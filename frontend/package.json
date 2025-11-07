@@ -16,5 +16,8 @@
   },
   "overrides": {
     "rollup": "4.18.0"
+  },
+  "comments": {
+    "overrides.rollup": "Pinned to 4.18.0 to avoid patch-package dependency issue in newer versions"
   }
 }
