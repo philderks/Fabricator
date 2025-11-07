@@ -53,6 +53,12 @@ Fabricator/
 
    The API will be available at `http://localhost:5000`
 
+   **Note:** By default, Flask runs in debug mode for development. To run in production mode, set the environment variable:
+   ```bash
+   FLASK_ENV=production python app.py
+   ```
+   For production deployments, use a production WSGI server like gunicorn.
+
 ### Frontend Setup
 
 1. Navigate to the frontend directory:
