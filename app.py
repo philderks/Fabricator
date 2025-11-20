@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify
 from flask_cors import CORS
 import os
 
@@ -21,9 +21,6 @@ def get_status():
 @app.route('/api/start', methods=['POST'])
 def start_server():
     """Start the managed server process."""
-    command = request.json.get("command") if request.is_json else None
-    if command:
-        server_service.command = command
     result = server_service.start()
     return jsonify(result)
 
