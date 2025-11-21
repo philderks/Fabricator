@@ -1,3 +1,4 @@
+"""Minecraft server management service."""
 import os
 import shlex
 import subprocess
@@ -6,8 +7,8 @@ import time
 from typing import Iterable, List, Optional
 
 
-class ServerService:
-    """Manage the lifecycle of an external server process."""
+class ServerManager:
+    """Manages the lifecycle of a Minecraft server process."""
 
     DEFAULT_COMMAND = "java -Xmx2G -jar server.jar nogui"
 
