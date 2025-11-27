@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import ServerCard from '../components/ServerCard.vue'
 import StatCard from '../components/StatCard.vue'
+import ServerCreateModal from '../components/ServerCreateModal.vue'
 
 const router = useRouter()
 
@@ -53,6 +54,27 @@ const servers = ref([
   }
 ])
 
+const showCreateModal = ref(false)
+
+const handleCreateServer = (serverData) => {
+  console.log('Creating server:', serverData)
+  // TODO: API call to create server
+  // For now, add to list with mock data
+  const newServer = {
+    id: servers.value.length + 1,
+    name: serverData.name,
+    status: 'stopped',
+    version: serverData.version,
+    loader: serverData.loader.charAt(0).toUpperCase() + serverData.loader.slice(1),
+    players: { online: 0, max: serverData.maxPlayers },
+    mods: 0,
+    uptime: null,
+    ip: `${serverData.name.toLowerCase().replace(/\s+/g, '-')}.example.com`
+  }
+  servers.value.push(newServer)
+  showCreateModal.value = false
+}
+
 const selectServer = (id) => {
   router.push(`/server/${id}`)
 }
@@ -80,7 +102,7 @@ const selectServer = (id) => {
             <h2 class="page-title">Server Overview</h2>
             <p class="page-subtitle">Manage your Minecraft servers</p>
           </div>
-          <button class="btn btn-primary">+ New Server</button>
+          <button class="btn btn-primary" @click="showCreateModal = true">+ New Server</button>
         </div>
 
         <div class="stats">
@@ -100,6 +122,12 @@ const selectServer = (id) => {
         </div>
       </div>
     </main>
+
+    <ServerCreateModal
+      :show="showCreateModal"
+      @close="showCreateModal = false"
+      @create="handleCreateServer"
+    />
   </div>
 </template>
 

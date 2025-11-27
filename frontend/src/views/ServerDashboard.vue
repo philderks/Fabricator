@@ -7,6 +7,7 @@ import ModItem from '../components/ModItem.vue'
 import ActivityFeed from '../components/ActivityFeed.vue'
 import ModBrowserModal from '../components/ModBrowserModal.vue'
 import ConfirmModal from '../components/ConfirmModal.vue'
+import ServerSettingsTab from '../components/ServerSettingsTab.vue'
 
 const route = useRoute()
 const serverId = route.params.id
@@ -39,12 +40,48 @@ const recentActivity = ref([
   { type: 'mod_update', mod: 'Fabric API', time: '5h ago' }
 ])
 
+// Server settings for Settings tab
+const serverSettings = ref({
+  // Basic
+  name: 'Main Survival',
+  port: 25565,
+  motd: 'A Minecraft Server',
+  
+  // Gameplay
+  maxPlayers: 50,
+  difficulty: 'normal',
+  gamemode: 'survival',
+  viewDistance: 10,
+  
+  // World
+  levelName: 'world',
+  levelType: 'default',
+  seed: '',
+  generateStructures: true,
+  spawnAnimals: true,
+  spawnMonsters: true,
+  spawnNpcs: true,
+  
+  // Performance
+  memory: 4,
+  simulationDistance: 10,
+  
+  // Advanced
+  onlineMode: true,
+  whitelist: false,
+  pvp: true,
+  commandBlocks: true
+})
+
 // Modal state
 const showModBrowser = ref(false)
 const showConfirmModal = ref(false)
 const confirmModalData = ref({})
 const modToRemove = ref(null)
 const installLoading = ref(false)
+
+// Tab state
+const activeTab = ref('overview')
 
 // Mod Browser
 const openModBrowser = () => {
@@ -139,6 +176,57 @@ const cancelRemoveMod = () => {
   showConfirmModal.value = false
   modToRemove.value = null
 }
+
+// Settings Tab
+const handleSaveSettings = (settings) => {
+  // Update server status with new settings
+  serverStatus.value = {
+    ...serverStatus.value,
+    name: settings.name,
+    players: {
+      ...serverStatus.value.players,
+      max: settings.maxPlayers
+    }
+  }
+  
+  // Update local settings
+  serverSettings.value = { ...settings }
+  
+  // Add to activity feed
+  recentActivity.value.unshift({
+    type: 'settings_update',
+    time: 'just now'
+  })
+  
+  console.log('Settings saved:', settings)
+  alert('Settings saved successfully!')
+}
+
+const resetSettings = () => {
+  // Reload original settings (in real app, fetch from API)
+  serverSettings.value = {
+    name: serverStatus.value.name,
+    port: 25565,
+    motd: 'A Minecraft Server',
+    maxPlayers: serverStatus.value.players.max,
+    difficulty: 'normal',
+    gamemode: 'survival',
+    viewDistance: 10,
+    levelName: 'world',
+    levelType: 'default',
+    seed: '',
+    generateStructures: true,
+    spawnAnimals: true,
+    spawnMonsters: true,
+    spawnNpcs: true,
+    memory: 4,
+    simulationDistance: 10,
+    onlineMode: true,
+    whitelist: false,
+    pvp: true,
+    commandBlocks: true
+  }
+}
 </script>
 
 <template>
@@ -168,13 +256,38 @@ const cancelRemoveMod = () => {
     <main class="main">
       <div class="content">
         <div class="tabs">
-          <button class="tab active">Overview</button>
-          <button class="tab">Console</button>
-          <button class="tab">Files</button>
-          <button class="tab">Settings</button>
+          <button 
+            class="tab" 
+            :class="{ active: activeTab === 'overview' }"
+            @click="activeTab = 'overview'"
+          >
+            Overview
+          </button>
+          <button 
+            class="tab" 
+            :class="{ active: activeTab === 'console' }"
+            @click="activeTab = 'console'"
+          >
+            Console
+          </button>
+          <button 
+            class="tab" 
+            :class="{ active: activeTab === 'files' }"
+            @click="activeTab = 'files'"
+          >
+            Files
+          </button>
+          <button 
+            class="tab" 
+            :class="{ active: activeTab === 'settings' }"
+            @click="activeTab = 'settings'"
+          >
+            Settings
+          </button>
         </div>
 
-        <div class="grid">
+        <!-- Overview Tab -->
+        <div v-if="activeTab === 'overview'" class="grid">
           <!-- Stats Overview -->
           <div class="stats-row">
             <StatCard 
@@ -195,40 +308,6 @@ const cancelRemoveMod = () => {
                   <h3>Performance</h3>
                 </div>
                 <PerformanceMetrics :cpu="serverStatus.cpu" :ram="serverStatus.ram" />
-              </div>
-
-              <!-- Server Settings -->
-              <div class="card">
-                <div class="card-header">
-                  <h3>Server Configuration</h3>
-                  <button class="btn-text">Edit</button>
-                </div>
-                <div class="settings-list">
-                  <div class="setting-item">
-                    <div class="setting-label">Server Name</div>
-                    <div class="setting-value">{{ serverStatus.name }}</div>
-                  </div>
-                  <div class="setting-item">
-                    <div class="setting-label">Version</div>
-                    <div class="setting-value">{{ serverStatus.version }}</div>
-                  </div>
-                  <div class="setting-item">
-                    <div class="setting-label">Loader</div>
-                    <div class="setting-value">{{ serverStatus.loader }}</div>
-                  </div>
-                  <div class="setting-item">
-                    <div class="setting-label">Max Players</div>
-                    <div class="setting-value">{{ serverStatus.players.max }}</div>
-                  </div>
-                  <div class="setting-item">
-                    <div class="setting-label">Difficulty</div>
-                    <div class="setting-value">Normal</div>
-                  </div>
-                  <div class="setting-item">
-                    <div class="setting-label">Game Mode</div>
-                    <div class="setting-value">Survival</div>
-                  </div>
-                </div>
               </div>
 
               <!-- Recent Activity -->
@@ -290,6 +369,40 @@ const cancelRemoveMod = () => {
             </div>
           </div>
         </div>
+
+        <!-- Console Tab -->
+        <div v-else-if="activeTab === 'console'" class="tab-content">
+          <div class="placeholder-state">
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none">
+              <rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="2"/>
+              <path d="M7 10L10 13L7 16M12 16H16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            <h3>Console</h3>
+            <p>Server console will be available here</p>
+          </div>
+        </div>
+
+        <!-- Files Tab -->
+        <div v-else-if="activeTab === 'files'" class="tab-content">
+          <div class="placeholder-state">
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none">
+              <path d="M13 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V9L13 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M13 2V9H20" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <h3>File Browser</h3>
+            <p>Server file management will be available here</p>
+          </div>
+        </div>
+
+        <!-- Settings Tab -->
+        <ServerSettingsTab
+          v-else-if="activeTab === 'settings'"
+          :settings="serverSettings"
+          :server-version="serverStatus.version"
+          :server-loader="serverStatus.loader"
+          @save="handleSaveSettings"
+          @reset="resetSettings"
+        />
       </div>
     </main>
 
@@ -318,33 +431,8 @@ const cancelRemoveMod = () => {
 </template>
 
 <style scoped>
-.page {
-  min-height: 100vh;
-  background: #0f172a;
-  color: #e2e8f0;
-}
-
-/* Header */
-.header {
-  background: #1e293b;
-  border-bottom: 1px solid #334155;
-}
-
-.header-content {
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 1.5rem 2rem;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 1.5rem;
-}
-
+/* Component-specific styles only */
+/* Header specific */
 .back-btn {
   display: flex;
   align-items: center;
@@ -352,15 +440,15 @@ const cancelRemoveMod = () => {
   width: 40px;
   height: 40px;
   border-radius: 8px;
-  background: #334155;
-  color: #e2e8f0;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
   text-decoration: none;
   font-size: 1.25rem;
   transition: all 0.2s;
 }
 
 .back-btn:hover {
-  background: #3b82f6;
+  background: var(--primary);
   color: white;
 }
 
@@ -368,7 +456,7 @@ const cancelRemoveMod = () => {
   margin: 0 0 0.375rem 0;
   font-size: 1.5rem;
   font-weight: 700;
-  color: #f1f5f9;
+  color: var(--text-primary);
 }
 
 .server-meta {
@@ -376,7 +464,7 @@ const cancelRemoveMod = () => {
   align-items: center;
   gap: 0.5rem;
   font-size: 0.875rem;
-  color: #94a3b8;
+  color: var(--text-muted);
 }
 
 .status-indicator {
@@ -386,11 +474,11 @@ const cancelRemoveMod = () => {
 }
 
 .status-indicator.running {
-  background: #10b981;
+  background: var(--success);
 }
 
 .status-indicator.stopped {
-  background: #64748b;
+  background: var(--text-disabled);
 }
 
 .status-text {
@@ -398,7 +486,7 @@ const cancelRemoveMod = () => {
 }
 
 .separator {
-  color: #64748b;
+  color: var(--text-disabled);
 }
 
 .server-controls {
@@ -406,162 +494,14 @@ const cancelRemoveMod = () => {
   gap: 0.75rem;
 }
 
-/* Buttons */
-.btn {
-  padding: 0.625rem 1.25rem;
-  border: none;
-  border-radius: 8px;
-  font-size: 0.875rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.btn-success {
-  background: #10b981;
-  color: white;
-}
-
-.btn-success:hover {
-  background: #059669;
-}
-
-.btn-danger {
-  background: #ef4444;
-  color: white;
-}
-
-.btn-danger:hover {
-  background: #dc2626;
-}
-
-.btn-secondary {
-  background: #334155;
-  color: #e2e8f0;
-}
-
-.btn-secondary:hover {
-  background: #475569;
-}
-
-.btn-primary {
-  background: #3b82f6;
-  color: white;
-}
-
-.btn-primary:hover {
-  background: #2563eb;
-}
-
-.btn-text {
-  background: transparent;
-  border: none;
-  color: #3b82f6;
-  font-size: 0.875rem;
-  font-weight: 500;
-  cursor: pointer;
-  padding: 0.25rem 0.5rem;
-}
-
-.btn-text:hover {
-  color: #2563eb;
-}
-
-.btn-text.danger {
-  color: #ef4444;
-}
-
-.btn-text.danger:hover {
-  color: #dc2626;
-}
-
-/* Main */
-.main {
-  max-width: 1400px;
-  margin: 0 auto;
-}
-
-.content {
-  padding: 2rem;
-}
-
-.grid {
-  display: grid;
-  gap: 1.5rem;
-}
-
-/* Tabs */
-.tabs {
-  display: flex;
-  gap: 0.5rem;
-  margin-bottom: 2rem;
-  border-bottom: 1px solid #334155;
-  padding-bottom: 0;
-}
-
-.tab {
-  padding: 0.75rem 1.5rem;
-  background: transparent;
-  border: none;
-  color: #94a3b8;
-  font-weight: 500;
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  transition: all 0.2s;
-}
-
-.tab:hover {
-  color: #e2e8f0;
-}
-
-.tab.active {
-  color: #3b82f6;
-  border-bottom-color: #3b82f6;
-}
-
-/* Two Column Layout */
-.two-col {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1.5rem;
-}
-
+/* Column layout */
 .col {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
 }
 
-/* Stats Row */
-.stats-row {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 1.5rem;
-}
-
-/* Card */
-.card {
-  background: #1e293b;
-  border: 1px solid #334155;
-  border-radius: 12px;
-  padding: 1.5rem;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1.5rem;
-}
-
-.card-header h3 {
-  margin: 0;
-  font-size: 1.125rem;
-  font-weight: 600;
-  color: #f1f5f9;
-}
-
-/* Mods */
+/* Search box */
 .search-box {
   margin-bottom: 1rem;
 }
@@ -569,22 +509,23 @@ const cancelRemoveMod = () => {
 .search-input {
   width: 100%;
   padding: 0.625rem 1rem;
-  background: #0f172a;
-  border: 1px solid #334155;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
-  color: #e2e8f0;
+  color: var(--text-secondary);
   font-size: 0.875rem;
 }
 
 .search-input:focus {
   outline: none;
-  border-color: #3b82f6;
+  border-color: var(--primary);
 }
 
 .search-input::placeholder {
-  color: #64748b;
+  color: var(--text-disabled);
 }
 
+/* Mods list */
 .mods-list {
   display: flex;
   flex-direction: column;
@@ -593,7 +534,7 @@ const cancelRemoveMod = () => {
   overflow-y: auto;
 }
 
-/* Settings */
+/* Settings list */
 .settings-list {
   display: flex;
   flex-direction: column;
@@ -605,23 +546,23 @@ const cancelRemoveMod = () => {
   justify-content: space-between;
   align-items: center;
   padding: 0.75rem;
-  background: #0f172a;
-  border: 1px solid #334155;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
 }
 
 .setting-label {
-  color: #94a3b8;
+  color: var(--text-muted);
   font-size: 0.875rem;
   font-weight: 500;
 }
 
 .setting-value {
-  color: #f1f5f9;
+  color: var(--text-primary);
   font-weight: 600;
 }
 
-/* Quick Actions */
+/* Quick actions */
 .action-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -630,8 +571,8 @@ const cancelRemoveMod = () => {
 
 .action-card {
   padding: 1rem;
-  background: #0f172a;
-  border: 1px solid #334155;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   text-align: left;
   cursor: pointer;
@@ -639,50 +580,57 @@ const cancelRemoveMod = () => {
 }
 
 .action-card:hover {
-  border-color: #3b82f6;
-  background: #1e293b;
+  border-color: var(--primary);
+  background: var(--bg-secondary);
 }
 
 .action-label {
-  color: #f1f5f9;
+  color: var(--text-primary);
   font-weight: 600;
   font-size: 0.875rem;
   margin-bottom: 0.25rem;
 }
 
 .action-desc {
-  color: #64748b;
+  color: var(--text-disabled);
   font-size: 0.8125rem;
 }
 
-@media (max-width: 1024px) {
-  .stats-row {
-    grid-template-columns: repeat(2, 1fr);
-  }
+/* Placeholder */
+.tab-content {
+  padding: 4rem 2rem;
+}
 
-  .two-col {
-    grid-template-columns: 1fr;
-  }
+.placeholder-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 4rem 2rem;
+  color: var(--text-muted);
+}
+
+.placeholder-state svg {
+  color: var(--text-disabled);
+  margin-bottom: 1.5rem;
+}
+
+.placeholder-state h3 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin: 0 0 0.5rem 0;
+}
+
+.placeholder-state p {
+  font-size: 1rem;
+  margin: 0;
 }
 
 @media (max-width: 768px) {
-  .header-content {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 1rem;
-  }
-
-  .tabs {
-    overflow-x: auto;
-  }
-
-  .stats-row {
-    grid-template-columns: 1fr;
-  }
-
   .action-grid {
     grid-template-columns: 1fr;
   }
-
 }
 </style>
