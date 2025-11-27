@@ -51,17 +51,30 @@
           </div>
         </div>
 
-        <div class="form-group">
-          <label for="server-port">Server Port</label>
-          <input 
-            id="server-port"
-            v-model.number="formData.port" 
-            type="number" 
-            min="1024"
-            max="65535"
-            placeholder="25565"
-          >
-          <span class="form-hint">Default: 25565</span>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="server-port">Server Port</label>
+            <input 
+              id="server-port"
+              v-model.number="formData.port" 
+              type="number" 
+              min="1024"
+              max="65535"
+              placeholder="25565"
+            >
+            <span class="form-hint">Default: 25565</span>
+          </div>
+
+          <div class="form-group">
+            <label for="install-path">Installation Path</label>
+            <input 
+              id="install-path"
+              v-model="formData.installPath" 
+              type="text" 
+              placeholder="~/fabricator/servers"
+            >
+            <span class="form-hint">Where server files will be stored</span>
+          </div>
         </div>
       </section>
 
@@ -312,6 +325,7 @@ export default {
         version: '1.21.3',
         loader: 'fabric',
         port: 25565,
+        installPath: '~/fabricator/servers',
         maxPlayers: 20,
         difficulty: 'normal',
         gamemode: 'survival',
@@ -372,6 +386,7 @@ export default {
         version: '1.21.3',
         loader: 'fabric',
         port: 25565,
+        installPath: '~/fabricator/servers',
         maxPlayers: 20,
         difficulty: 'normal',
         gamemode: 'survival',
@@ -431,8 +446,8 @@ export default {
   display: flex;
   gap: 1rem;
   padding: 1.5rem;
-  background: rgba(59, 130, 246, 0.05);
-  border: 2px solid rgba(59, 130, 246, 0.2);
+  background: color-mix(in oklch, var(--primary) 5%, transparent);
+  border: 2px solid color-mix(in oklch, var(--primary) 20%, transparent);
   border-radius: 12px;
 }
 

@@ -113,12 +113,12 @@ defineEmits(['click'])
 }
 
 .server-badge.running {
-  background: rgba(16, 185, 129, 0.2);
+  background: color-mix(in oklch, var(--success) 20%, transparent);
   color: var(--success);
 }
 
 .server-badge.stopped {
-  background: rgba(100, 116, 139, 0.2);
+  background: color-mix(in oklch, var(--text-muted) 20%, transparent);
   color: var(--text-muted);
 }
 
