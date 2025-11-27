@@ -1,6 +1,10 @@
 <script setup>
 import { ref } from 'vue'
 import { useRoute } from 'vue-router'
+import StatCard from '../components/StatCard.vue'
+import PerformanceMetrics from '../components/PerformanceMetrics.vue'
+import ModItem from '../components/ModItem.vue'
+import ActivityFeed from '../components/ActivityFeed.vue'
 
 const route = useRoute()
 const serverId = route.params.id
@@ -32,6 +36,14 @@ const recentActivity = ref([
   { type: 'player_leave', user: 'Alex', time: '3h ago' },
   { type: 'mod_update', mod: 'Fabric API', time: '5h ago' }
 ])
+
+const handleUpdateMod = (mod) => {
+  console.log('Update mod:', mod)
+}
+
+const handleRemoveMod = (mod) => {
+  console.log('Remove mod:', mod)
+}
 </script>
 
 <template>
@@ -70,22 +82,13 @@ const recentActivity = ref([
         <div class="grid">
           <!-- Stats Overview -->
           <div class="stats-row">
-            <div class="stat-card">
-              <div class="stat-label">Players Online</div>
-              <div class="stat-value">{{ serverStatus.players.online }}/{{ serverStatus.players.max }}</div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-label">Uptime</div>
-              <div class="stat-value">{{ serverStatus.uptime }}</div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-label">TPS</div>
-              <div class="stat-value">{{ serverStatus.tps }}</div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-label">Mods</div>
-              <div class="stat-value">{{ installedMods.length }}</div>
-            </div>
+            <StatCard 
+              label="Players Online" 
+              :value="`${serverStatus.players.online}/${serverStatus.players.max}`" 
+            />
+            <StatCard label="Uptime" :value="serverStatus.uptime" />
+            <StatCard label="TPS" :value="serverStatus.tps" />
+            <StatCard label="Mods" :value="installedMods.length" />
           </div>
 
           <div class="two-col">
@@ -96,26 +99,7 @@ const recentActivity = ref([
                 <div class="card-header">
                   <h3>Performance</h3>
                 </div>
-                <div class="performance">
-                  <div class="perf-item">
-                    <div class="perf-top">
-                      <span class="perf-label">CPU Usage</span>
-                      <span class="perf-value">{{ serverStatus.cpu }}%</span>
-                    </div>
-                    <div class="progress-bar">
-                      <div class="progress-fill" :style="{ width: serverStatus.cpu + '%' }"></div>
-                    </div>
-                  </div>
-                  <div class="perf-item">
-                    <div class="perf-top">
-                      <span class="perf-label">RAM Usage</span>
-                      <span class="perf-value">{{ serverStatus.ram.used }}GB / {{ serverStatus.ram.total }}GB</span>
-                    </div>
-                    <div class="progress-bar">
-                      <div class="progress-fill" :style="{ width: (serverStatus.ram.used / serverStatus.ram.total * 100) + '%' }"></div>
-                    </div>
-                  </div>
-                </div>
+                <PerformanceMetrics :cpu="serverStatus.cpu" :ram="serverStatus.ram" />
               </div>
 
               <!-- Server Settings -->
@@ -158,29 +142,7 @@ const recentActivity = ref([
                   <h3>Recent Activity</h3>
                   <button class="btn-text">View All</button>
                 </div>
-                <div class="activity-list">
-                  <div v-for="(activity, i) in recentActivity" :key="i" class="activity-item">
-                    <div class="activity-dot" :class="activity.type"></div>
-                    <div class="activity-content">
-                      <div class="activity-text">
-                        <span v-if="activity.type === 'player_join'">
-                          <strong>{{ activity.user }}</strong> joined the server
-                        </span>
-                        <span v-else-if="activity.type === 'player_leave'">
-                          <strong>{{ activity.user }}</strong> left the server
-                        </span>
-                        <span v-else-if="activity.type === 'mod_install'">
-                          Installed mod <strong>{{ activity.mod }}</strong>
-                        </span>
-                        <span v-else-if="activity.type === 'mod_update'">
-                          Updated mod <strong>{{ activity.mod }}</strong>
-                        </span>
-                        <span v-else>Server started</span>
-                      </div>
-                      <div class="activity-time">{{ activity.time }}</div>
-                    </div>
-                  </div>
-                </div>
+                <ActivityFeed :activities="recentActivity" />
               </div>
             </div>
 
@@ -196,22 +158,13 @@ const recentActivity = ref([
                   <input type="text" placeholder="Search mods..." class="search-input">
                 </div>
                 <div class="mods-list">
-                  <div v-for="mod in installedMods" :key="mod.name" class="mod-item">
-                    <div class="mod-main">
-                      <div class="mod-name">{{ mod.name }}</div>
-                      <div class="mod-meta">
-                        <span class="mod-version">v{{ mod.version }}</span>
-                        <span class="mod-separator">•</span>
-                        <span class="mod-category">{{ mod.category }}</span>
-                        <span class="mod-separator">•</span>
-                        <span class="mod-downloads">{{ mod.downloads }} downloads</span>
-                      </div>
-                    </div>
-                    <div class="mod-actions">
-                      <button class="btn-text">Update</button>
-                      <button class="btn-text danger">Remove</button>
-                    </div>
-                  </div>
+                  <ModItem 
+                    v-for="mod in installedMods" 
+                    :key="mod.name" 
+                    :mod="mod"
+                    @update="handleUpdateMod"
+                    @remove="handleRemoveMod"
+                  />
                 </div>
               </div>
 
@@ -469,26 +422,6 @@ const recentActivity = ref([
   gap: 1.5rem;
 }
 
-.stat-card {
-  background: #1e293b;
-  border: 1px solid #334155;
-  border-radius: 12px;
-  padding: 1.5rem;
-}
-
-.stat-label {
-  color: #94a3b8;
-  font-size: 0.875rem;
-  font-weight: 500;
-  margin-bottom: 0.5rem;
-}
-
-.stat-value {
-  font-size: 2rem;
-  font-weight: 700;
-  color: #f1f5f9;
-}
-
 /* Card */
 .card {
   background: #1e293b;
@@ -509,51 +442,6 @@ const recentActivity = ref([
   font-size: 1.125rem;
   font-weight: 600;
   color: #f1f5f9;
-}
-
-/* Performance */
-.performance {
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-}
-
-.perf-item {
-  display: flex;
-  flex-direction: column;
-  gap: 0.625rem;
-}
-
-.perf-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.perf-label {
-  color: #94a3b8;
-  font-size: 0.875rem;
-  font-weight: 500;
-}
-
-.perf-value {
-  color: #e2e8f0;
-  font-size: 0.875rem;
-  font-weight: 600;
-}
-
-.progress-bar {
-  height: 8px;
-  background: #334155;
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.progress-fill {
-  height: 100%;
-  background: #3b82f6;
-  border-radius: 4px;
-  transition: width 0.3s;
 }
 
 /* Mods */
@@ -586,122 +474,6 @@ const recentActivity = ref([
   gap: 0.5rem;
   max-height: 400px;
   overflow-y: auto;
-}
-
-.mod-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1rem;
-  background: #0f172a;
-  border: 1px solid #334155;
-  border-radius: 8px;
-  transition: all 0.2s;
-}
-
-.mod-item:hover {
-  border-color: #3b82f6;
-}
-
-.mod-main {
-  flex: 1;
-}
-
-.mod-name {
-  font-weight: 600;
-  color: #f1f5f9;
-  margin-bottom: 0.375rem;
-}
-
-.mod-meta {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.8125rem;
-  color: #64748b;
-}
-
-.mod-version {
-  color: #94a3b8;
-}
-
-.mod-category {
-  padding: 0.125rem 0.5rem;
-  background: #334155;
-  border-radius: 4px;
-  font-size: 0.75rem;
-}
-
-.mod-separator {
-  color: #475569;
-}
-
-.mod-actions {
-  display: flex;
-  gap: 0.5rem;
-}
-
-/* Activity */
-.activity-list {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.activity-item {
-  display: flex;
-  gap: 1rem;
-  padding: 0.875rem 0;
-  border-bottom: 1px solid #334155;
-}
-
-.activity-item:last-child {
-  border-bottom: none;
-}
-
-.activity-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  margin-top: 0.5rem;
-  flex-shrink: 0;
-}
-
-.activity-dot.player_join {
-  background: #10b981;
-}
-
-.activity-dot.player_leave {
-  background: #64748b;
-}
-
-.activity-dot.mod_install,
-.activity-dot.mod_update {
-  background: #3b82f6;
-}
-
-.activity-dot.server_start {
-  background: #10b981;
-}
-
-.activity-content {
-  flex: 1;
-}
-
-.activity-text {
-  color: #e2e8f0;
-  font-size: 0.875rem;
-  margin-bottom: 0.25rem;
-}
-
-.activity-text strong {
-  color: #f1f5f9;
-  font-weight: 600;
-}
-
-.activity-time {
-  color: #64748b;
-  font-size: 0.8125rem;
 }
 
 /* Settings */
@@ -795,15 +567,5 @@ const recentActivity = ref([
     grid-template-columns: 1fr;
   }
 
-  .mod-item {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.75rem;
-  }
-
-  .mod-actions {
-    width: 100%;
-    justify-content: flex-start;
-  }
 }
 </style>
