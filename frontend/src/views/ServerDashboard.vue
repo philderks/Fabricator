@@ -8,6 +8,7 @@ import ActivityFeed from '../components/server/ActivityFeed.vue'
 import ModBrowserModal from '../components/modals/ModBrowserModal.vue'
 import ConfirmModal from '../components/modals/ConfirmModal.vue'
 import ServerSettingsTab from '../components/server/ServerSettingsTab.vue'
+import { installMod } from '../api/modrinth'
 
 const route = useRoute()
 const serverId = route.params.id
@@ -92,45 +93,33 @@ const handleInstallMod = async (modData) => {
   installLoading.value = true
   
   try {
-    const response = await fetch(`/api/modrinth/mod/${modData.modId}/install`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        mc_version: modData.mcVersion,
-        loader: modData.loader
-      })
+    const result = await installMod(modData.modId, {
+      mc_version: modData.mcVersion,
+      loader: modData.loader
     })
     
-    const result = await response.json()
+    // Add to installed mods list
+    installedMods.value.push({
+      name: modData.modTitle,
+      version: 'Latest',
+      downloads: 'N/A',
+      category: 'Installed'
+    })
     
-    if (response.ok) {
-      // Add to installed mods list
-      installedMods.value.push({
-        name: modData.modTitle,
-        version: 'Latest',
-        downloads: 'N/A',
-        category: 'Installed'
-      })
-      
-      // Add to activity feed
-      recentActivity.value.unshift({
-        type: 'mod_install',
-        mod: modData.modTitle,
-        time: 'just now'
-      })
-      
-      showModBrowser.value = false
-      
-      // Show success notification (could be improved with a toast component)
-      alert(`${modData.modTitle} installed successfully!`)
-    } else {
-      alert(`Installation failed: ${result.error}`)
-    }
+    // Add to activity feed
+    recentActivity.value.unshift({
+      type: 'mod_install',
+      mod: modData.modTitle,
+      time: 'just now'
+    })
+    
+    showModBrowser.value = false
+    
+    // Show success notification (could be improved with a toast component)
+    alert(`${modData.modTitle} installed successfully!`)
   } catch (error) {
     console.error('Install failed:', error)
-    alert('Installation failed. Check console for details.')
+    alert(`Installation failed: ${error.message}`)
   } finally {
     installLoading.value = false
   }

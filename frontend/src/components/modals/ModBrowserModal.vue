@@ -120,7 +120,8 @@
 </template>
 
 <script>
-import BaseModal from './BaseModal.vue';
+import BaseModal from './BaseModal.vue'
+import { searchMods } from '../../api/modrinth'
 
 export default {
   name: 'ModBrowserModal',
@@ -163,36 +164,27 @@ export default {
     
     async performSearch() {
       if (!this.searchQuery.trim()) {
-        this.results = [];
-        return;
+        this.results = []
+        return
       }
 
-      this.loading = true;
+      this.loading = true
       
       try {
-        const params = new URLSearchParams({
+        const data = await searchMods({
           query: this.searchQuery,
-          index: this.sortBy,
-          limit: '20'
-        });
-
-        if (this.selectedLoader) {
-          params.append('loader', this.selectedLoader);
-        }
+          version: this.selectedVersion,
+          loader: this.selectedLoader,
+          sort: this.sortBy,
+          limit: 20
+        })
         
-        if (this.selectedVersion) {
-          params.append('mc_version', this.selectedVersion);
-        }
-
-        const response = await fetch(`/api/modrinth/search?${params}`);
-        const data = await response.json();
-        
-        this.results = data.hits || [];
+        this.results = data.hits || []
       } catch (error) {
-        console.error('Search failed:', error);
-        this.results = [];
+        console.error('Search failed:', error)
+        this.results = []
       } finally {
-        this.loading = false;
+        this.loading = false
       }
     },
 

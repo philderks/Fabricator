@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-
-const API_BASE = '' // Use relative path since Vite proxy is configured
+import * as modrinthApi from '../api/modrinth'
+import * as serversApi from '../api/servers'
 
 // Server Status
 const serverStatus = ref(null)
@@ -36,8 +36,7 @@ const gameVersions = ref(null)
 const getStatus = async () => {
   serverLoading.value = true
   try {
-    const res = await fetch(`${API_BASE}/api/status`)
-    serverStatus.value = await res.json()
+    serverStatus.value = await serversApi.getServerStatus()
   } catch (e) {
     serverStatus.value = { error: e.message }
   }
@@ -48,8 +47,7 @@ const getStatus = async () => {
 const startServer = async () => {
   serverLoading.value = true
   try {
-    const res = await fetch(`${API_BASE}/api/start`, { method: 'POST' })
-    serverStatus.value = await res.json()
+    serverStatus.value = await serversApi.startServer(1) // Mock server ID
   } catch (e) {
     serverStatus.value = { error: e.message }
   }
@@ -60,8 +58,7 @@ const startServer = async () => {
 const stopServer = async () => {
   serverLoading.value = true
   try {
-    const res = await fetch(`${API_BASE}/api/stop`, { method: 'POST' })
-    serverStatus.value = await res.json()
+    serverStatus.value = await serversApi.stopServer(1) // Mock server ID
   } catch (e) {
     serverStatus.value = { error: e.message }
   }
@@ -72,14 +69,12 @@ const stopServer = async () => {
 const searchMods = async () => {
   searchLoading.value = true
   try {
-    const params = new URLSearchParams({
+    searchResults.value = await modrinthApi.searchMods({
       query: searchQuery.value,
-      mc_version: searchMcVersion.value,
+      version: searchMcVersion.value,
       loader: searchLoader.value,
-      limit: '10'
+      limit: 10
     })
-    const res = await fetch(`${API_BASE}/api/modrinth/search?${params}`)
-    searchResults.value = await res.json()
   } catch (e) {
     searchResults.value = { error: e.message }
   }
@@ -91,8 +86,7 @@ const getMod = async () => {
   if (!modId.value) return
   modLoading.value = true
   try {
-    const res = await fetch(`${API_BASE}/api/modrinth/mod/${modId.value}`)
-    modDetails.value = await res.json()
+    modDetails.value = await modrinthApi.getModDetails(modId.value)
   } catch (e) {
     modDetails.value = { error: e.message }
   }
@@ -104,8 +98,7 @@ const getModVersions = async () => {
   if (!modId.value) return
   modLoading.value = true
   try {
-    const res = await fetch(`${API_BASE}/api/modrinth/mod/${modId.value}/versions`)
-    modVersions.value = await res.json()
+    modVersions.value = await modrinthApi.getModVersions(modId.value)
   } catch (e) {
     modVersions.value = { error: e.message }
   }
@@ -117,15 +110,10 @@ const installMod = async () => {
   if (!installModId.value) return
   installLoading.value = true
   try {
-    const res = await fetch(`${API_BASE}/api/modrinth/mod/${installModId.value}/install`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        mc_version: installMcVersion.value,
-        loader: installLoader.value
-      })
+    installResult.value = await modrinthApi.installMod(installModId.value, {
+      mc_version: installMcVersion.value,
+      loader: installLoader.value
     })
-    installResult.value = await res.json()
   } catch (e) {
     installResult.value = { error: e.message }
   }
@@ -135,14 +123,14 @@ const installMod = async () => {
 // Load Categories, Loaders, Game Versions
 const loadMetadata = async () => {
   try {
-    const [catRes, loadRes, verRes] = await Promise.all([
-      fetch(`${API_BASE}/api/modrinth/categories`),
-      fetch(`${API_BASE}/api/modrinth/loaders`),
-      fetch(`${API_BASE}/api/modrinth/game-versions`)
+    const [cat, load, ver] = await Promise.all([
+      modrinthApi.getCategories(),
+      modrinthApi.getLoaders(),
+      modrinthApi.getGameVersions()
     ])
-    categories.value = await catRes.json()
-    loaders.value = await loadRes.json()
-    gameVersions.value = await verRes.json()
+    categories.value = cat
+    loaders.value = load
+    gameVersions.value = ver
   } catch (e) {
     console.error('Failed to load metadata:', e)
   }

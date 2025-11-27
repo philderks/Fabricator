@@ -150,6 +150,12 @@ body {
   background: var(--secondary-hover);
 }
 
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 .btn-text {
   background: transparent;
   border: none;

@@ -242,13 +242,40 @@
           <span class="form-hint">{{ formData.motd.length }}/59 characters</span>
         </div>
       </section>
+
+      <!-- EULA Agreement -->
+      <section class="eula-section">
+        <div class="eula-box">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+            <path d="M9 12L11 14L15 10M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <div class="eula-content">
+            <label class="eula-label">
+              <input 
+                type="checkbox" 
+                v-model="formData.acceptEula"
+                required
+              >
+              <span>
+                I agree to the 
+                <a href="https://www.minecraft.net/en-us/eula" target="_blank" rel="noopener noreferrer">
+                  Minecraft EULA
+                </a>
+              </span>
+            </label>
+            <p class="eula-notice">
+              By creating a server, you must accept Mojang's End User License Agreement. This is required to run a Minecraft server.
+            </p>
+          </div>
+        </div>
+      </section>
     </form>
 
     <template #footer>
       <button type="button" class="btn btn-secondary" @click="handleClose" :disabled="creating">
         Cancel
       </button>
-      <button type="button" class="btn btn-primary" @click="handleCreate" :disabled="creating">
+      <button type="button" class="btn btn-primary" @click="handleCreate" :disabled="creating || !formData.acceptEula">
         <span v-if="creating" class="btn-loading"></span>
         {{ creating ? 'Creating...' : 'Create Server' }}
       </button>
@@ -257,7 +284,8 @@
 </template>
 
 <script>
-import BaseModal from './BaseModal.vue';
+import BaseModal from './BaseModal.vue'
+import { createServer } from '../../api/servers'
 
 export default {
   name: 'ServerCreateModal',
@@ -296,7 +324,8 @@ export default {
         whitelist: false,
         pvp: true,
         commandBlocks: true,
-        motd: 'A Minecraft Server'
+        motd: 'A Minecraft Server',
+        acceptEula: false
       }
     };
   },
@@ -309,20 +338,26 @@ export default {
     },
     
     async handleCreate() {
-      this.creating = true;
+      // Validate EULA acceptance
+      if (!this.formData.acceptEula) {
+        alert('You must accept the Minecraft EULA to create a server.')
+        return
+      }
+
+      this.creating = true
       
       try {
-        // Future: API call to create server
-        await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate API call
+        // Create server via API
+        const result = await createServer(this.formData)
         
-        this.$emit('create', { ...this.formData });
-        this.$emit('close');
-        this.resetForm();
+        this.$emit('create', result)
+        this.$emit('close')
+        this.resetForm()
       } catch (error) {
-        console.error('Failed to create server:', error);
-        alert('Failed to create server. Please try again.');
+        console.error('Failed to create server:', error)
+        alert(`Failed to create server: ${error.message}`)
       } finally {
-        this.creating = false;
+        this.creating = false
       }
     },
     
@@ -349,8 +384,9 @@ export default {
         whitelist: false,
         pvp: true,
         commandBlocks: true,
-        motd: 'A Minecraft Server'
-      };
+        motd: 'A Minecraft Server',
+        acceptEula: false
+      }
     }
   }
 }
@@ -501,6 +537,76 @@ export default {
 .warning-notice strong,
 .info-notice strong {
   font-weight: 600;
+}
+
+/* EULA Section */
+.eula-section {
+  margin-top: 2rem;
+  padding-top: 2rem;
+  border-top: 2px solid var(--border-color);
+}
+
+.eula-box {
+  display: flex;
+  gap: 1rem;
+  padding: 1.5rem;
+  background: rgba(59, 130, 246, 0.05);
+  border: 2px solid rgba(59, 130, 246, 0.2);
+  border-radius: 12px;
+}
+
+.eula-box svg {
+  color: var(--primary);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.eula-content {
+  flex: 1;
+}
+
+.eula-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  font-size: 0.9375rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  margin-bottom: 0.75rem;
+}
+
+.eula-label input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  cursor: pointer;
+  accent-color: var(--primary);
+  flex-shrink: 0;
+}
+
+.eula-label span {
+  user-select: none;
+  line-height: 1.5;
+}
+
+.eula-label a {
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 600;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.2s;
+}
+
+.eula-label a:hover {
+  border-bottom-color: var(--primary);
+}
+
+.eula-notice {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  padding-left: 2rem;
 }
 
 .btn-loading {
