@@ -9,8 +9,10 @@ import ModBrowserModal from '../components/modals/ModBrowserModal.vue'
 import ConfirmModal from '../components/modals/ConfirmModal.vue'
 import ServerSettingsTab from '../components/server/ServerSettingsTab.vue'
 import { installMod } from '../api/modrinth'
+import { useToast } from '../composables/useToast'
 
 const route = useRoute()
+const toast = useToast()
 const serverId = route.params.id
 
 const serverStatus = ref({
@@ -115,11 +117,10 @@ const handleInstallMod = async (modData) => {
     
     showModBrowser.value = false
     
-    // Show success notification (could be improved with a toast component)
-    alert(`${modData.modTitle} installed successfully!`)
+    toast.success(`${modData.modTitle} installed successfully!`, 'Mod Installed')
   } catch (error) {
     console.error('Install failed:', error)
-    alert(`Installation failed: ${error.message}`)
+    toast.error(error.message, 'Installation Failed')
   } finally {
     installLoading.value = false
   }
@@ -188,7 +189,7 @@ const handleSaveSettings = (settings) => {
   })
   
   console.log('Settings saved:', settings)
-  alert('Settings saved successfully!')
+  toast.success('Settings have been saved successfully!', 'Settings Updated')
 }
 
 const resetSettings = () => {

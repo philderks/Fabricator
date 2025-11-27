@@ -286,6 +286,7 @@
 <script>
 import BaseModal from './BaseModal.vue'
 import { createServer } from '../../api/servers'
+import { useToast } from '../../composables/useToast'
 
 export default {
   name: 'ServerCreateModal',
@@ -299,6 +300,10 @@ export default {
     }
   },
   emits: ['close', 'create'],
+  setup() {
+    const toast = useToast()
+    return { toast }
+  },
   data() {
     return {
       creating: false,
@@ -340,7 +345,7 @@ export default {
     async handleCreate() {
       // Validate EULA acceptance
       if (!this.formData.acceptEula) {
-        alert('You must accept the Minecraft EULA to create a server.')
+        this.toast.warning('You must accept the Minecraft EULA to create a server.', 'EULA Required')
         return
       }
 
@@ -355,7 +360,7 @@ export default {
         this.resetForm()
       } catch (error) {
         console.error('Failed to create server:', error)
-        alert(`Failed to create server: ${error.message}`)
+        this.toast.error(error.message, 'Server Creation Failed')
       } finally {
         this.creating = false
       }
@@ -393,6 +398,7 @@ export default {
 </script>
 
 <style scoped>
+/* Modal-specific styles only */
 .settings-form {
   display: flex;
   flex-direction: column;
@@ -412,131 +418,6 @@ export default {
   margin: 0 0 0.5rem 0;
   padding-bottom: 0.5rem;
   border-bottom: 1px solid var(--border-color);
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.form-group label {
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: var(--text-primary);
-}
-
-.form-group input,
-.form-group select,
-.form-group textarea {
-  width: 100%;
-}
-
-.form-hint {
-  font-size: 0.8125rem;
-  color: var(--text-muted);
-}
-
-.form-hint.warning {
-  color: var(--warning);
-  font-weight: 500;
-}
-
-.readonly-field {
-  position: relative;
-}
-
-.readonly-input {
-  background: var(--bg-tertiary) !important;
-  cursor: not-allowed !important;
-  color: var(--text-muted) !important;
-  text-transform: capitalize;
-}
-
-.readonly-badge {
-  position: absolute;
-  right: 12px;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--text-muted);
-  background: var(--bg-primary);
-  padding: 2px 8px;
-  border-radius: 4px;
-  pointer-events: none;
-}
-
-.form-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1rem;
-}
-
-.form-checkboxes {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 0.75rem;
-}
-
-.checkbox-label {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.875rem;
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-
-.checkbox-label input[type="checkbox"] {
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-  accent-color: var(--primary);
-}
-
-.checkbox-label span {
-  user-select: none;
-}
-
-.warning-notice,
-.info-notice {
-  display: flex;
-  gap: 12px;
-  padding: 12px 16px;
-  border-radius: 8px;
-  font-size: 0.875rem;
-  line-height: 1.5;
-  margin-bottom: 1rem;
-}
-
-.warning-notice {
-  background: rgba(245, 158, 11, 0.1);
-  border: 1px solid rgba(245, 158, 11, 0.3);
-  color: var(--warning);
-}
-
-.warning-notice svg {
-  color: var(--warning);
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-
-.info-notice {
-  background: rgba(59, 130, 246, 0.1);
-  border: 1px solid rgba(59, 130, 246, 0.3);
-  color: var(--primary);
-}
-
-.info-notice svg {
-  color: var(--primary);
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-
-.warning-notice strong,
-.info-notice strong {
-  font-weight: 600;
 }
 
 /* EULA Section */
@@ -607,31 +488,5 @@ export default {
   color: var(--text-muted);
   line-height: 1.5;
   padding-left: 2rem;
-}
-
-.btn-loading {
-  display: inline-block;
-  width: 14px;
-  height: 14px;
-  border: 2px solid currentColor;
-  border-right-color: transparent;
-  border-radius: 50%;
-  animation: spin 0.6s linear infinite;
-  margin-right: 8px;
-  vertical-align: middle;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-@media (max-width: 768px) {
-  .form-row {
-    grid-template-columns: 1fr;
-  }
-
-  .form-checkboxes {
-    grid-template-columns: 1fr;
-  }
 }
 </style>
