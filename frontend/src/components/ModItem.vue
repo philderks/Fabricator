@@ -34,14 +34,14 @@ defineEmits(['update', 'remove'])
   justify-content: space-between;
   align-items: center;
   padding: 1rem;
-  background: #0f172a;
-  border: 1px solid #334155;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   transition: all 0.2s;
 }
 
 .mod-item:hover {
-  border-color: #3b82f6;
+  border-color: var(--border-hover);
 }
 
 .mod-main {
@@ -50,7 +50,7 @@ defineEmits(['update', 'remove'])
 
 .mod-name {
   font-weight: 600;
-  color: #f1f5f9;
+  color: var(--text-primary);
   margin-bottom: 0.375rem;
 }
 
@@ -59,16 +59,16 @@ defineEmits(['update', 'remove'])
   align-items: center;
   gap: 0.5rem;
   font-size: 0.8125rem;
-  color: #64748b;
+  color: var(--text-disabled);
 }
 
 .mod-version {
-  color: #94a3b8;
+  color: var(--text-muted);
 }
 
 .mod-category {
   padding: 0.125rem 0.5rem;
-  background: #334155;
+  background: var(--bg-tertiary);
   border-radius: 4px;
   font-size: 0.75rem;
 }
@@ -80,28 +80,6 @@ defineEmits(['update', 'remove'])
 .mod-actions {
   display: flex;
   gap: 0.5rem;
-}
-
-.btn-text {
-  background: transparent;
-  border: none;
-  color: #3b82f6;
-  font-size: 0.875rem;
-  font-weight: 500;
-  cursor: pointer;
-  padding: 0.25rem 0.5rem;
-}
-
-.btn-text:hover {
-  color: #2563eb;
-}
-
-.btn-text.danger {
-  color: #ef4444;
-}
-
-.btn-text.danger:hover {
-  color: #dc2626;
 }
 
 @media (max-width: 768px) {

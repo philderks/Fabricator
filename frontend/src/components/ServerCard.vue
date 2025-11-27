@@ -57,8 +57,8 @@ defineEmits(['click'])
 
 <style scoped>
 .server-card {
-  background: #1e293b;
-  border: 1px solid #334155;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
   border-radius: 12px;
   padding: 1.5rem;
   display: flex;
@@ -68,7 +68,7 @@ defineEmits(['click'])
 }
 
 .server-card:hover {
-  border-color: #3b82f6;
+  border-color: var(--border-hover);
   transform: translateX(4px);
 }
 
@@ -79,11 +79,11 @@ defineEmits(['click'])
 }
 
 .server-status.running {
-  background: #10b981;
+  background: var(--success);
 }
 
 .server-status.stopped {
-  background: #64748b;
+  background: var(--text-disabled);
 }
 
 .server-content {
@@ -101,7 +101,7 @@ defineEmits(['click'])
   margin: 0;
   font-size: 1.25rem;
   font-weight: 600;
-  color: #f1f5f9;
+  color: var(--text-primary);
 }
 
 .server-badge {
@@ -114,12 +114,12 @@ defineEmits(['click'])
 
 .server-badge.running {
   background: rgba(16, 185, 129, 0.2);
-  color: #10b981;
+  color: var(--success);
 }
 
 .server-badge.stopped {
   background: rgba(100, 116, 139, 0.2);
-  color: #94a3b8;
+  color: var(--text-muted);
 }
 
 .server-info {
@@ -136,19 +136,19 @@ defineEmits(['click'])
 }
 
 .info-label {
-  color: #64748b;
+  color: var(--text-disabled);
   font-size: 0.75rem;
   font-weight: 500;
   text-transform: uppercase;
 }
 
 .info-value {
-  color: #e2e8f0;
+  color: var(--text-secondary);
   font-weight: 600;
 }
 
 .server-ip {
-  color: #64748b;
+  color: var(--text-disabled);
   font-family: 'Courier New', monospace;
   font-size: 0.875rem;
 }
@@ -168,21 +168,21 @@ defineEmits(['click'])
 }
 
 .btn-start {
-  background: #10b981;
+  background: var(--success);
   color: white;
 }
 
 .btn-start:hover {
-  background: #059669;
+  background: var(--success-dark);
 }
 
 .btn-stop {
-  background: #ef4444;
+  background: var(--danger);
   color: white;
 }
 
 .btn-stop:hover {
-  background: #dc2626;
+  background: var(--danger-dark);
 }
 
 @media (max-width: 768px) {

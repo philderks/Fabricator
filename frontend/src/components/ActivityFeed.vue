@@ -44,7 +44,7 @@ defineProps({
   display: flex;
   gap: 1rem;
   padding: 0.875rem 0;
-  border-bottom: 1px solid #334155;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .activity-item:last-child {
@@ -60,20 +60,20 @@ defineProps({
 }
 
 .activity-dot.player_join {
-  background: #10b981;
+  background: var(--success);
 }
 
 .activity-dot.player_leave {
-  background: #64748b;
+  background: var(--text-disabled);
 }
 
 .activity-dot.mod_install,
 .activity-dot.mod_update {
-  background: #3b82f6;
+  background: var(--primary);
 }
 
 .activity-dot.server_start {
-  background: #10b981;
+  background: var(--success);
 }
 
 .activity-content {
@@ -81,18 +81,18 @@ defineProps({
 }
 
 .activity-text {
-  color: #e2e8f0;
+  color: var(--text-secondary);
   font-size: 0.875rem;
   margin-bottom: 0.25rem;
 }
 
 .activity-text strong {
-  color: #f1f5f9;
+  color: var(--text-primary);
   font-weight: 600;
 }
 
 .activity-time {
-  color: #64748b;
+  color: var(--text-disabled);
   font-size: 0.8125rem;
 }
 </style>

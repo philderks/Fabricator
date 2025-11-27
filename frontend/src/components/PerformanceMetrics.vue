@@ -54,27 +54,27 @@ defineProps({
 }
 
 .perf-label {
-  color: #94a3b8;
+  color: var(--text-muted);
   font-size: 0.875rem;
   font-weight: 500;
 }
 
 .perf-value {
-  color: #e2e8f0;
+  color: var(--text-secondary);
   font-size: 0.875rem;
   font-weight: 600;
 }
 
 .progress-bar {
   height: 8px;
-  background: #334155;
+  background: var(--bg-tertiary);
   border-radius: 4px;
   overflow: hidden;
 }
 
 .progress-fill {
   height: 100%;
-  background: #3b82f6;
+  background: var(--primary);
   border-radius: 4px;
   transition: width 0.3s;
 }

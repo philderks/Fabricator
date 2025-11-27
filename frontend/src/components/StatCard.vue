@@ -24,14 +24,14 @@ defineProps({
 
 <style scoped>
 .stat-card {
-  background: #1e293b;
-  border: 1px solid #334155;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
   border-radius: 12px;
   padding: 1.5rem;
 }
 
 .stat-label {
-  color: #94a3b8;
+  color: var(--text-muted);
   font-size: 0.875rem;
   font-weight: 500;
   margin-bottom: 0.5rem;
@@ -40,10 +40,10 @@ defineProps({
 .stat-value {
   font-size: 2.25rem;
   font-weight: 700;
-  color: #f1f5f9;
+  color: var(--text-primary);
 }
 
 .stat-value.highlight {
-  color: #10b981;
+  color: var(--success);
 }
 </style>
