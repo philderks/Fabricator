@@ -1,83 +1,64 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import ServerCard from '../components/ui/ServerCard.vue'
 import StatCard from '../components/ui/StatCard.vue'
 import ServerCreateModal from '../components/modals/ServerCreateModal.vue'
+import { getServers, createServer } from '../api/servers'
+import { useToast } from '../composables/useToast'
 
 const router = useRouter()
+const toast = useToast()
 
-const servers = ref([
-  {
-    id: 1,
-    name: 'Main Survival',
-    status: 'running',
-    version: '1.21.3',
-    loader: 'Fabric',
-    players: { online: 12, max: 50 },
-    mods: 23,
-    uptime: '5d 12h',
-    ip: 'play.example.com'
-  },
-  {
-    id: 2,
-    name: 'Creative Build',
-    status: 'running',
-    version: '1.21.3',
-    loader: 'Fabric',
-    players: { online: 3, max: 20 },
-    mods: 15,
-    uptime: '2d 8h',
-    ip: 'creative.example.com'
-  },
-  {
-    id: 3,
-    name: 'Modded Adventure',
-    status: 'stopped',
-    version: '1.20.1',
-    loader: 'Forge',
-    players: { online: 0, max: 30 },
-    mods: 156,
-    uptime: null,
-    ip: 'adventure.example.com'
-  },
-  {
-    id: 4,
-    name: 'Testing',
-    status: 'stopped',
-    version: '1.21.3',
-    loader: 'Fabric',
-    players: { online: 0, max: 10 },
-    mods: 8,
-    uptime: null,
-    ip: 'test.example.com'
-  }
-])
-
+const servers = ref([])
+const loading = ref(true)
 const showCreateModal = ref(false)
 
-const handleCreateServer = (serverData) => {
-  console.log('Creating server:', serverData)
-  // TODO: API call to create server
-  // For now, add to list with mock data
-  const newServer = {
-    id: servers.value.length + 1,
-    name: serverData.name,
-    status: 'stopped',
-    version: serverData.version,
-    loader: serverData.loader.charAt(0).toUpperCase() + serverData.loader.slice(1),
-    players: { online: 0, max: serverData.maxPlayers },
-    mods: 0,
-    uptime: null,
-    ip: `${serverData.name.toLowerCase().replace(/\s+/g, '-')}.example.com`
+// Load servers from API
+const loadServers = async () => {
+  loading.value = true
+  try {
+    const data = await getServers()
+    // Transform API data to match component expectations
+    servers.value = data.map(server => ({
+      id: server.id,
+      name: server.name,
+      status: server.status,
+      version: server.version,
+      loader: server.loader.charAt(0).toUpperCase() + server.loader.slice(1),
+      players: { online: 0, max: server.maxPlayers || 20 },
+      mods: 0,
+      uptime: server.status === 'running' ? '0h' : null,
+      ip: `localhost:${server.port}`
+    }))
+  } catch (error) {
+    console.error('Failed to load servers:', error)
+    toast.error('Failed to load servers', 'Error')
+  } finally {
+    loading.value = false
   }
-  servers.value.push(newServer)
-  showCreateModal.value = false
+}
+
+const handleCreateServer = async (serverData) => {
+  try {
+    const result = await createServer(serverData)
+    toast.success(`Server "${result.name}" created successfully!`, 'Server Created')
+    await loadServers()
+    showCreateModal.value = false
+  } catch (error) {
+    console.error('Failed to create server:', error)
+    toast.error(error.message || 'Failed to create server', 'Error')
+  }
 }
 
 const selectServer = (id) => {
   router.push(`/server/${id}`)
 }
+
+// Load servers on mount
+onMounted(() => {
+  loadServers()
+})
 </script>
 
 <template>
@@ -112,7 +93,21 @@ const selectServer = (id) => {
           <StatCard label="Mods" :value="servers.reduce((sum, s) => sum + s.mods, 0)" />
         </div>
 
-        <div class="servers">
+        <div v-if="loading" class="loading-state">
+          <p>Loading servers...</p>
+        </div>
+
+        <div v-else-if="servers.length === 0" class="empty-state">
+          <svg width="64" height="64" viewBox="0 0 24 24" fill="none">
+            <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="2"/>
+            <path d="M12 8V12M12 16H12.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <h3>No servers yet</h3>
+          <p>Create your first Minecraft server to get started</p>
+          <button class="btn btn-primary" @click="showCreateModal = true">+ Create Server</button>
+        </div>
+
+        <div v-else class="servers">
           <ServerCard 
             v-for="server in servers" 
             :key="server.id" 
@@ -142,6 +137,39 @@ const selectServer = (id) => {
 .servers {
   display: grid;
   gap: 1.25rem;
+}
+
+.loading-state,
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4rem 2rem;
+  text-align: center;
+}
+
+.loading-state p {
+  color: var(--text-muted);
+  font-size: 1rem;
+}
+
+.empty-state svg {
+  color: var(--text-muted);
+  margin-bottom: 1.5rem;
+}
+
+.empty-state h3 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 0.5rem 0;
+}
+
+.empty-state p {
+  font-size: 1rem;
+  color: var(--text-muted);
+  margin: 0 0 2rem 0;
 }
 
 @media (max-width: 1024px) {
