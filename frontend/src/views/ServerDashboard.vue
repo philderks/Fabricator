@@ -5,6 +5,8 @@ import StatCard from '../components/StatCard.vue'
 import PerformanceMetrics from '../components/PerformanceMetrics.vue'
 import ModItem from '../components/ModItem.vue'
 import ActivityFeed from '../components/ActivityFeed.vue'
+import ModBrowserModal from '../components/ModBrowserModal.vue'
+import ConfirmModal from '../components/ConfirmModal.vue'
 
 const route = useRoute()
 const serverId = route.params.id
@@ -37,12 +39,105 @@ const recentActivity = ref([
   { type: 'mod_update', mod: 'Fabric API', time: '5h ago' }
 ])
 
+// Modal state
+const showModBrowser = ref(false)
+const showConfirmModal = ref(false)
+const confirmModalData = ref({})
+const modToRemove = ref(null)
+const installLoading = ref(false)
+
+// Mod Browser
+const openModBrowser = () => {
+  showModBrowser.value = true
+}
+
+const handleInstallMod = async (modData) => {
+  installLoading.value = true
+  
+  try {
+    const response = await fetch(`/api/modrinth/mod/${modData.modId}/install`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        mc_version: modData.mcVersion,
+        loader: modData.loader
+      })
+    })
+    
+    const result = await response.json()
+    
+    if (response.ok) {
+      // Add to installed mods list
+      installedMods.value.push({
+        name: modData.modTitle,
+        version: 'Latest',
+        downloads: 'N/A',
+        category: 'Installed'
+      })
+      
+      // Add to activity feed
+      recentActivity.value.unshift({
+        type: 'mod_install',
+        mod: modData.modTitle,
+        time: 'just now'
+      })
+      
+      showModBrowser.value = false
+      
+      // Show success notification (could be improved with a toast component)
+      alert(`${modData.modTitle} installed successfully!`)
+    } else {
+      alert(`Installation failed: ${result.error}`)
+    }
+  } catch (error) {
+    console.error('Install failed:', error)
+    alert('Installation failed. Check console for details.')
+  } finally {
+    installLoading.value = false
+  }
+}
+
+// Mod Management
 const handleUpdateMod = (mod) => {
   console.log('Update mod:', mod)
+  // Future: Check for updates and install
 }
 
 const handleRemoveMod = (mod) => {
-  console.log('Remove mod:', mod)
+  modToRemove.value = mod
+  confirmModalData.value = {
+    title: 'Remove Mod',
+    message: `Remove ${mod.name}?`,
+    description: 'This will delete the mod file from the server. This action cannot be undone.',
+    type: 'danger',
+    confirmText: 'Remove',
+    cancelText: 'Cancel'
+  }
+  showConfirmModal.value = true
+}
+
+const confirmRemoveMod = async () => {
+  if (!modToRemove.value) return
+  
+  // Simulate removal (replace with actual API call when available)
+  installedMods.value = installedMods.value.filter(m => m.name !== modToRemove.value.name)
+  
+  // Add to activity feed
+  recentActivity.value.unshift({
+    type: 'mod_remove',
+    mod: modToRemove.value.name,
+    time: 'just now'
+  })
+  
+  showConfirmModal.value = false
+  modToRemove.value = null
+}
+
+const cancelRemoveMod = () => {
+  showConfirmModal.value = false
+  modToRemove.value = null
 }
 </script>
 
@@ -152,7 +247,7 @@ const handleRemoveMod = (mod) => {
               <div class="card">
                 <div class="card-header">
                   <h3>Installed Mods ({{ installedMods.length }})</h3>
-                  <button class="btn btn-primary">Browse Mods</button>
+                  <button class="btn btn-primary" @click="openModBrowser">Browse Mods</button>
                 </div>
                 <div class="search-box">
                   <input type="text" placeholder="Search mods..." class="search-input">
@@ -197,6 +292,28 @@ const handleRemoveMod = (mod) => {
         </div>
       </div>
     </main>
+
+    <!-- Modals -->
+    <ModBrowserModal 
+      :show="showModBrowser"
+      :mc-version="serverStatus.version"
+      :loader="serverStatus.loader.toLowerCase()"
+      @close="showModBrowser = false"
+      @install="handleInstallMod"
+    />
+
+    <ConfirmModal
+      :show="showConfirmModal"
+      :title="confirmModalData.title"
+      :message="confirmModalData.message"
+      :description="confirmModalData.description"
+      :type="confirmModalData.type"
+      :confirm-text="confirmModalData.confirmText"
+      :cancel-text="confirmModalData.cancelText"
+      @confirm="confirmRemoveMod"
+      @cancel="cancelRemoveMod"
+      @close="cancelRemoveMod"
+    />
   </div>
 </template>
 
