@@ -1,13 +1,13 @@
 <script setup>
 import { ref } from 'vue'
 import { useRoute } from 'vue-router'
-import StatCard from '../components/StatCard.vue'
-import PerformanceMetrics from '../components/PerformanceMetrics.vue'
-import ModItem from '../components/ModItem.vue'
-import ActivityFeed from '../components/ActivityFeed.vue'
-import ModBrowserModal from '../components/ModBrowserModal.vue'
-import ConfirmModal from '../components/ConfirmModal.vue'
-import ServerSettingsTab from '../components/ServerSettingsTab.vue'
+import StatCard from '../components/ui/StatCard.vue'
+import PerformanceMetrics from '../components/server/PerformanceMetrics.vue'
+import ModItem from '../components/server/ModItem.vue'
+import ActivityFeed from '../components/server/ActivityFeed.vue'
+import ModBrowserModal from '../components/modals/ModBrowserModal.vue'
+import ConfirmModal from '../components/modals/ConfirmModal.vue'
+import ServerSettingsTab from '../components/server/ServerSettingsTab.vue'
 
 const route = useRoute()
 const serverId = route.params.id

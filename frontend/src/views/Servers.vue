@@ -1,9 +1,9 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import ServerCard from '../components/ServerCard.vue'
-import StatCard from '../components/StatCard.vue'
-import ServerCreateModal from '../components/ServerCreateModal.vue'
+import ServerCard from '../components/ui/ServerCard.vue'
+import StatCard from '../components/ui/StatCard.vue'
+import ServerCreateModal from '../components/modals/ServerCreateModal.vue'
 
 const router = useRouter()
 
