@@ -71,7 +71,7 @@
               id="install-path"
               v-model="formData.installPath" 
               type="text" 
-              placeholder="~/fabricator/servers"
+              placeholder="Leave empty for auto-generated path"
             >
             <span class="form-hint">Where server files will be stored</span>
           </div>
@@ -298,7 +298,7 @@
 
 <script>
 import BaseModal from './BaseModal.vue'
-import { createServer } from '../../api/servers'
+import { createServer, installServer } from '../../api/servers'
 import { useToast } from '../../composables/useToast'
 
 export default {
@@ -325,7 +325,7 @@ export default {
         version: '1.21.3',
         loader: 'fabric',
         port: 25565,
-        installPath: '~/fabricator/servers',
+        installPath: '',
         maxPlayers: 20,
         difficulty: 'normal',
         gamemode: 'survival',
@@ -367,11 +367,17 @@ export default {
       
       try {
         // Create server via API
-        const result = await createServer(this.formData)
-        
-        this.$emit('create', result)
-        this.$emit('close')
-        this.resetForm()
+        const server = await createServer(this.formData)
+        this.toast.info('Installing server...', 'Installation')
+        const installResult = await installServer(server.id)
+
+        if (installResult.success) {
+          this.$emit('create', installResult.server || server)
+          this.$emit('close')
+          this.resetForm()
+        } else {
+          this.toast.error(installResult.message || 'Installation failed', 'Server Installation Failed')
+        }
       } catch (error) {
         console.error('Failed to create server:', error)
         this.toast.error(error.message, 'Server Creation Failed')
@@ -386,7 +392,7 @@ export default {
         version: '1.21.3',
         loader: 'fabric',
         port: 25565,
-        installPath: '~/fabricator/servers',
+        installPath: '',
         maxPlayers: 20,
         difficulty: 'normal',
         gamemode: 'survival',

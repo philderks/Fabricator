@@ -170,3 +170,12 @@ export async function restoreBackup(serverId, backupId) {
 export async function getServerMetrics(serverId) {
   return get(`/api/servers/${serverId}/metrics`)
 }
+
+/**
+ * Install a server (download files, write configs)
+ * @param {string|number} serverId - Server ID
+ * @returns {Promise<Object>} Installation result
+ */
+export async function installServer(serverId) {
+  return post(`/api/servers/${serverId}/install`)
+}

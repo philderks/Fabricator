@@ -140,7 +140,9 @@ def install_server(server_id):
     if not server:
         return jsonify({'error': 'Server not found'}), 404
 
-    loader = server.get('loader', '').lower()
+    loader = (server.get('loader') or '').strip().lower()
+    if not loader:
+        return jsonify({'error': 'Server has no mod loader configured'}), 400
     mc_version = server.get('version')
 
     if not mc_version:
@@ -153,8 +155,12 @@ def install_server(server_id):
 
     installer = _get_installer(loader, install_path)
     if not installer:
+        supported_loaders = ['fabric']
         return jsonify({
-            'error': f'Unsupported loader: {loader}. Currently only "fabric" is supported.'
+            'error': (
+                f'Unsupported loader: {loader}. '
+                f'Supported loaders: {", ".join(supported_loaders)}.'
+            )
         }), 400
 
     storage.update_server_status(server_id, 'installing')
