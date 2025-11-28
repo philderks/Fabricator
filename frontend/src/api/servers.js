@@ -179,3 +179,21 @@ export async function getServerMetrics(serverId) {
 export async function installServer(serverId) {
   return post(`/api/servers/${serverId}/install`)
 }
+
+/**
+ * Get Fabric-supported Minecraft versions
+ * @returns {Promise<Array>} List of game versions from Fabric Meta
+ */
+export async function getFabricGameVersions() {
+  return get('/api/fabric/versions/game')
+}
+
+/**
+ * Get Fabric loader versions for a Minecraft version
+ * @param {string} mcVersion - Minecraft version filter
+ * @returns {Promise<Array>} Loader versions metadata
+ */
+export async function getFabricLoaderVersions(mcVersion) {
+  const params = mcVersion ? { mc_version: mcVersion } : {}
+  return get('/api/fabric/versions/loader', params)
+}

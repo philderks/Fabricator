@@ -27,12 +27,20 @@
             <select 
               id="minecraft-version"
               v-model="formData.version"
+              :disabled="versionsLoading || !gameVersions.length"
               required
             >
-              <option value="1.21.3">1.21.3</option>
-              <option value="1.21.1">1.21.1</option>
-              <option value="1.20.4">1.20.4</option>
-              <option value="1.20.1">1.20.1</option>
+              <option v-if="versionsLoading" disabled value="">Loading versions...</option>
+              <option v-else-if="!versionsLoading && !gameVersions.length" disabled value="">
+                No versions available
+              </option>
+              <option 
+                v-for="version in gameVersions" 
+                :key="version.version"
+                :value="version.version"
+              >
+                {{ version.version }}<template v-if="version.stable"> (stable)</template>
+              </option>
             </select>
           </div>
 
@@ -43,10 +51,13 @@
               v-model="formData.loader"
               required
             >
-              <option value="fabric">Fabric</option>
-              <option value="forge">Forge</option>
-              <option value="quilt">Quilt</option>
-              <option value="vanilla">Vanilla</option>
+              <option 
+                v-for="loaderOption in loaderOptions" 
+                :key="loaderOption.value"
+                :value="loaderOption.value"
+              >
+                {{ loaderOption.label }}
+              </option>
             </select>
           </div>
         </div>
@@ -298,7 +309,7 @@
 
 <script>
 import BaseModal from './BaseModal.vue'
-import { createServer, installServer } from '../../api/servers'
+import { createServer, installServer, getFabricGameVersions } from '../../api/servers'
 import { useToast } from '../../composables/useToast'
 
 export default {
@@ -320,9 +331,14 @@ export default {
   data() {
     return {
       creating: false,
+      versionsLoading: false,
+      gameVersions: [],
+      loaderOptions: [
+        { value: 'fabric', label: 'Fabric (supported)' }
+      ],
       formData: {
         name: '',
-        version: '1.21.3',
+        version: '',
         loader: 'fabric',
         port: 25565,
         installPath: '',
@@ -348,11 +364,33 @@ export default {
       }
     };
   },
+  created() {
+    this.loadGameVersions()
+  },
   methods: {
     handleClose() {
       if (!this.creating) {
         this.$emit('close');
         this.resetForm();
+      }
+    },
+    
+    async loadGameVersions() {
+      this.versionsLoading = true
+      try {
+        const versions = await getFabricGameVersions()
+        this.gameVersions = Array.isArray(versions) ? versions : []
+        const preferred = this.gameVersions.find(v => v.stable)
+        const fallback = preferred || this.gameVersions[0]
+        const versionExists = this.gameVersions.some(v => v.version === this.formData.version)
+        if ((!this.formData.version || !versionExists) && fallback) {
+          this.formData.version = fallback.version
+        }
+      } catch (error) {
+        console.error('Failed to load Fabric game versions:', error)
+        this.toast.error('Could not load Minecraft versions.', 'Version Fetch Failed')
+      } finally {
+        this.versionsLoading = false
       }
     },
     
@@ -387,9 +425,10 @@ export default {
     },
     
     resetForm() {
+      const preservedVersion = this.formData.version
       this.formData = {
         name: '',
-        version: '1.21.3',
+        version: preservedVersion || (this.gameVersions[0]?.version || ''),
         loader: 'fabric',
         port: 25565,
         installPath: '',

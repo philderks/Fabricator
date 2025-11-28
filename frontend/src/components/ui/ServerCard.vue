@@ -1,12 +1,25 @@
 <script setup>
-defineProps({
+const props = defineProps({
   server: {
     type: Object,
     required: true
+  },
+  busy: {
+    type: Boolean,
+    default: false
   }
 })
 
-defineEmits(['click'])
+const emit = defineEmits(['click', 'start', 'stop'])
+
+const handleAction = (event) => {
+  event.stopPropagation()
+  if (props.busy) {
+    return
+  }
+  const action = props.server.status === 'running' ? 'stop' : 'start'
+  emit(action, props.server.id)
+}
 </script>
 
 <template>
@@ -47,9 +60,11 @@ defineEmits(['click'])
       <button 
         class="action-btn"
         :class="server.status === 'running' ? 'btn-stop' : 'btn-start'"
-        @click.stop
+        :disabled="busy"
+        @click="handleAction"
       >
-        {{ server.status === 'running' ? 'Stop' : 'Start' }}
+        <span v-if="busy" class="btn-loading"></span>
+        <span v-else>{{ server.status === 'running' ? 'Stop' : 'Start' }}</span>
       </button>
     </div>
   </div>
@@ -165,6 +180,11 @@ defineEmits(['click'])
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
+}
+
+.action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .btn-start {

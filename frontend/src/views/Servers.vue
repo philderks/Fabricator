@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import ServerCard from '../components/ui/ServerCard.vue'
 import StatCard from '../components/ui/StatCard.vue'
 import ServerCreateModal from '../components/modals/ServerCreateModal.vue'
-import { getServers } from '../api/servers'
+import { getServers, startServer, stopServer } from '../api/servers'
 import { useToast } from '../composables/useToast'
 
 const router = useRouter()
@@ -13,6 +13,7 @@ const toast = useToast()
 const servers = ref([])
 const loading = ref(true)
 const showCreateModal = ref(false)
+const serverActions = ref({})
 
 // Load servers from API
 const loadServers = async () => {
@@ -25,7 +26,7 @@ const loadServers = async () => {
       name: server.name,
       status: server.status,
       version: server.version,
-      loader: server.loader.charAt(0).toUpperCase() + server.loader.slice(1),
+      loader: server.loader ? server.loader.charAt(0).toUpperCase() + server.loader.slice(1) : 'Unknown',
       players: { online: 0, max: server.maxPlayers || 20 },
       mods: 0,
       uptime: server.status === 'running' ? '0h' : null,
@@ -52,6 +53,40 @@ const handleCreateServer = async (createdServer) => {
 const selectServer = (id) => {
   router.push(`/server/${id}`)
 }
+
+const setServerActionState = (id, value) => {
+  const next = { ...serverActions.value }
+  if (value) {
+    next[id] = true
+  } else {
+    delete next[id]
+  }
+  serverActions.value = next
+}
+
+const handleStartStop = async (id, actionFn, successMessage, errorTitle) => {
+  if (serverActions.value[id]) {
+    return
+  }
+  setServerActionState(id, true)
+  try {
+    const result = await actionFn(id)
+    if (result.success) {
+      toast.success(successMessage, 'Success')
+    } else {
+      toast.error(result.message || 'Operation failed', errorTitle)
+    }
+  } catch (error) {
+    console.error(error)
+    toast.error('Request failed', errorTitle)
+  } finally {
+    setServerActionState(id, false)
+    await loadServers()
+  }
+}
+
+const handleStart = (id) => handleStartStop(id, startServer, 'Server start requested', 'Start Failed')
+const handleStop = (id) => handleStartStop(id, stopServer, 'Server stop requested', 'Stop Failed')
 
 // Load servers on mount
 onMounted(() => {
@@ -110,7 +145,10 @@ onMounted(() => {
             v-for="server in servers" 
             :key="server.id" 
             :server="server"
+            :busy="!!serverActions[server.id]"
             @click="selectServer"
+            @start="handleStart"
+            @stop="handleStop"
           />
         </div>
       </div>

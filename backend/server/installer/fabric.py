@@ -96,6 +96,18 @@ class FabricInstaller(InstallerBase):
             print(f"Failed to fetch installer versions: {exc}")
             return []
 
+    def _get_latest_installer_version(self) -> Optional[str]:
+        """Get the latest stable Fabric installer version."""
+        versions = self.get_installer_versions()
+        if not versions:
+            return None
+
+        for version in versions:
+            if version.get("stable"):
+                return version.get("version")
+
+        return versions[0].get("version")
+
     def _get_latest_loader_version(self, mc_version: str) -> Optional[str]:
         """Get the latest stable loader version for a MC version.
         
@@ -121,29 +133,44 @@ class FabricInstaller(InstallerBase):
         
         return None
 
-    def _get_server_jar_url(self, mc_version: str, loader_version: str) -> str:
+    def _get_server_jar_url(
+        self,
+        mc_version: str,
+        loader_version: str,
+        installer_version: str
+    ) -> str:
         """Get the URL for the pre-built Fabric server JAR.
         
         Args:
             mc_version: Minecraft version
             loader_version: Fabric loader version
+            installer_version: Fabric installer version
             
         Returns:
             URL to download the server JAR
         """
-        return f"{self.META_API_BASE}/versions/loader/{mc_version}/{loader_version}/server/jar"
+        return (
+            f"{self.META_API_BASE}/versions/loader/"
+            f"{mc_version}/{loader_version}/{installer_version}/server/jar"
+        )
 
-    def _download_server_jar(self, mc_version: str, loader_version: str) -> Optional[Path]:
+    def _download_server_jar(
+        self,
+        mc_version: str,
+        loader_version: str,
+        installer_version: str
+    ) -> Optional[Path]:
         """Download the Fabric server JAR.
         
         Args:
             mc_version: Minecraft version
             loader_version: Fabric loader version
+            installer_version: Fabric installer version
             
         Returns:
             Path to downloaded JAR or None on failure
         """
-        url = self._get_server_jar_url(mc_version, loader_version)
+        url = self._get_server_jar_url(mc_version, loader_version, installer_version)
         jar_name = f"fabric-server-mc.{mc_version}-loader.{loader_version}-launcher.jar"
         jar_path = self.install_path / jar_name
         
@@ -203,13 +230,15 @@ class FabricInstaller(InstallerBase):
     def install(
         self,
         mc_version: str,
-        loader_version: Optional[str] = None
+        loader_version: Optional[str] = None,
+        installer_version: Optional[str] = None
     ) -> InstallResult:
         """Install a Fabric server.
         
         Args:
             mc_version: Minecraft version to install
             loader_version: Optional specific loader version (uses latest stable if None)
+            installer_version: Optional specific installer version (uses latest stable if None)
             
         Returns:
             InstallResult with success status and details
@@ -232,10 +261,27 @@ class FabricInstaller(InstallerBase):
                 )
         
         print(f"Using loader version: {loader_version}")
+
+        # Get installer version if not specified
+        if not installer_version:
+            print("Fetching latest stable installer version...")
+            installer_version = self._get_latest_installer_version()
+            if not installer_version:
+                return InstallResult(
+                    success=False,
+                    status=InstallStatus.FAILED,
+                    message=(
+                        "Could not determine Fabric installer version. "
+                        "Check network connectivity or Fabric Meta availability."
+                    ),
+                    details={"mc_version": mc_version, "loader_version": loader_version}
+                )
+
+        print(f"Using installer version: {installer_version}")
         
         # Download server JAR
         print("Downloading server JAR...")
-        jar_path = self._download_server_jar(mc_version, loader_version)
+        jar_path = self._download_server_jar(mc_version, loader_version, installer_version)
         
         if not jar_path or not jar_path.exists():
             return InstallResult(
@@ -263,6 +309,7 @@ class FabricInstaller(InstallerBase):
             details={
                 "mc_version": mc_version,
                 "loader_version": loader_version,
+                "installer_version": installer_version,
                 "jar_file": str(jar_path),
                 "install_path": str(self.install_path)
             }
@@ -272,7 +319,8 @@ class FabricInstaller(InstallerBase):
         self,
         mc_version: str,
         server_config: Dict[str, Any],
-        loader_version: Optional[str] = None
+        loader_version: Optional[str] = None,
+        installer_version: Optional[str] = None
     ) -> InstallResult:
         """Install a Fabric server with full configuration.
         
@@ -285,7 +333,7 @@ class FabricInstaller(InstallerBase):
             InstallResult with success status and details
         """
         # First do the basic installation
-        result = self.install(mc_version, loader_version)
+        result = self.install(mc_version, loader_version, installer_version)
         
         if not result.success:
             return result
