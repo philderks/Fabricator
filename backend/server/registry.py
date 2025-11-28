@@ -5,8 +5,8 @@ import threading
 from pathlib import Path
 from typing import Dict, Optional
 
-from backend.config import get_config
-from backend.services.server_manager import ServerManager
+from backend.core.config import get_config
+from backend.server.manager import ServerManager
 
 
 class ServerProcessRegistry:

@@ -1,25 +1,21 @@
-"""Flask application factory."""
+"""Flask application factory and shared extensions."""
 from flask import Flask
 from flask_cors import CORS
 
-from backend.config import get_config
-from backend.routes.server import server_bp
-from backend.routes.modrinth import modrinth_bp
+from backend.core.config import get_config
+from backend.server.routes import server_bp
+from backend.modrinth.routes import modrinth_bp
 
 
-def create_app():
+def create_app() -> Flask:
     """Create and configure the Flask application."""
     app = Flask(__name__)
-    
-    # Load configuration
+
     config = get_config()
     app.config.from_object(config)
-    
-    # Enable CORS
+
     CORS(app)
-    
-    # Register blueprints
+
     app.register_blueprint(server_bp)
     app.register_blueprint(modrinth_bp)
-    
     return app

@@ -1,5 +1,5 @@
 """Test script for Fabricator API."""
-from backend.app import create_app
+from backend.core import create_app
 
 app = create_app()
 client = app.test_client()
