@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import StatCard from '../components/ui/StatCard.vue'
 import PerformanceMetrics from '../components/server/PerformanceMetrics.vue'
@@ -17,7 +17,14 @@ import {
   startServer,
   stopServer,
   restartServer,
-  updateServerSettings
+  updateServerSettings,
+  sendServerCommand,
+  browseServerFiles,
+  getServerFile,
+  saveServerFile,
+  createBackup,
+  getBackups,
+  restoreBackup
 } from '../api/servers'
 import { useToast } from '../composables/useToast'
 
@@ -41,6 +48,14 @@ const modToRemove = ref(null)
 const installLoading = ref(false)
 const activeTab = ref('overview')
 const actionState = ref({ start: false, stop: false, restart: false })
+const consoleCommand = ref('')
+const commandSending = ref(false)
+const backups = ref([])
+const backupLoading = ref(false)
+const fileBrowser = ref({ currentPath: '', entries: [], loading: false, error: null })
+const backupToRestore = ref(null)
+const showBackupRestoreModal = ref(false)
+const restoringBackup = ref(false)
 
 const defaultSettings = (data = {}) => ({
   name: data.name || 'Minecraft Server',
@@ -120,8 +135,168 @@ const loadLogs = async (limit = 200) => {
   }
 }
 
+const loadBackups = async () => {
+  backupLoading.value = true
+  try {
+    backups.value = await getBackups(serverId)
+  } catch (error) {
+    console.error('Failed to load backups:', error)
+    toast.error('Failed to load backups', 'Backups')
+  } finally {
+    backupLoading.value = false
+  }
+}
+
 const refreshAll = async () => {
-  await Promise.all([loadServer(), loadMods()])
+  await Promise.all([loadServer(), loadMods(), loadBackups()])
+}
+
+const createBackupAction = async () => {
+  if (backupLoading.value) {
+    return
+  }
+  backupLoading.value = true
+  try {
+    await createBackup(serverId)
+    toast.success('Backup created successfully', 'Backups')
+    await loadBackups()
+    activeTab.value = 'files'
+  } catch (error) {
+    console.error('Failed to create backup:', error)
+    toast.error(error.message || 'Failed to create backup', 'Backups')
+  } finally {
+    backupLoading.value = false
+  }
+}
+
+const formatBackupTime = (timestamp) => {
+  const date = new Date(timestamp)
+  if (Number.isNaN(date.getTime())) {
+    return 'Unknown'
+  }
+  return date.toLocaleString()
+}
+
+const requestRestoreBackup = (backup) => {
+  backupToRestore.value = backup
+  showBackupRestoreModal.value = true
+}
+
+const confirmRestoreBackup = async () => {
+  if (!backupToRestore.value) {
+    return
+  }
+  restoringBackup.value = true
+  try {
+    const backupId = backupToRestore.value.relativePath.replace(/\.zip$/i, '')
+    await restoreBackup(serverId, backupId)
+    toast.success('Backup restored successfully', 'Backups')
+    await openFileBrowser()
+  } catch (error) {
+    console.error('Failed to restore backup:', error)
+    toast.error(error.message || 'Failed to restore backup', 'Backups')
+  } finally {
+    restoringBackup.value = false
+    showBackupRestoreModal.value = false
+    backupToRestore.value = null
+  }
+}
+
+const cancelRestoreBackup = () => {
+  showBackupRestoreModal.value = false
+  backupToRestore.value = null
+}
+const openFileBrowser = async (path = '') => {
+  fileBrowser.value.loading = true
+  fileBrowser.value.error = null
+  try {
+    const data = await browseServerFiles(serverId, path ? { path } : {})
+    fileBrowser.value = { ...data, entries: data.entries, loading: false, error: null }
+  } catch (error) {
+    console.error('Failed to browse files:', error)
+    fileBrowser.value = { currentPath: path, entries: [], loading: false, error: error.message || 'Unable to load files' }
+  }
+}
+
+const enterFileEntry = (entry) => {
+  if (entry.isDir) {
+    openFileBrowser(entry.relativePath)
+  }
+}
+
+const goUpDirectory = () => {
+  if (!fileBrowser.value.currentPath) {
+    return
+  }
+  const parts = fileBrowser.value.currentPath.split('/').filter(Boolean)
+  parts.pop()
+  openFileBrowser(parts.join('/'))
+}
+
+const formatFileSize = (bytes) => {
+  if (!Number.isFinite(bytes)) {
+    return '—'
+  }
+  if (bytes < 1024) {
+    return `${bytes} B`
+  }
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let value = bytes / 1024
+  let idx = 0
+  while (value >= 1024 && idx < units.length - 1) {
+    value /= 1024
+    idx += 1
+  }
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[idx]}`
+}
+
+const openServerProperties = async () => {
+  try {
+    const file = await getServerFile(serverId, 'server.properties')
+    console.log(file.content)
+    toast.info('server.properties loaded in console log (UI editor coming soon)', 'Files')
+  } catch (error) {
+    console.error('Failed to load server.properties:', error)
+    toast.error('Failed to load server.properties', 'Files')
+  }
+}
+
+const scrollToSettingsSection = (selector) => {
+  const section = document.querySelector(`[data-settings-section="${selector}"]`)
+  if (section) {
+    section.scrollIntoView({ behavior: 'smooth' })
+  }
+}
+
+watch(activeTab, (tab) => {
+  if (tab === 'console') {
+    loadLogs()
+    startLogPolling()
+  } else {
+    stopLogPolling()
+  }
+
+  if (tab === 'files' && !fileBrowser.value.entries.length && !fileBrowser.value.loading) {
+    openFileBrowser()
+  }
+})
+
+let logsIntervalId = null
+
+const startLogPolling = () => {
+  if (logsIntervalId || activeTab.value !== 'console') {
+    return
+  }
+  logsIntervalId = setInterval(() => {
+    loadLogs()
+  }, 4000)
+}
+
+const stopLogPolling = () => {
+  if (logsIntervalId) {
+    clearInterval(logsIntervalId)
+    logsIntervalId = null
+  }
 }
 
 const serverStatus = computed(() => {
@@ -306,10 +481,14 @@ const performServerAction = async (action, fn, successMessage) => {
     actionState.value = { ...actionState.value, [action]: false }
     await loadServer()
     if (action === 'stop') {
+      stopLogPolling()
       logs.value = { stdout: [], stderr: [], running: false }
     }
     if (action === 'start' || action === 'restart') {
       await loadLogs()
+      if (activeTab.value === 'console') {
+        startLogPolling()
+      }
     }
   }
 }
@@ -317,6 +496,26 @@ const performServerAction = async (action, fn, successMessage) => {
 const handleStart = () => performServerAction('start', startServer, 'Server start requested')
 const handleStop = () => performServerAction('stop', stopServer, 'Server stop requested')
 const handleRestart = () => performServerAction('restart', restartServer, 'Server restart requested')
+
+const canSendCommand = computed(() => serverStatus.value.status === 'running' && !!server.value)
+
+const sendConsoleCommand = async () => {
+  if (!canSendCommand.value || !consoleCommand.value.trim()) {
+    return
+  }
+  commandSending.value = true
+  try {
+    await sendServerCommand(serverId, consoleCommand.value.trim())
+    toast.success('Command sent to server', 'Console')
+    consoleCommand.value = ''
+    await loadLogs()
+  } catch (error) {
+    console.error('Failed to send command:', error)
+    toast.error('Failed to send console command', 'Console Error')
+  } finally {
+    commandSending.value = false
+  }
+}
 
 const handleSaveSettings = async (settings) => {
   if (!server.value) {
@@ -344,11 +543,22 @@ const resetSettings = () => {
 watch(activeTab, (tab) => {
   if (tab === 'console') {
     loadLogs()
+    startLogPolling()
+  } else {
+    stopLogPolling()
+  }
+
+  if (tab === 'files' && !fileBrowser.value.entries.length && !fileBrowser.value.loading) {
+    openFileBrowser()
   }
 })
 
 onMounted(async () => {
   await refreshAll()
+})
+
+onUnmounted(() => {
+  stopLogPolling()
 })
 </script>
 
@@ -510,22 +720,42 @@ onMounted(async () => {
                   <h3>Quick Actions</h3>
                 </div>
                 <div class="action-grid">
-                  <button class="action-card">
+                  <button class="action-card" :disabled="backupLoading" @click="createBackupAction">
                     <div class="action-label">Backup Server</div>
-                    <div class="action-desc">Create a backup</div>
+                    <div class="action-desc">{{ backupLoading ? 'Creating…' : 'Create full backup' }}</div>
                   </button>
-                  <button class="action-card">
+                  <button class="action-card" @click="activeTab = 'console'">
                     <div class="action-label">View Logs</div>
-                    <div class="action-desc">Check server logs</div>
+                    <div class="action-desc">Jump to console</div>
                   </button>
-                  <button class="action-card">
+                  <button class="action-card" @click="openServerProperties">
                     <div class="action-label">Server Properties</div>
                     <div class="action-desc">Edit server.properties</div>
                   </button>
-                  <button class="action-card">
+                  <button class="action-card" @click="scrollToSettingsSection('world')">
                     <div class="action-label">World Settings</div>
-                    <div class="action-desc">Configure world</div>
+                    <div class="action-desc">Go to world config</div>
                   </button>
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="card-header">
+                  <h3>Backups</h3>
+                  <button class="btn-text" @click="activeTab = 'files'">Open folder</button>
+                </div>
+                <div v-if="backupLoading" class="mods-state">Loading backups…</div>
+                <div v-else-if="!backups.length" class="mods-state">No backups yet. Create one to get started.</div>
+                <div v-else class="backups-list">
+                  <div class="backup-item" v-for="backup in backups" :key="backup.relativePath">
+                    <div>
+                      <div class="backup-name">{{ backup.name }}</div>
+                      <div class="backup-meta">{{ formatBackupTime(backup.updatedAt) }}</div>
+                    </div>
+                    <div class="backup-actions">
+                      <button class="btn-text" @click="requestRestoreBackup(backup)">Restore</button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -542,6 +772,26 @@ onMounted(async () => {
               {{ logsLoading ? 'Refreshing…' : 'Refresh Logs' }}
             </button>
           </div>
+          <div class="console-command">
+            <input
+              v-model="consoleCommand"
+              class="command-input"
+              type="text"
+              placeholder="Enter server command (e.g., say Hello)"
+              :disabled="!canSendCommand || commandSending"
+              @keyup.enter="sendConsoleCommand"
+            >
+            <button
+              class="btn btn-primary"
+              :disabled="!canSendCommand || commandSending || !consoleCommand.trim()"
+              @click="sendConsoleCommand"
+            >
+              {{ commandSending ? 'Sending…' : 'Send Command' }}
+            </button>
+          </div>
+          <p class="command-hint" v-if="!canSendCommand">
+            Server must be running to accept console commands.
+          </p>
           <div class="console-output">
             <div class="console-stream">
               <div class="console-stream__header">STDOUT</div>
@@ -565,14 +815,36 @@ onMounted(async () => {
         </div>
 
         <!-- Files Tab -->
-        <div v-else-if="activeTab === 'files'" class="tab-content">
-          <div class="placeholder-state">
-            <svg width="64" height="64" viewBox="0 0 24 24" fill="none">
-              <path d="M13 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V9L13 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M13 2V9H20" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            <h3>File Browser</h3>
-            <p>Server file management will be available here</p>
+        <div v-else-if="activeTab === 'files'" class="files-tab">
+          <div class="files-toolbar">
+            <div class="files-toolbar-left">
+              <button class="btn btn-secondary" :disabled="!fileBrowser.currentPath" @click="goUpDirectory">
+                Up
+              </button>
+              <button class="btn btn-secondary" @click="openFileBrowser(fileBrowser.currentPath)">
+                Refresh
+              </button>
+            </div>
+            <div class="path-display">/{{ fileBrowser.currentPath }}</div>
+          </div>
+          <div class="files-list" v-if="!fileBrowser.loading && !fileBrowser.error">
+            <div
+              v-for="entry in fileBrowser.entries"
+              :key="entry.path"
+              class="file-entry"
+              @click="enterFileEntry(entry)"
+            >
+              <div class="file-info">
+                <span class="file-name">{{ entry.relativePath }}</span>
+                <span class="file-meta">{{ entry.isDir ? 'Folder' : formatFileSize(entry.size) }}</span>
+              </div>
+            </div>
+          </div>
+          <div v-else-if="fileBrowser.loading" class="placeholder-state">
+            <p>Loading files…</p>
+          </div>
+          <div v-else class="placeholder-state">
+            <p>{{ fileBrowser.error }}</p>
           </div>
         </div>
 
@@ -615,6 +887,20 @@ onMounted(async () => {
       @confirm="confirmRemoveMod"
       @cancel="cancelRemoveMod"
       @close="cancelRemoveMod"
+    />
+
+    <ConfirmModal
+      :show="showBackupRestoreModal"
+      title="Restore Backup"
+      :message="backupToRestore ? `Restore ${backupToRestore.name}?` : ''"
+      description="Restoring will overwrite the current world and configs. Make sure the server is stopped."
+      type="warning"
+      confirm-text="Restore"
+      cancel-text="Cancel"
+      :loading="restoringBackup"
+      @confirm="confirmRestoreBackup"
+      @cancel="cancelRestoreBackup"
+      @close="cancelRestoreBackup"
     />
   </div>
 </template>
@@ -730,6 +1016,37 @@ onMounted(async () => {
   gap: 0.5rem;
   max-height: 400px;
   overflow-y: auto;
+}
+
+.backups-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.backup-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-primary);
+}
+
+.backup-name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.backup-meta {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+.backup-actions {
+  display: flex;
+  gap: 0.5rem;
 }
 
 /* Settings list */
@@ -872,6 +1189,33 @@ onMounted(async () => {
   align-items: center;
 }
 
+.console-command {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.command-input {
+  flex: 1;
+  padding: 0.625rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'Fira Code', 'SFMono-Regular', Consolas, monospace;
+}
+
+.command-input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.command-hint {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
 .status-pill {
   padding: 0.375rem 0.75rem;
   border-radius: 999px;
@@ -934,6 +1278,60 @@ onMounted(async () => {
 .console-empty {
   margin: 0;
   color: #94a3b8;
+}
+
+.files-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.files-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.files-toolbar-left {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.path-display {
+  font-family: 'Fira Code', 'SFMono-Regular', Consolas, monospace;
+  color: var(--text-muted);
+}
+
+.files-list {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.file-entry {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.file-entry:last-child {
+  border-bottom: none;
+}
+
+.file-entry:hover {
+  background: var(--bg-tertiary);
+}
+
+.file-name {
+  font-weight: 600;
+}
+
+.file-meta {
+  font-size: 0.8125rem;
+  color: var(--text-disabled);
 }
 
 @keyframes shimmer {
