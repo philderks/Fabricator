@@ -2,10 +2,29 @@
 from flask import Blueprint, jsonify, request
 
 from backend.services.server_manager import ServerManager
+from backend.services.server_registry import get_server_process_registry
 from backend.services import server_storage
 
 server_bp = Blueprint('server', __name__, url_prefix='/api')
 server_manager = ServerManager()
+process_registry = get_server_process_registry()
+
+
+def _augment_with_runtime(server: dict) -> dict:
+    if not server or 'id' not in server:
+        return server
+
+    runtime = process_registry.get_status(server['id'])
+    augmented = dict(server)
+    if runtime:
+        augmented['runtime'] = runtime
+        runtime_status = runtime.get('status')
+        if runtime_status and runtime_status != server.get('status'):
+            updated = server_storage.update_server_status(server['id'], runtime_status)
+            if updated:
+                augmented = dict(updated)
+                augmented['runtime'] = runtime
+    return augmented
 
 
 # Legacy single-server endpoints (kept for compatibility)
@@ -45,7 +64,7 @@ def get_servers():
     Returns:
         JSON array of server objects
     """
-    servers = server_storage.get_all_servers()
+    servers = [_augment_with_runtime(server) for server in server_storage.get_all_servers()]
     return jsonify(servers)
 
 
@@ -103,7 +122,7 @@ def get_server_details(server_id):
     if not server:
         return jsonify({'error': 'Server not found'}), 404
     
-    return jsonify(server)
+    return jsonify(_augment_with_runtime(server))
 
 
 @server_bp.route('/servers/<server_id>/settings', methods=['PUT'])
@@ -170,19 +189,27 @@ def start_server_by_id(server_id):
         Success message with updated status
     """
     server = server_storage.get_server(server_id)
-    
     if not server:
         return jsonify({'error': 'Server not found'}), 404
-    
-    # TODO: Actually start the Minecraft server process
-    # For now, just update status in JSON
-    updated_server = server_storage.update_server_status(server_id, 'running')
-    
-    return jsonify({
-        'success': True,
-        'message': f'Server {server["name"]} started',
-        'server': updated_server
-    })
+
+    try:
+        result = process_registry.start_server(server)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    status_value = result.get('status')
+    success = status_value == 'running'
+    updated_server = (
+        server_storage.update_server_status(server_id, status_value)
+        if status_value else server
+    )
+
+    response = {
+        'success': success,
+        'message': result.get('message', ''),
+        'server': _augment_with_runtime(updated_server or server)
+    }
+    return jsonify(response), 200 if success else 400
 
 
 @server_bp.route('/servers/<server_id>/stop', methods=['POST'])
@@ -196,19 +223,23 @@ def stop_server_by_id(server_id):
         Success message with updated status
     """
     server = server_storage.get_server(server_id)
-    
     if not server:
         return jsonify({'error': 'Server not found'}), 404
-    
-    # TODO: Actually stop the Minecraft server process
-    # For now, just update status in JSON
-    updated_server = server_storage.update_server_status(server_id, 'stopped')
-    
-    return jsonify({
-        'success': True,
-        'message': f'Server {server["name"]} stopped',
-        'server': updated_server
-    })
+
+    result = process_registry.stop_server(server_id)
+    status_value = result.get('status')
+    success = status_value == 'stopped'
+    updated_server = (
+        server_storage.update_server_status(server_id, status_value)
+        if status_value else server
+    )
+
+    response = {
+        'success': success,
+        'message': result.get('message', ''),
+        'server': _augment_with_runtime(updated_server or server)
+    }
+    return jsonify(response), 200 if success else 400
 
 
 @server_bp.route('/servers/<server_id>/restart', methods=['POST'])
@@ -222,17 +253,25 @@ def restart_server_by_id(server_id):
         Success message with updated status
     """
     server = server_storage.get_server(server_id)
-    
     if not server:
         return jsonify({'error': 'Server not found'}), 404
-    
-    # TODO: Actually restart the Minecraft server process
-    # For now, just cycle status in JSON
-    server_storage.update_server_status(server_id, 'stopping')
-    updated_server = server_storage.update_server_status(server_id, 'running')
-    
-    return jsonify({
-        'success': True,
-        'message': f'Server {server["name"]} restarted',
-        'server': updated_server
-    })
+
+    try:
+        result = process_registry.restart_server(server)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    start_status = result['start'].get('status')
+    success = start_status == 'running'
+    updated_server = (
+        server_storage.update_server_status(server_id, start_status)
+        if start_status else server
+    )
+
+    response = {
+        'success': success,
+        'message': result['start'].get('message', ''),
+        'details': result,
+        'server': _augment_with_runtime(updated_server or server)
+    }
+    return jsonify(response), 200 if success else 400

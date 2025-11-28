@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import ServerCard from '../components/ui/ServerCard.vue'
 import StatCard from '../components/ui/StatCard.vue'
 import ServerCreateModal from '../components/modals/ServerCreateModal.vue'
-import { getServers, createServer } from '../api/servers'
+import { getServers } from '../api/servers'
 import { useToast } from '../composables/useToast'
 
 const router = useRouter()
@@ -39,15 +39,13 @@ const loadServers = async () => {
   }
 }
 
-const handleCreateServer = async (serverData) => {
+const handleCreateServer = async (createdServer) => {
   try {
-    const result = await createServer(serverData)
-    toast.success(`Server "${result.name}" created successfully!`, 'Server Created')
+    toast.success(`Server "${createdServer.name}" created successfully!`, 'Server Created')
     await loadServers()
-    showCreateModal.value = false
   } catch (error) {
-    console.error('Failed to create server:', error)
-    toast.error(error.message || 'Failed to create server', 'Error')
+    console.error('Failed to refresh servers:', error)
+    toast.error('Server list could not be refreshed', 'Error')
   }
 }
 

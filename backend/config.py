@@ -13,6 +13,7 @@ class Config:
     # Server Management
     SERVER_COMMAND = os.environ.get('SERVER_COMMAND')
     SERVER_DIR = os.environ.get('SERVER_DIR', 'server')
+    SERVERS_ROOT = os.environ.get('SERVER_ROOT', os.path.join(os.getcwd(), 'servers'))
     
     # API
     API_VERSION = '1.0.0'

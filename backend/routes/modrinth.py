@@ -3,10 +3,30 @@ import os
 from pathlib import Path
 from flask import Blueprint, jsonify, request
 
+from backend.services import server_storage
 from backend.services.modrinth_client import ModrinthClient
+from backend.services.server_registry import get_server_process_registry
 
 modrinth_bp = Blueprint('modrinth', __name__, url_prefix='/api/modrinth')
 modrinth_client = ModrinthClient()
+process_registry = get_server_process_registry()
+
+
+def _resolve_mods_folder(server_id: str | None):
+    if server_id:
+        server = server_storage.get_server(server_id)
+        if not server:
+            return None, ({'error': 'Server not found'}, 404)
+        try:
+            path = process_registry.resolve_mods_path(server)
+            return path, None
+        except ValueError as exc:
+            return None, ({'error': str(exc)}, 400)
+
+    legacy_root = Path(os.path.join(os.getcwd(), 'server'))
+    mods_path = legacy_root / 'mods'
+    mods_path.mkdir(parents=True, exist_ok=True)
+    return mods_path, None
 
 
 @modrinth_bp.route('/search', methods=['GET'])
@@ -110,20 +130,24 @@ def install_mod(mod_id):
     Body params (JSON):
         - mc_version: Minecraft version (required, e.g., "1.20.1")
         - loader: Mod loader (default: "fabric")
-        - mods_folder: Custom mods folder path (optional)
+        - server_id: Target server ID (optional, defaults to legacy single server)
     """
     data = request.get_json() or {}
     mc_version = data.get('mc_version')
     loader = data.get('loader', 'fabric')
-    mods_folder = data.get('mods_folder')
+    server_id = data.get('server_id')
+    mods_folder_override = data.get('mods_folder')
     
     if not mc_version:
         return jsonify({"error": "mc_version is required"}), 400
+
+    if mods_folder_override:
+        return jsonify({"error": "mods_folder override is not allowed"}), 400
     
-    # Default to server/mods folder
-    if not mods_folder:
-        server_dir = os.path.join(os.getcwd(), "server")
-        mods_folder = os.path.join(server_dir, "mods")
+    mods_folder, error = _resolve_mods_folder(server_id)
+    if error:
+        payload, status = error
+        return jsonify(payload), status
     
     target_path = Path(mods_folder)
     
