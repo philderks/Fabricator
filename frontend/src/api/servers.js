@@ -94,6 +94,38 @@ export async function restartServer(serverId) {
 }
 
 /**
+ * Browse server files
+ * @param {string|number} serverId - Server ID
+ * @param {Object} params - Query params
+ * @param {string} params.path - Relative path inside the server directory
+ * @returns {Promise<Object>} Current path and directory entries
+ */
+export async function browseServerFiles(serverId, params = {}) {
+  return get(`/api/servers/${serverId}/files`, params)
+}
+
+/**
+ * Fetch a text file's contents
+ * @param {string|number} serverId - Server ID
+ * @param {string} path - Relative file path
+ * @returns {Promise<Object>} File content payload
+ */
+export async function getServerFile(serverId, path) {
+  return get(`/api/servers/${serverId}/files/content`, { path })
+}
+
+/**
+ * Save a text file's contents
+ * @param {string|number} serverId - Server ID
+ * @param {string} path - Relative file path
+ * @param {string} content - File contents
+ * @returns {Promise<Object>} Save result
+ */
+export async function saveServerFile(serverId, path, content) {
+  return put(`/api/servers/${serverId}/files/content`, { path, content })
+}
+
+/**
  * Get server console logs
  * @param {string|number} serverId - Server ID
  * @param {Object} options - Log options

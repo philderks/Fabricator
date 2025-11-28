@@ -2,7 +2,7 @@
   <div class="settings-tab">
     <form @submit.prevent="handleSave" class="settings-form">
       <!-- Basic Settings -->
-      <section class="settings-section">
+      <section class="settings-section" data-settings-section="basic">
         <h3 class="section-title">Basic Settings</h3>
         
         <div class="form-group">
@@ -72,7 +72,7 @@
       </section>
 
       <!-- Gameplay Settings -->
-      <section class="settings-section">
+      <section class="settings-section" data-settings-section="gameplay">
         <h3 class="section-title">Gameplay</h3>
         
         <div class="form-row">
@@ -124,7 +124,7 @@
       </section>
 
       <!-- World Settings -->
-      <section class="settings-section">
+      <section class="settings-section" data-settings-section="world">
         <h3 class="section-title">World</h3>
         
         <div class="warning-notice">
@@ -192,7 +192,7 @@
       </section>
 
       <!-- Performance Settings -->
-      <section class="settings-section">
+      <section class="settings-section" data-settings-section="performance">
         <h3 class="section-title">Performance</h3>
         
         <div class="info-notice">
@@ -234,7 +234,7 @@
       </section>
 
       <!-- Advanced Settings -->
-      <section class="settings-section">
+      <section class="settings-section" data-settings-section="advanced">
         <h3 class="section-title">Advanced</h3>
         
         <div class="form-checkboxes">

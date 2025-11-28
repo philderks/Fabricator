@@ -1,6 +1,8 @@
 """Server management routes and blueprints."""
 from datetime import datetime
 from pathlib import Path
+import shutil
+import zipfile
 
 from flask import Blueprint, jsonify, request
 
@@ -31,13 +33,21 @@ def _augment_with_runtime(server: dict) -> dict:
     return augmented
 
 
-def _serialize_file_entry(path: Path) -> dict:
+def _serialize_file_entry(path: Path, base_path: Path | None = None) -> dict:
     stat_result = path.stat()
+    relative_path = path.name
+    if base_path is not None:
+        try:
+            relative_path = str(path.relative_to(base_path))
+        except ValueError:
+            relative_path = path.name
     return {
         'name': path.name,
         'size': stat_result.st_size,
         'updatedAt': datetime.utcfromtimestamp(stat_result.st_mtime).isoformat() + 'Z',
-        'path': str(path)
+        'path': str(path),
+        'relativePath': relative_path,
+        'isDir': path.is_dir()
     }
 
 
@@ -55,6 +65,37 @@ def _get_installer(loader: str, install_path: Path):
     if loader == 'fabric':
         return FabricInstaller(install_path)
     return None
+
+
+def _get_install_path(server: dict) -> Path:
+    try:
+        return process_registry._resolve_install_path(server)
+    except ValueError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+def _get_backups_dir(base_path: Path) -> Path:
+    backups_dir = base_path / 'backups'
+    backups_dir.mkdir(parents=True, exist_ok=True)
+    return backups_dir
+
+
+def _safe_extract_zip(zip_file: zipfile.ZipFile, destination: Path) -> None:
+    destination = destination.resolve()
+
+    for member in zip_file.infolist():
+        member_path = destination / member.filename
+        resolved_path = member_path.resolve()
+        if not str(resolved_path).startswith(str(destination)):
+            raise ValueError('Archive contains invalid paths')
+
+        if member.is_dir():
+            resolved_path.mkdir(parents=True, exist_ok=True)
+            continue
+
+        resolved_path.parent.mkdir(parents=True, exist_ok=True)
+        with zip_file.open(member, 'r') as source, open(resolved_path, 'wb') as target:
+            shutil.copyfileobj(source, target)
 
 
 @server_bp.route('/status', methods=['GET'])
@@ -127,6 +168,96 @@ def get_server_logs(server_id):
     return jsonify(logs)
 
 
+@server_bp.route('/servers/<server_id>/files', methods=['GET'])
+def browse_server_files(server_id):
+    server = storage.get_server(server_id)
+    if not server:
+        return jsonify({'error': 'Server not found'}), 404
+
+    relative_path = request.args.get('path', '').strip()
+
+    try:
+        base_path = _get_install_path(server)
+        target_path = _ensure_child_path(base_path, relative_path) if relative_path else base_path
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    if not target_path.exists() or not target_path.is_dir():
+        return jsonify({'error': 'Directory not found'}), 404
+
+    entries = [
+        _serialize_file_entry(entry, base_path)
+        for entry in target_path.iterdir()
+    ]
+
+    entries.sort(key=lambda entry: (0 if entry['isDir'] else 1, entry['name'].lower()))
+
+    current_relative = '' if target_path == base_path else str(target_path.relative_to(base_path))
+    return jsonify({'currentPath': current_relative, 'entries': entries})
+
+
+@server_bp.route('/servers/<server_id>/files/content', methods=['GET'])
+def get_server_file_content(server_id):
+    path_param = request.args.get('path', '').strip()
+    if not path_param:
+        return jsonify({'error': 'Path query parameter is required'}), 400
+
+    server = storage.get_server(server_id)
+    if not server:
+        return jsonify({'error': 'Server not found'}), 404
+
+    try:
+        base_path = _get_install_path(server)
+        target_path = _ensure_child_path(base_path, path_param)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    if not target_path.exists() or not target_path.is_file():
+        return jsonify({'error': 'File not found'}), 404
+
+    try:
+        with open(target_path, 'r', encoding='utf-8') as file_handle:
+            content = file_handle.read()
+    except UnicodeDecodeError:
+        return jsonify({'error': 'File is not UTF-8 text'}), 400
+
+    relative_path = str(target_path.relative_to(base_path))
+    return jsonify({'path': relative_path, 'content': content})
+
+
+@server_bp.route('/servers/<server_id>/files/content', methods=['PUT'])
+def update_server_file_content(server_id):
+    data = request.get_json() or {}
+    path_param = (data.get('path') or '').strip()
+    content = data.get('content')
+
+    if not path_param:
+        return jsonify({'error': 'Path is required'}), 400
+    if content is None:
+        return jsonify({'error': 'Content is required'}), 400
+
+    server = storage.get_server(server_id)
+    if not server:
+        return jsonify({'error': 'Server not found'}), 404
+
+    try:
+        base_path = _get_install_path(server)
+        target_path = _ensure_child_path(base_path, path_param)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    if not target_path.exists() or not target_path.is_file():
+        return jsonify({'error': 'File not found'}), 404
+
+    try:
+        with open(target_path, 'w', encoding='utf-8') as file_handle:
+            file_handle.write(content)
+    except OSError as exc:
+        return jsonify({'error': f'Failed to write file: {exc}'}), 500
+
+    return jsonify({'success': True})
+
+
 @server_bp.route('/servers/<server_id>/mods', methods=['GET'])
 def list_server_mods(server_id):
     server = storage.get_server(server_id)
@@ -139,7 +270,7 @@ def list_server_mods(server_id):
         return jsonify({'error': str(exc)}), 400
 
     files = [
-        _serialize_file_entry(path)
+        _serialize_file_entry(path, mods_path)
         for path in mods_path.iterdir()
         if path.is_file()
     ]
@@ -163,6 +294,99 @@ def delete_server_mod(server_id, filename):
 
     target.unlink()
     return jsonify({'success': True, 'message': f'{target.name} removed'})
+
+
+@server_bp.route('/servers/<server_id>/backups', methods=['GET'])
+def list_server_backups(server_id):
+    server = storage.get_server(server_id)
+    if not server:
+        return jsonify({'error': 'Server not found'}), 404
+
+    try:
+        base_path = _get_install_path(server)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    backups_dir = _get_backups_dir(base_path)
+    backups = [
+        _serialize_file_entry(path, backups_dir)
+        for path in backups_dir.glob('*.zip')
+    ]
+    backups.sort(key=lambda entry: entry['updatedAt'], reverse=True)
+    return jsonify(backups)
+
+
+@server_bp.route('/servers/<server_id>/backup', methods=['POST'])
+def create_server_backup(server_id):
+    server = storage.get_server(server_id)
+    if not server:
+        return jsonify({'error': 'Server not found'}), 404
+
+    try:
+        base_path = _get_install_path(server)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    backups_dir = _get_backups_dir(base_path)
+    timestamp = datetime.utcnow().strftime('%Y%m%d-%H%M%S')
+    archive_path = backups_dir / f'{timestamp}.zip'
+
+    try:
+        with zipfile.ZipFile(archive_path, 'w', compression=zipfile.ZIP_DEFLATED) as zip_file:
+            for file_path in base_path.rglob('*'):
+                if backups_dir in file_path.parents or file_path == backups_dir:
+                    continue
+                if file_path.is_dir():
+                    continue
+                zip_file.write(file_path, file_path.relative_to(base_path))
+    except OSError as exc:
+        if archive_path.exists():
+            archive_path.unlink(missing_ok=True)
+        return jsonify({'error': f'Failed to create backup: {exc}'}), 500
+
+    return jsonify({
+        'success': True,
+        'backup': _serialize_file_entry(archive_path, backups_dir)
+    })
+
+
+@server_bp.route('/servers/<server_id>/backups/<backup_id>/restore', methods=['POST'])
+def restore_server_backup(server_id, backup_id):
+    server = storage.get_server(server_id)
+    if not server:
+        return jsonify({'error': 'Server not found'}), 404
+
+    try:
+        base_path = _get_install_path(server)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    status = process_registry.get_status(server_id)
+    if status.get('status') == 'running':
+        return jsonify({'error': 'Stop the server before restoring a backup'}), 400
+
+    backups_dir = _get_backups_dir(base_path)
+    backup_path = backups_dir / f'{backup_id}.zip'
+    if not backup_path.exists():
+        return jsonify({'error': 'Backup not found'}), 404
+
+    try:
+        for entry in base_path.iterdir():
+            if entry == backups_dir:
+                continue
+            if entry.is_dir():
+                shutil.rmtree(entry)
+            else:
+                entry.unlink()
+
+        with zipfile.ZipFile(backup_path, 'r') as zip_file:
+            _safe_extract_zip(zip_file, base_path)
+    except OSError as exc:
+        return jsonify({'error': f'Failed to restore backup: {exc}'}), 500
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    return jsonify({'success': True, 'message': 'Backup restored successfully'})
 
 
 @server_bp.route('/servers/<server_id>/settings', methods=['PUT'])
