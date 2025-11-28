@@ -24,6 +24,7 @@ const modLoading = ref(false)
 const installModId = ref('')
 const installMcVersion = ref('1.21.3')
 const installLoader = ref('fabric')
+const installServerId = ref('')
 const installResult = ref(null)
 const installLoading = ref(false)
 
@@ -107,12 +108,15 @@ const getModVersions = async () => {
 
 // Install Mod
 const installMod = async () => {
-  if (!installModId.value) return
+  if (!installModId.value || !installServerId.value) {
+    return
+  }
   installLoading.value = true
   try {
     installResult.value = await modrinthApi.installMod(installModId.value, {
       mc_version: installMcVersion.value,
-      loader: installLoader.value
+      loader: installLoader.value,
+      server_id: installServerId.value
     })
   } catch (e) {
     installResult.value = { error: e.message }
@@ -197,6 +201,7 @@ onMounted(() => {
           <input v-model="installModId" placeholder="Mod ID (e.g., AANobbMI)" />
           <input v-model="installMcVersion" placeholder="MC Version (e.g., 1.21.3)" />
           <input v-model="installLoader" placeholder="Loader (fabric/forge)" />
+          <input v-model="installServerId" placeholder="Server ID (e.g., srv_1234)" />
           <button @click="installMod" :disabled="installLoading">Install Mod</button>
         </div>
         <pre v-if="installResult" class="result">{{ JSON.stringify(installResult, null, 2) }}</pre>

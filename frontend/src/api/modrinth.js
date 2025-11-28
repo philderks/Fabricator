@@ -61,12 +61,14 @@ export async function getModVersions(modId, filters = {}) {
  * @param {Object} options - Installation options
  * @param {string} options.mc_version - Minecraft version
  * @param {string} options.loader - Mod loader
+ * @param {string|number} options.server_id - Target server identifier
  * @returns {Promise<Object>} Installation result
  */
-export async function installMod(modId, { mc_version, loader }) {
+export async function installMod(modId, { mc_version, loader, server_id }) {
   return post(`/api/modrinth/mod/${modId}/install`, {
     mc_version,
-    loader
+    loader,
+    server_id
   })
 }
 

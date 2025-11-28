@@ -1,5 +1,5 @@
 <script setup>
-defineProps({
+const props = defineProps({
   mod: {
     type: Object,
     required: true
@@ -7,6 +7,41 @@ defineProps({
 })
 
 defineEmits(['update', 'remove'])
+
+const formatBytes = (bytes) => {
+  if (!Number.isFinite(bytes)) {
+    return '—'
+  }
+  if (bytes < 1024) {
+    return `${bytes} B`
+  }
+  const units = ['KB', 'MB', 'GB']
+  let value = bytes / 1024
+  let idx = 0
+  while (value >= 1024 && idx < units.length - 1) {
+    value /= 1024
+    idx += 1
+  }
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[idx]}`
+}
+
+const formatUpdated = (timestamp) => {
+  if (!timestamp) {
+    return ''
+  }
+  const date = new Date(timestamp)
+  if (Number.isNaN(date.getTime())) {
+    return ''
+  }
+  return date.toLocaleDateString()
+}
+
+const versionLabel = () => {
+  if (!props.mod.version || props.mod.version === 'local') {
+    return 'Local'
+  }
+  return props.mod.version
+}
 </script>
 
 <template>
@@ -14,11 +49,13 @@ defineEmits(['update', 'remove'])
     <div class="mod-main">
       <div class="mod-name">{{ mod.name }}</div>
       <div class="mod-meta">
-        <span class="mod-version">v{{ mod.version }}</span>
-        <span class="mod-separator">•</span>
-        <span class="mod-category">{{ mod.category }}</span>
-        <span class="mod-separator">•</span>
-        <span class="mod-downloads">{{ mod.downloads }} downloads</span>
+        <span class="mod-version">{{ versionLabel() }}</span>
+        <span class="mod-separator" v-if="mod.size && mod.size > 0">•</span>
+        <span class="mod-size" v-if="mod.size && mod.size > 0">{{ formatBytes(mod.size) }}</span>
+        <span class="mod-separator" v-if="mod.updatedAt">•</span>
+        <span class="mod-updated" v-if="mod.updatedAt">Updated {{ formatUpdated(mod.updatedAt) }}</span>
+        <span class="mod-separator" v-if="mod.source || mod.category">•</span>
+        <span class="mod-category" v-if="mod.source || mod.category">{{ mod.source || mod.category }}</span>
       </div>
     </div>
     <div class="mod-actions">
@@ -63,6 +100,12 @@ defineEmits(['update', 'remove'])
 }
 
 .mod-version {
+  color: var(--text-muted);
+  text-transform: capitalize;
+}
+
+.mod-size,
+.mod-updated {
   color: var(--text-muted);
 }
 

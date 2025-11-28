@@ -146,8 +146,8 @@ export default {
   data() {
     return {
       searchQuery: '',
-      selectedLoader: this.loader,
-      selectedVersion: this.mcVersion,
+      selectedLoader: (this.loader || 'fabric').toLowerCase(),
+      selectedVersion: this.mcVersion || '',
       sortBy: 'relevance',
       results: [],
       loading: false,
@@ -220,7 +220,16 @@ export default {
         // Reset on close
         this.searchQuery = '';
         this.results = [];
+      } else {
+        this.selectedLoader = (this.loader || 'fabric').toLowerCase()
+        this.selectedVersion = this.mcVersion || ''
       }
+    },
+    mcVersion(newVal) {
+      this.selectedVersion = newVal || ''
+    },
+    loader(newVal) {
+      this.selectedLoader = (newVal || 'fabric').toLowerCase()
     }
   }
 }
