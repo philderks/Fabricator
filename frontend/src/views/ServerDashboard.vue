@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import StatCard from '../components/ui/StatCard.vue'
 import PerformanceMetrics from '../components/server/PerformanceMetrics.vue'
@@ -9,127 +9,245 @@ import ModBrowserModal from '../components/modals/ModBrowserModal.vue'
 import ConfirmModal from '../components/modals/ConfirmModal.vue'
 import ServerSettingsTab from '../components/server/ServerSettingsTab.vue'
 import { installMod } from '../api/modrinth'
+import {
+  getServer,
+  getInstalledMods,
+  removeMod,
+  getServerLogs,
+  startServer,
+  stopServer,
+  restartServer,
+  updateServerSettings
+} from '../api/servers'
 import { useToast } from '../composables/useToast'
 
 const route = useRoute()
 const toast = useToast()
 const serverId = route.params.id
 
-const serverStatus = ref({
-  name: 'Main Survival',
-  status: 'running',
-  uptime: '5d 12h 34m',
-  version: '1.21.3',
-  loader: 'Fabric',
-  players: { online: 12, max: 50 },
-  cpu: 45,
-  ram: { used: 2.4, total: 4 },
-  tps: 19.8
-})
-
-const installedMods = ref([
-  { name: 'Sodium', version: '0.6.0-beta.2', downloads: '15M', category: 'Performance' },
-  { name: 'Lithium', version: '0.13.0', downloads: '8M', category: 'Performance' },
-  { name: 'Iris Shaders', version: '1.8.0', downloads: '12M', category: 'Graphics' },
-  { name: 'Fabric API', version: '0.95.4', downloads: '50M', category: 'Library' },
-  { name: 'Mod Menu', version: '9.2.0', downloads: '20M', category: 'Utility' }
-])
-
-const recentActivity = ref([
-  { type: 'player_join', user: 'Steve', time: '2m ago' },
-  { type: 'mod_install', mod: 'Sodium', time: '1h ago' },
-  { type: 'server_start', time: '2h ago' },
-  { type: 'player_leave', user: 'Alex', time: '3h ago' },
-  { type: 'mod_update', mod: 'Fabric API', time: '5h ago' }
-])
-
-// Server settings for Settings tab
-const serverSettings = ref({
-  // Basic
-  name: 'Main Survival',
-  port: 25565,
-  motd: 'A Minecraft Server',
-  
-  // Gameplay
-  maxPlayers: 50,
-  difficulty: 'normal',
-  gamemode: 'survival',
-  viewDistance: 10,
-  
-  // World
-  levelName: 'world',
-  levelType: 'default',
-  seed: '',
-  generateStructures: true,
-  spawnAnimals: true,
-  spawnMonsters: true,
-  spawnNpcs: true,
-  
-  // Performance
-  memory: 4,
-  simulationDistance: 10,
-  
-  // Advanced
-  onlineMode: true,
-  whitelist: false,
-  pvp: true,
-  commandBlocks: true
-})
-
-// Modal state
+const server = ref(null)
+const serverLoading = ref(true)
+const modsLoading = ref(false)
+const logsLoading = ref(false)
+const installedMods = ref([])
+const modSearch = ref('')
+const logs = ref({ stdout: [], stderr: [], running: false })
+const recentActivity = ref([])
+const serverSettings = ref(null)
 const showModBrowser = ref(false)
 const showConfirmModal = ref(false)
 const confirmModalData = ref({})
 const modToRemove = ref(null)
 const installLoading = ref(false)
-
-// Tab state
 const activeTab = ref('overview')
+const actionState = ref({ start: false, stop: false, restart: false })
 
-// Mod Browser
+const defaultSettings = (data = {}) => ({
+  name: data.name || 'Minecraft Server',
+  port: data.port || 25565,
+  motd: data.motd || 'A Minecraft Server',
+  maxPlayers: data.maxPlayers ?? 20,
+  difficulty: data.difficulty || 'normal',
+  gamemode: data.gamemode || 'survival',
+  viewDistance: data.viewDistance ?? 10,
+  levelName: data.levelName || 'world',
+  levelType: data.levelType || 'default',
+  seed: data.seed || '',
+  generateStructures: data.generateStructures ?? true,
+  spawnAnimals: data.spawnAnimals ?? true,
+  spawnMonsters: data.spawnMonsters ?? true,
+  spawnNpcs: data.spawnNpcs ?? true,
+  memory: data.memory ?? 4,
+  simulationDistance: data.simulationDistance ?? 10,
+  onlineMode: data.onlineMode ?? true,
+  whitelist: data.whitelist ?? false,
+  pvp: data.pvp ?? true,
+  commandBlocks: data.commandBlocks ?? true
+})
+
+const loadServer = async () => {
+  serverLoading.value = true
+  try {
+    const data = await getServer(serverId)
+    server.value = data
+    serverSettings.value = defaultSettings(data)
+  } catch (error) {
+    console.error('Failed to load server:', error)
+    toast.error('Could not load server details', 'Error')
+  } finally {
+    serverLoading.value = false
+  }
+}
+
+const loadMods = async () => {
+  modsLoading.value = true
+  try {
+    const files = await getInstalledMods(serverId)
+    installedMods.value = files.map((file) => ({
+      name: file.name,
+      filename: file.name,
+      version: file.version || 'local',
+      downloads: file.downloads || 'N/A',
+      size: file.size,
+      updatedAt: file.updatedAt,
+      path: file.path,
+      source: 'Local',
+      category: 'Mods Folder'
+    }))
+  } catch (error) {
+    console.error('Failed to load mods:', error)
+    toast.error('Failed to load installed mods', 'Error')
+  } finally {
+    modsLoading.value = false
+  }
+}
+
+const loadLogs = async (limit = 200) => {
+  if (!server.value) {
+    return
+  }
+  if (logsLoading.value) {
+    return
+  }
+  logsLoading.value = true
+  try {
+    logs.value = await getServerLogs(serverId, { limit })
+  } catch (error) {
+    console.error('Failed to load logs:', error)
+    toast.error('Failed to load console logs', 'Error')
+  } finally {
+    logsLoading.value = false
+  }
+}
+
+const refreshAll = async () => {
+  await Promise.all([loadServer(), loadMods()])
+}
+
+const serverStatus = computed(() => {
+  const loaderName = server.value?.loader
+    ? server.value.loader.charAt(0).toUpperCase() + server.value.loader.slice(1)
+    : 'Unknown'
+
+  return {
+    name: server.value?.name || 'Minecraft Server',
+    status: server.value?.runtime?.status || server.value?.status || 'pending',
+    uptime: server.value?.runtime?.uptime || '—',
+    version: server.value?.version || '—',
+    loader: loaderName,
+    players: {
+      online: server.value?.runtime?.players?.online ?? 0,
+      max: server.value?.maxPlayers ?? server.value?.runtime?.players?.max ?? 0
+    },
+    cpu: server.value?.runtime?.cpu ?? 0,
+    ram: server.value?.runtime?.ram || { used: 0, total: server.value?.memory ?? 0 },
+    tps: server.value?.runtime?.tps ?? 20
+  }
+})
+
+const ramMetrics = computed(() => {
+  const runtimeRam = server.value?.runtime?.ram
+  const defaultTotal = server.value?.memory ?? 4
+
+  if (runtimeRam && typeof runtimeRam.used === 'number' && typeof runtimeRam.total === 'number') {
+    const total = runtimeRam.total || defaultTotal || 1
+    const used = Math.min(runtimeRam.used, total)
+    return { used, total }
+  }
+
+  return {
+    used: 0,
+    total: defaultTotal || 1
+  }
+})
+
+const filteredMods = computed(() => {
+  if (!modSearch.value) {
+    return installedMods.value
+  }
+  return installedMods.value.filter((mod) =>
+    mod.name.toLowerCase().includes(modSearch.value.toLowerCase())
+  )
+})
+
+const playersDisplay = computed(() => {
+  const online = serverStatus.value.players.online
+  const max = serverStatus.value.players.max
+  return max ? `${online}/${max}` : `${online}`
+})
+
+const statusLabel = computed(() => {
+  const status = serverStatus.value.status
+  if (status === 'running') {
+    return 'Running'
+  }
+  if (status === 'stopped') {
+    return 'Stopped'
+  }
+  if (status === 'pending') {
+    return 'Install Required'
+  }
+  if (status === 'installing') {
+    return 'Installing'
+  }
+  if (status === 'failed') {
+    return 'Failed'
+  }
+  return status?.charAt(0).toUpperCase() + status?.slice(1) || 'Unknown'
+})
+
+const logActivity = (entry) => {
+  recentActivity.value.unshift({
+    ...entry,
+    time: new Date().toLocaleTimeString()
+  })
+  if (recentActivity.value.length > 20) {
+    recentActivity.value.pop()
+  }
+}
+
+const startLocked = computed(() => ['installing', 'pending'].includes(serverStatus.value.status))
+
+const startButtonLabel = computed(() => {
+  if (serverStatus.value.status === 'installing') {
+    return 'Installing…'
+  }
+  if (serverStatus.value.status === 'pending') {
+    return 'Install Required'
+  }
+  return actionState.value.start ? 'Starting…' : 'Start'
+})
+
 const openModBrowser = () => {
   showModBrowser.value = true
 }
 
 const handleInstallMod = async (modData) => {
+  if (!server.value) {
+    return
+  }
   installLoading.value = true
-  
   try {
-    const result = await installMod(modData.modId, {
+    await installMod(modData.modId, {
       mc_version: modData.mcVersion,
-      loader: modData.loader
+      loader: modData.loader,
+      server_id: serverId
     })
-    
-    // Add to installed mods list
-    installedMods.value.push({
-      name: modData.modTitle,
-      version: 'Latest',
-      downloads: 'N/A',
-      category: 'Installed'
-    })
-    
-    // Add to activity feed
-    recentActivity.value.unshift({
-      type: 'mod_install',
-      mod: modData.modTitle,
-      time: 'just now'
-    })
-    
     showModBrowser.value = false
-    
     toast.success(`${modData.modTitle} installed successfully!`, 'Mod Installed')
+    logActivity({ type: 'mod_install', mod: modData.modTitle })
+    await loadMods()
   } catch (error) {
     console.error('Install failed:', error)
-    toast.error(error.message, 'Installation Failed')
+    toast.error(error.message || 'Mod installation failed', 'Installation Failed')
   } finally {
     installLoading.value = false
   }
 }
 
-// Mod Management
 const handleUpdateMod = (mod) => {
-  console.log('Update mod:', mod)
-  // Future: Check for updates and install
+  console.log('Update mod placeholder:', mod)
+  toast.info('Mod updates coming soon', 'Not Implemented')
 }
 
 const handleRemoveMod = (mod) => {
@@ -146,20 +264,21 @@ const handleRemoveMod = (mod) => {
 }
 
 const confirmRemoveMod = async () => {
-  if (!modToRemove.value) return
-  
-  // Simulate removal (replace with actual API call when available)
-  installedMods.value = installedMods.value.filter(m => m.name !== modToRemove.value.name)
-  
-  // Add to activity feed
-  recentActivity.value.unshift({
-    type: 'mod_remove',
-    mod: modToRemove.value.name,
-    time: 'just now'
-  })
-  
-  showConfirmModal.value = false
-  modToRemove.value = null
+  if (!modToRemove.value) {
+    return
+  }
+  try {
+    await removeMod(serverId, modToRemove.value.filename || modToRemove.value.name)
+    toast.success(`${modToRemove.value.name} removed`, 'Mod Removed')
+    logActivity({ type: 'mod_remove', mod: modToRemove.value.name })
+    await loadMods()
+  } catch (error) {
+    console.error('Failed to remove mod:', error)
+    toast.error('Failed to remove mod', 'Error')
+  } finally {
+    showConfirmModal.value = false
+    modToRemove.value = null
+  }
 }
 
 const cancelRemoveMod = () => {
@@ -167,83 +286,126 @@ const cancelRemoveMod = () => {
   modToRemove.value = null
 }
 
-// Settings Tab
-const handleSaveSettings = (settings) => {
-  // Update server status with new settings
-  serverStatus.value = {
-    ...serverStatus.value,
-    name: settings.name,
-    players: {
-      ...serverStatus.value.players,
-      max: settings.maxPlayers
+const performServerAction = async (action, fn, successMessage) => {
+  if (actionState.value[action]) {
+    return
+  }
+  actionState.value = { ...actionState.value, [action]: true }
+  try {
+    const result = await fn(serverId)
+    if (result.success) {
+      toast.success(successMessage, 'Server Updated')
+      logActivity({ type: `server_${action}` })
+    } else {
+      toast.error(result.message || 'Operation failed', 'Server Error')
+    }
+  } catch (error) {
+    console.error(`Failed to ${action} server:`, error)
+    toast.error(`Failed to ${action} server`, 'Server Error')
+  } finally {
+    actionState.value = { ...actionState.value, [action]: false }
+    await loadServer()
+    if (action === 'stop') {
+      logs.value = { stdout: [], stderr: [], running: false }
+    }
+    if (action === 'start' || action === 'restart') {
+      await loadLogs()
     }
   }
-  
-  // Update local settings
-  serverSettings.value = { ...settings }
-  
-  // Add to activity feed
-  recentActivity.value.unshift({
-    type: 'settings_update',
-    time: 'just now'
-  })
-  
-  console.log('Settings saved:', settings)
-  toast.success('Settings have been saved successfully!', 'Settings Updated')
+}
+
+const handleStart = () => performServerAction('start', startServer, 'Server start requested')
+const handleStop = () => performServerAction('stop', stopServer, 'Server stop requested')
+const handleRestart = () => performServerAction('restart', restartServer, 'Server restart requested')
+
+const handleSaveSettings = async (settings) => {
+  if (!server.value) {
+    return
+  }
+  try {
+    const updated = await updateServerSettings(serverId, settings)
+    server.value = updated
+    serverSettings.value = defaultSettings(updated)
+    toast.success('Settings saved successfully', 'Settings Updated')
+    logActivity({ type: 'settings_update' })
+  } catch (error) {
+    console.error('Failed to save settings:', error)
+    toast.error('Failed to save settings', 'Error')
+  }
 }
 
 const resetSettings = () => {
-  // Reload original settings (in real app, fetch from API)
-  serverSettings.value = {
-    name: serverStatus.value.name,
-    port: 25565,
-    motd: 'A Minecraft Server',
-    maxPlayers: serverStatus.value.players.max,
-    difficulty: 'normal',
-    gamemode: 'survival',
-    viewDistance: 10,
-    levelName: 'world',
-    levelType: 'default',
-    seed: '',
-    generateStructures: true,
-    spawnAnimals: true,
-    spawnMonsters: true,
-    spawnNpcs: true,
-    memory: 4,
-    simulationDistance: 10,
-    onlineMode: true,
-    whitelist: false,
-    pvp: true,
-    commandBlocks: true
+  if (!server.value) {
+    return
   }
+  serverSettings.value = defaultSettings(server.value)
 }
+
+watch(activeTab, (tab) => {
+  if (tab === 'console') {
+    loadLogs()
+  }
+})
+
+onMounted(async () => {
+  await refreshAll()
+})
 </script>
 
 <template>
   <div class="page">
     <header class="header">
-      <div class="header-content">
+      <div class="header-content" v-if="!serverLoading && server">
         <div class="brand">
           <router-link to="/" class="back-btn">←</router-link>
           <div>
             <h1 class="server-title">{{ serverStatus.name }}</h1>
             <div class="server-meta">
               <span class="status-indicator" :class="serverStatus.status"></span>
-              <span class="status-text">{{ serverStatus.status === 'running' ? 'Running' : 'Stopped' }}</span>
+              <span class="status-text">{{ statusLabel }}</span>
               <span class="separator">•</span>
               <span>{{ serverStatus.loader }} {{ serverStatus.version }}</span>
             </div>
           </div>
         </div>
         <div class="server-controls">
-          <button class="btn btn-danger" v-if="serverStatus.status === 'running'">Stop</button>
-          <button class="btn btn-success" v-else>Start</button>
-          <button class="btn btn-secondary">Restart</button>
+          <button
+            class="btn btn-danger"
+            v-if="serverStatus.status === 'running'"
+            :disabled="actionState.stop"
+            @click="handleStop"
+          >
+            {{ actionState.stop ? 'Stopping…' : 'Stop' }}
+          </button>
+          <button
+            class="btn btn-success"
+            v-else
+            :disabled="actionState.start || startLocked"
+            @click="handleStart"
+          >
+            {{ startButtonLabel }}
+          </button>
+          <button
+            class="btn btn-secondary"
+            :disabled="actionState.restart || serverStatus.status !== 'running'"
+            @click="handleRestart"
+          >
+            {{ actionState.restart ? 'Restarting…' : 'Restart' }}
+          </button>
+        </div>
+      </div>
+      <div class="header-content" v-else>
+        <div class="brand">
+          <router-link to="/" class="back-btn">←</router-link>
+          <div>
+            <div class="skeleton skeleton-title"></div>
+            <div class="skeleton skeleton-subtitle"></div>
+          </div>
         </div>
       </div>
     </header>
 
-    <main class="main">
+    <main v-if="!serverLoading && server" class="main">
       <div class="content">
         <div class="tabs">
           <button 
@@ -282,7 +444,7 @@ const resetSettings = () => {
           <div class="stats-row">
             <StatCard 
               label="Players Online" 
-              :value="`${serverStatus.players.online}/${serverStatus.players.max}`" 
+              :value="playersDisplay"
             />
             <StatCard label="Uptime" :value="serverStatus.uptime" />
             <StatCard label="TPS" :value="serverStatus.tps" />
@@ -297,7 +459,7 @@ const resetSettings = () => {
                 <div class="card-header">
                   <h3>Performance</h3>
                 </div>
-                <PerformanceMetrics :cpu="serverStatus.cpu" :ram="serverStatus.ram" />
+                <PerformanceMetrics :cpu="serverStatus.cpu" :ram="ramMetrics" />
               </div>
 
               <!-- Recent Activity -->
@@ -316,15 +478,25 @@ const resetSettings = () => {
               <div class="card">
                 <div class="card-header">
                   <h3>Installed Mods ({{ installedMods.length }})</h3>
-                  <button class="btn btn-primary" @click="openModBrowser">Browse Mods</button>
+                  <button class="btn btn-primary" :disabled="installLoading" @click="openModBrowser">
+                    {{ installLoading ? 'Installing…' : 'Browse Mods' }}
+                  </button>
                 </div>
                 <div class="search-box">
-                  <input type="text" placeholder="Search mods..." class="search-input">
+                  <input
+                    v-model="modSearch"
+                    type="text"
+                    placeholder="Search mods..."
+                    class="search-input"
+                    :disabled="modsLoading"
+                  >
                 </div>
-                <div class="mods-list">
-                  <ModItem 
-                    v-for="mod in installedMods" 
-                    :key="mod.name" 
+                <div v-if="modsLoading" class="mods-state">Loading mods…</div>
+                <div v-else-if="!filteredMods.length" class="mods-state">No mods installed yet.</div>
+                <div v-else class="mods-list">
+                  <ModItem
+                    v-for="mod in filteredMods"
+                    :key="mod.filename || mod.name"
                     :mod="mod"
                     @update="handleUpdateMod"
                     @remove="handleRemoveMod"
@@ -361,14 +533,34 @@ const resetSettings = () => {
         </div>
 
         <!-- Console Tab -->
-        <div v-else-if="activeTab === 'console'" class="tab-content">
-          <div class="placeholder-state">
-            <svg width="64" height="64" viewBox="0 0 24 24" fill="none">
-              <rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="2"/>
-              <path d="M7 10L10 13L7 16M12 16H16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-            <h3>Console</h3>
-            <p>Server console will be available here</p>
+        <div v-else-if="activeTab === 'console'" class="console-tab">
+          <div class="console-toolbar">
+            <div class="status-pill" :class="serverStatus.status">
+              Server {{ statusLabel }}
+            </div>
+            <button class="btn btn-secondary" :disabled="logsLoading" @click="loadLogs">
+              {{ logsLoading ? 'Refreshing…' : 'Refresh Logs' }}
+            </button>
+          </div>
+          <div class="console-output">
+            <div class="console-stream">
+              <div class="console-stream__header">STDOUT</div>
+              <div class="console-stream__body">
+                <template v-if="logs.stdout?.length">
+                  <pre v-for="(line, idx) in logs.stdout" :key="`stdout-${idx}`">{{ line }}</pre>
+                </template>
+                <p v-else class="console-empty">No output yet.</p>
+              </div>
+            </div>
+            <div class="console-stream">
+              <div class="console-stream__header">STDERR</div>
+              <div class="console-stream__body">
+                <template v-if="logs.stderr?.length">
+                  <pre v-for="(line, idx) in logs.stderr" :key="`stderr-${idx}`">{{ line }}</pre>
+                </template>
+                <p v-else class="console-empty">No errors reported.</p>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -386,7 +578,7 @@ const resetSettings = () => {
 
         <!-- Settings Tab -->
         <ServerSettingsTab
-          v-else-if="activeTab === 'settings'"
+          v-else-if="activeTab === 'settings' && serverSettings"
           :settings="serverSettings"
           :server-version="serverStatus.version"
           :server-loader="serverStatus.loader"
@@ -396,11 +588,18 @@ const resetSettings = () => {
       </div>
     </main>
 
+    <div v-else-if="serverLoading" class="loading-state">
+      Loading server data…
+    </div>
+    <div v-else class="loading-state">
+      Unable to find this server.
+    </div>
+
     <!-- Modals -->
     <ModBrowserModal 
       :show="showModBrowser"
-      :mc-version="serverStatus.version"
-      :loader="serverStatus.loader.toLowerCase()"
+      :mc-version="server?.version || serverStatus.version"
+      :loader="(server?.loader || serverStatus.loader).toLowerCase()"
       @close="showModBrowser = false"
       @install="handleInstallMod"
     />
@@ -469,6 +668,15 @@ const resetSettings = () => {
 
 .status-indicator.stopped {
   background: var(--text-disabled);
+}
+
+.status-indicator.pending,
+.status-indicator.installing {
+  background: #fbbf24;
+}
+
+.status-indicator.failed {
+  background: #ef4444;
 }
 
 .status-text {
@@ -616,6 +824,125 @@ const resetSettings = () => {
 .placeholder-state p {
   font-size: 1rem;
   margin: 0;
+}
+
+.mods-state {
+  padding: 1rem;
+  text-align: center;
+  color: var(--text-muted);
+  border: 1px dashed var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.loading-state {
+  padding: 4rem 2rem;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 1rem;
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--bg-tertiary), var(--bg-secondary), var(--bg-tertiary));
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 8px;
+}
+
+.skeleton-title {
+  width: 180px;
+  height: 24px;
+  margin-bottom: 0.5rem;
+}
+
+.skeleton-subtitle {
+  width: 140px;
+  height: 16px;
+}
+
+.console-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.console-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.status-pill {
+  padding: 0.375rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: white;
+}
+
+.status-pill.running {
+  background: var(--success);
+}
+
+.status-pill.stopped {
+  background: var(--text-disabled);
+}
+
+.status-pill.pending {
+  background: #fbbf24;
+}
+
+.status-pill.installing {
+  background: #fbbf24;
+}
+
+.status-pill.failed {
+  background: #ef4444;
+}
+
+.console-output {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem;
+}
+
+.console-stream__header {
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: var(--text-primary);
+}
+
+.console-stream__body {
+  background: black;
+  color: #e5e7eb;
+  padding: 1rem;
+  border-radius: 8px;
+  min-height: 240px;
+  max-height: 420px;
+  overflow-y: auto;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.console-stream__body pre {
+  margin: 0;
+  font-family: 'Fira Code', 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.875rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
+.console-empty {
+  margin: 0;
+  color: #94a3b8;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
 }
 
 @media (max-width: 768px) {

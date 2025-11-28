@@ -148,6 +148,7 @@ class ServerManager:
             if not self.is_running or not self._process:
                 return {"status": "stopped", "message": "Server is not running"}
 
+            proc = self._process
             try:
                 if self._process.stdin and not self._process.stdin.closed:
                     try:
@@ -156,10 +157,14 @@ class ServerManager:
                     except Exception:
                         pass
 
-                self._process.terminate()
-                self._process.wait(timeout=5)
+                proc.terminate()
+                proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                self._process.kill()
+                proc.kill()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
             finally:
                 self._process = None
 
@@ -173,3 +178,14 @@ class ServerManager:
         status_value = "running" if self.is_running else "stopped"
         message = "Server process is running" if self.is_running else "Server process is not running"
         return {"status": status_value, "message": message}
+
+    def tail_logs(self, limit: int = 200) -> dict:
+        with self._lock:
+            stdout = self._stdout_buffer[-limit:]
+            stderr = self._stderr_buffer[-limit:]
+            running = self.is_running
+        return {
+            "stdout": stdout,
+            "stderr": stderr,
+            "running": running
+        }

@@ -106,6 +106,9 @@ def install_mod(mod_id):
     if not mc_version:
         return jsonify({"error": "mc_version is required"}), 400
 
+    if not server_id:
+        return jsonify({"error": "server_id is required"}), 400
+
     if mods_folder_override:
         return jsonify({"error": "mods_folder override is not allowed"}), 400
 

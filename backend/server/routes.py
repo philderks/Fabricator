@@ -1,4 +1,5 @@
 """Server management routes and blueprints."""
+from datetime import datetime
 from pathlib import Path
 
 from flask import Blueprint, jsonify, request
@@ -28,6 +29,24 @@ def _augment_with_runtime(server: dict) -> dict:
                 augmented = dict(updated)
                 augmented['runtime'] = runtime
     return augmented
+
+
+def _serialize_file_entry(path: Path) -> dict:
+    stat_result = path.stat()
+    return {
+        'name': path.name,
+        'size': stat_result.st_size,
+        'updatedAt': datetime.utcfromtimestamp(stat_result.st_mtime).isoformat() + 'Z',
+        'path': str(path)
+    }
+
+
+def _ensure_child_path(base: Path, child: str) -> Path:
+    candidate = (base / child).resolve()
+    base_resolved = base.resolve()
+    if not str(candidate).startswith(str(base_resolved)):
+        raise ValueError('Invalid path')
+    return candidate
 
 
 def _get_installer(loader: str, install_path: Path):
@@ -99,6 +118,51 @@ def get_server_details(server_id):
         return jsonify({'error': 'Server not found'}), 404
 
     return jsonify(_augment_with_runtime(server))
+
+
+@server_bp.route('/servers/<server_id>/logs', methods=['GET'])
+def get_server_logs(server_id):
+    limit = request.args.get('limit', default=200, type=int)
+    logs = process_registry.get_logs(server_id, limit)
+    return jsonify(logs)
+
+
+@server_bp.route('/servers/<server_id>/mods', methods=['GET'])
+def list_server_mods(server_id):
+    server = storage.get_server(server_id)
+    if not server:
+        return jsonify({'error': 'Server not found'}), 404
+
+    try:
+        mods_path = process_registry.resolve_mods_path(server)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    files = [
+        _serialize_file_entry(path)
+        for path in mods_path.iterdir()
+        if path.is_file()
+    ]
+    return jsonify(sorted(files, key=lambda entry: entry['name'].lower()))
+
+
+@server_bp.route('/servers/<server_id>/mods/<path:filename>', methods=['DELETE'])
+def delete_server_mod(server_id, filename):
+    server = storage.get_server(server_id)
+    if not server:
+        return jsonify({'error': 'Server not found'}), 404
+
+    try:
+        mods_path = process_registry.resolve_mods_path(server)
+        target = _ensure_child_path(mods_path, filename)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    if not target.exists() or not target.is_file():
+        return jsonify({'error': 'Mod file not found'}), 404
+
+    target.unlink()
+    return jsonify({'success': True, 'message': f'{target.name} removed'})
 
 
 @server_bp.route('/servers/<server_id>/settings', methods=['PUT'])
@@ -261,7 +325,7 @@ def restart_server_by_id(server_id):
 
     try:
         result = process_registry.restart_server(server)
-    except ValueError as exc:
+    except (ValueError, RuntimeError) as exc:
         return jsonify({'error': str(exc)}), 400
 
     start_status = result['start'].get('status')

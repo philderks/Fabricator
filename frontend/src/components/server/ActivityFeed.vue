@@ -8,7 +8,7 @@ defineProps({
 </script>
 
 <template>
-  <div class="activity-list">
+  <div v-if="activities.length" class="activity-list">
     <div v-for="(activity, i) in activities" :key="i" class="activity-item">
       <div class="activity-dot" :class="activity.type"></div>
       <div class="activity-content">
@@ -25,11 +25,23 @@ defineProps({
           <span v-else-if="activity.type === 'mod_update'">
             Updated mod <strong>{{ activity.mod }}</strong>
           </span>
+          <span v-else-if="activity.type === 'server_stop'">
+            Server stop requested
+          </span>
+          <span v-else-if="activity.type === 'server_restart'">
+            Server restart requested
+          </span>
+          <span v-else-if="activity.type === 'settings_update'">
+            Server settings updated
+          </span>
           <span v-else>Server started</span>
         </div>
         <div class="activity-time">{{ activity.time }}</div>
       </div>
     </div>
+  </div>
+  <div v-else class="activity-empty">
+    No recent activity yet.
   </div>
 </template>
 
@@ -76,6 +88,18 @@ defineProps({
   background: var(--success);
 }
 
+.activity-dot.server_stop {
+  background: #ef4444;
+}
+
+.activity-dot.server_restart {
+  background: #f97316;
+}
+
+.activity-dot.settings_update {
+  background: var(--primary);
+}
+
 .activity-content {
   flex: 1;
 }
@@ -94,5 +118,14 @@ defineProps({
 .activity-time {
   color: var(--text-disabled);
   font-size: 0.8125rem;
+}
+
+.activity-empty {
+  padding: 1.5rem;
+  text-align: center;
+  color: var(--text-muted);
+  border: 1px dashed var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-tertiary);
 }
 </style>

@@ -77,6 +77,12 @@ class ServerProcessRegistry:
 
     def restart_server(self, server: Dict[str, object]) -> Dict[str, Dict[str, object]]:
         stop_result = self.stop_server(str(server['id']))
+        if stop_result.get('status') != 'stopped':
+            message = stop_result.get('message') or 'Unknown stop error'
+            raise RuntimeError(
+                f"Failed to stop server before restart: {message}. "
+                "Verify no other Minecraft instance is using this world and try again."
+            )
         start_result = self.start_server(server)
         return {'stop': stop_result, 'start': start_result}
 
@@ -85,6 +91,13 @@ class ServerProcessRegistry:
         mods_path = install_path / 'mods'
         mods_path.mkdir(parents=True, exist_ok=True)
         return mods_path
+
+    def get_logs(self, server_id: str, limit: int = 200) -> Dict[str, object]:
+        with self._lock:
+            manager = self._instances.get(server_id)
+        if not manager:
+            return {'stdout': [], 'stderr': [], 'running': False, 'message': 'Server is not running'}
+        return manager.tail_logs(limit)
 
 
 _registry: Optional[ServerProcessRegistry] = None
