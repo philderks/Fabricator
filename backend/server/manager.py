@@ -189,3 +189,27 @@ class ServerManager:
             "stderr": stderr,
             "running": running
         }
+
+    def send_command(self, command: str) -> dict:
+        """Send a console command to the running server process."""
+        if not command.strip():
+            return {"success": False, "message": "Command must not be empty"}
+
+        with self._lock:
+            if not self.is_running or not self._process:
+                return {"success": False, "message": "Server is not running"}
+
+            stdin = self._process.stdin
+            if not stdin or stdin.closed:
+                return {"success": False, "message": "Server stdin is not available"}
+
+            try:
+                stdin.write(command.strip() + "\n")
+                stdin.flush()
+            except Exception as exc:  # pragma: no cover - best effort logging
+                return {
+                    "success": False,
+                    "message": f"Failed to send command: {exc}"
+                }
+
+        return {"success": True, "message": "Command sent"}
