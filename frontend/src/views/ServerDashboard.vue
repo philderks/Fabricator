@@ -307,22 +307,8 @@ const formatFileSize = (bytes) => {
   return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[idx]}`
 }
 
-const scrollToSettingsSection = async (selector) => {
-  if (activeTab.value !== 'settings') {
-    activeTab.value = 'settings'
-    await nextTick()
-  }
-  if (!selector) {
-    return
-  }
-  const requiresAdvanced = ['resources', 'network', 'advanced'].includes(selector)
-  if (requiresAdvanced && settingsTabRef.value?.enableAdvanced) {
-    await settingsTabRef.value.enableAdvanced()
-  }
-  const section = document.querySelector(`[data-settings-section="${selector}"]`)
-  if (section) {
-    section.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
+const scrollToSettingsSection = () => {
+  activeTab.value = 'settings'
 }
 
 watch(activeTab, (tab) => {
@@ -814,7 +800,7 @@ onUnmounted(() => {
       :show="showDeleteServerModal"
       title="Delete Server"
       message="Delete this server permanently?"
-      description="All server files and backups will be deleted. 67"
+      description="All server files and backups will be deleted. This cannot be undone."
       type="danger"
       confirm-text="Delete"
       cancel-text="Cancel"
