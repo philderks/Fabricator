@@ -51,8 +51,8 @@
           <path d="M12 10V14M12 18H12.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
         </svg>
         <span>
-          Suche zeigt Mods für <strong>{{ selectedVersion }}</strong>, aber Installation erfolgt für Server-Version
-          <strong>{{ mcVersion }}</strong>
+          Search filters target <strong>{{ selectedVersion }}</strong>, but your server runs <strong>{{ mcVersion }}</strong>.
+          Installs use the server version unless it is unavailable, in which case you can choose another version during installation.
         </span>
       </div>
     </div>
@@ -95,6 +95,9 @@
             </span>
             <span class="stat category-tag" v-if="mod.categories && mod.categories.length">
               {{ mod.categories[0] }}
+            </span>
+            <span class="stat category-tag" v-else-if="mod.loaders && mod.loaders.length">
+              {{ mod.loaders[0] }}
             </span>
           </div>
         </div>
@@ -144,7 +147,7 @@
     :mod-title="pendingMod ? pendingMod.title : ''"
     :server-version="mcVersion"
     :status="pendingCompatibilityStatus"
-    :versions="pendingModVersions"
+    :versions="pendingCompatibilityVersions"
     :initial-selected-version="selectedVersion || mcVersion"
     @confirm="confirmCompatibilityInstall"
     @cancel="cancelCompatibilityInstall"
@@ -155,7 +158,7 @@
 <script>
 import BaseModal from './BaseModal.vue'
 import CompatibilityConfirmModal from './CompatibilityConfirmModal.vue'
-import { searchMods, getGameVersions } from '../../api/modrinth'
+import { searchMods, getGameVersions, getModVersions } from '../../api/modrinth'
 
 export default {
   name: 'ModBrowserModal',
@@ -190,7 +193,9 @@ export default {
       availableVersions: [],
       pendingMod: null,
       pendingCompatibilityStatus: 'unknown',
-      showCompatibilityModal: false
+      showCompatibilityModal: false,
+      pendingCompatibilityVersions: [],
+      modVersionCache: {}
     };
   },
   computed: {
@@ -210,9 +215,6 @@ export default {
         return versions
       }
       return versions.filter((version) => version !== this.mcVersion)
-    },
-    pendingModVersions() {
-      return this.pendingMod ? this.getVersionList(this.pendingMod) : []
     },
     loaderLabel() {
       if (!this.selectedLoader) {
@@ -279,6 +281,56 @@ export default {
       }
     },
 
+    async loadCompatibilityVersions(mod) {
+      const modId = mod?.project_id
+      if (!modId) {
+        return []
+      }
+
+      const cacheKey = `${modId}:${this.selectedLoader || 'any'}`
+      if (this.modVersionCache[cacheKey]) {
+        return this.modVersionCache[cacheKey]
+      }
+
+      try {
+        const filters = {}
+        if (this.selectedLoader) {
+          filters.loaders = [this.selectedLoader]
+        }
+        const response = await getModVersions(modId, filters)
+        const collected = new Set()
+
+        response.forEach((entry) => {
+          if (Array.isArray(entry.game_versions)) {
+            entry.game_versions.forEach((version) => {
+              if (version) {
+                collected.add(version)
+              }
+            })
+          }
+        })
+
+        const normalized = Array.from(collected)
+        normalized.sort((a, b) => {
+          const partsA = a.split('.').map((n) => parseInt(n, 10) || 0)
+          const partsB = b.split('.').map((n) => parseInt(n, 10) || 0)
+          for (let i = 0; i < Math.max(partsA.length, partsB.length); i += 1) {
+            const diff = (partsB[i] || 0) - (partsA[i] || 0)
+            if (diff !== 0) {
+              return diff
+            }
+          }
+          return 0
+        })
+
+        this.modVersionCache[cacheKey] = normalized
+        return normalized
+      } catch (error) {
+        console.error('Failed to load compatibility versions:', error)
+        return []
+      }
+    },
+
     debouncedSearch() {
       clearTimeout(this.debounceTimeout);
       this.debounceTimeout = setTimeout(() => {
@@ -317,8 +369,10 @@ export default {
       const status = this.getCompatibilityStatus(mod)
 
       if (status !== 'full') {
+        const versions = await this.loadCompatibilityVersions(mod)
         this.pendingMod = mod
         this.pendingCompatibilityStatus = status
+        this.pendingCompatibilityVersions = versions
         this.showCompatibilityModal = true
         return
       }
@@ -327,10 +381,11 @@ export default {
     },
 
     performInstall(mod, versionOverride = null) {
+      const preferredVersion = versionOverride || this.mcVersion
       this.$emit('install', {
         modId: mod.project_id,
         modTitle: mod.title,
-        mcVersion: versionOverride || this.mcVersion,
+        mcVersion: preferredVersion,
         loader: (this.loader || 'fabric').toLowerCase()
       })
     },
@@ -343,12 +398,14 @@ export default {
 
       this.performInstall(this.pendingMod, selectedVersion)
       this.pendingMod = null
+      this.pendingCompatibilityVersions = []
       this.pendingCompatibilityStatus = 'unknown'
       this.showCompatibilityModal = false
     },
 
     cancelCompatibilityInstall() {
       this.pendingMod = null
+      this.pendingCompatibilityVersions = []
       this.pendingCompatibilityStatus = 'unknown'
       this.showCompatibilityModal = false
     },
