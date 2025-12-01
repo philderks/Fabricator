@@ -1,13 +1,13 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import StatCard from '../components/ui/StatCard.vue'
-import PerformanceMetrics from '../components/server/PerformanceMetrics.vue'
-import ModItem from '../components/server/ModItem.vue'
-import ActivityFeed from '../components/server/ActivityFeed.vue'
 import ModBrowserModal from '../components/modals/ModBrowserModal.vue'
 import ConfirmModal from '../components/modals/ConfirmModal.vue'
 import ServerSettingsTab from '../components/server/ServerSettingsTab.vue'
+import ServerHeader from '../components/server/ServerHeader.vue'
+import ServerOverviewTab from '../components/server/ServerOverviewTab.vue'
+import ServerConsoleTab from '../components/server/ServerConsoleTab.vue'
+import ServerFilesTab from '../components/server/ServerFilesTab.vue'
 import { installMod } from '../api/modrinth'
 import {
   getServer,
@@ -596,19 +596,6 @@ const resetSettings = () => {
   serverSettings.value = defaultSettings(server.value)
 }
 
-watch(activeTab, (tab) => {
-  if (tab === 'console') {
-    loadLogs()
-    startLogPolling()
-  } else {
-    stopLogPolling()
-  }
-
-  if (tab === 'files' && !fileBrowser.value.entries.length && !fileBrowser.value.loading) {
-    openFileBrowser()
-  }
-})
-
 onMounted(async () => {
   await refreshAll()
   startServerStatusPolling()
@@ -622,63 +609,20 @@ onUnmounted(() => {
 
 <template>
   <div class="page">
-    <header class="header">
-      <div class="header-content" v-if="!serverLoading && server">
-        <div class="brand">
-          <router-link to="/" class="back-btn">←</router-link>
-          <div>
-            <h1 class="server-title">{{ serverStatus.name }}</h1>
-            <div class="server-meta">
-              <span class="status-indicator" :class="serverStatus.status"></span>
-              <span class="status-text">{{ statusLabel }}</span>
-              <span class="separator">•</span>
-              <span>{{ serverStatus.loader }} {{ serverStatus.version }}</span>
-            </div>
-          </div>
-        </div>
-        <div class="server-controls">
-          <button
-            class="btn btn-outline"
-            :disabled="deletingServer"
-            @click="openDeleteServerModal"
-          >
-            {{ deletingServer ? 'Deleting…' : 'Delete' }}
-          </button>
-          <button
-            class="btn btn-danger"
-            v-if="serverStatus.status === 'running'"
-            :disabled="actionState.stop"
-            @click="handleStop"
-          >
-            {{ actionState.stop ? 'Stopping…' : 'Stop' }}
-          </button>
-          <button
-            class="btn btn-success"
-            v-else
-            :disabled="actionState.start || startLocked"
-            @click="handleStart"
-          >
-            {{ startButtonLabel }}
-          </button>
-          <button
-            class="btn btn-secondary"
-            :disabled="actionState.restart || serverStatus.status !== 'running'"
-            @click="handleRestart"
-          >
-            {{ actionState.restart ? 'Restarting…' : 'Restart' }}
-          </button>
-        </div>
-      </div>
-      <div class="header-content" v-else>
-        <div class="brand">
-          <router-link to="/" class="back-btn">←</router-link>
-          <div>
-            <div class="skeleton skeleton-title"></div>
-            <div class="skeleton skeleton-subtitle"></div>
-          </div>
-        </div>
-      </div>
-    </header>
+    <ServerHeader
+      :server="server"
+      :server-loading="serverLoading"
+      :server-status="serverStatus"
+      :status-label="statusLabel"
+      :action-state="actionState"
+      :start-locked="startLocked"
+      :start-button-label="startButtonLabel"
+      :deleting-server="deletingServer"
+      @start="handleStart"
+      @stop="handleStop"
+      @restart="handleRestart"
+      @delete="openDeleteServerModal"
+    />
 
     <main v-if="!serverLoading && server" class="main">
       <div class="content">
@@ -713,207 +657,53 @@ onUnmounted(() => {
           </button>
         </div>
 
-        <!-- Overview Tab -->
-        <div v-if="activeTab === 'overview'" class="grid">
-          <!-- Stats Overview -->
-          <div class="stats-row">
-            <StatCard 
-              label="Players Online" 
-              :value="playersDisplay"
-            />
-            <StatCard label="Uptime" :value="serverStatus.uptime" />
-            <StatCard label="TPS" :value="serverStatus.tps" />
-            <StatCard label="Mods" :value="installedMods.length" />
-          </div>
+        <ServerOverviewTab
+          v-if="activeTab === 'overview'"
+          :server-status="serverStatus"
+          :players-display="playersDisplay"
+          :installed-mods="installedMods"
+          v-model:mod-search="modSearch"
+          :mods-loading="modsLoading"
+          :filtered-mods="filteredMods"
+          :ram-metrics="ramMetrics"
+          :recent-activity="recentActivity"
+          :install-loading="installLoading"
+          :backup-loading="backupLoading"
+          :backups="backups"
+          :format-backup-time="formatBackupTime"
+          @browse-mods="openModBrowser"
+          @remove-mod="handleRemoveMod"
+          @update-mod="handleUpdateMod"
+          @create-backup="createBackupAction"
+          @open-console="activeTab = 'console'"
+          @open-files="activeTab = 'files'"
+          @open-properties="openServerProperties"
+          @scroll-settings="scrollToSettingsSection"
+          @request-restore-backup="requestRestoreBackup"
+        />
 
-          <div class="two-col">
-            <!-- Left Column -->
-            <div class="col">
-              <!-- Performance -->
-              <div class="card">
-                <div class="card-header">
-                  <h3>Performance</h3>
-                </div>
-                <PerformanceMetrics :ram="ramMetrics" />
-              </div>
+        <ServerConsoleTab
+          v-else-if="activeTab === 'console'"
+          :server-status="serverStatus"
+          :status-label="statusLabel"
+          :logs="logs"
+          :logs-loading="logsLoading"
+          v-model:console-command="consoleCommand"
+          :can-send-command="canSendCommand"
+          :command-sending="commandSending"
+          @refresh-logs="loadLogs"
+          @send-command="sendConsoleCommand"
+        />
 
-              <!-- Recent Activity -->
-              <div class="card">
-                <div class="card-header">
-                  <h3>Recent Activity</h3>
-                  <button class="btn-text">View All</button>
-                </div>
-                <ActivityFeed :activities="recentActivity" />
-              </div>
-            </div>
+        <ServerFilesTab
+          v-else-if="activeTab === 'files'"
+          :file-browser="fileBrowser"
+          :format-file-size="formatFileSize"
+          @go-up="goUpDirectory"
+          @refresh="openFileBrowser(fileBrowser.currentPath)"
+          @enter-entry="enterFileEntry"
+        />
 
-            <!-- Right Column -->
-            <div class="col">
-              <!-- Installed Mods -->
-              <div class="card">
-                <div class="card-header">
-                  <h3>Installed Mods ({{ installedMods.length }})</h3>
-                  <button class="btn btn-primary" :disabled="installLoading" @click="openModBrowser">
-                    {{ installLoading ? 'Installing…' : 'Browse Mods' }}
-                  </button>
-                </div>
-                <div class="search-box">
-                  <input
-                    v-model="modSearch"
-                    type="text"
-                    placeholder="Search mods..."
-                    class="search-input"
-                    :disabled="modsLoading"
-                  >
-                </div>
-                <div v-if="modsLoading" class="mods-state">Loading mods…</div>
-                <div v-else-if="!filteredMods.length" class="mods-state">No mods installed yet.</div>
-                <div v-else class="mods-list">
-                  <ModItem
-                    v-for="mod in filteredMods"
-                    :key="mod.filename || mod.name"
-                    :mod="mod"
-                    @update="handleUpdateMod"
-                    @remove="handleRemoveMod"
-                  />
-                </div>
-              </div>
-
-              <!-- Quick Actions -->
-              <div class="card">
-                <div class="card-header">
-                  <h3>Quick Actions</h3>
-                </div>
-                <div class="action-grid">
-                  <button class="action-card" :disabled="backupLoading" @click="createBackupAction">
-                    <div class="action-label">Backup Server</div>
-                    <div class="action-desc">{{ backupLoading ? 'Creating…' : 'Create full backup' }}</div>
-                  </button>
-                  <button class="action-card" @click="activeTab = 'console'">
-                    <div class="action-label">View Logs</div>
-                    <div class="action-desc">Jump to console</div>
-                  </button>
-                  <button class="action-card" @click="openServerProperties">
-                    <div class="action-label">Server Properties</div>
-                    <div class="action-desc">Edit server.properties</div>
-                  </button>
-                  <button class="action-card" @click="scrollToSettingsSection('world')">
-                    <div class="action-label">World Settings</div>
-                    <div class="action-desc">Go to world config</div>
-                  </button>
-                </div>
-              </div>
-
-              <div class="card">
-                <div class="card-header">
-                  <h3>Backups</h3>
-                  <button class="btn-text" @click="activeTab = 'files'">Open folder</button>
-                </div>
-                <div v-if="backupLoading" class="mods-state">Loading backups…</div>
-                <div v-else-if="!backups.length" class="mods-state">No backups yet. Create one to get started.</div>
-                <div v-else class="backups-list">
-                  <div class="backup-item" v-for="backup in backups" :key="backup.relativePath">
-                    <div>
-                      <div class="backup-name">{{ backup.name }}</div>
-                      <div class="backup-meta">{{ formatBackupTime(backup.updatedAt) }}</div>
-                    </div>
-                    <div class="backup-actions">
-                      <button class="btn-text" @click="requestRestoreBackup(backup)">Restore</button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Console Tab -->
-        <div v-else-if="activeTab === 'console'" class="console-tab">
-          <div class="console-toolbar">
-            <div class="status-pill" :class="serverStatus.status">
-              Server {{ statusLabel }}
-            </div>
-            <button class="btn btn-secondary" :disabled="logsLoading" @click="loadLogs">
-              {{ logsLoading ? 'Refreshing…' : 'Refresh Logs' }}
-            </button>
-          </div>
-          <div class="console-command">
-            <input
-              v-model="consoleCommand"
-              class="command-input"
-              type="text"
-              placeholder="Enter server command (e.g., say Hello)"
-              :disabled="!canSendCommand || commandSending"
-              @keyup.enter="sendConsoleCommand"
-            >
-            <button
-              class="btn btn-primary"
-              :disabled="!canSendCommand || commandSending || !consoleCommand.trim()"
-              @click="sendConsoleCommand"
-            >
-              {{ commandSending ? 'Sending…' : 'Send Command' }}
-            </button>
-          </div>
-          <p class="command-hint" v-if="!canSendCommand">
-            Server must be running to accept console commands.
-          </p>
-          <div class="console-output">
-            <div class="console-stream">
-              <div class="console-stream__header">STDOUT</div>
-              <div class="console-stream__body">
-                <template v-if="logs.stdout?.length">
-                  <pre v-for="(line, idx) in logs.stdout" :key="`stdout-${idx}`">{{ line }}</pre>
-                </template>
-                <p v-else class="console-empty">No output yet.</p>
-              </div>
-            </div>
-            <div class="console-stream">
-              <div class="console-stream__header">STDERR</div>
-              <div class="console-stream__body">
-                <template v-if="logs.stderr?.length">
-                  <pre v-for="(line, idx) in logs.stderr" :key="`stderr-${idx}`">{{ line }}</pre>
-                </template>
-                <p v-else class="console-empty">No errors reported.</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Files Tab -->
-        <div v-else-if="activeTab === 'files'" class="files-tab">
-          <div class="files-toolbar">
-            <div class="files-toolbar-left">
-              <button class="btn btn-secondary" :disabled="!fileBrowser.currentPath" @click="goUpDirectory">
-                Up
-              </button>
-              <button class="btn btn-secondary" @click="openFileBrowser(fileBrowser.currentPath)">
-                Refresh
-              </button>
-            </div>
-            <div class="path-display">/{{ fileBrowser.currentPath }}</div>
-          </div>
-          <div class="files-list" v-if="!fileBrowser.loading && !fileBrowser.error">
-            <div
-              v-for="entry in fileBrowser.entries"
-              :key="entry.path"
-              class="file-entry"
-              @click="enterFileEntry(entry)"
-            >
-              <div class="file-info">
-                <span class="file-name">{{ entry.relativePath }}</span>
-                <span class="file-meta">{{ entry.isDir ? 'Folder' : formatFileSize(entry.size) }}</span>
-              </div>
-            </div>
-          </div>
-          <div v-else-if="fileBrowser.loading" class="placeholder-state">
-            <p>Loading files…</p>
-          </div>
-          <div v-else class="placeholder-state">
-            <p>{{ fileBrowser.error }}</p>
-          </div>
-        </div>
-
-        <!-- Settings Tab -->
         <ServerSettingsTab
           v-else-if="activeTab === 'settings' && serverSettings"
           :settings="serverSettings"
@@ -983,441 +773,3 @@ onUnmounted(() => {
     />
   </div>
 </template>
-
-<style scoped>
-/* Component-specific styles only */
-/* Header specific */
-.back-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-  text-decoration: none;
-  font-size: 1.25rem;
-  transition: all 0.2s;
-}
-
-.back-btn:hover {
-  background: var(--primary);
-  color: white;
-}
-
-.server-title {
-  margin: 0 0 0.375rem 0;
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: var(--text-primary);
-}
-
-.server-meta {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.875rem;
-  color: var(--text-muted);
-}
-
-.status-indicator {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-
-.status-indicator.running {
-  background: var(--success);
-}
-
-.status-indicator.stopped {
-  background: var(--text-disabled);
-}
-
-.status-indicator.pending,
-.status-indicator.installing {
-  background: #fbbf24;
-}
-
-.status-indicator.failed {
-  background: #ef4444;
-}
-
-.status-text {
-  font-weight: 500;
-}
-
-.separator {
-  color: var(--text-disabled);
-}
-
-.server-controls {
-  display: flex;
-  gap: 0.75rem;
-}
-
-/* Column layout */
-.col {
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-}
-
-/* Search box */
-.search-box {
-  margin-bottom: 1rem;
-}
-
-.search-input {
-  width: 100%;
-  padding: 0.625rem 1rem;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  color: var(--text-secondary);
-  font-size: 0.875rem;
-}
-
-.search-input:focus {
-  outline: none;
-  border-color: var(--primary);
-}
-
-.search-input::placeholder {
-  color: var(--text-disabled);
-}
-
-/* Mods list */
-.mods-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  max-height: 400px;
-  overflow-y: auto;
-}
-
-.backups-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.backup-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.75rem 1rem;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: var(--bg-primary);
-}
-
-.backup-name {
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.backup-meta {
-  font-size: 0.8125rem;
-  color: var(--text-muted);
-}
-
-.backup-actions {
-  display: flex;
-  gap: 0.5rem;
-}
-
-/* Settings list */
-.settings-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.setting-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.75rem;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-}
-
-.setting-label {
-  color: var(--text-muted);
-  font-size: 0.875rem;
-  font-weight: 500;
-}
-
-.setting-value {
-  color: var(--text-primary);
-  font-weight: 600;
-}
-
-/* Quick actions */
-.action-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 0.75rem;
-}
-
-.action-card {
-  padding: 1rem;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  text-align: left;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.action-card:hover {
-  border-color: var(--primary);
-  background: var(--bg-secondary);
-}
-
-.action-label {
-  color: var(--text-primary);
-  font-weight: 600;
-  font-size: 0.875rem;
-  margin-bottom: 0.25rem;
-}
-
-.action-desc {
-  color: var(--text-disabled);
-  font-size: 0.8125rem;
-}
-
-/* Placeholder */
-.tab-content {
-  padding: 4rem 2rem;
-}
-
-.placeholder-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: 4rem 2rem;
-  color: var(--text-muted);
-}
-
-.placeholder-state svg {
-  color: var(--text-disabled);
-  margin-bottom: 1.5rem;
-}
-
-.placeholder-state h3 {
-  font-size: 1.5rem;
-  font-weight: 600;
-  color: var(--text-secondary);
-  margin: 0 0 0.5rem 0;
-}
-
-.placeholder-state p {
-  font-size: 1rem;
-  margin: 0;
-}
-
-.mods-state {
-  padding: 1rem;
-  text-align: center;
-  color: var(--text-muted);
-  border: 1px dashed var(--border-color);
-  border-radius: 8px;
-  background: var(--bg-secondary);
-}
-
-.skeleton {
-  background: linear-gradient(90deg, var(--bg-tertiary), var(--bg-secondary), var(--bg-tertiary));
-  background-size: 200% 100%;
-  animation: shimmer 1.5s infinite;
-  border-radius: 8px;
-}
-
-.skeleton-title {
-  width: 180px;
-  height: 24px;
-  margin-bottom: 0.5rem;
-}
-
-.skeleton-subtitle {
-  width: 140px;
-  height: 16px;
-}
-
-.console-tab {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.console-toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.console-command {
-  display: flex;
-  gap: 0.75rem;
-  margin-bottom: 0.5rem;
-}
-
-.command-input {
-  flex: 1;
-  padding: 0.625rem 0.75rem;
-  border-radius: 8px;
-  border: 1px solid var(--border-color);
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font-family: 'Fira Code', 'SFMono-Regular', Consolas, monospace;
-}
-
-.command-input:focus {
-  outline: none;
-  border-color: var(--primary);
-}
-
-.command-hint {
-  margin: 0 0 0.75rem 0;
-  font-size: 0.875rem;
-  color: var(--text-muted);
-}
-
-.status-pill {
-  padding: 0.375rem 0.75rem;
-  border-radius: 999px;
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: white;
-}
-
-.status-pill.running {
-  background: var(--success);
-}
-
-.status-pill.stopped {
-  background: var(--text-disabled);
-}
-
-.status-pill.pending {
-  background: #fbbf24;
-}
-
-.status-pill.installing {
-  background: #fbbf24;
-}
-
-.status-pill.failed {
-  background: #ef4444;
-}
-
-.console-output {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 1.5rem;
-}
-
-.console-stream__header {
-  font-weight: 600;
-  margin-bottom: 0.5rem;
-  color: var(--text-primary);
-}
-
-.console-stream__body {
-  background: black;
-  color: #e5e7eb;
-  padding: 1rem;
-  border-radius: 8px;
-  min-height: 240px;
-  max-height: 420px;
-  overflow-y: auto;
-  border: 1px solid rgba(148, 163, 184, 0.2);
-}
-
-.console-stream__body pre {
-  margin: 0;
-  font-family: 'Fira Code', 'SFMono-Regular', Consolas, monospace;
-  font-size: 0.875rem;
-  line-height: 1.4;
-  white-space: pre-wrap;
-}
-
-.console-empty {
-  margin: 0;
-  color: #94a3b8;
-}
-
-.files-tab {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.files-toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.files-toolbar-left {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.path-display {
-  font-family: 'Fira Code', 'SFMono-Regular', Consolas, monospace;
-  color: var(--text-muted);
-}
-
-.files-list {
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.file-entry {
-  display: flex;
-  justify-content: space-between;
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--border-color);
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.file-entry:last-child {
-  border-bottom: none;
-}
-
-.file-entry:hover {
-  background: var(--bg-tertiary);
-}
-
-.file-name {
-  font-weight: 600;
-}
-
-.file-meta {
-  font-size: 0.8125rem;
-  color: var(--text-disabled);
-}
-
-@keyframes shimmer {
-  0% {
-    background-position: 200% 0;
-  }
-  100% {
-    background-position: -200% 0;
-  }
-}
-
-@media (max-width: 768px) {
-  .action-grid {
-    grid-template-columns: 1fr;
-  }
-}
-</style>
