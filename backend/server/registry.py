@@ -99,6 +99,13 @@ class ServerProcessRegistry:
             return {'stdout': [], 'stderr': [], 'running': False, 'message': 'Server is not running'}
         return manager.tail_logs(limit)
 
+    def send_command(self, server_id: str, command: str) -> Dict[str, object]:
+        with self._lock:
+            manager = self._instances.get(server_id)
+        if not manager:
+            return {'success': False, 'message': 'Server is not running'}
+        return manager.send_command(command)
+
 
 _registry: Optional[ServerProcessRegistry] = None
 _registry_lock = threading.Lock()

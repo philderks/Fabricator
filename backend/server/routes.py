@@ -583,3 +583,20 @@ def get_fabric_loader_versions():
     installer = FabricInstaller(Path('/tmp'))
     versions = installer.get_available_versions(mc_version)
     return jsonify(versions)
+
+
+@server_bp.route('/servers/<server_id>/console', methods=['POST'])
+def send_console_command(server_id):
+    data = request.get_json() or {}
+    command = (data.get('command') or '').strip()
+
+    if not command:
+        return jsonify({'error': 'Command is required'}), 400
+
+    server = storage.get_server(server_id)
+    if not server:
+        return jsonify({'error': 'Server not found'}), 404
+
+    result = process_registry.send_command(server_id, command)
+    status_code = 200 if result.get('success') else 400
+    return jsonify(result), status_code
