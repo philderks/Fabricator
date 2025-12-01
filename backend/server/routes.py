@@ -410,6 +410,8 @@ def update_server_settings(server_id):
     if not server:
         return jsonify({'error': 'Server not found'}), 404
 
+    process_registry.invalidate(server_id)
+
     return jsonify(server)
 
 
