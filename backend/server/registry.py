@@ -52,7 +52,15 @@ class ServerProcessRegistry:
                 return manager
 
             install_path = self._resolve_install_path(server)
-            command = server.get('command')
+            memory = server.get('memory', 4)
+            command = server.get('command') or [
+                'java',
+                f'-Xms{memory}G',
+                f'-Xmx{memory}G',
+                '-jar',
+                'server.jar',
+                'nogui'
+            ]
             manager = ServerManager(command=command, cwd=str(install_path))
             self._instances[server_id] = manager
             return manager
@@ -105,6 +113,11 @@ class ServerProcessRegistry:
         if not manager:
             return {'success': False, 'message': 'Server is not running'}
         return manager.send_command(command)
+
+    def invalidate(self, server_id: str) -> None:
+        """Remove cached manager so next start uses fresh settings."""
+        with self._lock:
+            self._instances.pop(server_id, None)
 
 
 _registry: Optional[ServerProcessRegistry] = None
