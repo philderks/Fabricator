@@ -21,19 +21,20 @@
       </div>
       
       <div class="filters">
-        <select v-model="selectedLoader" @change="performSearch">
-          <option value="">All Loaders</option>
-          <option value="fabric">Fabric</option>
-          <option value="forge">Forge</option>
-          <option value="quilt">Quilt</option>
+        <select :value="selectedLoader" disabled>
+          <option :value="selectedLoader">{{ loaderLabel }}</option>
         </select>
         
         <select v-model="selectedVersion" @change="performSearch">
           <option value="">All Versions</option>
-          <option value="1.20.4">1.20.4</option>
-          <option value="1.20.1">1.20.1</option>
-          <option value="1.19.4">1.19.4</option>
-          <option value="1.19.2">1.19.2</option>
+          <option :value="mcVersion" v-if="mcVersion">{{ mcVersion }} (Server)</option>
+          <option
+            v-for="version in availableVersionOptions"
+            :key="version"
+            :value="version"
+          >
+            {{ version }}
+          </option>
         </select>
 
         <select v-model="sortBy" @change="performSearch">
@@ -42,6 +43,17 @@
           <option value="updated">Updated</option>
           <option value="newest">Newest</option>
         </select>
+      </div>
+
+      <div v-if="versionMismatch" class="version-warning">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+          <path d="M12 2L2 20H22L12 2Z" stroke="currentColor" stroke-width="2" />
+          <path d="M12 10V14M12 18H12.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+        </svg>
+        <span>
+          Suche zeigt Mods für <strong>{{ selectedVersion }}</strong>, aber Installation erfolgt für Server-Version
+          <strong>{{ mcVersion }}</strong>
+        </span>
       </div>
     </div>
 
@@ -70,20 +82,29 @@
           <div class="mod-stats">
             <span class="stat">
               <svg width="14" height="14" viewBox="0 0 20 20" fill="none">
-                <path d="M10 2L3 7V17H8V12H12V17H17V7L10 2Z" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M10 3V13M10 13L6 9M10 13L14 9M4 17H16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
               {{ formatNumber(mod.downloads) }}
             </span>
-            <span class="stat">
+            <span class="stat" v-if="hasVersionInfo(mod)">
               <svg width="14" height="14" viewBox="0 0 20 20" fill="none">
-                <path d="M10 3V17M10 17L4 11M10 17L16 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                <rect x="3" y="3" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M7 7H13M7 10H13M7 13H10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
               </svg>
-              {{ mod.latest_version || 'N/A' }}
+              {{ formatVersions(getVersionList(mod), selectedVersion || mcVersion) }}
+            </span>
+            <span class="stat category-tag" v-if="mod.categories && mod.categories.length">
+              {{ mod.categories[0] }}
             </span>
           </div>
         </div>
         <div class="mod-actions">
-          <button class="btn btn-primary btn-sm" @click.stop="installMod(mod)">
+          <button
+            class="btn btn-sm"
+            :class="getInstallButtonClass(mod)"
+            @click.stop="installMod(mod)"
+            :title="getInstallButtonTitle(mod)"
+          >
             Install
           </button>
         </div>
@@ -117,16 +138,30 @@
       </button>
     </template>
   </BaseModal>
+
+  <CompatibilityConfirmModal
+    :show="showCompatibilityModal"
+    :mod-title="pendingMod ? pendingMod.title : ''"
+    :server-version="mcVersion"
+    :status="pendingCompatibilityStatus"
+    :versions="pendingModVersions"
+    :initial-selected-version="selectedVersion || mcVersion"
+    @confirm="confirmCompatibilityInstall"
+    @cancel="cancelCompatibilityInstall"
+    @close="cancelCompatibilityInstall"
+  />
 </template>
 
 <script>
 import BaseModal from './BaseModal.vue'
-import { searchMods } from '../../api/modrinth'
+import CompatibilityConfirmModal from './CompatibilityConfirmModal.vue'
+import { searchMods, getGameVersions } from '../../api/modrinth'
 
 export default {
   name: 'ModBrowserModal',
   components: {
-    BaseModal
+    BaseModal,
+    CompatibilityConfirmModal
   },
   props: {
     show: {
@@ -151,10 +186,99 @@ export default {
       sortBy: 'relevance',
       results: [],
       loading: false,
-      debounceTimeout: null
+      debounceTimeout: null,
+      availableVersions: [],
+      pendingMod: null,
+      pendingCompatibilityStatus: 'unknown',
+      showCompatibilityModal: false
     };
   },
+  computed: {
+    versionMismatch() {
+      return Boolean(
+        this.selectedVersion &&
+        this.mcVersion &&
+        this.selectedVersion !== this.mcVersion
+      )
+    },
+    availableVersionOptions() {
+      const versions = this.availableVersions || []
+      if (!versions.length) {
+        return []
+      }
+      if (!this.mcVersion) {
+        return versions
+      }
+      return versions.filter((version) => version !== this.mcVersion)
+    },
+    pendingModVersions() {
+      return this.pendingMod ? this.getVersionList(this.pendingMod) : []
+    },
+    loaderLabel() {
+      if (!this.selectedLoader) {
+        return 'Any Loader'
+      }
+      return this.selectedLoader.charAt(0).toUpperCase() + this.selectedLoader.slice(1)
+    }
+  },
   methods: {
+    async loadVersions() {
+      try {
+        const versions = await getGameVersions()
+        const normalized = (versions || [])
+          .map((entry) => {
+            if (!entry) {
+              return null
+            }
+            if (typeof entry === 'string') {
+              return entry
+            }
+            return entry.version || entry.name || entry.version_number || null
+          })
+          .filter(Boolean)
+
+        const unique = Array.from(new Set(normalized))
+        unique.sort((a, b) => {
+          const partsA = a.split('.').map((n) => parseInt(n, 10) || 0)
+          const partsB = b.split('.').map((n) => parseInt(n, 10) || 0)
+          for (let i = 0; i < Math.max(partsA.length, partsB.length); i += 1) {
+            const diff = (partsB[i] || 0) - (partsA[i] || 0)
+            if (diff !== 0) {
+              return diff
+            }
+          }
+          return 0
+        })
+
+        const stableVersionPattern = /^\d+(\.\d+){1,2}$/
+        const minVersion = [1, 8, 9]
+
+        const stableVersions = unique.filter((version) => {
+          if (!stableVersionPattern.test(version)) {
+            return false
+          }
+          const parts = version.split('.').map((n) => parseInt(n, 10) || 0)
+          while (parts.length < 3) {
+            parts.push(0)
+          }
+          for (let i = 0; i < minVersion.length; i += 1) {
+            if ((parts[i] || 0) > minVersion[i]) {
+              return true
+            }
+            if ((parts[i] || 0) < minVersion[i]) {
+              return false
+            }
+          }
+          return true
+        })
+
+        this.availableVersions = stableVersions
+      } catch (error) {
+        console.error('Failed to load game versions:', error)
+        this.availableVersions = []
+      }
+    },
+
     debouncedSearch() {
       clearTimeout(this.debounceTimeout);
       this.debounceTimeout = setTimeout(() => {
@@ -178,8 +302,9 @@ export default {
           sort: this.sortBy,
           limit: 20
         })
-        
-        this.results = data.hits || []
+
+        const hits = data.hits || []
+        this.results = hits.filter((mod) => this.modSupportsLoader(mod, this.selectedLoader))
       } catch (error) {
         console.error('Search failed:', error)
         this.results = []
@@ -189,12 +314,43 @@ export default {
     },
 
     async installMod(mod) {
+      const status = this.getCompatibilityStatus(mod)
+
+      if (status !== 'full') {
+        this.pendingMod = mod
+        this.pendingCompatibilityStatus = status
+        this.showCompatibilityModal = true
+        return
+      }
+
+      this.performInstall(mod)
+    },
+
+    performInstall(mod, versionOverride = null) {
       this.$emit('install', {
         modId: mod.project_id,
         modTitle: mod.title,
-        mcVersion: this.selectedVersion || this.mcVersion,
-        loader: this.selectedLoader || this.loader
-      });
+        mcVersion: versionOverride || this.mcVersion,
+        loader: (this.loader || 'fabric').toLowerCase()
+      })
+    },
+
+    confirmCompatibilityInstall(selectedVersion = null) {
+      if (!this.pendingMod) {
+        this.cancelCompatibilityInstall()
+        return
+      }
+
+      this.performInstall(this.pendingMod, selectedVersion)
+      this.pendingMod = null
+      this.pendingCompatibilityStatus = 'unknown'
+      this.showCompatibilityModal = false
+    },
+
+    cancelCompatibilityInstall() {
+      this.pendingMod = null
+      this.pendingCompatibilityStatus = 'unknown'
+      this.showCompatibilityModal = false
     },
 
     selectMod(mod) {
@@ -212,7 +368,102 @@ export default {
       if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
       if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
       return num.toString();
+    },
+
+    formatVersions(versions, highlightVersion = null) {
+      if (!versions || !versions.length) return 'N/A'
+
+      const sorted = [...versions].sort((a, b) => {
+        const partsA = a.split('.').map((n) => parseInt(n, 10) || 0)
+        const partsB = b.split('.').map((n) => parseInt(n, 10) || 0)
+        for (let i = 0; i < Math.max(partsA.length, partsB.length); i += 1) {
+          const diff = (partsB[i] || 0) - (partsA[i] || 0)
+          if (diff !== 0) return diff
+        }
+        return 0
+      })
+
+      if (highlightVersion && versions.includes(highlightVersion)) {
+        const others = sorted.length - 1
+        if (others === 0) return highlightVersion
+        return `${highlightVersion} (+${others} more)`
+      }
+
+      if (sorted.length === 1) return sorted[0]
+      if (sorted.length === 2) return `${sorted[0]}, ${sorted[1]}`
+      return `${sorted[0]} (+${sorted.length - 1} more)`
+    },
+
+    getCompatibilityStatus(mod) {
+      const versions = this.getVersionList(mod)
+      const serverVersion = this.mcVersion
+
+      if (!versions.length || !serverVersion) return 'unknown'
+      if (versions.includes(serverVersion)) return 'full'
+
+      const [sMajor, sMinor] = serverVersion.split('.')
+      const hasCloseMatch = versions.some((version) => {
+        const [vMajor, vMinor] = version.split('.')
+        return vMajor === sMajor && vMinor === sMinor
+      })
+
+      return hasCloseMatch ? 'likely' : 'unlikely'
+    },
+
+    getInstallButtonClass(mod) {
+      const status = this.getCompatibilityStatus(mod)
+      return {
+        'btn-primary': status === 'full',
+        'btn-warning': status === 'likely',
+        'btn-danger': status === 'unlikely' || status === 'unknown'
+      }
+    },
+
+    getInstallButtonTitle(mod) {
+      const status = this.getCompatibilityStatus(mod)
+      switch (status) {
+        case 'full':
+          return 'Vollständig kompatibel'
+        case 'likely':
+          return 'Wahrscheinlich kompatibel (ähnliche Version)'
+        case 'unlikely':
+          return 'Möglicherweise inkompatibel'
+        default:
+          return 'Kompatibilität unbekannt'
+      }
+    },
+
+    getVersionList(mod) {
+      if (mod.game_versions && mod.game_versions.length) {
+        return mod.game_versions
+      }
+      if (mod.version_numbers && mod.version_numbers.length) {
+        return mod.version_numbers
+      }
+      if (mod.versions && mod.versions.length) {
+        return mod.versions
+      }
+      return []
+    },
+
+    hasVersionInfo(mod) {
+      const versions = this.getVersionList(mod)
+      return Array.isArray(versions) && versions.length > 0
+    },
+
+    modSupportsLoader(mod, loader) {
+      if (!loader) {
+        return true
+      }
+      const loaders = mod.loaders || []
+      if (!Array.isArray(loaders) || loaders.length === 0) {
+        return true
+      }
+      return loaders.map((entry) => (entry || '').toLowerCase()).includes(loader.toLowerCase())
     }
+  },
+  created() {
+    this.loadVersions()
   },
   watch: {
     show(newVal) {
@@ -220,9 +471,14 @@ export default {
         // Reset on close
         this.searchQuery = '';
         this.results = [];
-      } else {
-        this.selectedLoader = (this.loader || 'fabric').toLowerCase()
-        this.selectedVersion = this.mcVersion || ''
+        this.cancelCompatibilityInstall()
+      }
+
+      this.selectedLoader = (this.loader || 'fabric').toLowerCase()
+      this.selectedVersion = this.mcVersion || ''
+
+      if (newVal && !this.availableVersions.length) {
+        this.loadVersions()
       }
     },
     mcVersion(newVal) {
@@ -289,6 +545,27 @@ export default {
 .filters select:focus {
   outline: none;
   border-color: var(--primary);
+}
+
+.version-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  margin-top: 12px;
+  background: color-mix(in oklch, var(--warning) 15%, transparent);
+  border: 1px solid color-mix(in oklch, var(--warning) 40%, transparent);
+  border-radius: 8px;
+  font-size: 0.8125rem;
+  color: var(--warning);
+}
+
+.version-warning svg {
+  flex-shrink: 0;
+}
+
+.version-warning strong {
+  font-weight: 600;
 }
 
 .loading-spinner {
@@ -372,6 +649,14 @@ export default {
   color: var(--text-tertiary);
 }
 
+.category-tag {
+  padding: 2px 8px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  font-size: 0.75rem;
+  text-transform: capitalize;
+}
+
 .mod-actions {
   display: flex;
   align-items: center;
@@ -380,6 +665,24 @@ export default {
 .btn-sm {
   padding: 8px 16px;
   font-size: 0.875rem;
+}
+
+.btn-warning {
+  background: var(--warning);
+  color: #000;
+}
+
+.btn-warning:hover {
+  background: color-mix(in oklch, var(--warning) 85%, #000);
+}
+
+.btn-danger {
+  background: var(--danger);
+  color: #fff;
+}
+
+.btn-danger:hover {
+  background: color-mix(in oklch, var(--danger) 85%, #000);
 }
 
 /* Scrollbar styling */
