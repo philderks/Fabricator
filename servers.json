@@ -3,7 +3,7 @@
     "id": "srv_690d3c89",
     "status": "stopped",
     "createdAt": "2025-11-28T12:52:49.974002Z",
-    "updatedAt": "2025-12-01T12:48:51.737707Z",
+    "updatedAt": "2025-12-01T14:09:37.577913Z",
     "name": "Minecraft Server",
     "version": "1.21.10",
     "loader": "fabric",
