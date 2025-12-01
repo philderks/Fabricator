@@ -229,3 +229,11 @@ export async function getFabricLoaderVersions(mcVersion) {
   const params = mcVersion ? { mc_version: mcVersion } : {}
   return get('/api/fabric/versions/loader', params)
 }
+
+/**
+ * Get overall system metrics (CPU, memory)
+ * @returns {Promise<Object>} System metrics payload
+ */
+export async function getSystemMetrics() {
+  return get('/api/metrics/system')
+}

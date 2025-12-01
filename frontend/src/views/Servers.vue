@@ -1,10 +1,10 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import ServerCard from '../components/ui/ServerCard.vue'
 import StatCard from '../components/ui/StatCard.vue'
 import ServerCreateModal from '../components/modals/ServerCreateModal.vue'
-import { getServers, startServer, stopServer } from '../api/servers'
+import { getServers, startServer, stopServer, getSystemMetrics } from '../api/servers'
 import { useToast } from '../composables/useToast'
 
 const router = useRouter()
@@ -14,6 +14,8 @@ const servers = ref([])
 const loading = ref(true)
 const showCreateModal = ref(false)
 const serverActions = ref({})
+const systemMetrics = ref({ cpuPercent: null })
+let systemMetricsIntervalId = null
 
 // Load servers from API
 const loadServers = async () => {
@@ -21,22 +23,41 @@ const loadServers = async () => {
   try {
     const data = await getServers()
     // Transform API data to match component expectations
-    servers.value = data.map(server => ({
-      id: server.id,
-      name: server.name,
-      status: server.status,
-      version: server.version,
-      loader: server.loader ? server.loader.charAt(0).toUpperCase() + server.loader.slice(1) : 'Unknown',
-      players: { online: 0, max: server.maxPlayers || 20 },
-      mods: 0,
-      uptime: server.status === 'running' ? '0h' : null,
-      ip: `localhost:${server.port}`
-    }))
+    servers.value = data.map(server => {
+      const runtime = server.runtime || {}
+      const status = runtime.status || server.status
+      const loaderName = server.loader ? server.loader.charAt(0).toUpperCase() + server.loader.slice(1) : 'Unknown'
+      const playersOnline = runtime.players?.online ?? 0
+      const playersMax = runtime.players?.max ?? server.maxPlayers ?? 20
+      return {
+        id: server.id,
+        name: server.name,
+        status,
+        version: server.version,
+        loader: loaderName,
+        players: { online: playersOnline, max: playersMax },
+        mods: runtime.mods ?? 0,
+        uptime: runtime.uptime || (status === 'running' ? '—' : null),
+        ip: `localhost:${server.port}`
+      }
+    })
   } catch (error) {
     console.error('Failed to load servers:', error)
     toast.error('Failed to load servers', 'Error')
   } finally {
     loading.value = false
+  }
+}
+
+const loadSystemMetrics = async () => {
+  try {
+    const metrics = await getSystemMetrics()
+    systemMetrics.value = {
+      cpuPercent: metrics?.cpu?.percent ?? null
+    }
+  } catch (error) {
+    console.error('Failed to load system metrics:', error)
+    systemMetrics.value = { cpuPercent: null }
   }
 }
 
@@ -88,9 +109,26 @@ const handleStartStop = async (id, actionFn, successMessage, errorTitle) => {
 const handleStart = (id) => handleStartStop(id, startServer, 'Server start requested', 'Start Failed')
 const handleStop = (id) => handleStartStop(id, stopServer, 'Server stop requested', 'Stop Failed')
 
-// Load servers on mount
+const cpuStatLabel = computed(() => {
+  const value = systemMetrics.value.cpuPercent
+  if (typeof value !== 'number') {
+    return '—'
+  }
+  return `${value}%`
+})
+
+// Load servers on mount and refresh system metrics periodically
 onMounted(() => {
   loadServers()
+  loadSystemMetrics()
+  systemMetricsIntervalId = setInterval(loadSystemMetrics, 10000)
+})
+
+onUnmounted(() => {
+  if (systemMetricsIntervalId) {
+    clearInterval(systemMetricsIntervalId)
+    systemMetricsIntervalId = null
+  }
 })
 </script>
 
@@ -104,7 +142,6 @@ onMounted(() => {
         </div>
         <nav class="nav">
           <router-link to="/" class="nav-item active">Servers</router-link>
-          <router-link to="/api-testing" class="nav-item">API Testing</router-link>
         </nav>
       </div>
     </header>
@@ -123,7 +160,7 @@ onMounted(() => {
           <StatCard label="Total" :value="servers.length" />
           <StatCard label="Running" :value="servers.filter(s => s.status === 'running').length" highlight />
           <StatCard label="Players" :value="servers.reduce((sum, s) => sum + s.players.online, 0)" />
-          <StatCard label="Mods" :value="servers.reduce((sum, s) => sum + s.mods, 0)" />
+          <StatCard label="CPU" :value="cpuStatLabel" />
         </div>
 
         <div v-if="loading" class="loading-state">

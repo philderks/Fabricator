@@ -314,25 +314,32 @@ const serverStatus = computed(() => {
       online: server.value?.runtime?.players?.online ?? 0,
       max: server.value?.maxPlayers ?? server.value?.runtime?.players?.max ?? 0
     },
-    cpu: server.value?.runtime?.cpu ?? 0,
-    ram: server.value?.runtime?.ram || { used: 0, total: server.value?.memory ?? 0 },
     tps: server.value?.runtime?.tps ?? 20
   }
 })
 
 const ramMetrics = computed(() => {
+  const configuredTotal = Number(server.value?.memory ?? serverSettings.value?.memory ?? 0)
+  const total = configuredTotal > 0 ? configuredTotal : 1
   const runtimeRam = server.value?.runtime?.ram
-  const defaultTotal = server.value?.memory ?? 4
+  let used = 0
 
-  if (runtimeRam && typeof runtimeRam.used === 'number' && typeof runtimeRam.total === 'number') {
-    const total = runtimeRam.total || defaultTotal || 1
-    const used = Math.min(runtimeRam.used, total)
-    return { used, total }
+  if (runtimeRam) {
+    if (typeof runtimeRam.usedGB === 'number') {
+      used = runtimeRam.usedGB
+    } else if (typeof runtimeRam.usedBytes === 'number') {
+      used = runtimeRam.usedBytes / (1024 ** 3)
+    } else if (typeof runtimeRam.used === 'number') {
+      used = runtimeRam.used
+    }
   }
 
+  used = Math.max(0, Math.min(used, total))
+
   return {
-    used: 0,
-    total: defaultTotal || 1
+    used,
+    total,
+    running: serverStatus.value.status === 'running'
   }
 })
 
@@ -669,7 +676,7 @@ onUnmounted(() => {
                 <div class="card-header">
                   <h3>Performance</h3>
                 </div>
-                <PerformanceMetrics :cpu="serverStatus.cpu" :ram="ramMetrics" />
+                <PerformanceMetrics :ram="ramMetrics" />
               </div>
 
               <!-- Recent Activity -->
