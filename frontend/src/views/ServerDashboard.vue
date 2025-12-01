@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ModBrowserModal from '../components/modals/ModBrowserModal.vue'
 import ConfirmModal from '../components/modals/ConfirmModal.vue'
@@ -20,8 +20,6 @@ import {
   updateServerSettings,
   sendServerCommand,
   browseServerFiles,
-  getServerFile,
-  saveServerFile,
   createBackup,
   getBackups,
   restoreBackup,
@@ -60,28 +58,75 @@ const showBackupRestoreModal = ref(false)
 const restoringBackup = ref(false)
 const showDeleteServerModal = ref(false)
 const deletingServer = ref(false)
+const settingsTabRef = ref(null)
 
 const defaultSettings = (data = {}) => ({
   name: data.name || 'Minecraft Server',
-  port: data.port || 25565,
+  port: data.port ?? 25565,
+  serverIp: data.serverIp || '',
   motd: data.motd || 'A Minecraft Server',
+  bugReportLink: data.bugReportLink || '',
   maxPlayers: data.maxPlayers ?? 20,
   difficulty: data.difficulty || 'normal',
   gamemode: data.gamemode || 'survival',
+  forceGamemode: data.forceGamemode ?? false,
+  hardcore: data.hardcore ?? false,
+  allowFlight: data.allowFlight ?? false,
+  pvp: data.pvp ?? true,
+  spawnProtection: data.spawnProtection ?? 16,
+  commandBlocks: data.commandBlocks ?? true,
+  whitelist: data.whitelist ?? false,
+  enforceWhitelist: data.enforceWhitelist ?? false,
+  functionPermissionLevel: data.functionPermissionLevel ?? 2,
+  opPermissionLevel: data.opPermissionLevel ?? 4,
+  playerIdleTimeout: data.playerIdleTimeout ?? 0,
+  pauseWhenEmptySeconds: data.pauseWhenEmptySeconds ?? 60,
+  onlineMode: data.onlineMode ?? true,
+  enforceSecureProfile: data.enforceSecureProfile ?? true,
+  hideOnlinePlayers: data.hideOnlinePlayers ?? false,
+  preventProxyConnections: data.preventProxyConnections ?? false,
+  logIps: data.logIps ?? true,
+  acceptsTransfers: data.acceptsTransfers ?? false,
+  enableStatus: data.enableStatus ?? true,
+  statusHeartbeatInterval: data.statusHeartbeatInterval ?? 0,
+  broadcastConsoleToOps: data.broadcastConsoleToOps ?? true,
+  broadcastRconToOps: data.broadcastRconToOps ?? true,
+  enableCodeOfConduct: data.enableCodeOfConduct ?? false,
+  enableJmxMonitoring: data.enableJmxMonitoring ?? false,
+  enableQuery: data.enableQuery ?? false,
+  queryPort: data.queryPort ?? data.port ?? 25565,
+  enableRcon: data.enableRcon ?? false,
+  rconPort: data.rconPort ?? 25575,
+  rconPassword: data.rconPassword || '',
+  rateLimit: data.rateLimit ?? 0,
+  networkCompressionThreshold: data.networkCompressionThreshold ?? 256,
+  resourcePack: data.resourcePack || '',
+  resourcePackPrompt: data.resourcePackPrompt || '',
+  resourcePackSha1: data.resourcePackSha1 || '',
+  resourcePackId: data.resourcePackId || '',
+  requireResourcePack: data.requireResourcePack ?? false,
+  initialEnabledPacks: data.initialEnabledPacks || 'vanilla',
+  initialDisabledPacks: data.initialDisabledPacks || '',
+  textFilteringConfig: data.textFilteringConfig || '',
+  textFilteringVersion: data.textFilteringVersion ?? 0,
   viewDistance: data.viewDistance ?? 10,
+  simulationDistance: data.simulationDistance ?? 10,
+  memory: data.memory ?? 4,
   levelName: data.levelName || 'world',
   levelType: data.levelType || 'default',
   seed: data.seed || '',
+  generatorSettings: data.generatorSettings ?? '',
+  maxWorldSize: data.maxWorldSize ?? 29999984,
   generateStructures: data.generateStructures ?? true,
   spawnAnimals: data.spawnAnimals ?? true,
   spawnMonsters: data.spawnMonsters ?? true,
   spawnNpcs: data.spawnNpcs ?? true,
-  memory: data.memory ?? 4,
-  simulationDistance: data.simulationDistance ?? 10,
-  onlineMode: data.onlineMode ?? true,
-  whitelist: data.whitelist ?? false,
-  pvp: data.pvp ?? true,
-  commandBlocks: data.commandBlocks ?? true
+  entityBroadcastRangePercentage: data.entityBroadcastRangePercentage ?? 100,
+  maxChainedNeighborUpdates: data.maxChainedNeighborUpdates ?? 1000000,
+  maxTickTime: data.maxTickTime ?? 60000,
+  syncChunkWrites: data.syncChunkWrites ?? true,
+  useNativeTransport: data.useNativeTransport ?? true,
+  regionFileCompression: data.regionFileCompression || 'deflate'
 })
 
 const loadServer = async (options = {}) => {
@@ -92,7 +137,10 @@ const loadServer = async (options = {}) => {
   try {
     const data = await getServer(serverId)
     server.value = data
-    serverSettings.value = defaultSettings(data)
+    const mappedSettings = defaultSettings(data)
+    if (!serverSettings.value || activeTab.value !== 'settings') {
+      serverSettings.value = mappedSettings
+    }
   } catch (error) {
     console.error('Failed to load server:', error)
     toast.error('Could not load server details', 'Error')
@@ -259,21 +307,21 @@ const formatFileSize = (bytes) => {
   return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[idx]}`
 }
 
-const openServerProperties = async () => {
-  try {
-    const file = await getServerFile(serverId, 'server.properties')
-    console.log(file.content)
-    toast.info('server.properties loaded in console log (UI editor coming soon)', 'Files')
-  } catch (error) {
-    console.error('Failed to load server.properties:', error)
-    toast.error('Failed to load server.properties', 'Files')
+const scrollToSettingsSection = async (selector) => {
+  if (activeTab.value !== 'settings') {
+    activeTab.value = 'settings'
+    await nextTick()
   }
-}
-
-const scrollToSettingsSection = (selector) => {
+  if (!selector) {
+    return
+  }
+  const requiresAdvanced = ['resources', 'network', 'advanced'].includes(selector)
+  if (requiresAdvanced && settingsTabRef.value?.enableAdvanced) {
+    await settingsTabRef.value.enableAdvanced()
+  }
   const section = document.querySelector(`[data-settings-section="${selector}"]`)
   if (section) {
-    section.scrollIntoView({ behavior: 'smooth' })
+    section.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 }
 
@@ -677,7 +725,6 @@ onUnmounted(() => {
           @create-backup="createBackupAction"
           @open-console="activeTab = 'console'"
           @open-files="activeTab = 'files'"
-          @open-properties="openServerProperties"
           @scroll-settings="scrollToSettingsSection"
           @request-restore-backup="requestRestoreBackup"
         />
@@ -705,6 +752,7 @@ onUnmounted(() => {
         />
 
         <ServerSettingsTab
+          ref="settingsTabRef"
           v-else-if="activeTab === 'settings' && serverSettings"
           :settings="serverSettings"
           :server-version="serverStatus.version"
