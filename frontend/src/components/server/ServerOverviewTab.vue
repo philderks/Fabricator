@@ -64,7 +64,6 @@ const emit = defineEmits([
   'create-backup',
   'open-console',
   'open-files',
-  'open-properties',
   'scroll-settings',
   'request-restore-backup'
 ])
@@ -78,7 +77,6 @@ const handleBrowseMods = () => emit('browse-mods')
 const handleCreateBackup = () => emit('create-backup')
 const handleOpenConsole = () => emit('open-console')
 const handleOpenFiles = () => emit('open-files')
-const handleOpenProperties = () => emit('open-properties')
 const handleScrollSettings = (section) => emit('scroll-settings', section)
 const handleRequestRestore = (backup) => emit('request-restore-backup', backup)
 </script>
@@ -153,7 +151,7 @@ const handleRequestRestore = (backup) => emit('request-restore-backup', backup)
               <div class="action-label">View Logs</div>
               <div class="action-desc">Jump to console</div>
             </button>
-            <button class="action-card" @click="handleOpenProperties">
+            <button class="action-card" @click="handleScrollSettings('advanced')">
               <div class="action-label">Server Properties</div>
               <div class="action-desc">Edit server.properties</div>
             </button>
