@@ -393,9 +393,13 @@ const serverStatus = computed(() => {
 })
 
 const ramMetrics = computed(() => {
-  const configuredTotal = Number(server.value?.memory ?? serverSettings.value?.memory ?? 0)
-  const total = configuredTotal > 0 ? configuredTotal : 1
   const runtimeRam = server.value?.runtime?.ram
+  const runtimeLimit = typeof runtimeRam?.limitGB === 'number' ? runtimeRam.limitGB : null
+  const configuredTotal = Number(server.value?.memory ?? serverSettings.value?.memory ?? 0)
+  let total = runtimeLimit ?? configuredTotal
+  if (!Number.isFinite(total) || total <= 0) {
+    total = 1
+  }
   let used = 0
 
   if (runtimeRam) {
@@ -810,7 +814,7 @@ onUnmounted(() => {
       :show="showDeleteServerModal"
       title="Delete Server"
       message="Delete this server permanently?"
-      description="All server files and backups remain on disk, but this entry will be removed from Fabricator."
+      description="All server files and backups will be deleted. 67"
       type="danger"
       confirm-text="Delete"
       cancel-text="Cancel"
