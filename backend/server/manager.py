@@ -6,6 +6,11 @@ import threading
 import time
 from typing import Iterable, List, Optional
 
+try:
+    import psutil  # type: ignore
+except ImportError:  # pragma: no cover - optional dependency fallback
+    psutil = None
+
 
 class ServerManager:
     """Manages the lifecycle of a Minecraft server process."""
@@ -23,6 +28,7 @@ class ServerManager:
         )
         self.cwd = cwd or os.path.join(os.getcwd(), "server")
         self._process: Optional[subprocess.Popen] = None
+        self._ps_process: Optional["psutil.Process"] = None  # type: ignore[name-defined]
         self._stdout_thread: Optional[threading.Thread] = None
         self._stderr_thread: Optional[threading.Thread] = None
         self._stdout_buffer: List[str] = []
@@ -95,6 +101,7 @@ class ServerManager:
                 stderr=subprocess.PIPE,
                 text=True,
             )
+            self._ps_process = None
             self._start_log_streams()
             time.sleep(0.5)
 
@@ -167,6 +174,7 @@ class ServerManager:
                     pass
             finally:
                 self._process = None
+                self._ps_process = None
 
             return {"status": "stopped", "message": "Server stopped"}
 
@@ -177,7 +185,17 @@ class ServerManager:
     def status(self) -> dict:
         status_value = "running" if self.is_running else "stopped"
         message = "Server process is running" if self.is_running else "Server process is not running"
-        return {"status": status_value, "message": message}
+        ram_usage = self._get_ram_usage_bytes()
+        status = {"status": status_value, "message": message}
+        if ram_usage is not None:
+            status["ram"] = {
+                "usedBytes": ram_usage,
+                "usedMB": round(ram_usage / (1024 ** 2), 2),
+                "usedGB": round(ram_usage / (1024 ** 3), 3)
+            }
+        if self._process and self.is_running:
+            status["pid"] = self._process.pid
+        return status
 
     def tail_logs(self, limit: int = 200) -> dict:
         with self._lock:
@@ -213,3 +231,27 @@ class ServerManager:
                 }
 
         return {"success": True, "message": "Command sent"}
+
+    def _get_psutil_process(self):
+        if not psutil or not self.is_running or not self._process:
+            self._ps_process = None
+            return None
+
+        if self._ps_process and self._ps_process.pid == self._process.pid:
+            return self._ps_process
+
+        try:
+            self._ps_process = psutil.Process(self._process.pid)
+        except (psutil.Error, ProcessLookupError):  # pragma: no cover - psutil errors
+            self._ps_process = None
+        return self._ps_process
+
+    def _get_ram_usage_bytes(self) -> Optional[int]:
+        process = self._get_psutil_process()
+        if not process:
+            return None
+        try:
+            return process.memory_info().rss
+        except (psutil.Error, ProcessLookupError):
+            self._ps_process = None
+            return None

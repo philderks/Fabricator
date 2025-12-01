@@ -11,6 +11,11 @@ from backend.server import storage
 from backend.server.manager import ServerManager
 from backend.server.installer import FabricInstaller, InstallStatus
 
+try:
+    import psutil  # type: ignore
+except ImportError:  # pragma: no cover - optional dependency fallback
+    psutil = None
+
 server_bp = Blueprint('server', __name__, url_prefix='/api')
 server_manager = ServerManager()
 process_registry = get_server_process_registry()
@@ -566,6 +571,25 @@ def restart_server_by_id(server_id):
         'server': _augment_with_runtime(updated_server or server)
     }
     return jsonify(response), 200 if success else 400
+
+
+@server_bp.route('/metrics/system', methods=['GET'])
+def get_system_metrics():
+    if not psutil:
+        return jsonify({'error': 'System metrics are unavailable'}), 500
+
+    cpu_percent = psutil.cpu_percent(interval=0.1)
+    memory = psutil.virtual_memory()
+    return jsonify({
+        'cpu': {
+            'percent': round(cpu_percent, 1)
+        },
+        'memory': {
+            'percent': round(memory.percent, 1),
+            'totalBytes': memory.total,
+            'usedBytes': memory.used
+        }
+    })
 
 
 @server_bp.route('/fabric/versions/game', methods=['GET'])
