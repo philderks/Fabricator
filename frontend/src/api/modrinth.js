@@ -26,9 +26,9 @@ export async function searchMods({
 }) {
   return get('/api/modrinth/search', {
     query,
-    version,
+    mc_version: version,
     loader,
-    sort,
+    index: sort,
     limit,
     offset
   })

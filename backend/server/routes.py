@@ -371,7 +371,11 @@ def restore_server_backup(server_id, backup_id):
         return jsonify({'error': 'Stop the server before restoring a backup'}), 400
 
     backups_dir = _get_backups_dir(base_path)
-    backup_path = backups_dir / f'{backup_id}.zip'
+    try:
+        backup_path = _ensure_child_path(backups_dir, f'{backup_id}.zip')
+    except ValueError:
+        return jsonify({'error': 'Invalid backup ID'}), 400
+
     if not backup_path.exists():
         return jsonify({'error': 'Backup not found'}), 404
 
@@ -615,6 +619,25 @@ def get_system_metrics():
             'usedBytes': memory.used
         }
     })
+
+
+@server_bp.route('/servers/<server_id>/metrics', methods=['GET'])
+def get_server_metrics(server_id):
+    """Get performance metrics for a specific server."""
+    server = storage.get_server(server_id)
+    if not server:
+        return jsonify({'error': 'Server not found'}), 404
+
+    runtime = process_registry.get_status(server_id) or {}
+
+    metrics = {
+        'status': runtime.get('status', 'stopped'),
+        'ram': runtime.get('ram'),
+        'pid': runtime.get('pid'),
+        'uptime': None,  # TODO: Implement uptime tracking
+    }
+
+    return jsonify(metrics)
 
 
 @server_bp.route('/fabric/versions/game', methods=['GET'])

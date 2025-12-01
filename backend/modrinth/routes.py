@@ -4,13 +4,18 @@ from pathlib import Path
 
 from flask import Blueprint, jsonify, request
 
-from backend.modrinth.client import ModrinthClient
+from backend.modrinth.client import ModrinthClient, ModrinthApiError
 from backend.server import storage
 from backend.server.registry import get_server_process_registry
 
 modrinth_bp = Blueprint('modrinth', __name__, url_prefix='/api/modrinth')
 modrinth_client = ModrinthClient()
 process_registry = get_server_process_registry()
+
+
+def _modrinth_error_response(exc: ModrinthApiError):
+    status = exc.status_code or 502
+    return jsonify({'error': str(exc)}), status
 
 
 def _resolve_mods_folder(server_id: str | None):
@@ -39,21 +44,27 @@ def search_mods():
     offset = int(request.args.get('offset', 0))
     index = request.args.get('index', 'downloads')
 
-    result = modrinth_client.search_mods(
-        query=query,
-        mc_version=mc_version,
-        loader=loader,
-        limit=limit,
-        offset=offset,
-        index=index
-    )
-    return jsonify(result)
+    try:
+        result = modrinth_client.search_mods(
+            query=query,
+            mc_version=mc_version,
+            loader=loader,
+            limit=limit,
+            offset=offset,
+            index=index
+        )
+        return jsonify(result)
+    except ModrinthApiError as exc:
+        return _modrinth_error_response(exc)
 
 
 @modrinth_bp.route('/mod/<mod_id>', methods=['GET'])
 def get_mod(mod_id):
-    result = modrinth_client.get_mod(mod_id)
-    return jsonify(result)
+    try:
+        result = modrinth_client.get_mod(mod_id)
+        return jsonify(result)
+    except ModrinthApiError as exc:
+        return _modrinth_error_response(exc)
 
 
 @modrinth_bp.route('/mod/<mod_id>/versions', methods=['GET'])
@@ -66,13 +77,16 @@ def get_mod_versions(mod_id):
     if featured is not None:
         featured_bool = featured.lower() in ('true', '1', 'yes')
 
-    result = modrinth_client.get_mod_versions(
-        mod_id=mod_id,
-        loaders=loaders if loaders else None,
-        game_versions=game_versions if game_versions else None,
-        featured=featured_bool
-    )
-    return jsonify(result)
+    try:
+        result = modrinth_client.get_mod_versions(
+            mod_id=mod_id,
+            loaders=loaders if loaders else None,
+            game_versions=game_versions if game_versions else None,
+            featured=featured_bool
+        )
+        return jsonify(result)
+    except ModrinthApiError as exc:
+        return _modrinth_error_response(exc)
 
 
 @modrinth_bp.route('/mod/<mod_id>/download-url', methods=['GET'])
@@ -83,11 +97,14 @@ def get_mod_download_url(mod_id):
     if not mc_version:
         return jsonify({"error": "mc_version parameter is required"}), 400
 
-    download_url = modrinth_client.get_mod_download_url(
-        mod_id=mod_id,
-        mc_version=mc_version,
-        loader=loader
-    )
+    try:
+        download_url = modrinth_client.get_mod_download_url(
+            mod_id=mod_id,
+            mc_version=mc_version,
+            loader=loader
+        )
+    except ModrinthApiError as exc:
+        return _modrinth_error_response(exc)
 
     if not download_url:
         return jsonify({"error": "No suitable version found"}), 404
@@ -119,19 +136,22 @@ def install_mod(mod_id):
 
     target_path = Path(mods_folder)
 
-    download_url = modrinth_client.get_mod_download_url(
-        mod_id=mod_id,
-        mc_version=mc_version,
-        loader=loader
-    )
+    try:
+        download_url = modrinth_client.get_mod_download_url(
+            mod_id=mod_id,
+            mc_version=mc_version,
+            loader=loader
+        )
+    except ModrinthApiError as exc:
+        return _modrinth_error_response(exc)
 
     if not download_url:
         return jsonify({"error": "No suitable version found"}), 404
 
-    file_path = modrinth_client.download_mod(download_url, target_path)
-
-    if not file_path:
-        return jsonify({"error": "Download failed"}), 500
+    try:
+        file_path = modrinth_client.download_mod(download_url, target_path)
+    except ModrinthApiError as exc:
+        return _modrinth_error_response(exc)
 
     return jsonify({
         "success": True,
@@ -143,23 +163,35 @@ def install_mod(mod_id):
 
 @modrinth_bp.route('/version/<version_id>', methods=['GET'])
 def get_version(version_id):
-    result = modrinth_client.get_version(version_id)
-    return jsonify(result)
+    try:
+        result = modrinth_client.get_version(version_id)
+        return jsonify(result)
+    except ModrinthApiError as exc:
+        return _modrinth_error_response(exc)
 
 
 @modrinth_bp.route('/categories', methods=['GET'])
 def get_categories():
-    result = modrinth_client.get_categories()
-    return jsonify(result)
+    try:
+        result = modrinth_client.get_categories()
+        return jsonify(result)
+    except ModrinthApiError as exc:
+        return _modrinth_error_response(exc)
 
 
 @modrinth_bp.route('/loaders', methods=['GET'])
 def get_loaders():
-    result = modrinth_client.get_loaders()
-    return jsonify(result)
+    try:
+        result = modrinth_client.get_loaders()
+        return jsonify(result)
+    except ModrinthApiError as exc:
+        return _modrinth_error_response(exc)
 
 
 @modrinth_bp.route('/game-versions', methods=['GET'])
 def get_game_versions():
-    result = modrinth_client.get_game_versions()
-    return jsonify(result)
+    try:
+        result = modrinth_client.get_game_versions()
+        return jsonify(result)
+    except ModrinthApiError as exc:
+        return _modrinth_error_response(exc)

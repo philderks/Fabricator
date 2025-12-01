@@ -1,5 +1,6 @@
 """Minecraft server management service."""
 import os
+import re
 import shlex
 import subprocess
 import threading
@@ -104,8 +105,15 @@ class ServerManager:
         version_output = (result.stdout or "") + (result.stderr or "")
         if result.returncode != 0:
             return False, "Java executable not available"
-        if "21" not in version_output:
-            return False, "Java 21 is required to start the server"
+
+        match = re.search(r'version "(\d+)', version_output)
+        if not match:
+            return False, "Could not determine Java version"
+
+        major_version = int(match.group(1))
+        if major_version < 21:
+            return False, f"Java 21 is required (found Java {major_version})"
+
         return True, version_output.strip()
 
     def _start_log_streams(self) -> None:

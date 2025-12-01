@@ -7,6 +7,14 @@ from typing import Optional, Dict, List, Any
 import requests
 
 
+class ModrinthApiError(Exception):
+    """Raised when Modrinth API request fails."""
+
+    def __init__(self, message: str, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
+
+
 class ModrinthClient:
     """Client for interacting with the Modrinth API."""
 
@@ -19,6 +27,15 @@ class ModrinthClient:
             'User-Agent': self.USER_AGENT,
             'Accept': 'application/json'
         })
+
+    def _request(self, method: str, url: str, *, timeout: int = 15, error_context: str, **kwargs) -> requests.Response:
+        try:
+            response = self.session.request(method, url, timeout=timeout, **kwargs)
+            response.raise_for_status()
+            return response
+        except requests.exceptions.RequestException as exc:
+            status_code = getattr(getattr(exc, 'response', None), 'status_code', None)
+            raise ModrinthApiError(f"{error_context}: {exc}", status_code=status_code) from exc
 
     def search_mods(
         self,
@@ -45,20 +62,23 @@ class ModrinthClient:
             "facets": json.dumps(facets)
         }
 
-        try:
-            response = self.session.get(f"{self.BASE_URL}/search", params=params, timeout=15)
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.RequestException as exc:
-            return {"error": str(exc), "hits": [], "total_hits": 0}
+        response = self._request(
+            'get',
+            f"{self.BASE_URL}/search",
+            params=params,
+            timeout=15,
+            error_context="Failed to search mods"
+        )
+        return response.json()
 
     def get_mod(self, mod_id: str) -> Dict[str, Any]:
-        try:
-            response = self.session.get(f"{self.BASE_URL}/project/{mod_id}", timeout=15)
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.RequestException as exc:
-            return {"error": str(exc)}
+        response = self._request(
+            'get',
+            f"{self.BASE_URL}/project/{mod_id}",
+            timeout=15,
+            error_context="Failed to fetch mod"
+        )
+        return response.json()
 
     def get_mod_versions(
         self,
@@ -75,24 +95,23 @@ class ModrinthClient:
         if featured is not None:
             params["featured"] = str(featured).lower()
 
-        try:
-            response = self.session.get(
-                f"{self.BASE_URL}/project/{mod_id}/version",
-                params=params if params else None,
-                timeout=15
-            )
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.RequestException as exc:
-            return [{"error": str(exc)}]
+        response = self._request(
+            'get',
+            f"{self.BASE_URL}/project/{mod_id}/version",
+            params=params if params else None,
+            timeout=15,
+            error_context="Failed to fetch mod versions"
+        )
+        return response.json()
 
     def get_version(self, version_id: str) -> Dict[str, Any]:
-        try:
-            response = self.session.get(f"{self.BASE_URL}/version/{version_id}", timeout=15)
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.RequestException as exc:
-            return {"error": str(exc)}
+        response = self._request(
+            'get',
+            f"{self.BASE_URL}/version/{version_id}",
+            timeout=15,
+            error_context="Failed to fetch version"
+        )
+        return response.json()
 
     def pick_best_version(self, versions: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         if not versions:
@@ -151,38 +170,45 @@ class ModrinthClient:
             filename = download_url.split("/")[-1]
             target_path = target_folder / filename
 
-            with self.session.get(download_url, stream=True, timeout=60) as response:
-                response.raise_for_status()
+            with self._request(
+                'get',
+                download_url,
+                stream=True,
+                timeout=60,
+                error_context="Failed to download mod file"
+            ) as response:
                 with open(target_path, "wb") as file_handle:
                     for chunk in response.iter_content(chunk_size=8192):
                         if chunk:
                             file_handle.write(chunk)
 
             return target_path
-        except Exception as exc:
-            print(f"Download failed: {exc}")
-            return None
+        except OSError as exc:
+            raise ModrinthApiError(f"Failed to save mod file: {exc}") from exc
 
     def get_categories(self) -> List[Dict[str, Any]]:
-        try:
-            response = self.session.get(f"{self.BASE_URL}/tag/category")
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.RequestException as exc:
-            return [{"error": str(exc)}]
+        response = self._request(
+            'get',
+            f"{self.BASE_URL}/tag/category",
+            timeout=15,
+            error_context="Failed to fetch categories"
+        )
+        return response.json()
 
     def get_loaders(self) -> List[Dict[str, Any]]:
-        try:
-            response = self.session.get(f"{self.BASE_URL}/tag/loader")
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.RequestException as exc:
-            return [{"error": str(exc)}]
+        response = self._request(
+            'get',
+            f"{self.BASE_URL}/tag/loader",
+            timeout=15,
+            error_context="Failed to fetch loaders"
+        )
+        return response.json()
 
     def get_game_versions(self) -> List[Dict[str, Any]]:
-        try:
-            response = self.session.get(f"{self.BASE_URL}/tag/game_version")
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.RequestException as exc:
-            return [{"error": str(exc)}]
+        response = self._request(
+            'get',
+            f"{self.BASE_URL}/tag/game_version",
+            timeout=15,
+            error_context="Failed to fetch game versions"
+        )
+        return response.json()
