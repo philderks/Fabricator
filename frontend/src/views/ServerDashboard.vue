@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import StatCard from '../components/ui/StatCard.vue'
 import PerformanceMetrics from '../components/server/PerformanceMetrics.vue'
 import ModItem from '../components/server/ModItem.vue'
@@ -24,11 +24,13 @@ import {
   saveServerFile,
   createBackup,
   getBackups,
-  restoreBackup
+  restoreBackup,
+  deleteServer
 } from '../api/servers'
 import { useToast } from '../composables/useToast'
 
 const route = useRoute()
+const router = useRouter()
 const toast = useToast()
 const serverId = route.params.id
 
@@ -56,6 +58,8 @@ const fileBrowser = ref({ currentPath: '', entries: [], loading: false, error: n
 const backupToRestore = ref(null)
 const showBackupRestoreModal = ref(false)
 const restoringBackup = ref(false)
+const showDeleteServerModal = ref(false)
+const deletingServer = ref(false)
 
 const defaultSettings = (data = {}) => ({
   name: data.name || 'Minecraft Server',
@@ -196,7 +200,7 @@ const confirmRestoreBackup = async () => {
     const backupId = backupToRestore.value.relativePath.replace(/\.zip$/i, '')
     await restoreBackup(serverId, backupId)
     toast.success('Backup restored successfully', 'Backups')
-    await openFileBrowser()
+    await Promise.all([openFileBrowser(), loadMods()])
   } catch (error) {
     console.error('Failed to restore backup:', error)
     toast.error(error.message || 'Failed to restore backup', 'Backups')
@@ -426,6 +430,29 @@ const openModBrowser = () => {
   showModBrowser.value = true
 }
 
+const openDeleteServerModal = () => {
+  showDeleteServerModal.value = true
+}
+
+const cancelDeleteServer = () => {
+  showDeleteServerModal.value = false
+}
+
+const confirmDeleteServer = async () => {
+  deletingServer.value = true
+  try {
+    await deleteServer(serverId)
+    toast.success('Server deleted', 'Servers')
+    router.push('/')
+  } catch (error) {
+    console.error('Failed to delete server:', error)
+    toast.error(error.message || 'Failed to delete server', 'Server Error')
+  } finally {
+    deletingServer.value = false
+    showDeleteServerModal.value = false
+  }
+}
+
 const handleInstallMod = async (modData) => {
   if (!server.value) {
     return
@@ -610,6 +637,13 @@ onUnmounted(() => {
           </div>
         </div>
         <div class="server-controls">
+          <button
+            class="btn btn-outline"
+            :disabled="deletingServer"
+            @click="openDeleteServerModal"
+          >
+            {{ deletingServer ? 'Deleting…' : 'Delete' }}
+          </button>
           <button
             class="btn btn-danger"
             v-if="serverStatus.status === 'running'"
@@ -933,6 +967,20 @@ onUnmounted(() => {
       @cancel="cancelRestoreBackup"
       @close="cancelRestoreBackup"
     />
+
+    <ConfirmModal
+      :show="showDeleteServerModal"
+      title="Delete Server"
+      message="Delete this server permanently?"
+      description="All server files and backups remain on disk, but this entry will be removed from Fabricator."
+      type="danger"
+      confirm-text="Delete"
+      cancel-text="Cancel"
+      :loading="deletingServer"
+      @confirm="confirmDeleteServer"
+      @cancel="cancelDeleteServer"
+      @close="cancelDeleteServer"
+    />
   </div>
 </template>
 
@@ -1181,13 +1229,6 @@ onUnmounted(() => {
   border: 1px dashed var(--border-color);
   border-radius: 8px;
   background: var(--bg-secondary);
-}
-
-.loading-state {
-  padding: 4rem 2rem;
-  text-align: center;
-  color: var(--text-muted);
-  font-size: 1rem;
 }
 
 .skeleton {

@@ -415,15 +415,38 @@ def update_server_settings(server_id):
 
 @server_bp.route('/servers/<server_id>', methods=['DELETE'])
 def delete_server_route(server_id):
-    success = storage.delete_server(server_id)
-
-    if not success:
+    server = storage.get_server(server_id)
+    if not server:
         return jsonify({'error': 'Server not found'}), 404
 
-    return jsonify({
-        'success': True,
-        'message': 'Server deleted successfully'
-    })
+    # Stop running process if needed
+    process_registry.stop_server(server_id)
+
+    # Resolve install path to clean up files
+    install_path = None
+    try:
+        install_path = _get_install_path(server)
+    except ValueError:
+        install_path = None
+
+    # Remove server from storage
+    storage.delete_server(server_id)
+
+    # Delete files on disk
+    removal_error = None
+    if install_path and install_path.exists():
+        try:
+            shutil.rmtree(install_path)
+        except OSError as exc:
+            removal_error = str(exc)
+
+    response = {
+        'success': removal_error is None,
+        'message': 'Server deleted successfully' if not removal_error else 'Server removed but files could not be deleted',
+    }
+    if removal_error:
+        response['error'] = removal_error
+    return jsonify(response), 200 if removal_error is None else 500
 
 
 @server_bp.route('/servers/<server_id>/install', methods=['POST'])
