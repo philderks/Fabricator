@@ -3,7 +3,7 @@
     "id": "srv_690d3c89",
     "status": "stopped",
     "createdAt": "2025-11-28T12:52:49.974002Z",
-    "updatedAt": "2025-12-01T09:10:06.823994Z",
+    "updatedAt": "2025-12-01T09:40:47.672765Z",
     "name": "Test1",
     "version": "1.21.10",
     "loader": "fabric",
