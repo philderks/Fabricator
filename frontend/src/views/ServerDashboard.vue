@@ -80,8 +80,11 @@ const defaultSettings = (data = {}) => ({
   commandBlocks: data.commandBlocks ?? true
 })
 
-const loadServer = async () => {
-  serverLoading.value = true
+const loadServer = async (options = {}) => {
+  const { silent = false } = options
+  if (!silent) {
+    serverLoading.value = true
+  }
   try {
     const data = await getServer(serverId)
     server.value = data
@@ -90,7 +93,9 @@ const loadServer = async () => {
     console.error('Failed to load server:', error)
     toast.error('Could not load server details', 'Error')
   } finally {
-    serverLoading.value = false
+    if (!silent) {
+      serverLoading.value = false
+    }
   }
 }
 
@@ -282,6 +287,7 @@ watch(activeTab, (tab) => {
 })
 
 let logsIntervalId = null
+let serverStatusIntervalId = null
 
 const startLogPolling = () => {
   if (logsIntervalId || activeTab.value !== 'console') {
@@ -296,6 +302,22 @@ const stopLogPolling = () => {
   if (logsIntervalId) {
     clearInterval(logsIntervalId)
     logsIntervalId = null
+  }
+}
+
+const startServerStatusPolling = () => {
+  if (serverStatusIntervalId) {
+    return
+  }
+  serverStatusIntervalId = setInterval(() => {
+    loadServer({ silent: true })
+  }, 2500)
+}
+
+const stopServerStatusPolling = () => {
+  if (serverStatusIntervalId) {
+    clearInterval(serverStatusIntervalId)
+    serverStatusIntervalId = null
   }
 }
 
@@ -562,10 +584,12 @@ watch(activeTab, (tab) => {
 
 onMounted(async () => {
   await refreshAll()
+  startServerStatusPolling()
 })
 
 onUnmounted(() => {
   stopLogPolling()
+  stopServerStatusPolling()
 })
 </script>
 

@@ -121,7 +121,7 @@ const cpuStatLabel = computed(() => {
 onMounted(() => {
   loadServers()
   loadSystemMetrics()
-  systemMetricsIntervalId = setInterval(loadSystemMetrics, 10000)
+  systemMetricsIntervalId = setInterval(loadSystemMetrics, 2500)
 })
 
 onUnmounted(() => {
