@@ -291,15 +291,6 @@ export default {
   border-color: var(--primary);
 }
 
-.loading-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 60px 20px;
-  color: var(--text-secondary);
-}
-
 .loading-spinner {
   width: 48px;
   height: 48px;
@@ -389,33 +380,6 @@ export default {
 .btn-sm {
   padding: 8px 16px;
   font-size: 0.875rem;
-}
-
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 80px 20px;
-  text-align: center;
-}
-
-.empty-state svg {
-  color: var(--text-tertiary);
-  margin-bottom: 20px;
-}
-
-.empty-state h3 {
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin: 0 0 8px 0;
-}
-
-.empty-state p {
-  font-size: 0.9375rem;
-  color: var(--text-secondary);
-  margin: 0;
 }
 
 /* Scrollbar styling */

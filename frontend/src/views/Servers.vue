@@ -212,39 +212,6 @@ onUnmounted(() => {
   gap: 1.25rem;
 }
 
-.loading-state,
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 4rem 2rem;
-  text-align: center;
-}
-
-.loading-state p {
-  color: var(--text-muted);
-  font-size: 1rem;
-}
-
-.empty-state svg {
-  color: var(--text-muted);
-  margin-bottom: 1.5rem;
-}
-
-.empty-state h3 {
-  font-size: 1.5rem;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin: 0 0 0.5rem 0;
-}
-
-.empty-state p {
-  font-size: 1rem;
-  color: var(--text-muted);
-  margin: 0 0 2rem 0;
-}
-
 @media (max-width: 1024px) {
   .stats {
     grid-template-columns: repeat(2, 1fr);
