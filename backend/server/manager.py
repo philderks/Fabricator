@@ -27,6 +27,7 @@ class ServerManager:
             self.DEFAULT_COMMAND
         )
         self.cwd = cwd or os.path.join(os.getcwd(), "server")
+        self._memory_limit_bytes = self._extract_memory_limit_bytes(self.command)
         self._process: Optional[subprocess.Popen] = None
         self._ps_process: Optional["psutil.Process"] = None  # type: ignore[name-defined]
         self._stdout_thread: Optional[threading.Thread] = None
@@ -42,6 +43,43 @@ class ServerManager:
             return shlex.split(command)
         if isinstance(command, Iterable):
             return list(command)
+        return None
+
+    @staticmethod
+    def _parse_memory_quantity(spec: str) -> Optional[int]:
+        if not spec:
+            return None
+        spec = spec.strip()
+        if not spec:
+            return None
+        unit = spec[-1].lower()
+        multipliers = {
+            'k': 1024,
+            'm': 1024 ** 2,
+            'g': 1024 ** 3
+        }
+        if unit in multipliers:
+            number_part = spec[:-1]
+            multiplier = multipliers[unit]
+        else:
+            number_part = spec
+            multiplier = 1
+        try:
+            value = float(number_part)
+        except ValueError:
+            return None
+        return int(value * multiplier)
+
+    def _extract_memory_limit_bytes(self, command: Optional[List[str]]) -> Optional[int]:
+        if not command:
+            return None
+        for part in command:
+            if not isinstance(part, str):
+                continue
+            if part.startswith('-Xmx') and len(part) > 4:
+                quantity = self._parse_memory_quantity(part[4:])
+                if quantity:
+                    return quantity
         return None
 
     def _ensure_server_dir(self) -> None:
@@ -186,13 +224,19 @@ class ServerManager:
         status_value = "running" if self.is_running else "stopped"
         message = "Server process is running" if self.is_running else "Server process is not running"
         ram_usage = self._get_ram_usage_bytes()
+        ram_limit = self._memory_limit_bytes
         status = {"status": status_value, "message": message}
-        if ram_usage is not None:
-            status["ram"] = {
-                "usedBytes": ram_usage,
-                "usedMB": round(ram_usage / (1024 ** 2), 2),
-                "usedGB": round(ram_usage / (1024 ** 3), 3)
-            }
+        if ram_usage is not None or ram_limit is not None:
+            ram_info = {}
+            if ram_usage is not None:
+                ram_info["usedBytes"] = ram_usage
+                ram_info["usedMB"] = round(ram_usage / (1024 ** 2), 2)
+                ram_info["usedGB"] = round(ram_usage / (1024 ** 3), 3)
+            if ram_limit is not None:
+                ram_info["limitBytes"] = ram_limit
+                ram_info["limitMB"] = round(ram_limit / (1024 ** 2), 2)
+                ram_info["limitGB"] = round(ram_limit / (1024 ** 3), 3)
+            status["ram"] = ram_info
         if self._process and self.is_running:
             status["pid"] = self._process.pid
         return status
