@@ -1,7 +1,13 @@
 """Server management routes and blueprints."""
 from datetime import datetime
 from pathlib import Path
+<<<<<<< HEAD
 import shutil
+=======
+import os
+import shutil
+import stat
+>>>>>>> feature/windows-support
 import zipfile
 
 from flask import Blueprint, jsonify, request
@@ -10,6 +16,12 @@ from backend.server.registry import get_server_process_registry
 from backend.server import storage
 from backend.server.manager import ServerManager
 from backend.server.installer import FabricInstaller, InstallStatus
+from backend.utils import platform as platform_utils
+
+try:
+    import psutil  # type: ignore
+except ImportError:  # pragma: no cover - optional dependency fallback
+    psutil = None
 
 try:
     import psutil  # type: ignore
@@ -19,6 +31,26 @@ except ImportError:  # pragma: no cover - optional dependency fallback
 server_bp = Blueprint('server', __name__, url_prefix='/api')
 server_manager = ServerManager()
 process_registry = get_server_process_registry()
+FABRIC_META_STAGING_DIR = platform_utils.temp_directory('fabricator-meta')
+
+
+def _handle_remove_readonly(func, path, exc_info):
+    """Retry deletions on Windows by toggling the readonly bit."""
+    try:
+        os.chmod(path, stat.S_IWRITE)
+    except OSError:
+        pass
+    func(path)
+
+
+def _unlink_with_retry(target: Path) -> None:
+    try:
+        target.unlink()
+    except FileNotFoundError:
+        return
+    except PermissionError:
+        target.chmod(stat.S_IWRITE)
+        target.unlink()
 
 
 def _augment_with_runtime(server: dict) -> dict:
@@ -395,7 +427,11 @@ def delete_server_mod(server_id, filename):
     if not target.exists() or not target.is_file():
         return jsonify({'error': 'Mod file not found'}), 404
 
+<<<<<<< HEAD
     target.unlink()
+=======
+    _unlink_with_retry(target)
+>>>>>>> feature/windows-support
     return jsonify({'success': True, 'message': f'{target.name} removed'})
 
 
@@ -444,7 +480,14 @@ def create_server_backup(server_id):
                 zip_file.write(file_path, file_path.relative_to(base_path))
     except OSError as exc:
         if archive_path.exists():
+<<<<<<< HEAD
             archive_path.unlink(missing_ok=True)
+=======
+            try:
+                _unlink_with_retry(archive_path)
+            except OSError:
+                pass
+>>>>>>> feature/windows-support
         return jsonify({'error': f'Failed to create backup: {exc}'}), 500
 
     return jsonify({
@@ -482,9 +525,15 @@ def restore_server_backup(server_id, backup_id):
             if entry == backups_dir:
                 continue
             if entry.is_dir():
+<<<<<<< HEAD
                 shutil.rmtree(entry)
             else:
                 entry.unlink()
+=======
+                shutil.rmtree(entry, onerror=_handle_remove_readonly)
+            else:
+                _unlink_with_retry(entry)
+>>>>>>> feature/windows-support
 
         with zipfile.ZipFile(backup_path, 'r') as zip_file:
             _safe_extract_zip(zip_file, base_path)
@@ -517,7 +566,11 @@ def delete_server_backup(server_id, backup_id):
         return jsonify({'error': 'Backup not found'}), 404
 
     try:
+<<<<<<< HEAD
         backup_path.unlink()
+=======
+        _unlink_with_retry(backup_path)
+>>>>>>> feature/windows-support
     except OSError as exc:
         return jsonify({'error': f'Failed to delete backup: {exc}'}), 500
 
@@ -581,7 +634,11 @@ def delete_server_route(server_id):
     removal_error = None
     if install_path and install_path.exists():
         try:
+<<<<<<< HEAD
             shutil.rmtree(install_path)
+=======
+            shutil.rmtree(install_path, onerror=_handle_remove_readonly)
+>>>>>>> feature/windows-support
         except OSError as exc:
             removal_error = str(exc)
 
@@ -781,7 +838,7 @@ def get_server_metrics(server_id):
 @server_bp.route('/fabric/versions/game', methods=['GET'])
 def get_fabric_game_versions():
     """Get Minecraft versions supported by Fabric."""
-    installer = FabricInstaller(Path('/tmp'))
+    installer = FabricInstaller(FABRIC_META_STAGING_DIR)
     versions = installer.get_minecraft_versions()
     return jsonify(versions)
 
@@ -790,7 +847,7 @@ def get_fabric_game_versions():
 def get_fabric_loader_versions():
     """Get available Fabric loader versions."""
     mc_version = request.args.get('mc_version')
-    installer = FabricInstaller(Path('/tmp'))
+    installer = FabricInstaller(FABRIC_META_STAGING_DIR)
     versions = installer.get_available_versions(mc_version)
     return jsonify(versions)
 
