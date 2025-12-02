@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 
 const props = defineProps({
   serverStatus: {
@@ -39,8 +39,31 @@ const consoleCommandModel = computed({
   set: (value) => emit('update:consoleCommand', value)
 })
 
+const stdoutBodyRef = ref(null)
+const stderrBodyRef = ref(null)
+
 const handleRefresh = () => emit('refresh-logs')
 const handleSendCommand = () => emit('send-command')
+
+const scheduleScroll = (targetRef) => {
+  nextTick(() => {
+    if (targetRef.value) {
+      targetRef.value.scrollTop = targetRef.value.scrollHeight
+    }
+  })
+}
+
+const registerAutoScroll = (targetRef, lengthGetter) => {
+  watch(lengthGetter, () => scheduleScroll(targetRef), { immediate: true })
+}
+
+registerAutoScroll(stdoutBodyRef, () => props.logs.stdout?.length ?? 0)
+registerAutoScroll(stderrBodyRef, () => props.logs.stderr?.length ?? 0)
+
+onMounted(() => {
+  scheduleScroll(stdoutBodyRef)
+  scheduleScroll(stderrBodyRef)
+})
 </script>
 
 <template>
@@ -76,7 +99,7 @@ const handleSendCommand = () => emit('send-command')
     <div class="console-output">
       <div class="console-stream">
         <div class="console-stream__header">STDOUT</div>
-        <div class="console-stream__body">
+        <div class="console-stream__body" ref="stdoutBodyRef">
           <template v-if="logs.stdout?.length">
             <pre v-for="(line, idx) in logs.stdout" :key="`stdout-${idx}`">{{ line }}</pre>
           </template>
@@ -85,7 +108,7 @@ const handleSendCommand = () => emit('send-command')
       </div>
       <div class="console-stream">
         <div class="console-stream__header">STDERR</div>
-        <div class="console-stream__body">
+        <div class="console-stream__body" ref="stderrBodyRef">
           <template v-if="logs.stderr?.length">
             <pre v-for="(line, idx) in logs.stderr" :key="`stderr-${idx}`">{{ line }}</pre>
           </template>
