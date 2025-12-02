@@ -1,6 +1,10 @@
 <template>
   <div class="settings-tab">
     <form class="settings-form" @submit.prevent="handleSave">
+      <div class="settings-guard" v-if="formDisabled">
+        Stop the server before editing configuration.
+      </div>
+      <fieldset class="settings-fieldset" :disabled="formDisabled">
       <div class="mode-toggle">
         <div>
           <p class="mode-label">{{ modeLabel }}</p>
@@ -616,6 +620,7 @@
         <button type="button" class="btn btn-secondary" @click="handleReset">Reset</button>
         <button type="submit" class="btn btn-primary">Save Changes</button>
       </div>
+      </fieldset>
     </form>
   </div>
 </template>
@@ -635,6 +640,10 @@ const props = defineProps({
   serverLoader: {
     type: String,
     default: 'Unknown'
+  },
+  canEdit: {
+    type: Boolean,
+    default: true
   }
 })
 
@@ -648,6 +657,7 @@ const motdCharacters = computed(() => localSettings.motd?.length ?? 0)
 const statusIntervalDisabled = computed(() => !localSettings.enableStatus)
 const queryDisabled = computed(() => !localSettings.enableQuery)
 const rconDisabled = computed(() => !localSettings.enableRcon)
+const formDisabled = computed(() => !props.canEdit)
 
 const modeLabel = computed(() => (showAdvanced.value ? 'Expert mode' : 'Basic mode'))
 const modeDescription = computed(() =>
@@ -675,10 +685,16 @@ watch(
 const toPlainObject = () => JSON.parse(JSON.stringify(localSettings))
 
 const handleSave = () => {
+  if (formDisabled.value) {
+    return
+  }
   emit('save', toPlainObject())
 }
 
 const handleReset = () => {
+  if (formDisabled.value) {
+    return
+  }
   emit('reset')
   syncFromProps(props.settings)
 }
@@ -696,3 +712,25 @@ const enableAdvanced = async () => {
 
 defineExpose({ enableAdvanced })
 </script>
+
+<style scoped>
+.settings-fieldset {
+  border: none;
+  padding: 0;
+  margin: 0;
+  min-inline-size: 0;
+}
+
+.settings-fieldset[disabled] {
+  opacity: 0.6;
+}
+
+.settings-guard {
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--warning);
+  border-radius: 8px;
+  color: var(--warning);
+  background: color-mix(in oklch, var(--warning) 12%, transparent);
+}
+</style>

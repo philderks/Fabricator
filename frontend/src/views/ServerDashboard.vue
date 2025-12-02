@@ -412,6 +412,8 @@ const serverStatus = computed(() => {
   }
 })
 
+const canEditSettings = computed(() => serverStatus.value.status !== 'running')
+
 const ramMetrics = computed(() => {
   const runtimeRam = server.value?.runtime?.ram
   const runtimeLimit = typeof runtimeRam?.limitGB === 'number' ? runtimeRam.limitGB : null
@@ -657,7 +659,7 @@ const handleSaveSettings = async (settings) => {
     logActivity({ type: 'settings_update' })
   } catch (error) {
     console.error('Failed to save settings:', error)
-    toast.error('Failed to save settings', 'Error')
+    toast.error(error.message || 'Failed to save settings', 'Error')
   }
 }
 
@@ -817,6 +819,7 @@ onUnmounted(() => {
           :settings="serverSettings"
           :server-version="serverStatus.version"
           :server-loader="serverStatus.loader"
+          :can-edit="canEditSettings"
           @save="handleSaveSettings"
           @reset="resetSettings"
         />
