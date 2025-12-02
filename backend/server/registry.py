@@ -2,11 +2,31 @@
 from __future__ import annotations
 
 import threading
+import time
 from pathlib import Path
 from typing import Dict, Optional
 
 from backend.core.config import get_config
 from backend.server.manager import ServerManager
+
+
+def _format_uptime(seconds: int) -> str:
+    """Format uptime seconds to human readable string."""
+    if seconds < 60:
+        return f"{seconds}s"
+
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes}m"
+
+    hours = minutes // 60
+    remaining_minutes = minutes % 60
+    if hours < 24:
+        return f"{hours}h {remaining_minutes}m"
+
+    days = hours // 24
+    remaining_hours = hours % 24
+    return f"{days}d {remaining_hours}h"
 
 
 class ServerProcessRegistry:
@@ -17,6 +37,7 @@ class ServerProcessRegistry:
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._instances: Dict[str, ServerManager] = {}
+        self._started_at: Dict[str, float] = {}
 
     def _ensure_within_root(self, candidate: Path) -> Path:
         candidate = candidate.expanduser().resolve()
@@ -66,19 +87,38 @@ class ServerProcessRegistry:
             return manager
 
     def get_status(self, server_id: str) -> Dict[str, object]:
+        server_id = str(server_id)
         with self._lock:
             manager = self._instances.get(server_id)
+            started_at = self._started_at.get(server_id)
         if not manager:
             return {'status': 'stopped', 'message': 'Server process is not running'}
-        return manager.status()
+
+        status = manager.status()
+        if status.get('status') == 'running' and started_at:
+            uptime_seconds = max(0, int(time.time() - started_at))
+            status = dict(status)
+            status['uptime'] = _format_uptime(uptime_seconds)
+            status['startedAt'] = started_at
+        elif status.get('status') != 'running':
+            with self._lock:
+                self._started_at.pop(server_id, None)
+        return status
 
     def start_server(self, server: Dict[str, object]) -> Dict[str, object]:
         manager = self._get_or_create_manager(server)
-        return manager.start()
+        result = manager.start()
+        if result.get('status') == 'running':
+            server_id = str(server['id'])
+            with self._lock:
+                self._started_at[server_id] = time.time()
+        return result
 
     def stop_server(self, server_id: str) -> Dict[str, object]:
+        server_id = str(server_id)
         with self._lock:
             manager = self._instances.get(server_id)
+            self._started_at.pop(server_id, None)
         if not manager:
             return {'status': 'stopped', 'message': 'Server is not running'}
         return manager.stop()
@@ -118,6 +158,7 @@ class ServerProcessRegistry:
         """Remove cached manager so next start uses fresh settings."""
         with self._lock:
             self._instances.pop(server_id, None)
+            self._started_at.pop(server_id, None)
 
 
 _registry: Optional[ServerProcessRegistry] = None
