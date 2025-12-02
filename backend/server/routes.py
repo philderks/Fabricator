@@ -4,7 +4,6 @@ from pathlib import Path
 import os
 import shutil
 import stat
-import tempfile
 import zipfile
 
 from flask import Blueprint, jsonify, request
@@ -13,6 +12,7 @@ from backend.server.registry import get_server_process_registry
 from backend.server import storage
 from backend.server.manager import ServerManager
 from backend.server.installer import FabricInstaller, InstallStatus
+from backend.utils import platform as platform_utils
 
 try:
     import psutil  # type: ignore
@@ -22,8 +22,7 @@ except ImportError:  # pragma: no cover - optional dependency fallback
 server_bp = Blueprint('server', __name__, url_prefix='/api')
 server_manager = ServerManager()
 process_registry = get_server_process_registry()
-FABRIC_META_STAGING_DIR = Path(tempfile.gettempdir()) / 'fabricator-meta'
-FABRIC_META_STAGING_DIR.mkdir(parents=True, exist_ok=True)
+FABRIC_META_STAGING_DIR = platform_utils.temp_directory('fabricator-meta')
 
 
 def _handle_remove_readonly(func, path, exc_info):

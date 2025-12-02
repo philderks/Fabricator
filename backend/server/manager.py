@@ -1,11 +1,12 @@
 """Minecraft server management service."""
 import os
 import re
-import shlex
 import subprocess
 import threading
 import time
 from typing import Iterable, List, Optional
+
+from backend.utils import platform as platform_utils
 
 try:
     import psutil  # type: ignore
@@ -49,8 +50,7 @@ class ServerManager:
     @staticmethod
     def _split_command(command: str) -> List[str]:
         """Split a command string with platform-appropriate shlex settings."""
-        posix_mode = os.name != "nt"
-        return shlex.split(command, posix=posix_mode)
+        return platform_utils.split_command(command)
 
     @staticmethod
     def _parse_memory_quantity(spec: str) -> Optional[int]:
