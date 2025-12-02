@@ -65,7 +65,8 @@ const emit = defineEmits([
   'open-console',
   'open-files',
   'scroll-settings',
-  'request-restore-backup'
+  'request-restore-backup',
+  'request-delete-backup'
 ])
 
 const modSearchModel = computed({
@@ -79,6 +80,7 @@ const handleOpenConsole = () => emit('open-console')
 const handleOpenFiles = () => emit('open-files')
 const handleScrollSettings = (section) => emit('scroll-settings', section)
 const handleRequestRestore = (backup) => emit('request-restore-backup', backup)
+const handleRequestDelete = (backup) => emit('request-delete-backup', backup)
 </script>
 
 <template>
@@ -177,6 +179,7 @@ const handleRequestRestore = (backup) => emit('request-restore-backup', backup)
               </div>
               <div class="backup-actions">
                 <button class="btn-text" @click="handleRequestRestore(backup)">Restore</button>
+                <button class="btn-text danger" @click="handleRequestDelete(backup)">Delete</button>
               </div>
             </div>
           </div>
