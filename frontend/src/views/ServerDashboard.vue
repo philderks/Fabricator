@@ -30,7 +30,7 @@ import { useToast } from '../composables/useToast'
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
-const serverId = route.params.id
+const serverId = computed(() => route.params.id)
 
 const server = ref(null)
 const serverLoading = ref(true)
@@ -135,7 +135,7 @@ const loadServer = async (options = {}) => {
     serverLoading.value = true
   }
   try {
-    const data = await getServer(serverId)
+    const data = await getServer(serverId.value)
     server.value = data
     const mappedSettings = defaultSettings(data)
     if (!serverSettings.value || activeTab.value !== 'settings') {
@@ -154,7 +154,7 @@ const loadServer = async (options = {}) => {
 const loadMods = async () => {
   modsLoading.value = true
   try {
-    const files = await getInstalledMods(serverId)
+    const files = await getInstalledMods(serverId.value)
     installedMods.value = files.map((file) => ({
       name: file.name,
       filename: file.name,
@@ -183,7 +183,7 @@ const loadLogs = async (limit = 200) => {
   }
   logsLoading.value = true
   try {
-    logs.value = await getServerLogs(serverId, { limit })
+    logs.value = await getServerLogs(serverId.value, { limit })
   } catch (error) {
     console.error('Failed to load logs:', error)
     toast.error('Failed to load console logs', 'Error')
@@ -195,7 +195,7 @@ const loadLogs = async (limit = 200) => {
 const loadBackups = async () => {
   backupLoading.value = true
   try {
-    backups.value = await getBackups(serverId)
+    backups.value = await getBackups(serverId.value)
   } catch (error) {
     console.error('Failed to load backups:', error)
     toast.error('Failed to load backups', 'Backups')
@@ -214,7 +214,7 @@ const createBackupAction = async () => {
   }
   backupLoading.value = true
   try {
-    await createBackup(serverId)
+    await createBackup(serverId.value)
     toast.success('Backup created successfully', 'Backups')
     await loadBackups()
     activeTab.value = 'files'
@@ -246,7 +246,7 @@ const confirmRestoreBackup = async () => {
   restoringBackup.value = true
   try {
     const backupId = backupToRestore.value.relativePath.replace(/\.zip$/i, '')
-    await restoreBackup(serverId, backupId)
+    await restoreBackup(serverId.value, backupId)
     toast.success('Backup restored successfully', 'Backups')
     await Promise.all([openFileBrowser(), loadMods()])
   } catch (error) {
@@ -267,7 +267,7 @@ const openFileBrowser = async (path = '') => {
   fileBrowser.value.loading = true
   fileBrowser.value.error = null
   try {
-    const data = await browseServerFiles(serverId, path ? { path } : {})
+    const data = await browseServerFiles(serverId.value, path ? { path } : {})
     fileBrowser.value = { ...data, entries: data.entries, loading: false, error: null }
   } catch (error) {
     console.error('Failed to browse files:', error)
@@ -479,7 +479,7 @@ const cancelDeleteServer = () => {
 const confirmDeleteServer = async () => {
   deletingServer.value = true
   try {
-    await deleteServer(serverId)
+    await deleteServer(serverId.value)
     toast.success('Server deleted', 'Servers')
     router.push('/')
   } catch (error) {
@@ -500,7 +500,7 @@ const handleInstallMod = async (modData) => {
     await installMod(modData.modId, {
       mc_version: modData.mcVersion,
       loader: modData.loader,
-      server_id: serverId
+      server_id: serverId.value
     })
     showModBrowser.value = false
     toast.success(`${modData.modTitle} installed successfully!`, 'Mod Installed')
@@ -537,7 +537,7 @@ const confirmRemoveMod = async () => {
     return
   }
   try {
-    await removeMod(serverId, modToRemove.value.filename || modToRemove.value.name)
+    await removeMod(serverId.value, modToRemove.value.filename || modToRemove.value.name)
     toast.success(`${modToRemove.value.name} removed`, 'Mod Removed')
     logActivity({ type: 'mod_remove', mod: modToRemove.value.name })
     await loadMods()
@@ -561,7 +561,7 @@ const performServerAction = async (action, fn, successMessage) => {
   }
   actionState.value = { ...actionState.value, [action]: true }
   try {
-    const result = await fn(serverId)
+    const result = await fn(serverId.value)
     if (result.success) {
       toast.success(successMessage, 'Server Updated')
       logActivity({ type: `server_${action}` })
@@ -599,7 +599,7 @@ const sendConsoleCommand = async () => {
   }
   commandSending.value = true
   try {
-    await sendServerCommand(serverId, consoleCommand.value.trim())
+    await sendServerCommand(serverId.value, consoleCommand.value.trim())
     toast.success('Command sent to server', 'Console')
     consoleCommand.value = ''
     await loadLogs()
@@ -616,7 +616,7 @@ const handleSaveSettings = async (settings) => {
     return
   }
   try {
-    const updated = await updateServerSettings(serverId, settings)
+    const updated = await updateServerSettings(serverId.value, settings)
     server.value = updated
     serverSettings.value = defaultSettings(updated)
     toast.success('Settings saved successfully', 'Settings Updated')
@@ -633,6 +633,40 @@ const resetSettings = () => {
   }
   serverSettings.value = defaultSettings(server.value)
 }
+
+const resetDashboardState = () => {
+  server.value = null
+  serverSettings.value = null
+  installedMods.value = []
+  logs.value = { stdout: [], stderr: [], running: false }
+  recentActivity.value = []
+  backups.value = []
+  fileBrowser.value = { currentPath: '', entries: [], loading: false, error: null }
+  modSearch.value = ''
+  modToRemove.value = null
+  backupToRestore.value = null
+  serverLoading.value = true
+  modsLoading.value = false
+  logsLoading.value = false
+  backupLoading.value = false
+  installLoading.value = false
+  actionState.value = { start: false, stop: false, restart: false }
+}
+
+watch(serverId, async (newId, oldId) => {
+  if (!newId || newId === oldId) {
+    return
+  }
+  stopLogPolling()
+  stopServerStatusPolling()
+  resetDashboardState()
+  await refreshAll()
+  if (activeTab.value === 'console') {
+    await loadLogs()
+    startLogPolling()
+  }
+  startServerStatusPolling()
+})
 
 onMounted(async () => {
   await refreshAll()
