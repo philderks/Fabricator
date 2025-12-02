@@ -773,7 +773,6 @@ def get_server_metrics(server_id):
         'status': runtime.get('status', 'stopped'),
         'ram': runtime.get('ram'),
         'pid': runtime.get('pid'),
-        'uptime': None,  # TODO: Implement uptime tracking
     }
 
     return jsonify(metrics)
