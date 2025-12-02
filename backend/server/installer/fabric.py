@@ -1,4 +1,5 @@
 """Fabric server installer using the Fabric Meta API."""
+import shutil
 import requests
 from pathlib import Path
 from typing import List, Optional, Dict, Any
@@ -222,9 +223,13 @@ class FabricInstaller(InstallerBase):
         # Remove existing symlink or file
         if server_jar.exists() or server_jar.is_symlink():
             server_jar.unlink()
-        
-        # Create relative symlink
-        server_jar.symlink_to(actual_jar.name)
+
+        # Create relative symlink, fall back to copy on Windows permission issues
+        try:
+            server_jar.symlink_to(actual_jar.name)
+        except OSError as exc:
+            print(f"Symlink creation failed ({exc}); copying server.jar instead.")
+            shutil.copy2(actual_jar, server_jar)
         return server_jar
 
     def install(

@@ -22,9 +22,9 @@ class ServerManager:
         env_command = os.environ.get("SERVER_COMMAND")
         parsed_env_command: Optional[List[str]] = None
         if env_command:
-            parsed_env_command = shlex.split(env_command)
+            parsed_env_command = self._split_command(env_command)
 
-        self.command = self._parse_command(command or parsed_env_command) or shlex.split(
+        self.command = self._parse_command(command or parsed_env_command) or self._split_command(
             self.DEFAULT_COMMAND
         )
         self.cwd = cwd or os.path.join(os.getcwd(), "server")
@@ -41,10 +41,16 @@ class ServerManager:
         if command is None:
             return None
         if isinstance(command, str):
-            return shlex.split(command)
+            return self._split_command(command)
         if isinstance(command, Iterable):
             return list(command)
         return None
+
+    @staticmethod
+    def _split_command(command: str) -> List[str]:
+        """Split a command string with platform-appropriate shlex settings."""
+        posix_mode = os.name != "nt"
+        return shlex.split(command, posix=posix_mode)
 
     @staticmethod
     def _parse_memory_quantity(spec: str) -> Optional[int]:
