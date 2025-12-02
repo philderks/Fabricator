@@ -85,6 +85,104 @@ def _get_backups_dir(base_path: Path) -> Path:
     return backups_dir
 
 
+def _build_server_properties(server: dict) -> dict:
+    level_type_value = server.get('levelType', 'default') or 'default'
+    if ':' not in level_type_value:
+        level_type_value = f"minecraft:{level_type_value}"
+
+    return {
+        'server-port': server.get('port', 25565),
+        'server-ip': server.get('serverIp', ''),
+        'motd': server.get('motd', 'A Minecraft Server'),
+        'bug-report-link': server.get('bugReportLink', ''),
+        'max-players': server.get('maxPlayers', 20),
+        'difficulty': server.get('difficulty', 'normal'),
+        'gamemode': server.get('gamemode', 'survival'),
+        'force-gamemode': server.get('forceGamemode', False),
+        'hardcore': server.get('hardcore', False),
+        'allow-flight': server.get('allowFlight', False),
+        'pvp': server.get('pvp', True),
+        'spawn-protection': server.get('spawnProtection', 16),
+        'function-permission-level': server.get('functionPermissionLevel', 2),
+        'op-permission-level': server.get('opPermissionLevel', 4),
+        'player-idle-timeout': server.get('playerIdleTimeout', 0),
+        'pause-when-empty-seconds': server.get('pauseWhenEmptySeconds', 60),
+        'view-distance': server.get('viewDistance', 10),
+        'simulation-distance': server.get('simulationDistance', 10),
+        'level-name': server.get('levelName', 'world'),
+        'level-type': level_type_value,
+        'level-seed': server.get('seed', ''),
+        'generator-settings': server.get('generatorSettings', ''),
+        'max-world-size': server.get('maxWorldSize', 29_999_984),
+        'generate-structures': server.get('generateStructures', True),
+        'spawn-animals': server.get('spawnAnimals', True),
+        'spawn-monsters': server.get('spawnMonsters', True),
+        'spawn-npcs': server.get('spawnNpcs', True),
+        'entity-broadcast-range-percentage': server.get('entityBroadcastRangePercentage', 100),
+        'max-chained-neighbor-updates': server.get('maxChainedNeighborUpdates', 1_000_000),
+        'max-tick-time': server.get('maxTickTime', 60_000),
+        'network-compression-threshold': server.get('networkCompressionThreshold', 256),
+        'region-file-compression': server.get('regionFileCompression', 'deflate'),
+        'sync-chunk-writes': server.get('syncChunkWrites', True),
+        'use-native-transport': server.get('useNativeTransport', True),
+        'online-mode': server.get('onlineMode', True),
+        'enforce-secure-profile': server.get('enforceSecureProfile', True),
+        'hide-online-players': server.get('hideOnlinePlayers', False),
+        'prevent-proxy-connections': server.get('preventProxyConnections', False),
+        'log-ips': server.get('logIps', True),
+        'accepts-transfers': server.get('acceptsTransfers', False),
+        'enable-status': server.get('enableStatus', True),
+        'status-heartbeat-interval': server.get('statusHeartbeatInterval', 0),
+        'white-list': server.get('whitelist', False),
+        'enforce-whitelist': server.get('enforceWhitelist', False),
+        'enable-command-block': server.get('commandBlocks', True),
+        'broadcast-console-to-ops': server.get('broadcastConsoleToOps', True),
+        'broadcast-rcon-to-ops': server.get('broadcastRconToOps', True),
+        'enable-code-of-conduct': server.get('enableCodeOfConduct', False),
+        'enable-jmx-monitoring': server.get('enableJmxMonitoring', False),
+        'enable-query': server.get('enableQuery', False),
+        'query.port': server.get('queryPort', server.get('port', 25565)),
+        'enable-rcon': server.get('enableRcon', False),
+        'rcon.port': server.get('rconPort', 25575),
+        'rcon.password': server.get('rconPassword', ''),
+        'rate-limit': server.get('rateLimit', 0),
+        'resource-pack': server.get('resourcePack', ''),
+        'resource-pack-sha1': server.get('resourcePackSha1', ''),
+        'resource-pack-prompt': server.get('resourcePackPrompt', ''),
+        'resource-pack-id': server.get('resourcePackId', ''),
+        'require-resource-pack': server.get('requireResourcePack', False),
+        'initial-enabled-packs': server.get('initialEnabledPacks', 'vanilla'),
+        'initial-disabled-packs': server.get('initialDisabledPacks', ''),
+        'text-filtering-config': server.get('textFilteringConfig', ''),
+        'text-filtering-version': server.get('textFilteringVersion', 0),
+    }
+
+
+def _write_server_properties(server: dict) -> tuple[bool, str | None]:
+    try:
+        install_path = _get_install_path(server)
+    except ValueError as exc:
+        return False, str(exc)
+
+    properties = _build_server_properties(server)
+    props_path = install_path / 'server.properties'
+    lines = [
+        '# Fabricator server properties',
+        f'# Updated {datetime.utcnow().isoformat()}Z'
+    ]
+    for key, value in properties.items():
+        if isinstance(value, bool):
+            value = str(value).lower()
+        lines.append(f"{key}={value}")
+
+    try:
+        props_path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+    except OSError as exc:
+        return False, f'Failed to write server.properties: {exc}'
+
+    return True, None
+
+
 def _safe_extract_zip(zip_file: zipfile.ZipFile, destination: Path) -> None:
     destination = destination.resolve()
 
@@ -437,10 +535,23 @@ def update_server_settings(server_id):
     for field in protected_fields:
         data.pop(field, None)
 
+    server = storage.get_server(server_id)
+
+    if not server:
+        return jsonify({'error': 'Server not found'}), 404
+
+    runtime_status = process_registry.get_status(server_id)
+    if runtime_status.get('status') == 'running':
+        return jsonify({'error': 'Stop the server before changing settings'}), 409
+
     server = storage.update_server(server_id, data)
 
     if not server:
         return jsonify({'error': 'Server not found'}), 404
+
+    success, error_message = _write_server_properties(server)
+    if not success:
+        return jsonify({'error': error_message}), 500
 
     process_registry.invalidate(server_id)
 
