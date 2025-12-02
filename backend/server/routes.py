@@ -398,6 +398,34 @@ def restore_server_backup(server_id, backup_id):
     return jsonify({'success': True, 'message': 'Backup restored successfully'})
 
 
+@server_bp.route('/servers/<server_id>/backups/<backup_id>', methods=['DELETE'])
+def delete_server_backup(server_id, backup_id):
+    server = storage.get_server(server_id)
+    if not server:
+        return jsonify({'error': 'Server not found'}), 404
+
+    try:
+        base_path = _get_install_path(server)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    backups_dir = _get_backups_dir(base_path)
+    try:
+        backup_path = _ensure_child_path(backups_dir, f'{backup_id}.zip')
+    except ValueError:
+        return jsonify({'error': 'Invalid backup ID'}), 400
+
+    if not backup_path.exists():
+        return jsonify({'error': 'Backup not found'}), 404
+
+    try:
+        backup_path.unlink()
+    except OSError as exc:
+        return jsonify({'error': f'Failed to delete backup: {exc}'}), 500
+
+    return jsonify({'success': True, 'message': 'Backup deleted successfully'})
+
+
 @server_bp.route('/servers/<server_id>/settings', methods=['PUT'])
 def update_server_settings(server_id):
     data = request.get_json()

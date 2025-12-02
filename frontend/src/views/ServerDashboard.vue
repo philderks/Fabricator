@@ -23,6 +23,7 @@ import {
   createBackup,
   getBackups,
   restoreBackup,
+  deleteBackup,
   deleteServer
 } from '../api/servers'
 import { useToast } from '../composables/useToast'
@@ -56,6 +57,9 @@ const fileBrowser = ref({ currentPath: '', entries: [], loading: false, error: n
 const backupToRestore = ref(null)
 const showBackupRestoreModal = ref(false)
 const restoringBackup = ref(false)
+const backupToDelete = ref(null)
+const showBackupDeleteModal = ref(false)
+const deletingBackup = ref(false)
 const showDeleteServerModal = ref(false)
 const deletingServer = ref(false)
 const settingsTabRef = ref(null)
@@ -262,6 +266,36 @@ const confirmRestoreBackup = async () => {
 const cancelRestoreBackup = () => {
   showBackupRestoreModal.value = false
   backupToRestore.value = null
+}
+
+const requestDeleteBackup = (backup) => {
+  backupToDelete.value = backup
+  showBackupDeleteModal.value = true
+}
+
+const confirmDeleteBackup = async () => {
+  if (!backupToDelete.value) {
+    return
+  }
+  deletingBackup.value = true
+  try {
+    const backupId = backupToDelete.value.relativePath.replace(/\.zip$/i, '')
+    await deleteBackup(serverId.value, backupId)
+    toast.success('Backup deleted', 'Backups')
+    await loadBackups()
+  } catch (error) {
+    console.error('Failed to delete backup:', error)
+    toast.error(error.message || 'Failed to delete backup', 'Backups')
+  } finally {
+    deletingBackup.value = false
+    showBackupDeleteModal.value = false
+    backupToDelete.value = null
+  }
+}
+
+const cancelDeleteBackup = () => {
+  showBackupDeleteModal.value = false
+  backupToDelete.value = null
 }
 const openFileBrowser = async (path = '') => {
   fileBrowser.value.loading = true
@@ -751,6 +785,7 @@ onUnmounted(() => {
           @open-files="activeTab = 'files'"
           @scroll-settings="scrollToSettingsSection"
           @request-restore-backup="requestRestoreBackup"
+          @request-delete-backup="requestDeleteBackup"
         />
 
         <ServerConsoleTab
@@ -829,6 +864,20 @@ onUnmounted(() => {
       @confirm="confirmRestoreBackup"
       @cancel="cancelRestoreBackup"
       @close="cancelRestoreBackup"
+    />
+
+    <ConfirmModal
+      :show="showBackupDeleteModal"
+      title="Delete Backup"
+      :message="backupToDelete ? `Delete ${backupToDelete.name}?` : ''"
+      description="This backup will be permanently deleted. This action cannot be undone."
+      type="danger"
+      confirm-text="Delete"
+      cancel-text="Cancel"
+      :loading="deletingBackup"
+      @confirm="confirmDeleteBackup"
+      @cancel="cancelDeleteBackup"
+      @close="cancelDeleteBackup"
     />
 
     <ConfirmModal

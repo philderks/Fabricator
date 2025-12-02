@@ -195,6 +195,16 @@ export async function restoreBackup(serverId, backupId) {
 }
 
 /**
+ * Delete a server backup
+ * @param {string|number} serverId - Server ID
+ * @param {string} backupId - Backup ID (filename without .zip)
+ * @returns {Promise<Object>} Deletion result
+ */
+export async function deleteBackup(serverId, backupId) {
+  return del(`/api/servers/${serverId}/backups/${backupId}`)
+}
+
+/**
  * Get server performance metrics
  * @param {string|number} serverId - Server ID
  * @returns {Promise<Object>} Performance metrics (CPU, RAM, TPS, etc.)
