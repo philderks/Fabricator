@@ -68,3 +68,7 @@ build/
 # Servers
 /servers
 servers.json
+
+# Fabricator build artifacts
+backend/fabricator_backend/frontend_dist/*
+!backend/fabricator_backend/frontend_dist/.gitkeep

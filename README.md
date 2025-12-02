@@ -1,158 +1,69 @@
 # Fabricator
 
-A minimal Flask + Vue 3 project for managing a personal Minecraft server.
+Fabricator is a desktop-style web application with a Flask backend and a Vue 3 frontend. The backend serves the compiled frontend so users only start one process in production. Windows users can wrap the app with a tray launcher, and Linux users can install it as a systemd service.
 
 ## Project Structure
-
 ```
 Fabricator/
-├── app.py                  # Flask REST API server
-├── requirements.txt        # Python dependencies
-├── .gitignore             # Git ignore rules
-├── frontend/              # Vue 3 frontend application
-│   ├── src/
-│   │   ├── main.js        # Vue app entry point
-│   │   ├── App.vue        # Root component
-│   │   ├── style.css      # Global styles
-│   │   └── components/
-│   │       └── ServerStatus.vue  # Server status component
-│   ├── public/            # Static assets
-│   ├── index.html         # HTML entry point
-│   ├── vite.config.js     # Vite configuration (includes API proxy)
-│   └── package.json       # Node.js dependencies
-└── README.md              # This file
+├── backend/
+│   └── fabricator_backend/
+│       ├── __init__.py            # Flask app factory and SPA serving
+│       ├── __main__.py            # Entrypoint: python -m fabricator_backend
+│       ├── api/                   # Example API routes
+│       └── frontend_dist/         # Built Vue assets copied here
+├── frontend/                      # Vue 3 application (Vite)
+├── tools/
+│   ├── fabricator_launcher.py     # Windows tray launcher
+│   └── install.sh                 # Linux install script (systemd)
+├── Makefile                       # Build helper for frontend assets
+├── requirements.txt               # Python dependencies
+└── README.md
 ```
 
-## Features
+## Development
 
-- **Flask Backend**: Lightweight REST API server with CORS support
-- **Vue 3 Frontend**: Modern Vue 3 with Composition API
-- **Vite Build Tool**: Fast development server with HMR
-- **API Proxy**: Vite dev server proxies `/api/*` requests to Flask backend
-- **Example Endpoint**: `/api/status` returns server status in JSON format
-
-## Development Setup
-
-### Prerequisites
-
-- Python 3.8 or higher
-- Node.js 18 or higher
-- npm or yarn
-
-### Backend Setup
-
-1. Install Python dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-2. Run the Flask development server:
-   ```bash
-   python app.py
-   ```
-
-   The API will be available at `http://localhost:5000`
-
-   **Note:** By default, Flask runs in debug mode for development. To run in production mode, set the environment variable:
-   ```bash
-   FLASK_ENV=production python app.py
-   ```
-   For production deployments, use a production WSGI server like gunicorn.
-
-### Frontend Setup
-
-1. Navigate to the frontend directory:
-   ```bash
-   cd frontend
-   ```
-
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-3. Run the development server:
-   ```bash
-   npm run dev
-   ```
-
-   The frontend will be available at `http://localhost:3000`
-
-### Running Both Servers
-
-You need to run both servers simultaneously in separate terminal windows:
-
-**Terminal 1 (Backend):**
+### Backend
 ```bash
-python app.py
+cd backend
+python -m fabricator_backend
 ```
+The server listens on `http://127.0.0.1:8000` and serves API routes under `/api`.
 
-**Terminal 2 (Frontend):**
+### Frontend
 ```bash
 cd frontend
+npm install
 npm run dev
 ```
-
-Then open your browser to `http://localhost:3000` to see the application.
+The Vite dev server proxies API requests to `http://localhost:8000`.
 
 ## Production Build
+1. Build the frontend and copy assets into the backend package:
+   ```bash
+   make build-frontend
+   ```
+2. Start only the backend (serves both API and SPA):
+   ```bash
+   cd backend
+   python -m fabricator_backend
+   ```
+3. Open `http://127.0.0.1:8000` in your browser.
 
-### Build Frontend
+## Windows Tray Launcher
+- Script: `tools/fabricator_launcher.py`
+- PyInstaller example:
+  ```bash
+  pyinstaller --onefile --noconsole --icon=fabricator_icon.ico tools/fabricator_launcher.py
+  ```
+- The resulting executable starts the backend, opens the UI, shows a tray icon with **Open Fabricator** and **Quit** actions, and shuts down the backend when exiting.
 
+## Linux Install Script (systemd)
+Run the installer as root (or via sudo):
 ```bash
-cd frontend
-npm run build
+bash tools/install.sh
 ```
+The script copies the project into `/opt/fabricator`, creates a virtual environment, installs dependencies, writes `/etc/systemd/system/fabricator.service`, and enables the service so Fabricator runs on boot at `http://127.0.0.1:8000`.
 
-This creates an optimized production build in `frontend/dist/`
-
-### Preview Production Build
-
-```bash
-cd frontend
-npm run preview
-```
-
-## API Endpoints
-
-### `GET /api/status`
-
-Returns the current status of the Minecraft server.
-
-**Response:**
-```json
-{
-  "status": "offline",
-  "message": "Minecraft server manager is ready",
-  "version": "1.0.0"
-}
-```
-
-### `GET /api/health`
-
-Health check endpoint.
-
-**Response:**
-```json
-{
-  "healthy": true
-}
-```
-
-## Expanding the Project
-
-This is a minimal scaffold ready to be expanded. Here are some ideas:
-
-1. **Add server control endpoints**: Start, stop, restart the Minecraft server
-2. **Server properties management**: Edit server.properties file
-3. **Player management**: Whitelist, ban, op players
-4. **Log viewing**: Stream and display server logs
-5. **Backup management**: Create and restore server backups
-6. **Resource monitoring**: CPU, memory, disk usage
-7. **Authentication**: Add user login and session management
-
-## Technologies Used
-
-- **Backend**: Flask 3.0, Flask-CORS
-- **Frontend**: Vue 3, Vite 5
-- **Language**: Python 3, JavaScript (ES6+)
+## Notes
+- The backend serves built frontend files from `backend/fabricator_backend/frontend_dist`. Rebuild and copy assets after frontend changes.
+- Keep dependencies minimal; only Flask/CORS and tray icon requirements are included in `requirements.txt`.
