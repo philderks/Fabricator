@@ -768,6 +768,7 @@ onUnmounted(() => {
 
         <ServerFilesTab
           v-else-if="activeTab === 'files'"
+          :server-id="serverId"
           :file-browser="fileBrowser"
           :format-file-size="formatFileSize"
           @go-up="goUpDirectory"
