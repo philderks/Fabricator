@@ -1,20 +1,12 @@
 """Minecraft server management service."""
 import os
 import re
-<<<<<<< HEAD
-import shlex
-=======
->>>>>>> feature/windows-support
 import subprocess
 import threading
 import time
 from typing import Iterable, List, Optional
 
-<<<<<<< HEAD
-=======
 from backend.utils import platform as platform_utils
-
->>>>>>> feature/windows-support
 try:
     import psutil  # type: ignore
 except ImportError:  # pragma: no cover - optional dependency fallback
@@ -55,14 +47,11 @@ class ServerManager:
         return None
 
     @staticmethod
-<<<<<<< HEAD
-=======
     def _split_command(command: str) -> List[str]:
         """Split a command string with platform-appropriate shlex settings."""
         return platform_utils.split_command(command)
 
     @staticmethod
->>>>>>> feature/windows-support
     def _parse_memory_quantity(spec: str) -> Optional[int]:
         if not spec:
             return None
