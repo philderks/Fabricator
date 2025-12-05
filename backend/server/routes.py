@@ -10,7 +10,6 @@ from flask import Blueprint, jsonify, request
 
 from backend.server.registry import get_server_process_registry
 from backend.server import storage
-from backend.server.manager import ServerManager
 from backend.server.installer import FabricInstaller, InstallStatus
 from backend.utils import platform as platform_utils
 
@@ -20,9 +19,21 @@ except ImportError:  # pragma: no cover - optional dependency fallback
     psutil = None
 
 server_bp = Blueprint('server', __name__, url_prefix='/api')
-server_manager = ServerManager()
 process_registry = get_server_process_registry()
 FABRIC_META_STAGING_DIR = platform_utils.temp_directory('fabricator-meta')
+
+
+def _cleanup_stale_statuses() -> None:
+    stale_states = {'installing', 'starting', 'stopping'}
+    for server in storage.get_all_servers():
+        server_id = server.get('id')
+        if not server_id:
+            continue
+        if (server.get('status') or '').lower() in stale_states:
+            storage.update_server_status(server_id, 'stopped')
+
+
+_cleanup_stale_statuses()
 
 
 def _handle_remove_readonly(func, path, exc_info):
@@ -82,8 +93,10 @@ def _serialize_file_entry(path: Path, base_path: Path | None = None) -> dict:
 def _ensure_child_path(base: Path, child: str) -> Path:
     candidate = (base / child).resolve()
     base_resolved = base.resolve()
-    if not str(candidate).startswith(str(base_resolved)):
-        raise ValueError('Invalid path')
+    try:
+        candidate.relative_to(base_resolved)
+    except ValueError as exc:
+        raise ValueError('Invalid path') from exc
     return candidate
 
 
@@ -226,21 +239,23 @@ def _safe_extract_zip(zip_file: zipfile.ZipFile, destination: Path) -> None:
 
 @server_bp.route('/status', methods=['GET'])
 def get_status():
-    status = server_manager.status()
-    status.update({"version": "1.0.0"})
-    return jsonify(status)
+    return jsonify({
+        'error': 'Deprecated endpoint. Use /api/servers/<id>/metrics or other new routes.'
+    }), 410
 
 
 @server_bp.route('/start', methods=['POST'])
 def start_server_legacy():
-    result = server_manager.start()
-    return jsonify(result)
+    return jsonify({
+        'error': 'Deprecated endpoint. Use /api/servers/<server_id>/start instead.'
+    }), 410
 
 
 @server_bp.route('/stop', methods=['POST'])
 def stop_server_legacy():
-    result = server_manager.stop()
-    return jsonify(result)
+    return jsonify({
+        'error': 'Deprecated endpoint. Use /api/servers/<server_id>/stop instead.'
+    }), 410
 
 
 @server_bp.route('/health', methods=['GET'])
@@ -268,6 +283,11 @@ def create_server():
         return jsonify({
             'error': f'Missing required fields: {", ".join(missing_fields)}'
         }), 400
+
+    requested_port = int(data.get('port', 25565))
+    existing_servers = storage.get_all_servers()
+    if any((server.get('port') or 25565) == requested_port for server in existing_servers):
+        return jsonify({'error': f'Port {requested_port} is already in use by another server'}), 400
 
     try:
         data['status'] = 'pending'
@@ -447,6 +467,10 @@ def create_server_backup(server_id):
     server = storage.get_server(server_id)
     if not server:
         return jsonify({'error': 'Server not found'}), 404
+
+    runtime_status = process_registry.get_status(server_id)
+    if runtime_status.get('status') == 'running':
+        return jsonify({'error': 'Stop the server before creating a backup to avoid data corruption'}), 400
 
     try:
         base_path = _get_install_path(server)

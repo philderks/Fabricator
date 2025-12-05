@@ -40,8 +40,14 @@ def search_mods():
     query = request.args.get('query', '')
     mc_version = request.args.get('mc_version')
     loader = request.args.get('loader')
-    limit = int(request.args.get('limit', 20))
-    offset = int(request.args.get('offset', 0))
+    try:
+        limit = int(request.args.get('limit', 20))
+    except (TypeError, ValueError):
+        limit = 20
+    try:
+        offset = int(request.args.get('offset', 0))
+    except (TypeError, ValueError):
+        offset = 0
     index = request.args.get('index', 'downloads')
 
     try:

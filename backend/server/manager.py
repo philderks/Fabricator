@@ -17,6 +17,7 @@ class ServerManager:
     """Manages the lifecycle of a Minecraft server process."""
 
     DEFAULT_COMMAND = "java -Xmx2G -jar server.jar nogui"
+    MAX_LOG_LINES = 10_000
 
     def __init__(self, command: Optional[Iterable[str]] = None, cwd: Optional[str] = None):
         env_command = os.environ.get("SERVER_COMMAND")
@@ -128,6 +129,8 @@ class ServerManager:
         def _stream(pipe, buffer: List[str]):
             for line in iter(pipe.readline, ""):
                 buffer.append(line)
+                if len(buffer) > self.MAX_LOG_LINES:
+                    del buffer[: len(buffer) - self.MAX_LOG_LINES]
                 print(line, end="")
             pipe.close()
 
@@ -226,6 +229,12 @@ class ServerManager:
             finally:
                 self._process = None
                 self._ps_process = None
+                if self._stdout_thread:
+                    self._stdout_thread.join(timeout=2)
+                    self._stdout_thread = None
+                if self._stderr_thread:
+                    self._stderr_thread.join(timeout=2)
+                    self._stderr_thread = None
 
             return {"status": "stopped", "message": "Server stopped"}
 

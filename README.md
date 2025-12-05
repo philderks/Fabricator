@@ -35,7 +35,7 @@ Fabricator/
 
 ### Prerequisites
 
-- Python 3.8 or higher
+- Python 3.11+
 - Node.js 18 or higher
 - npm or yarn
 

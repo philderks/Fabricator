@@ -131,6 +131,7 @@ class ServerProcessRegistry:
                 f"Failed to stop server before restart: {message}. "
                 "Verify no other Minecraft instance is using this world and try again."
             )
+        time.sleep(2)
         start_result = self.start_server(server)
         return {'stop': stop_result, 'start': start_result}
 

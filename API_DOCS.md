@@ -18,14 +18,15 @@ Ein moderner Minecraft Server Manager mit Modrinth-Integration zum einfachen Ver
 ```
 Fabricator/
 ├── backend/
-│   ├── app.py                    # Flask App Factory
-│   ├── config.py                 # Zentrale Konfiguration
+│   ├── core/
+│   │   ├── app.py                # Flask App Factory
+│   │   └── config.py             # Zentrale Konfiguration
 │   ├── routes/
-│   │   ├── server.py            # Server Management Endpoints
-│   │   └── modrinth.py          # Modrinth API Endpoints
-│   ├── services/
-│   │   ├── server_manager.py   # Minecraft Server Verwaltung
-│   │   └── modrinth_client.py  # Modrinth API Client
+│   │   ├── server.py             # Server Management Endpoints
+│   │   └── modrinth.py           # Modrinth API Endpoints
+│   ├── server/                   # Server-Lifecycle und Storage
+│   ├── modrinth/
+│   │   └── client.py             # Modrinth API Client
 │   └── utils/
 ├── frontend/                     # Vue.js Frontend
 ├── server/                       # Minecraft Server Dateien
@@ -250,11 +251,18 @@ GET /api/modrinth/mod/sodium/download-url?mc_version=1.20.1&loader=fabric
 Mod herunterladen und direkt im Server installieren.
 
 **Body (JSON):**
+
+- `mc_version` (string, **required**): Ziel-Minecraft-Version
+- `server_id` (string, **required**): Server, auf dem die Mod installiert wird
+- `loader` (string, optional): Mod Loader (default: "fabric")
+- `mods_folder` (string, optional): Nur für Legacy-Setups
+
 ```json
 {
   "mc_version": "1.20.1",
+  "server_id": "srv_a1b2c3d4",
   "loader": "fabric",
-  "mods_folder": "/path/to/mods"  // optional
+  "mods_folder": "/path/to/mods"
 }
 ```
 
@@ -265,6 +273,7 @@ Content-Type: application/json
 
 {
   "mc_version": "1.20.1",
+  "server_id": "srv_a1b2c3d4",
   "loader": "fabric"
 }
 ```
@@ -283,6 +292,12 @@ Content-Type: application/json
 ```json
 {
   "error": "mc_version is required"
+}
+```
+
+```json
+{
+  "error": "server_id is required"
 }
 ```
 
@@ -392,7 +407,7 @@ CORS_ORIGINS=*               # Erlaubte Origins
 
 ### Konfigurationsklassen
 
-In `backend/config.py`:
+In `backend/core/config.py`:
 - `DevelopmentConfig`: Debug-Modus aktiviert
 - `ProductionConfig`: Optimiert für Production
 
@@ -403,7 +418,7 @@ In `backend/config.py`:
 Der `ModrinthClient` kann auch direkt in Python verwendet werden:
 
 ```python
-from backend.services.modrinth_client import ModrinthClient
+from backend.modrinth.client import ModrinthClient
 
 client = ModrinthClient()
 

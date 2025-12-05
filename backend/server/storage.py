@@ -1,12 +1,14 @@
 """JSON-based storage for server data."""
 import json
+import threading
 import uuid
-from pathlib import Path
-from typing import List, Dict, Optional, Any
 from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 
 SERVERS_FILE = Path("servers.json")
+_storage_lock = threading.Lock()
 
 
 def _ensure_file_exists():
@@ -79,21 +81,22 @@ def create_server(server_data: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         Created server with generated ID and metadata
     """
-    servers = load_servers()
+    with _storage_lock:
+        servers = load_servers()
 
-    now_iso = datetime.utcnow().isoformat() + 'Z'
-    new_server = {
-        'id': generate_server_id(),
-        'status': 'stopped',
-        'createdAt': now_iso,
-        'updatedAt': now_iso,
-        **server_data
-    }
+        now_iso = datetime.utcnow().isoformat() + 'Z'
+        new_server = {
+            'id': generate_server_id(),
+            'status': 'stopped',
+            'createdAt': now_iso,
+            'updatedAt': now_iso,
+            **server_data
+        }
 
-    servers.append(new_server)
-    save_servers(servers)
+        servers.append(new_server)
+        save_servers(servers)
 
-    return new_server
+        return new_server
 
 
 def update_server(server_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -106,16 +109,17 @@ def update_server(server_id: str, updates: Dict[str, Any]) -> Optional[Dict[str,
     Returns:
         Updated server or None if not found
     """
-    servers = load_servers()
+    with _storage_lock:
+        servers = load_servers()
 
-    for server in servers:
-        if server.get('id') == server_id:
-            server.update(updates)
-            server['updatedAt'] = datetime.utcnow().isoformat() + 'Z'
-            save_servers(servers)
-            return server
+        for server in servers:
+            if server.get('id') == server_id:
+                server.update(updates)
+                server['updatedAt'] = datetime.utcnow().isoformat() + 'Z'
+                save_servers(servers)
+                return server
 
-    return None
+        return None
 
 
 def delete_server(server_id: str) -> bool:
@@ -127,16 +131,17 @@ def delete_server(server_id: str) -> bool:
     Returns:
         True if deleted, False if not found
     """
-    servers = load_servers()
-    initial_count = len(servers)
+    with _storage_lock:
+        servers = load_servers()
+        initial_count = len(servers)
 
-    servers = [s for s in servers if s.get('id') != server_id]
+        servers = [s for s in servers if s.get('id') != server_id]
 
-    if len(servers) < initial_count:
-        save_servers(servers)
-        return True
+        if len(servers) < initial_count:
+            save_servers(servers)
+            return True
 
-    return False
+        return False
 
 
 def update_server_status(server_id: str, status: str) -> Optional[Dict[str, Any]]:
