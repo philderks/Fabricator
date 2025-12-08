@@ -7,6 +7,20 @@ main() {
 	OS_FAMILY=""
 	PACKAGETYPE=""
 
+    GITHUB_OWNER="philderks"
+    GITHUB_REPO="Fabricator"
+    INSTALL_DIR="/opt/fabricator"
+    APP_DIR="$INSTALL_DIR/app"
+    VENV_DIR="$INSTALL_DIR/venv"
+    SERVICE_USER="fabricator"
+    SERVICE_NAME="fabricator.service"
+    
+    # If you always upload an asset called fabricator.tar.gz to each release,
+    # this URL will always point to the latest one:
+    RELEASE_ASSET_NAME="fabricator.tar.gz"
+    RELEASE_URL="https://github.com/$GITHUB_OWNER/$GITHUB_REPO/releases/latest/download/$RELEASE_ASSET_NAME"
+
+
 	if [ -f /etc/os-release ]; then
 		# /etc/os-release populates a number of shell variables. We care about the following:
 		#  - ID: the short name of the OS (e.g. "debian", "arch")
@@ -64,6 +78,19 @@ main() {
     echo "Dependencies installed."
 
     # 3) Download Fabricator release (from GitHub)
+    echo "Downloading Fabricator from GitHub..."
+    tmpfile="$(mktemp)"
+    curl -L "$RELEASE_URL" -o "$tmpfile"
+
+    echo "Preparing install directory at $INSTALL_DIR..."
+    sudo mkdir -p "$APP_DIR"
+    sudo rm -rf "$APP_DIR"/*
+    sudo tar -xzf "$tmpfile" -C "$APP_DIR" --strip-components=1
+    rm -f "$tmpfile"
+
+    echo "Setting ownership..."
+    sudo chown -R "$SERVICE_USER":"$SERVICE_USER" "$INSTALL_DIR"
+
     # 4) Install binary to /usr/local/bin
     # 5) Install systemd service
 }
