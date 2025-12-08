@@ -9,7 +9,7 @@ main() {
 
 	if [ -f /etc/os-release ]; then
 		# /etc/os-release populates a number of shell variables. We care about the following:
-		#  - ID: the short name of the OS (e.g. "debian", "freebsd")
+		#  - ID: the short name of the OS (e.g. "debian", "arch")
 		. /etc/os-release
 		case "$ID" in
 			debian|ubuntu|raspbian|pop|linuxmint)
@@ -39,6 +39,30 @@ main() {
 
 
     # 2) Install dependencies (java, systemd stuff, etc.)
+    echo "Installing dependencies for $OS_FAMILY (pkg: $PACKAGETYPE)..."
+
+    case "$PACKAGETYPE" in
+        apt)
+            DEPS="python3 python3-venv python3-pip curl ca-certificates"
+            sudo apt-get update
+            sudo apt-get install -y $DEPS
+            ;;
+        pacman)
+            DEPS="python python-pip curl ca-certificates"
+            sudo pacman -Sy --noconfirm $DEPS
+            ;;
+        dnf)
+            DEPS="python3 python3-pip curl ca-certificates"
+            sudo dnf install -y $DEPS
+            ;;
+        *)
+            echo "internal error: unknown PACKAGETYPE: $PACKAGETYPE"
+            exit 1
+            ;;
+    esac
+
+    echo "Dependencies installed."
+
     # 3) Download Fabricator release (from GitHub)
     # 4) Install binary to /usr/local/bin
     # 5) Install systemd service
