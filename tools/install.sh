@@ -9,7 +9,7 @@ main() {
 
     GITHUB_OWNER="philderks"
     GITHUB_REPO="Fabricator"
-    INSTALL_DIR="/opt/fabricator"
+    INSTALL_DIR="/srv/fabricator"
     APP_DIR="$INSTALL_DIR/app"
     VENV_DIR="$INSTALL_DIR/venv"
     SERVICE_USER="fabricator"
@@ -92,7 +92,63 @@ main() {
     sudo chown -R "$SERVICE_USER":"$SERVICE_USER" "$INSTALL_DIR"
 
     # 4) Install binary to /usr/local/bin
+    echo "▶ Creating Python virtualenv..."
+
+    sudo -u "$SERVICE_USER" python3 -m venv "$VENV_DIR"
+    sudo -u "$SERVICE_USER" "$VENV_DIR/bin/pip" install --upgrade pip
+
+    if [ -f "$APP_DIR/requirements.txt" ]; then
+        echo "▶ Installing Python requirements..."
+        sudo -u "$SERVICE_USER" "$VENV_DIR/bin/pip" install -r "$APP_DIR/requirements.txt"
+    else
+        echo "⚠ No requirements.txt found in $APP_DIR, skipping pip install."
+    fi
+
+        echo "▶ Creating config directory /etc/fabricator..."
+    sudo mkdir -p /etc/fabricator
+
+    ENV_FILE="/etc/fabricator/fabricator.env"
+    if [ ! -f "$ENV_FILE" ]; then
+        echo "▶ Creating default env file at $ENV_FILE"
+        sudo tee "$ENV_FILE" >/dev/null <<EOF
+# Fabricator environment configuration
+FABRICATOR_HOST=127.0.0.1
+FABRICATOR_PORT=5000
+FABRICATOR_ENV=production
+EOF
+    fi
+
     # 5) Install systemd service
+    echo "▶ Creating systemd service..."
+
+    SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME"
+
+    sudo tee "$SERVICE_FILE" >/dev/null <<EOF
+[Unit]
+Description=Fabricator Minecraft Manager
+After=network.target
+
+[Service]
+Type=simple
+User=$SERVICE_USER
+Group=$SERVICE_USER
+WorkingDirectory=$APP_DIR
+EnvironmentFile=/etc/fabricator/fabricator.env
+ExecStart=$VENV_DIR/bin/python $APP_DIR/run.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    echo "▶ Reloading systemd and enabling service..."
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now "$SERVICE_NAME"
+
+    echo "✅ Fabricator service installed and started."
+    echo "   Check status with: sudo systemctl status $SERVICE_NAME"
+
 }
 
-main "$@"
+main
