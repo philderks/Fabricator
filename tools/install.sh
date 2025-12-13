@@ -12,7 +12,7 @@ main() {
     INSTALL_DIR="/srv/fabricator"
     APP_DIR="$INSTALL_DIR/app"
     VENV_DIR="$INSTALL_DIR/venv"
-    SERVICE_USER="fabricator"`
+    SERVICE_USER="fabricator"
     SERVICE_NAME="fabricator.service"
 
     RELEASE_ASSET_NAME="fabricator.tar.gz"
