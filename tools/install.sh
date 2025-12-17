@@ -1,11 +1,9 @@
-#!/bin/sh
-set -eu
+#!/usr/bin/env bash
+set -euo pipefail
 
 main() {
-    # 1) Detect distro (via /etc/os-release)
-
-	OS_FAMILY=""
-	PACKAGETYPE=""
+    OS_FAMILY=""
+    PACKAGETYPE=""
 
     GITHUB_OWNER="philderks"
     GITHUB_REPO="Fabricator"
@@ -15,8 +13,10 @@ main() {
     SERVICE_USER="fabricator"
     SERVICE_NAME="fabricator.service"
 
-    RELEASE_ASSET_NAME="fabricator.tar.gz"
-    RELEASE_URL="https://github.com/$GITHUB_OWNER/$GITHUB_REPO/releases/latest/download/$RELEASE_ASSET_NAME"
+    FABRICATOR_REPO="${FABRICATOR_REPO:-${GITHUB_OWNER}/${GITHUB_REPO}}"
+    FABRICATOR_BRANCH="${FABRICATOR_BRANCH:-main}"
+    FABRICATOR_VERSION="${FABRICATOR_VERSION:-latest}"  # latest | main | v1.2.3
+    APP_SUBDIR="${APP_SUBDIR:-}"                        # e.g. "backend" if run.py lives there
 
     # --- root/sudo detection ---
     SUDO=""
@@ -73,16 +73,16 @@ main() {
 
     case "$PACKAGETYPE" in
         apt)
-            DEPS="python3 python3-venv python3-pip openjdk-17-jre curl ca-certificates unzip"
+            DEPS="python3 python3-venv python3-pip openjdk-17-jre curl ca-certificates grep sed tar rsync"
             $SUDO apt-get update
             $SUDO apt-get install -y $DEPS
             ;;
         pacman)
-            DEPS="python python-pip jre-openjdk curl ca-certificates unzip"
+            DEPS="python python-pip jre-openjdk curl ca-certificates grep sed tar rsync"
             $SUDO pacman -Sy --noconfirm $DEPS
             ;;
         dnf)
-            DEPS="python3 python3-pip java-17-openjdk curl ca-certificates unzip"
+            DEPS="python3 python3-pip java-17-openjdk curl ca-certificates grep sed tar rsync"
             $SUDO dnf install -y $DEPS
             ;;
         *)
@@ -99,22 +99,78 @@ main() {
         $SUDO useradd --system --home "$INSTALL_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
     fi
 
-    # 3) Download Fabricator release
+    # 3) Download Fabricator sources
     echo "Downloading Fabricator from GitHub..."
-    tmpfile="$(mktemp)"
-    trap 'rm -f "$tmpfile"' EXIT
+    TMP_DIR="$(mktemp -d)"
+    cleanup() { rm -rf "$TMP_DIR"; }
+    trap cleanup EXIT
 
-    curl -fsSL -L "$RELEASE_URL" -o "$tmpfile"
+    get_latest_tag() {
+      curl -fsSL "https://api.github.com/repos/${FABRICATOR_REPO}/releases/latest" \
+        | grep -m1 '"tag_name"' \
+        | sed -E 's/.*"tag_name":[[:space:]]*"([^"]+)".*/\1/'
+    }
 
-    echo "Preparing install directory at $INSTALL_DIR..."
-    $SUDO mkdir -p "$INSTALL_DIR"
-    $SUDO rm -rf "$APP_DIR"
+    download_tarball() {
+      local kind="$1"   # "tags" or "heads"
+      local ref="$2"    # tag or branch
+      local url="https://github.com/${FABRICATOR_REPO}/archive/refs/${kind}/${ref}.tar.gz"
+
+      echo "Fetching: $url"
+      curl -fsSL "$url" -o "$TMP_DIR/fabricator.tar.gz"
+      tar -xzf "$TMP_DIR/fabricator.tar.gz" -C "$TMP_DIR"
+    }
+
+    if [[ "$FABRICATOR_VERSION" == "main" ]]; then
+      download_tarball "heads" "$FABRICATOR_BRANCH"
+    else
+      TAG=""
+      if [[ "$FABRICATOR_VERSION" == "latest" ]]; then
+        TAG="$(get_latest_tag || true)"
+      else
+        TAG="$FABRICATOR_VERSION"
+      fi
+
+      if [[ -n "$TAG" ]]; then
+        echo "Latest release tag: $TAG"
+        download_tarball "tags" "$TAG"
+      else
+        echo "No releases found (or API blocked). Falling back to branch: ${FABRICATOR_BRANCH}"
+        download_tarball "heads" "$FABRICATOR_BRANCH"
+      fi
+    fi
+
+    SRC_DIR="$(find "$TMP_DIR" -maxdepth 1 -type d -name 'Fabricator-*' | head -n1)"
+    if [[ -z "${SRC_DIR:-}" || ! -d "$SRC_DIR" ]]; then
+      echo "ERROR: Could not locate extracted Fabricator sources."
+      exit 1
+    fi
+
+    echo "Source extracted to: $SRC_DIR"
+
+    # Select app subdirectory if needed
+    APP_SRC_DIR="$SRC_DIR"
+    if [[ -n "$APP_SUBDIR" ]]; then
+      APP_SRC_DIR="$SRC_DIR/$APP_SUBDIR"
+    fi
+
+    if [[ ! -d "$APP_SRC_DIR" ]]; then
+      echo "ERROR: App source directory not found: $APP_SRC_DIR"
+      echo "Hint: set APP_SUBDIR (e.g. APP_SUBDIR=backend) if your run.py is not at repo root."
+      exit 1
+    fi
+
+    # Sync into install location
     $SUDO mkdir -p "$APP_DIR"
+    $SUDO rsync -a --delete "$APP_SRC_DIR/" "$APP_DIR/"
+    $SUDO chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
 
-    $SUDO tar -xzf "$tmpfile" -C "$APP_DIR" --strip-components=1
-
-    echo "Setting ownership..."
-    $SUDO chown -R "$SERVICE_USER":"$SERVICE_USER" "$INSTALL_DIR"
+    # Sanity check
+    if [[ ! -f "$APP_DIR/run.py" ]]; then
+      echo "ERROR: $APP_DIR/run.py not found after sync."
+      echo "Your app may live in a subfolder. Re-run with: APP_SUBDIR=<folder>"
+      exit 1
+    fi
 
     # 4) Setup Python venv + requirements
     echo "Creating Python virtualenv..."
@@ -172,7 +228,7 @@ EOF
     $SUDO systemctl daemon-reload
     $SUDO systemctl enable --now "$SERVICE_NAME"
 
-    echo "✅ Fabricator service installed and started."
+    echo "Fabricator service installed and started."
     echo "Check status with: $SUDO systemctl status $SERVICE_NAME"
 }
 
