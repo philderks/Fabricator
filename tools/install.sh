@@ -99,6 +99,15 @@ main() {
         $SUDO useradd --system --home "$INSTALL_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
     fi
 
+    # Helper to run commands as the service user
+    run_as_service_user() {
+        if [ "$(id -u)" -eq 0 ]; then
+            su -s /bin/bash - "$SERVICE_USER" -c "$(printf '%q ' "$@")"
+        else
+            $SUDO -u "$SERVICE_USER" "$@"
+        fi
+    }
+
     # 3) Download Fabricator sources
     echo "Downloading Fabricator from GitHub..."
     TMP_DIR="$(mktemp -d)"
@@ -174,12 +183,12 @@ main() {
 
     # 4) Setup Python venv + requirements
     echo "Creating Python virtualenv..."
-    $SUDO -u "$SERVICE_USER" python3 -m venv "$VENV_DIR"
-    $SUDO -u "$SERVICE_USER" "$VENV_DIR/bin/pip" install --upgrade pip
+    run_as_service_user python3 -m venv "$VENV_DIR"
+    run_as_service_user "$VENV_DIR/bin/pip" install --upgrade pip
 
     if [ -f "$APP_DIR/requirements.txt" ]; then
         echo "Installing Python requirements..."
-        $SUDO -u "$SERVICE_USER" "$VENV_DIR/bin/pip" install -r "$APP_DIR/requirements.txt"
+        run_as_service_user "$VENV_DIR/bin/pip" install -r "$APP_DIR/requirements.txt"
     else
         echo "No requirements.txt found in $APP_DIR, skipping pip install."
     fi
