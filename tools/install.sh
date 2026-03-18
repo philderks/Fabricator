@@ -69,32 +69,34 @@ main() {
     fi
 
     # 2) Install dependencies
+    # NOTE: all package-manager commands redirect stdin from /dev/null so they
+    # cannot consume the piped script when invoked via  curl … | bash
     echo "Installing dependencies for $OS_FAMILY (pkg: $PACKAGETYPE)..."
 
     case "$PACKAGETYPE" in
         apt)
             DEPS="python3 python3-venv python3-pip openjdk-17-jre curl ca-certificates grep sed tar rsync"
-            $SUDO apt-get update
-            $SUDO apt-get install -y $DEPS
+            $SUDO apt-get update </dev/null
+            $SUDO apt-get install -y $DEPS </dev/null
             # Node.js 18+ required for Vue/Vite frontend; use NodeSource on Debian/Ubuntu
-            node_ver=$(node -v 2>/dev/null | sed 's/v//' | cut -d. -f1)
-            if ! command -v node >/dev/null 2>&1 || [[ "${node_ver:-0}" -lt 18 ]]; then
+            node_ver="$(node -v 2>/dev/null | sed 's/v//' | cut -d. -f1 || true)"
+            if [ -z "$node_ver" ] || [ "$node_ver" -lt 18 ]; then
                 echo "Installing Node.js 20.x from NodeSource..."
                 if [ -n "$SUDO" ]; then
                     curl -fsSL https://deb.nodesource.com/setup_20.x | $SUDO -E bash -
                 else
                     curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
                 fi
-                $SUDO apt-get install -y nodejs
+                $SUDO apt-get install -y nodejs </dev/null
             fi
             ;;
         pacman)
-            DEPS="python python-pip jre-openjdk nodejs curl ca-certificates grep sed tar rsync"
-            $SUDO pacman -Sy --noconfirm $DEPS
+            DEPS="python python-pip jre-openjdk nodejs npm curl ca-certificates grep sed tar rsync"
+            $SUDO pacman -Sy --noconfirm $DEPS </dev/null
             ;;
         dnf)
-            DEPS="python3 python3-pip java-17-openjdk nodejs curl ca-certificates grep sed tar rsync"
-            $SUDO dnf install -y $DEPS
+            DEPS="python3 python3-pip java-17-openjdk nodejs npm curl ca-certificates grep sed tar rsync"
+            $SUDO dnf install -y $DEPS </dev/null
             ;;
         *)
             echo "internal error: unknown PACKAGETYPE: $PACKAGETYPE"
@@ -192,14 +194,14 @@ main() {
       exit 1
     fi
 
-    # 4) Setup Python venv + requirements
+    # 4a) Setup Python venv + requirements
     echo "Creating Python virtualenv..."
     run_as_service_user python3 -m venv "$VENV_DIR"
-    run_as_service_user "$VENV_DIR/bin/pip" install --upgrade pip
+    run_as_service_user "$VENV_DIR/bin/pip" install --upgrade pip </dev/null
 
     if [ -f "$APP_DIR/requirements.txt" ]; then
         echo "Installing Python requirements..."
-        run_as_service_user "$VENV_DIR/bin/pip" install -r "$APP_DIR/requirements.txt"
+        run_as_service_user "$VENV_DIR/bin/pip" install -r "$APP_DIR/requirements.txt" </dev/null
     else
         echo "No requirements.txt found in $APP_DIR, skipping pip install."
     fi
@@ -207,7 +209,7 @@ main() {
     # 4b) Build frontend (Vue/Vite)
     if [ -d "$APP_DIR/frontend" ] && [ -f "$APP_DIR/frontend/package.json" ]; then
         echo "Building frontend..."
-        run_as_service_user sh -c "cd $APP_DIR/frontend && npm install && npm run build"
+        run_as_service_user sh -c "cd $APP_DIR/frontend && npm install && npm run build" </dev/null
     else
         echo "No frontend folder found, skipping frontend build."
     fi
