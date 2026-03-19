@@ -244,6 +244,7 @@ After=network.target
 Type=simple
 User=$SERVICE_USER
 Group=$SERVICE_USER
+UMask=0002
 WorkingDirectory=$APP_DIR
 EnvironmentFile=/etc/fabricator/fabricator.env
 ExecStart=$VENV_DIR/bin/python $APP_DIR/run.py
@@ -258,8 +259,14 @@ EOF
     $SUDO systemctl daemon-reload
     $SUDO systemctl enable --now "$SERVICE_NAME"
 
+    echo ""
     echo "Fabricator service installed and started."
     echo "Check status with: $SUDO systemctl status $SERVICE_NAME"
+    echo ""
+    echo "To manage servers from the CLI as your own user, add yourself to the"
+    echo "'$SERVICE_USER' group so you have write access to server directories:"
+    echo "  sudo usermod -aG $SERVICE_USER \$USER"
+    echo "Then log out and back in for the group change to take effect."
 }
 
 main "$@"
