@@ -137,7 +137,7 @@ onUnmounted(() => {
     <header class="header">
       <div class="header-content">
         <div class="brand">
-          <div class="brand-icon">⚙️</div>
+          <img src="/favicon.svg" alt="Fabricator" class="brand-logo" />
           <h1 class="brand-name">Fabricator</h1>
         </div>
         <nav class="nav">
