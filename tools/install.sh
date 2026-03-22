@@ -298,4 +298,11 @@ EOF
     echo ""
     info "Fabricator service installed and started."
     info "Check status with: $SUDO systemctl status $SERVICE_NAME"
-   
+    echo ""
+    info "To manage servers from the CLI as your own user, add yourself to the"
+    info "'$SERVICE_USER' group so you have write access to server directories:"
+    info "  sudo usermod -aG $SERVICE_USER \$USER"
+    info "Then log out and back in for the group change to take effect."
+}
+
+main "$@"
