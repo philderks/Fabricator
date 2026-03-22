@@ -1,9 +1,12 @@
 """Abstract base class for Minecraft server installers."""
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import List, Optional, Dict, Any
+
+DIR_PERMISSIONS = 0o775
 
 
 class InstallStatus(Enum):
@@ -92,8 +95,14 @@ class InstallerBase(ABC):
         pass
 
     def _ensure_install_dir(self) -> None:
-        """Create installation directory if it doesn't exist."""
+        """Create installation directory if it doesn't exist.
+
+        Uses 0o775 so that both the service user (owner) and members
+        of its group can read/write — required for the Java process
+        and for admin users who need to manage servers manually.
+        """
         self.install_path.mkdir(parents=True, exist_ok=True)
+        os.chmod(self.install_path, DIR_PERMISSIONS)
 
     def _write_eula(self, accepted: bool = True) -> Path:
         """Write eula.txt file.

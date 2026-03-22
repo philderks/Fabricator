@@ -67,8 +67,11 @@ body {
   gap: 0.75rem;
 }
 
-.brand-icon {
-  font-size: 1.75rem;
+.brand-icon,
+.brand-logo {
+  width: 2rem;
+  height: 2rem;
+  flex-shrink: 0;
 }
 
 .brand-name {

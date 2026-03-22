@@ -1,10 +1,11 @@
 """Fabric server installer using the Fabric Meta API."""
+import os
 import shutil
 import requests
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
-from .base import InstallerBase, InstallResult, InstallStatus
+from .base import InstallerBase, InstallResult, InstallStatus, DIR_PERMISSIONS
 
 
 class FabricInstaller(InstallerBase):
@@ -302,6 +303,13 @@ class FabricInstaller(InstallerBase):
         # Create server.jar symlink
         server_jar = self._create_server_jar_symlink(jar_path)
         
+        # Pre-create .fabric cache directory so the launcher can
+        # download the vanilla server JAR on first start without
+        # running into permission issues.
+        fabric_cache = self.install_path / ".fabric"
+        fabric_cache.mkdir(exist_ok=True)
+        os.chmod(fabric_cache, DIR_PERMISSIONS)
+
         # Write eula.txt
         print("Writing eula.txt...")
         self._write_eula(accepted=True)

@@ -1,6 +1,7 @@
 """Process registry for managing per-server runtime state."""
 from __future__ import annotations
 
+import os
 import threading
 import time
 from pathlib import Path
@@ -8,6 +9,8 @@ from typing import Dict, Optional
 
 from backend.core.config import get_config
 from backend.server.manager import ServerManager
+
+DIR_PERMISSIONS = 0o775
 
 
 def _format_uptime(seconds: int) -> str:
@@ -35,6 +38,7 @@ class ServerProcessRegistry:
     def __init__(self, base_dir: str | Path):
         self.base_dir = Path(base_dir).expanduser().resolve()
         self.base_dir.mkdir(parents=True, exist_ok=True)
+        os.chmod(self.base_dir, DIR_PERMISSIONS)
         self._lock = threading.RLock()
         self._instances: Dict[str, ServerManager] = {}
         self._started_at: Dict[str, float] = {}
@@ -48,6 +52,7 @@ class ServerProcessRegistry:
                 f"Install path '{candidate}' is outside of configured server root"
             ) from exc
         candidate.mkdir(parents=True, exist_ok=True)
+        os.chmod(candidate, DIR_PERMISSIONS)
         return candidate
 
     def _resolve_install_path(self, server: Dict[str, object]) -> Path:

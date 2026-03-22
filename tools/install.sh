@@ -274,6 +274,7 @@ After=network.target
 Type=simple
 User=$SERVICE_USER
 Group=$SERVICE_USER
+UMask=0002
 WorkingDirectory=$APP_DIR
 EnvironmentFile=/etc/fabricator/fabricator.env
 ExecStart=$VENV_DIR/bin/python $APP_DIR/run.py
@@ -294,8 +295,7 @@ EOF
     $SUDO systemctl daemon-reload
     $SUDO systemctl enable --now "$SERVICE_NAME"
 
+    echo ""
     info "Fabricator service installed and started."
     info "Check status with: $SUDO systemctl status $SERVICE_NAME"
-}
-
-main "$@"
+   
