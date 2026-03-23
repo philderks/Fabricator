@@ -1073,6 +1073,8 @@ onUnmounted(() => {
     <ModSideDecisionModal
       :show="showUncertainModsModal"
       :mods="uncertainModsReport"
+      :mc-version="server?.version || serverStatus.version"
+      :loader="(server?.loader || serverStatus.loader).toLowerCase()"
       :loading="modpackInstalling"
       @confirm="confirmUncertainModsDecision"
       @cancel="cancelUncertainModsDecision"

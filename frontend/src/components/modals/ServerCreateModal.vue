@@ -460,6 +460,8 @@
   <ModSideDecisionModal
     :show="showUncertainModsModal"
     :mods="uncertainModsReport"
+    :mc-version="formData.version"
+    :loader="formData.loader"
     :loading="creating"
     @confirm="confirmUncertainModsDecision"
     @cancel="cancelUncertainModsDecision"
