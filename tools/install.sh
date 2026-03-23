@@ -172,8 +172,13 @@ main() {
 
       if [[ -z "$TAG" ]]; then
         warn "WARNING: Could not determine latest release tag (GitHub API may be rate-limited or blocked)."
-        warn "Falling back to branch: ${FABRICATOR_BRANCH}"
-        download_tarball "heads" "$FABRICATOR_BRANCH"
+        warn "Falling back to cloning branch: ${FABRICATOR_BRANCH}"
+        if ! command -v git >/dev/null 2>&1; then
+          error "git is required for fallback clone but was not found."
+        fi
+        git clone --depth 1 --branch "$FABRICATOR_BRANCH" \
+          "https://github.com/${FABRICATOR_REPO}.git" \
+          "$TMP_DIR/Fabricator-${FABRICATOR_BRANCH}"
       else
         info "Latest release tag: $TAG"
         download_tarball "tags" "$TAG"
@@ -204,7 +209,7 @@ main() {
         $SUDO systemctl stop "$SERVICE_NAME"
     fi
     $SUDO mkdir -p "$APP_DIR"
-    $SUDO rsync -a --delete "$APP_SRC_DIR/" "$APP_DIR/"
+    $SUDO rsync -a --delete --exclude .git "$APP_SRC_DIR/" "$APP_DIR/"
     $SUDO chown -R root:root "$APP_DIR"
     $SUDO chmod -R 755 "$APP_DIR"
     $SUDO chown -R "$SERVICE_USER:$SERVICE_USER" "$VENV_DIR"
