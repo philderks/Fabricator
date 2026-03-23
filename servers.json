@@ -1,1 +1,32 @@
-[]
+[
+  {
+    "id": "srv_b1713ca8",
+    "status": "stopped",
+    "createdAt": "2026-03-23T09:45:35.298739Z",
+    "updatedAt": "2026-03-23T09:45:35.828686Z",
+    "name": "",
+    "version": "1.21.11",
+    "loader": "fabric",
+    "port": 25565,
+    "installPath": "",
+    "maxPlayers": 20,
+    "difficulty": "normal",
+    "gamemode": "survival",
+    "viewDistance": 10,
+    "levelName": "world",
+    "levelType": "default",
+    "seed": "",
+    "generateStructures": true,
+    "spawnAnimals": true,
+    "spawnMonsters": true,
+    "spawnNpcs": true,
+    "memory": 4,
+    "simulationDistance": 10,
+    "onlineMode": true,
+    "whitelist": false,
+    "pvp": true,
+    "commandBlocks": true,
+    "motd": "A Minecraft Server",
+    "acceptEula": true
+  }
+]

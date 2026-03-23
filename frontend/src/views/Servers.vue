@@ -110,7 +110,11 @@ const loadUpdateState = async ({ silent = false } = {}) => {
 
 const handleCreateServer = async (createdServer) => {
   try {
-    toast.success(`Server "${createdServer.name}" created successfully!`, 'Server Created')
+    const modpackTitle = createdServer?.modpackSelection?.title
+    const message = modpackTitle
+      ? `Server "${createdServer.name}" created. Selected modpack: ${modpackTitle}.`
+      : `Server "${createdServer.name}" created successfully!`
+    toast.success(message, 'Server Created')
     await loadServers()
   } catch (error) {
     console.error('Failed to refresh servers:', error)

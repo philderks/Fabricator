@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ModBrowserModal from '../components/modals/ModBrowserModal.vue'
+import ModpackBrowserModal from '../components/modals/ModpackBrowserModal.vue'
 import ConfirmModal from '../components/modals/ConfirmModal.vue'
 import JavaInstallModal from '../components/modals/JavaInstallModal.vue'
 import ServerSettingsTab from '../components/server/ServerSettingsTab.vue'
@@ -54,6 +55,7 @@ const javaStatus = ref({
   java_path: 'java',
   linux_install_command: 'sudo apt install openjdk-21-jre-headless'
 })
+const showModpackBrowser = ref(false)
 const showConfirmModal = ref(false)
 const confirmModalData = ref({})
 const modToRemove = ref(null)
@@ -515,6 +517,10 @@ const openModBrowser = () => {
   showModBrowser.value = true
 }
 
+const openModpackBrowser = () => {
+  showModpackBrowser.value = true
+}
+
 const openDeleteServerModal = () => {
   showDeleteServerModal.value = true
 }
@@ -564,6 +570,15 @@ const handleInstallMod = async (modData) => {
 const handleUpdateMod = (mod) => {
   console.log('Update mod placeholder:', mod)
   toast.info('Mod updates coming soon', 'Not Implemented')
+}
+
+const handleSelectModpack = (modpackData) => {
+  showModpackBrowser.value = false
+  toast.success(
+    `${modpackData.title} selected for Minecraft ${modpackData.mcVersion}.`,
+    'Modpack Selected'
+  )
+  logActivity({ type: 'modpack_select', modpack: modpackData.title })
 }
 
 const handleRemoveMod = (mod) => {
@@ -801,6 +816,7 @@ onUnmounted(() => {
           :backups="backups"
           :format-backup-time="formatBackupTime"
           @browse-mods="openModBrowser"
+          @browse-modpacks="openModpackBrowser"
           @remove-mod="handleRemoveMod"
           @update-mod="handleUpdateMod"
           @create-backup="createBackupAction"
@@ -861,6 +877,14 @@ onUnmounted(() => {
       :loader="(server?.loader || serverStatus.loader).toLowerCase()"
       @close="showModBrowser = false"
       @install="handleInstallMod"
+    />
+
+    <ModpackBrowserModal
+      :show="showModpackBrowser"
+      :mc-version="server?.version || serverStatus.version"
+      :loader="(server?.loader || serverStatus.loader).toLowerCase()"
+      @close="showModpackBrowser = false"
+      @select="handleSelectModpack"
     />
 
     <ConfirmModal

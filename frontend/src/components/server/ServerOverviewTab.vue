@@ -59,6 +59,7 @@ const props = defineProps({
 const emit = defineEmits([
   'update:modSearch',
   'browse-mods',
+  'browse-modpacks',
   'remove-mod',
   'update-mod',
   'create-backup',
@@ -75,6 +76,7 @@ const modSearchModel = computed({
 })
 
 const handleBrowseMods = () => emit('browse-mods')
+const handleBrowseModpacks = () => emit('browse-modpacks')
 const handleCreateBackup = () => emit('create-backup')
 const handleOpenConsole = () => emit('open-console')
 const handleOpenFiles = () => emit('open-files')
@@ -114,9 +116,14 @@ const handleRequestDelete = (backup) => emit('request-delete-backup', backup)
         <div class="card">
           <div class="card-header">
             <h3>Installed Mods ({{ installedMods.length }})</h3>
-            <button class="btn btn-primary" :disabled="installLoading" @click="handleBrowseMods">
-              {{ installLoading ? 'Installing…' : 'Browse Mods' }}
-            </button>
+            <div class="mod-actions">
+              <button class="btn btn-secondary" :disabled="installLoading" @click="handleBrowseModpacks">
+                Browse Modpacks
+              </button>
+              <button class="btn btn-primary" :disabled="installLoading" @click="handleBrowseMods">
+                {{ installLoading ? 'Installing…' : 'Browse Mods' }}
+              </button>
+            </div>
           </div>
           <div class="search-box">
             <input
@@ -234,6 +241,12 @@ const handleRequestDelete = (backup) => emit('request-delete-backup', backup)
   border: 1px dashed var(--border-color);
   border-radius: 8px;
   background: var(--bg-secondary);
+}
+
+.mod-actions {
+  display: inline-flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .backups-list {

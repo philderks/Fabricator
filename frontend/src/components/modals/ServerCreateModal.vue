@@ -5,7 +5,7 @@
     size="large"
     @close="handleClose"
   >
-    <form @submit.prevent="handleSave" class="settings-form">
+    <form @submit.prevent="handleCreate" class="settings-form">
       <!-- Basic Settings -->
       <section class="settings-section">
         <h3 class="section-title">Basic Settings</h3>
@@ -89,6 +89,145 @@
             >
             <span class="form-hint">Where server files will be stored</span>
           </div>
+        </div>
+      </section>
+
+      <!-- Modpack Setup -->
+      <section class="settings-section">
+        <h3 class="section-title">Modpack Setup</h3>
+
+        <div class="mode-toggle" role="tablist" aria-label="Server setup mode">
+          <button
+            type="button"
+            class="mode-toggle-btn"
+            :class="{ active: formData.setupMode === 'custom' }"
+            @click="formData.setupMode = 'custom'"
+          >
+            Custom Server
+          </button>
+          <button
+            type="button"
+            class="mode-toggle-btn"
+            :class="{ active: formData.setupMode === 'modpack' }"
+            @click="formData.setupMode = 'modpack'"
+          >
+            Import Modpack
+          </button>
+        </div>
+
+        <p class="form-hint">
+          Use custom mode for manual setup, or choose a Modrinth modpack by link or search.
+        </p>
+
+        <div v-if="formData.setupMode === 'modpack'" class="modpack-panel">
+          <div class="form-group">
+            <label>Import Method</label>
+            <div class="inline-choice">
+              <label class="choice-pill">
+                <input type="radio" v-model="formData.modpackImportMethod" value="link">
+                <span>Link</span>
+              </label>
+              <label class="choice-pill">
+                <input type="radio" v-model="formData.modpackImportMethod" value="search">
+                <span>Search</span>
+              </label>
+            </div>
+          </div>
+
+          <div v-if="formData.modpackImportMethod === 'link'" class="form-row modpack-input-row">
+            <div class="form-group modpack-grow">
+              <label for="modpack-link">Modpack URL or Slug</label>
+              <input
+                id="modpack-link"
+                v-model="modpackLinkInput"
+                type="text"
+                placeholder="https://modrinth.com/modpack/your-pack"
+              >
+              <span class="form-hint">Supports Modrinth links, slugs, or project IDs.</span>
+            </div>
+            <div class="form-group modpack-action">
+              <label>&nbsp;</label>
+              <button
+                type="button"
+                class="btn btn-secondary"
+                @click="resolveModpackByLink"
+                :disabled="modpackLookupLoading || !modpackLinkInput.trim()"
+              >
+                {{ modpackLookupLoading ? 'Resolving...' : 'Resolve' }}
+              </button>
+            </div>
+          </div>
+
+          <div v-else>
+            <div class="form-row modpack-input-row">
+              <div class="form-group modpack-grow">
+                <label for="modpack-search">Search Modpacks</label>
+                <input
+                  id="modpack-search"
+                  v-model="modpackSearchQuery"
+                  type="text"
+                  placeholder="All of Fabric, Better Minecraft, ..."
+                >
+              </div>
+              <div class="form-group modpack-action">
+                <label>&nbsp;</label>
+                <button
+                  type="button"
+                  class="btn btn-secondary"
+                  @click="searchForModpacks"
+                  :disabled="modpackSearchLoading || !modpackSearchQuery.trim()"
+                >
+                  {{ modpackSearchLoading ? 'Searching...' : 'Search' }}
+                </button>
+              </div>
+            </div>
+
+            <div v-if="modpackSearchResults.length" class="modpack-results">
+              <button
+                v-for="pack in modpackSearchResults"
+                :key="pack.project_id"
+                type="button"
+                class="modpack-result"
+                :class="{ selected: selectedModpack && selectedModpack.id === pack.project_id }"
+                @click="selectModpackFromSearch(pack)"
+              >
+                <div class="modpack-result-header">
+                  <img
+                    v-if="pack.icon_url"
+                    :src="pack.icon_url"
+                    :alt="pack.title"
+                    class="modpack-icon"
+                  >
+                  <div>
+                    <strong>{{ pack.title }}</strong>
+                    <p>{{ pack.description || 'No description provided.' }}</p>
+                  </div>
+                </div>
+                <span class="modpack-meta">{{ formatNumber(pack.downloads || 0) }} downloads</span>
+              </button>
+            </div>
+
+            <p v-if="modpackSearchDone && !modpackSearchLoading && !modpackSearchResults.length" class="form-hint">
+              No matching modpacks found for this search.
+            </p>
+          </div>
+
+          <p v-if="modpackError" class="modpack-error">{{ modpackError }}</p>
+
+          <div v-if="selectedModpack" class="modpack-selected">
+            <div>
+              <p class="selected-label">Selected Modpack</p>
+              <strong>{{ selectedModpack.title }}</strong>
+              <p>{{ selectedModpack.description || 'No description provided.' }}</p>
+            </div>
+            <button type="button" class="btn btn-secondary" @click="clearSelectedModpack">
+              Clear
+            </button>
+          </div>
+
+          <p class="form-hint">
+            Modpack installation wiring is next; this step stores your chosen modpack with the new server.
+          </p>
         </div>
       </section>
 
@@ -325,6 +464,7 @@
 <script>
 import BaseModal from './BaseModal.vue'
 import { createServer, installServer, getFabricGameVersions, getJavaStatus } from '../../api/servers'
+import { getProjectDetails, searchModpacks } from '../../api/modrinth'
 import { useToast } from '../../composables/useToast'
 
 export default {
@@ -348,6 +488,14 @@ export default {
       creating: false,
       versionsLoading: false,
       javaRequirementLoading: false,
+      modpackLookupLoading: false,
+      modpackSearchLoading: false,
+      modpackSearchDone: false,
+      modpackLinkInput: '',
+      modpackSearchQuery: '',
+      modpackSearchResults: [],
+      modpackError: '',
+      selectedModpack: null,
       gameVersions: [],
       javaStatus: null,
       javaRequirementWarning: '',
@@ -355,6 +503,9 @@ export default {
         { value: 'fabric', label: 'Fabric (supported)' }
       ],
       formData: {
+        setupMode: 'custom',
+        modpackImportMethod: 'link',
+        modpackReference: '',
         name: '',
         version: '',
         loader: 'fabric',
@@ -387,6 +538,149 @@ export default {
     this.loadGameVersions()
   },
   methods: {
+    buildServerPayload() {
+      return {
+        name: this.formData.name,
+        version: this.formData.version,
+        loader: this.formData.loader,
+        port: this.formData.port,
+        installPath: this.formData.installPath,
+        maxPlayers: this.formData.maxPlayers,
+        difficulty: this.formData.difficulty,
+        gamemode: this.formData.gamemode,
+        viewDistance: this.formData.viewDistance,
+        levelName: this.formData.levelName,
+        levelType: this.formData.levelType,
+        seed: this.formData.seed,
+        generateStructures: this.formData.generateStructures,
+        spawnAnimals: this.formData.spawnAnimals,
+        spawnMonsters: this.formData.spawnMonsters,
+        spawnNpcs: this.formData.spawnNpcs,
+        memory: this.formData.memory,
+        simulationDistance: this.formData.simulationDistance,
+        onlineMode: this.formData.onlineMode,
+        whitelist: this.formData.whitelist,
+        pvp: this.formData.pvp,
+        commandBlocks: this.formData.commandBlocks,
+        motd: this.formData.motd,
+        acceptEula: this.formData.acceptEula
+      }
+    },
+
+    extractProjectIdOrSlug(input) {
+      if (!input) {
+        return ''
+      }
+
+      const raw = input.trim()
+      if (!raw) {
+        return ''
+      }
+
+      if (!raw.startsWith('http://') && !raw.startsWith('https://')) {
+        return raw.replace(/^@/, '')
+      }
+
+      try {
+        const parsed = new URL(raw)
+        const pathParts = parsed.pathname.split('/').filter(Boolean)
+        if (!pathParts.length) {
+          return ''
+        }
+
+        if ((pathParts[0] === 'modpack' || pathParts[0] === 'project') && pathParts[1]) {
+          return pathParts[1]
+        }
+
+        return pathParts[pathParts.length - 1]
+      } catch {
+        return ''
+      }
+    },
+
+    normalizeModpack(project) {
+      return {
+        id: project.project_id || project.id,
+        slug: project.slug || '',
+        title: project.title || project.name || project.slug || 'Unknown Modpack',
+        description: project.description || '',
+        downloads: project.downloads || 0,
+        iconUrl: project.icon_url || '',
+        projectType: project.project_type || 'modpack'
+      }
+    },
+
+    formatNumber(value) {
+      return new Intl.NumberFormat().format(value || 0)
+    },
+
+    setSelectedModpack(project) {
+      const normalized = this.normalizeModpack(project)
+      this.selectedModpack = normalized
+      this.formData.modpackReference = normalized.slug || normalized.id || ''
+      this.modpackError = ''
+    },
+
+    clearSelectedModpack() {
+      this.selectedModpack = null
+      this.formData.modpackReference = ''
+    },
+
+    async resolveModpackByLink() {
+      const projectRef = this.extractProjectIdOrSlug(this.modpackLinkInput)
+      if (!projectRef) {
+        this.modpackError = 'Enter a valid Modrinth modpack URL, slug, or project ID.'
+        return
+      }
+
+      this.modpackLookupLoading = true
+      this.modpackError = ''
+      try {
+        const project = await getProjectDetails(projectRef)
+        if (project.project_type !== 'modpack') {
+          this.modpackError = 'That project exists, but it is not a modpack.'
+          return
+        }
+        this.setSelectedModpack(project)
+      } catch (error) {
+        this.modpackError = error.message || 'Could not resolve modpack from the provided link.'
+      } finally {
+        this.modpackLookupLoading = false
+      }
+    },
+
+    async searchForModpacks() {
+      const query = this.modpackSearchQuery.trim()
+      if (!query) {
+        this.modpackSearchResults = []
+        this.modpackSearchDone = false
+        return
+      }
+
+      this.modpackSearchLoading = true
+      this.modpackSearchDone = false
+      this.modpackError = ''
+      try {
+        const response = await searchModpacks({
+          query,
+          version: this.formData.version,
+          loader: this.formData.loader,
+          limit: 8
+        })
+        this.modpackSearchResults = Array.isArray(response.hits) ? response.hits : []
+      } catch (error) {
+        this.modpackSearchResults = []
+        this.modpackError = error.message || 'Failed to search modpacks.'
+      } finally {
+        this.modpackSearchLoading = false
+        this.modpackSearchDone = true
+      }
+    },
+
+    selectModpackFromSearch(pack) {
+      this.setSelectedModpack(pack)
+    },
+
     handleClose() {
       if (!this.creating) {
         this.$emit('close');
@@ -447,16 +741,39 @@ export default {
         return
       }
 
+      if (this.formData.setupMode === 'modpack' && !this.selectedModpack) {
+        this.toast.warning('Choose a modpack by link or search before creating the server.', 'Modpack Required')
+        return
+      }
+
       this.creating = true
       
       try {
         // Create server via API
-        const server = await createServer(this.formData)
+        const server = await createServer(this.buildServerPayload())
         this.toast.info('Installing server...', 'Installation')
         const installResult = await installServer(server.id)
 
         if (installResult.success) {
-          this.$emit('create', installResult.server || server)
+          const createdServer = installResult.server || server
+          const payload = this.selectedModpack && this.formData.setupMode === 'modpack'
+            ? {
+              ...createdServer,
+              modpackSelection: {
+                id: this.selectedModpack.id,
+                slug: this.selectedModpack.slug,
+                title: this.selectedModpack.title,
+                source: this.formData.modpackImportMethod
+              }
+            }
+            : createdServer
+
+          this.$emit('create', payload)
+
+          if (payload.modpackSelection) {
+            this.toast.info('Modpack selected and attached to this server. Backend install step is next.', 'Modpack Ready')
+          }
+
           this.$emit('close')
           this.resetForm()
         } else {
@@ -473,6 +790,9 @@ export default {
     resetForm() {
       const preservedVersion = this.formData.version
       this.formData = {
+        setupMode: 'custom',
+        modpackImportMethod: 'link',
+        modpackReference: '',
         name: '',
         version: preservedVersion || (this.gameVersions[0]?.version || ''),
         loader: 'fabric',
@@ -501,6 +821,15 @@ export default {
       }
       this.javaStatus = null
       this.javaRequirementWarning = ''
+
+      this.modpackLookupLoading = false
+      this.modpackSearchLoading = false
+      this.modpackSearchDone = false
+      this.modpackLinkInput = ''
+      this.modpackSearchQuery = ''
+      this.modpackSearchResults = []
+      this.modpackError = ''
+      this.selectedModpack = null
     }
   },
   computed: {
@@ -544,6 +873,180 @@ export default {
 
 .warning-hint {
   color: var(--warning, #f59e0b);
+}
+
+.mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: color-mix(in oklch, var(--bg-secondary) 88%, transparent);
+  gap: 0.25rem;
+}
+
+.mode-toggle-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 0.5rem 0.9rem;
+  border-radius: 999px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.mode-toggle-btn.active {
+  background: color-mix(in oklch, var(--primary) 15%, transparent);
+  color: var(--text-primary);
+}
+
+.modpack-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: color-mix(in oklch, var(--bg-tertiary) 75%, transparent);
+}
+
+.inline-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.choice-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+.modpack-input-row {
+  align-items: end;
+}
+
+.modpack-grow {
+  flex: 1;
+}
+
+.modpack-action {
+  min-width: 140px;
+}
+
+.modpack-results {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.modpack-result {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 0.75rem;
+  background: var(--bg-primary);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.modpack-result:hover {
+  border-color: color-mix(in oklch, var(--primary) 35%, var(--border-color));
+}
+
+.modpack-result.selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--primary) 20%, transparent);
+}
+
+.modpack-result-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.modpack-result-header p {
+  margin: 0.15rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.modpack-meta {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.modpack-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  object-fit: cover;
+  border: 1px solid var(--border-color);
+}
+
+.modpack-error {
+  margin: 0;
+  color: var(--danger, #d14343);
+  font-size: 0.875rem;
+}
+
+.modpack-selected {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: start;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  background: color-mix(in oklch, var(--success, #22a06b) 12%, transparent);
+  border: 1px solid color-mix(in oklch, var(--success, #22a06b) 28%, transparent);
+}
+
+.modpack-selected p {
+  margin: 0.2rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+}
+
+.selected-label {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+@media (max-width: 900px) {
+  .modpack-action {
+    min-width: 0;
+  }
+
+  .modpack-result {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .modpack-meta {
+    white-space: normal;
+  }
+
+  .modpack-selected {
+    flex-direction: column;
+  }
 }
 
 /* EULA Section */

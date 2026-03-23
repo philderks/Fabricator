@@ -5,6 +5,27 @@
 
 import { get, post } from './client'
 
+const MODRINTH_PUBLIC_API = 'https://api.modrinth.com/v2'
+
+async function requestPublic(path, params = {}) {
+  const queryString = new URLSearchParams(params).toString()
+  const url = queryString ? `${MODRINTH_PUBLIC_API}${path}?${queryString}` : `${MODRINTH_PUBLIC_API}${path}`
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json'
+    }
+  })
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}))
+    const message = payload.description || payload.error || `Modrinth request failed (${response.status})`
+    throw new Error(message)
+  }
+
+  return response.json()
+}
+
 /**
  * Search for mods on Modrinth
  * @param {Object} params - Search parameters
@@ -94,4 +115,52 @@ export async function getLoaders() {
  */
 export async function getGameVersions() {
   return get('/api/modrinth/game-versions')
+}
+
+/**
+ * Search for modpacks on Modrinth.
+ * Uses Modrinth public API from the frontend until dedicated backend routes are added.
+ * @param {Object} params - Search parameters
+ * @param {string} params.query - Search query
+ * @param {string} params.version - Minecraft version
+ * @param {string} params.loader - Mod loader (fabric, quilt, etc.)
+ * @param {string} params.sort - Sort order
+ * @param {number} params.limit - Number of results
+ * @param {number} params.offset - Pagination offset
+ * @returns {Promise<Object>} Search results with hits array
+ */
+export async function searchModpacks({
+  query = '',
+  version = '',
+  loader = '',
+  sort = 'relevance',
+  limit = 8,
+  offset = 0
+}) {
+  const facets = [["project_type:modpack"]]
+
+  if (loader) {
+    facets.push([`categories:${loader}`])
+  }
+
+  if (version) {
+    facets.push([`versions:${version}`])
+  }
+
+  return requestPublic('/search', {
+    query,
+    index: sort,
+    limit: Math.min(limit, 50),
+    offset,
+    facets: JSON.stringify(facets)
+  })
+}
+
+/**
+ * Fetch details for a Modrinth project by slug or ID.
+ * @param {string} projectIdOrSlug - Modrinth project identifier
+ * @returns {Promise<Object>} Project details
+ */
+export async function getProjectDetails(projectIdOrSlug) {
+  return requestPublic(`/project/${encodeURIComponent(projectIdOrSlug)}`)
 }
