@@ -62,9 +62,9 @@ def create_tray_icon(port: int, on_quit_callback):
         on_quit_callback()
 
     menu = pystray.Menu(
-        pystray.MenuItem('🌐 Im Browser öffnen', on_open_browser, default=True),
+        pystray.MenuItem('🌐 Open in Browser', on_open_browser, default=True),
         pystray.Menu.SEPARATOR,
-        pystray.MenuItem('❌ Beenden', on_quit),
+        pystray.MenuItem('❌ Quit', on_quit),
     )
 
     return pystray.Icon(

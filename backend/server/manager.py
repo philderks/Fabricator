@@ -18,6 +18,8 @@ class ServerManager:
 
     DEFAULT_COMMAND = "java -Xmx2G -jar server.jar nogui"
     MAX_LOG_LINES = 10_000
+    _PLAYER_JOIN_RE = re.compile(r'\[.*?INFO\]: (.+) joined the game')
+    _PLAYER_LEAVE_RE = re.compile(r'\[.*?INFO\]: (.+) left the game')
 
     def __init__(self, command: Optional[Iterable[str]] = None, cwd: Optional[str] = None):
         env_command = os.environ.get("SERVER_COMMAND")
@@ -36,6 +38,7 @@ class ServerManager:
         self._stderr_thread: Optional[threading.Thread] = None
         self._stdout_buffer: List[str] = []
         self._stderr_buffer: List[str] = []
+        self._players: set = set()
         self._lock = threading.Lock()
 
     def _parse_command(self, command: Optional[Iterable[str]]) -> Optional[List[str]]:
@@ -131,6 +134,15 @@ class ServerManager:
                 buffer.append(line)
                 if len(buffer) > self.MAX_LOG_LINES:
                     del buffer[: len(buffer) - self.MAX_LOG_LINES]
+                join_match = self._PLAYER_JOIN_RE.search(line)
+                if join_match:
+                    with self._lock:
+                        self._players.add(join_match.group(1))
+                else:
+                    leave_match = self._PLAYER_LEAVE_RE.search(line)
+                    if leave_match:
+                        with self._lock:
+                            self._players.discard(leave_match.group(1))
                 print(line, end="")
             pipe.close()
 
@@ -229,6 +241,7 @@ class ServerManager:
             finally:
                 self._process = None
                 self._ps_process = None
+                self._players.clear()
                 if self._stdout_thread:
                     self._stdout_thread.join(timeout=2)
                     self._stdout_thread = None
@@ -243,8 +256,9 @@ class ServerManager:
         return bool(self._process and self._process.poll() is None)
 
     def status(self) -> dict:
-        status_value = "running" if self.is_running else "stopped"
-        message = "Server process is running" if self.is_running else "Server process is not running"
+        running = self.is_running
+        status_value = "running" if running else "stopped"
+        message = "Server process is running" if running else "Server process is not running"
         ram_usage = self._get_ram_usage_bytes()
         ram_limit = self._memory_limit_bytes
         status = {"status": status_value, "message": message}
@@ -259,8 +273,12 @@ class ServerManager:
                 ram_info["limitMB"] = round(ram_limit / (1024 ** 2), 2)
                 ram_info["limitGB"] = round(ram_limit / (1024 ** 3), 3)
             status["ram"] = ram_info
-        if self._process and self.is_running:
+        if self._process and running:
             status["pid"] = self._process.pid
+        with self._lock:
+            if not running:
+                self._players.clear()
+            status["players"] = {"online": len(self._players)}
         return status
 
     def tail_logs(self, limit: int = 200) -> dict:

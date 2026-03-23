@@ -59,7 +59,13 @@ def _augment_with_runtime(server: dict) -> dict:
     if not server or 'id' not in server:
         return server
 
-    runtime = process_registry.get_status(server['id'])
+    runtime = dict(process_registry.get_status(server['id']) or {})
+    try:
+        mods_path = process_registry.resolve_mods_path(server)
+        runtime['mods'] = sum(1 for f in mods_path.iterdir() if f.is_file() and f.suffix == '.jar')
+    except Exception:
+        pass
+
     augmented = dict(server)
     if runtime:
         augmented['runtime'] = runtime

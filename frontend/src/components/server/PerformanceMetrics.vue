@@ -40,7 +40,7 @@ const ramLabel = computed(() => {
       <div class="progress-bar">
         <div class="progress-fill" :style="{ width: ramPercent + '%' }"></div>
       </div>
-      <p class="perf-hint" v-if="!props.ram.running">Server muss laufen, um Live-Daten zu sammeln.</p>
+      <p class="perf-hint" v-if="!props.ram.running">Server must be running to collect live data.</p>
     </div>
   </div>
 </template>
