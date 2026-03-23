@@ -17,6 +17,24 @@ export class ApiError extends Error {
   }
 }
 
+function extractErrorMessageFromBody(rawBody) {
+  if (!rawBody) {
+    return ''
+  }
+
+  // Remove HTML tags for Flask/Werkzeug error pages and collapse whitespace.
+  const plain = String(rawBody)
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  if (!plain) {
+    return ''
+  }
+
+  return plain.length > 220 ? `${plain.slice(0, 220)}...` : plain
+}
+
 /**
  * Make an API request with error handling
  * @param {string} endpoint - API endpoint (e.g., '/api/status')
@@ -39,15 +57,24 @@ export async function apiRequest(endpoint, options = {}) {
       headers
     })
     
-    // Parse response
-    const data = await response.json().catch(() => ({}))
+    // Parse response body as JSON when possible, otherwise keep text for diagnostics.
+    const contentType = response.headers.get('content-type') || ''
+    let data = {}
+    let rawBody = ''
+
+    if (contentType.includes('application/json')) {
+      data = await response.json().catch(() => ({}))
+    } else {
+      rawBody = await response.text().catch(() => '')
+    }
     
     // Handle non-OK responses
     if (!response.ok) {
+      const bodyMessage = extractErrorMessageFromBody(rawBody)
       throw new ApiError(
-        data.error || data.message || `Request failed with status ${response.status}`,
+        data.error || data.message || bodyMessage || `Request failed with status ${response.status}`,
         response.status,
-        data
+        data && Object.keys(data).length ? data : null
       )
     }
     

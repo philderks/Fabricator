@@ -77,6 +77,8 @@ const deletingBackup = ref(false)
 const showDeleteServerModal = ref(false)
 const deletingServer = ref(false)
 const settingsTabRef = ref(null)
+const showModpackInstallConfirmModal = ref(false)
+const pendingModpackInstall = ref(null)
 
 const defaultSettings = (data = {}) => ({
   name: data.name || 'Minecraft Server',
@@ -574,15 +576,53 @@ const handleUpdateMod = (mod) => {
 }
 
 const handleInstallModpack = async (modpackData) => {
+  if (!modpackData) {
+    return
+  }
+
+  pendingModpackInstall.value = modpackData
+  showModpackInstallConfirmModal.value = true
+}
+
+const cancelModpackInstallConfirmation = () => {
+  showModpackInstallConfirmModal.value = false
+  pendingModpackInstall.value = null
+}
+
+const confirmModpackInstall = async () => {
+  const modpackData = pendingModpackInstall.value
+  if (!modpackData) {
+    return
+  }
+
+  showModpackInstallConfirmModal.value = false
+
   modpackInstalling.value = true
   try {
-    await installModpack(modpackData.projectId, {
+    const preInstallMessage = modpackData.createBackup
+      ? 'Replace mode active: old mod/config folders will be removed. A backup will be created first.'
+      : 'Replace mode active: old mod/config folders will be removed and backup is disabled.'
+    toast.warning(preInstallMessage, 'Modpack Switch')
+
+    const result = await installModpack(modpackData.projectId, {
       mc_version: modpackData.mcVersion,
       loader: modpackData.loader,
-      server_id: serverId.value
+      server_id: serverId.value,
+      clean_install: true,
+      create_backup: modpackData.createBackup
     })
     showModpackBrowser.value = false
-    toast.success(`${modpackData.title} installed successfully!`, 'Modpack Installed')
+    const cleanedCount = Array.isArray(result?.cleaned_paths) ? result.cleaned_paths.length : 0
+    const removedClientModsCount = Array.isArray(result?.removed_client_mods) ? result.removed_client_mods.length : 0
+    const cleanedNote = ` Replaced folders: ${cleanedCount}.`
+    const removedClientModsNote = removedClientModsCount
+      ? ` Removed incompatible client mods: ${removedClientModsCount}.`
+      : ''
+    const backupNote = result?.backup_file ? ` Backup: ${result.backup_file}.` : ''
+    toast.success(
+      `${modpackData.title} installed successfully.${cleanedNote}${removedClientModsNote}${backupNote}`,
+      'Modpack Installed'
+    )
     logActivity({ type: 'modpack_install', modpack: modpackData.title })
     await loadMods()
   } catch (error) {
@@ -590,6 +630,7 @@ const handleInstallModpack = async (modpackData) => {
     toast.error(error.message || 'Modpack installation failed', 'Installation Failed')
   } finally {
     modpackInstalling.value = false
+    pendingModpackInstall.value = null
   }
 }
 
@@ -734,6 +775,7 @@ const resetDashboardState = () => {
   logsLoading.value = false
   backupLoading.value = false
   installLoading.value = false
+  modpackInstalling.value = false
   actionState.value = { start: false, stop: false, restart: false }
 }
 
@@ -898,6 +940,24 @@ onUnmounted(() => {
       :installing="modpackInstalling"
       @close="showModpackBrowser = false"
       @install="handleInstallModpack"
+    />
+
+    <ConfirmModal
+      :show="showModpackInstallConfirmModal"
+      title="Confirm Modpack Replace"
+      :message="pendingModpackInstall ? `Install ${pendingModpackInstall.title} on this server?` : ''"
+      :description="pendingModpackInstall
+        ? (pendingModpackInstall.createBackup
+            ? 'Replace mode updates pack-managed folders (mods/config/defaultconfigs/kubejs/scripts). World, server settings, logs and backups stay intact. A backup will be created before install.'
+            : 'Replace mode updates pack-managed folders (mods/config/defaultconfigs/kubejs/scripts). World, server settings, logs and backups stay intact. Backup is disabled.')
+        : ''"
+      type="warning"
+      confirm-text="Install"
+      cancel-text="Cancel"
+      :loading="modpackInstalling"
+      @confirm="confirmModpackInstall"
+      @cancel="cancelModpackInstallConfirmation"
+      @close="cancelModpackInstallConfirmation"
     />
 
     <ConfirmModal

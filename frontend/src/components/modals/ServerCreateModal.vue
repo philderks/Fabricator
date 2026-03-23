@@ -624,6 +624,17 @@ export default {
       this.formData.modpackReference = ''
     },
 
+    isNotFoundError(error) {
+      if (!error) {
+        return false
+      }
+      if (error.status === 404) {
+        return true
+      }
+      const message = String(error.message || '').toLowerCase()
+      return message.includes('not found')
+    },
+
     async resolveModpackByLink() {
       const projectRef = this.extractProjectIdOrSlug(this.modpackLinkInput)
       if (!projectRef) {
@@ -641,7 +652,13 @@ export default {
         }
         this.setSelectedModpack(project)
       } catch (error) {
-        this.modpackError = error.message || 'Could not resolve modpack from the provided link.'
+        if (this.isNotFoundError(error)) {
+          this.modpackError = `No exact modpack found for "${projectRef}". Showing search results instead.`
+          this.modpackSearchQuery = projectRef
+          await this.searchForModpacks()
+        } else {
+          this.modpackError = error.message || 'Could not resolve modpack from the provided link.'
+        }
       } finally {
         this.modpackLookupLoading = false
       }

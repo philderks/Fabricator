@@ -1,8 +1,11 @@
 """Modrinth API routes."""
+import inspect
 import os
+import zipfile
+from datetime import datetime
 from pathlib import Path
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 
 from backend.modrinth.client import ModrinthClient, ModrinthApiError
 from backend.server import storage
@@ -16,6 +19,40 @@ process_registry = get_server_process_registry()
 def _modrinth_error_response(exc: ModrinthApiError):
     status = exc.status_code or 502
     return jsonify({'error': str(exc)}), status
+
+
+def _parse_bool(value, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in ('1', 'true', 'yes', 'on')
+    return default
+
+
+def _create_server_backup(install_path: Path) -> str:
+    backups_dir = install_path / 'backups'
+    backups_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.utcnow().strftime('%Y%m%d-%H%M%S')
+    backup_name = f"modpack-switch-{stamp}.zip"
+    backup_path = backups_dir / backup_name
+
+    with zipfile.ZipFile(backup_path, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+        for path in install_path.rglob('*'):
+            if path == backup_path:
+                continue
+            try:
+                rel = path.relative_to(install_path)
+            except ValueError:
+                continue
+            if rel.parts and rel.parts[0] == 'backups':
+                continue
+            archive.write(path, rel)
+
+    return backup_name
 
 
 def _resolve_mods_folder(server_id: str | None):
@@ -280,6 +317,8 @@ def install_modpack(project_id):
     mc_version = data.get('mc_version')
     loader = data.get('loader')
     server_id = data.get('server_id')
+    clean_install = True
+    create_backup = _parse_bool(data.get('create_backup'), default=False)
 
     if not server_id:
         return jsonify({'error': 'server_id is required'}), 400
@@ -297,17 +336,37 @@ def install_modpack(project_id):
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
 
+    backup_file = None
+    if create_backup:
+        try:
+            backup_file = _create_server_backup(install_path)
+        except OSError as exc:
+            return jsonify({'error': f'Failed to create backup before install: {exc}'}), 500
+
     try:
-        result = modrinth_client.install_modpack(
-            project_id=project_id,
-            install_path=install_path,
-            mc_version=mc_version,
-            loader=loader,
-        )
+        install_kwargs = {
+            'project_id': project_id,
+            'install_path': install_path,
+            'mc_version': mc_version,
+            'loader': loader,
+        }
+
+        # Backward compatibility: tolerate older cached client code that does
+        # not yet expose the clean_install argument.
+        if 'clean_install' in inspect.signature(modrinth_client.install_modpack).parameters:
+            install_kwargs['clean_install'] = clean_install
+
+        result = modrinth_client.install_modpack(**install_kwargs)
     except ModrinthApiError as exc:
         return _modrinth_error_response(exc)
+    except Exception as exc:  # pragma: no cover - defensive error mapping
+        current_app.logger.exception('Unexpected modpack install failure for %s', project_id)
+        return jsonify({'error': f'Modpack install failed: {exc}'}), 500
 
-    return jsonify({'success': True, 'message': 'Modpack installed successfully', **result})
+    payload = {'success': True, 'message': 'Modpack installed successfully', **result}
+    if backup_file:
+        payload['backup_file'] = backup_file
+    return jsonify(payload)
 
 
 @modrinth_bp.route('/version/<version_id>', methods=['GET'])

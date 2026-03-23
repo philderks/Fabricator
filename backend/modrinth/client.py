@@ -1,11 +1,11 @@
-"""Modrinth API client for fetching mod information."""
+"""Modrinth API client for fetching mod and modpack information."""
 import json
 import shutil
 import tempfile
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, List, Any
+from typing import Any, Dict, List, Optional
 
 import requests
 
@@ -23,6 +23,19 @@ class ModrinthClient:
 
     BASE_URL = "https://api.modrinth.com/v2"
     USER_AGENT = "philderks/Fabricator/1.0.0 (https://github.com/philderks/Fabricator)"
+    MODPACK_SWITCH_PATHS = (
+        'mods',
+        'config',
+        'defaultconfigs',
+        'kubejs',
+        'scripts',
+        'resourcepacks',
+        'shaderpacks',
+    )
+    # Keep this list minimal and focused on known dedicated-server hard failures.
+    SERVER_BLOCKED_MOD_IDS = {
+        'mod-loading-screen',
+    }
 
     def __init__(self):
         self.session = requests.Session()
@@ -37,8 +50,28 @@ class ModrinthClient:
             response.raise_for_status()
             return response
         except requests.exceptions.RequestException as exc:
-            status_code = getattr(getattr(exc, 'response', None), 'status_code', None)
-            raise ModrinthApiError(f"{error_context}: {exc}", status_code=status_code) from exc
+            response = getattr(exc, 'response', None)
+            status_code = getattr(response, 'status_code', None)
+
+            detail = ''
+            if response is not None:
+                try:
+                    payload = response.json()
+                    detail = payload.get('description') or payload.get('error') or payload.get('message') or ''
+                except ValueError:
+                    detail = ''
+
+            lowered_context = error_context.lower()
+            if status_code == 404 and ('fetch project' in lowered_context or 'fetch mod' in lowered_context):
+                message = f"{error_context}: Not found"
+            elif detail:
+                message = f"{error_context}: {detail}"
+            elif status_code is not None:
+                message = f"{error_context}: HTTP {status_code}"
+            else:
+                message = f"{error_context}: {exc}"
+
+            raise ModrinthApiError(message, status_code=status_code) from exc
 
     def search_mods(
         self,
@@ -83,9 +116,10 @@ class ModrinthClient:
         offset: int = 0,
         index: str = "downloads"
     ) -> Dict[str, Any]:
-        # Only filter by project type; loader is intentionally excluded because
-        # modpacks define their own loader and filtering by it hides most results.
         facets = [["project_type:modpack"]]
+
+        if loader:
+            facets.append([f"categories:{loader}"])
 
         if mc_version:
             facets.append([f"versions:{mc_version}"])
@@ -285,13 +319,9 @@ class ModrinthClient:
         install_path: Path,
         mc_version: Optional[str] = None,
         loader: Optional[str] = None,
+        clean_install: bool = False,
     ) -> Dict[str, Any]:
-        """Download and install a modpack into a server directory.
-
-        Downloads the .mrpack file, installs all server-side mod files listed in
-        modrinth.index.json, and extracts overrides/ and server-overrides/ into
-        the server root. Client-only files (env.server == 'unsupported') are skipped.
-        """
+        """Download and install a modpack into a server directory."""
         loaders = [loader] if loader else None
         game_versions = [mc_version] if mc_version else None
 
@@ -300,14 +330,12 @@ class ModrinthClient:
         )
         best = self.pick_best_version(versions)
 
-        # Retry without loader filter if no match found
         if not best and loaders:
             versions = self.get_project_versions(
                 project_id, loaders=None, game_versions=game_versions
             )
             best = self.pick_best_version(versions)
 
-        # Retry without any filter as last resort
         if not best and (loaders or game_versions):
             versions = self.get_project_versions(project_id)
             best = self.pick_best_version(versions)
@@ -323,6 +351,10 @@ class ModrinthClient:
         files_installed: List[str] = []
         files_skipped: List[str] = []
         index: Dict[str, Any] = {}
+        cleaned_paths: List[str] = []
+
+        if clean_install:
+            cleaned_paths = self.clean_modpack_switch_paths(install_path)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             mrpack_path = Path(tmp_dir) / "modpack.mrpack"
@@ -340,7 +372,6 @@ class ModrinthClient:
                 with zf.open('modrinth.index.json') as fh:
                     index = json.loads(fh.read())
 
-                # Install mod files listed in the index
                 for entry in index.get('files', []):
                     env = entry.get('env', {})
                     if env.get('server', 'required') == 'unsupported':
@@ -349,9 +380,7 @@ class ModrinthClient:
 
                     target = (install_path / entry['path']).resolve()
                     if not str(target).startswith(str(install_path)):
-                        raise ModrinthApiError(
-                            f"Invalid path in modpack index: {entry['path']}"
-                        )
+                        raise ModrinthApiError(f"Invalid path in modpack index: {entry['path']}")
 
                     target.parent.mkdir(parents=True, exist_ok=True)
                     downloads = entry.get('downloads', [])
@@ -368,16 +397,25 @@ class ModrinthClient:
                                     fh.write(chunk)
                     files_installed.append(entry['path'])
 
-                # Extract overrides and server-overrides into server root
                 for member in zf.infolist():
                     if member.is_dir():
                         continue
                     relative: Optional[str] = None
+                    matched_prefix: Optional[str] = None
                     for prefix in ('server-overrides/', 'overrides/'):
                         if member.filename.startswith(prefix):
                             relative = member.filename[len(prefix):]
+                            matched_prefix = prefix
                             break
                     if not relative:
+                        continue
+
+                    if (
+                        matched_prefix == 'overrides/'
+                        and relative.startswith('mods/')
+                        and relative.lower().endswith('.jar')
+                    ):
+                        files_skipped.append(member.filename)
                         continue
 
                     target = (install_path / relative).resolve()
@@ -387,13 +425,78 @@ class ModrinthClient:
                     with zf.open(member) as src, open(target, 'wb') as dst:
                         shutil.copyfileobj(src, dst)
 
+        removed_client_mods = self.prune_incompatible_server_mods(install_path)
+
         return {
             'version': best.get('version_number'),
             'name': best.get('name'),
             'files_installed': len(files_installed),
             'files_skipped': len(files_skipped),
+            'clean_install': clean_install,
+            'cleaned_paths': cleaned_paths,
+            'removed_client_mods': removed_client_mods,
             'dependencies': index.get('dependencies', {}),
         }
+
+    def clean_modpack_switch_paths(self, install_path: Path) -> List[str]:
+        """Remove known modpack-managed directories before a clean switch."""
+        install_root = Path(install_path).resolve()
+        removed: List[str] = []
+
+        for relative in self.MODPACK_SWITCH_PATHS:
+            target = (install_root / relative).resolve()
+            if not str(target).startswith(str(install_root)):
+                continue
+            if not target.exists():
+                continue
+
+            if target.is_dir():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
+            removed.append(relative)
+
+        return removed
+
+    def prune_incompatible_server_mods(self, install_path: Path) -> List[str]:
+        """Remove mods that are not suitable for dedicated server runtime."""
+        mods_dir = (Path(install_path).resolve() / 'mods').resolve()
+        if not mods_dir.exists() or not mods_dir.is_dir():
+            return []
+
+        removed: List[str] = []
+        for jar_path in sorted(mods_dir.glob('*.jar')):
+            if not jar_path.is_file():
+                continue
+
+            try:
+                with zipfile.ZipFile(jar_path) as zf:
+                    if 'fabric.mod.json' not in zf.namelist():
+                        continue
+                    mod_meta = json.loads(zf.read('fabric.mod.json'))
+            except (OSError, zipfile.BadZipFile, json.JSONDecodeError):
+                continue
+
+            mod_id = str(mod_meta.get('id') or '').strip()
+            environment = str(mod_meta.get('environment') or '').strip().lower()
+            entrypoints = mod_meta.get('entrypoints') or {}
+
+            should_remove = False
+            if mod_id in self.SERVER_BLOCKED_MOD_IDS:
+                should_remove = True
+            elif environment == 'client':
+                should_remove = True
+            elif 'client' in entrypoints and 'server' not in entrypoints and 'main' not in entrypoints:
+                should_remove = True
+
+            if should_remove:
+                try:
+                    jar_path.unlink()
+                    removed.append(jar_path.name)
+                except OSError:
+                    continue
+
+        return removed
 
     def get_categories(self) -> List[Dict[str, Any]]:
         response = self._request(

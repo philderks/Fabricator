@@ -147,10 +147,18 @@ export async function getProjectDetails(projectIdOrSlug) {
  * @param {string|number} options.server_id - Target server identifier
  * @returns {Promise<Object>} Installation result
  */
-export async function installModpack(projectId, { mc_version, loader, server_id }) {
+export async function installModpack(projectId, {
+  mc_version,
+  loader,
+  server_id,
+  clean_install = false,
+  create_backup = false
+}) {
   return post(`/api/modrinth/modpack/${encodeURIComponent(projectId)}/install`, {
     mc_version,
     loader,
-    server_id
+    server_id,
+    clean_install,
+    create_backup
   })
 }
