@@ -64,10 +64,66 @@ def search_mods():
         return _modrinth_error_response(exc)
 
 
+@modrinth_bp.route('/modpacks/search', methods=['GET'])
+def search_modpacks():
+    query = request.args.get('query', '')
+    mc_version = request.args.get('mc_version')
+    loader = request.args.get('loader')
+    strict_version = request.args.get('strict_version', 'false').lower() in ('true', '1', 'yes')
+    try:
+        limit = int(request.args.get('limit', 20))
+    except (TypeError, ValueError):
+        limit = 20
+    try:
+        offset = int(request.args.get('offset', 0))
+    except (TypeError, ValueError):
+        offset = 0
+    index = request.args.get('index', 'downloads')
+
+    try:
+        result = modrinth_client.search_modpacks(
+            query=query,
+            mc_version=mc_version,
+            loader=loader,
+            limit=limit,
+            offset=offset,
+            index=index
+        )
+
+        # If strict version filtering returns no hits, retry without mc_version.
+        # This keeps UX friendly for modpacks that are compatible but not tagged consistently.
+        hits = result.get('hits') if isinstance(result, dict) else None
+        if mc_version and not strict_version and isinstance(hits, list) and not hits:
+            fallback = modrinth_client.search_modpacks(
+                query=query,
+                mc_version=None,
+                loader=loader,
+                limit=limit,
+                offset=offset,
+                index=index
+            )
+            if isinstance(fallback, dict):
+                fallback['version_filter_fallback'] = True
+            return jsonify(fallback)
+
+        return jsonify(result)
+    except ModrinthApiError as exc:
+        return _modrinth_error_response(exc)
+
+
 @modrinth_bp.route('/mod/<mod_id>', methods=['GET'])
 def get_mod(mod_id):
     try:
         result = modrinth_client.get_mod(mod_id)
+        return jsonify(result)
+    except ModrinthApiError as exc:
+        return _modrinth_error_response(exc)
+
+
+@modrinth_bp.route('/project/<project_id>', methods=['GET'])
+def get_project(project_id):
+    try:
+        result = modrinth_client.get_project(project_id)
         return jsonify(result)
     except ModrinthApiError as exc:
         return _modrinth_error_response(exc)
@@ -93,6 +149,57 @@ def get_mod_versions(mod_id):
         return jsonify(result)
     except ModrinthApiError as exc:
         return _modrinth_error_response(exc)
+
+
+@modrinth_bp.route('/project/<project_id>/versions', methods=['GET'])
+def get_project_versions(project_id):
+    loaders = request.args.getlist('loaders')
+    game_versions = request.args.getlist('game_versions')
+    featured = request.args.get('featured')
+
+    featured_bool = None
+    if featured is not None:
+        featured_bool = featured.lower() in ('true', '1', 'yes')
+
+    try:
+        result = modrinth_client.get_project_versions(
+            project_id=project_id,
+            loaders=loaders if loaders else None,
+            game_versions=game_versions if game_versions else None,
+            featured=featured_bool
+        )
+        return jsonify(result)
+    except ModrinthApiError as exc:
+        return _modrinth_error_response(exc)
+
+
+@modrinth_bp.route('/project/<project_id>/resolve-version', methods=['GET'])
+def resolve_project_version(project_id):
+    mc_version = request.args.get('mc_version')
+    loader = request.args.get('loader')
+
+    if not mc_version:
+        return jsonify({"error": "mc_version parameter is required"}), 400
+
+    try:
+        resolved = modrinth_client.resolve_project_version(
+            project_id=project_id,
+            mc_version=mc_version,
+            loader=loader
+        )
+    except ModrinthApiError as exc:
+        return _modrinth_error_response(exc)
+
+    if not resolved:
+        return jsonify({"error": "No suitable version found"}), 404
+
+    return jsonify({
+        "project_id": project_id,
+        "mc_version": mc_version,
+        "loader": loader,
+        "version": resolved["version"],
+        "download_url": resolved["download_url"]
+    })
 
 
 @modrinth_bp.route('/mod/<mod_id>/download-url', methods=['GET'])
@@ -165,6 +272,42 @@ def install_mod(mod_id):
         "file": str(file_path.name),
         "path": str(file_path)
     })
+
+
+@modrinth_bp.route('/modpack/<project_id>/install', methods=['POST'])
+def install_modpack(project_id):
+    data = request.get_json() or {}
+    mc_version = data.get('mc_version')
+    loader = data.get('loader')
+    server_id = data.get('server_id')
+
+    if not server_id:
+        return jsonify({'error': 'server_id is required'}), 400
+
+    server = storage.get_server(server_id)
+    if not server:
+        return jsonify({'error': 'Server not found'}), 404
+
+    runtime_status = process_registry.get_status(server_id)
+    if runtime_status.get('status') == 'running':
+        return jsonify({'error': 'Stop the server before installing a modpack'}), 400
+
+    try:
+        install_path = process_registry._resolve_install_path(server)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    try:
+        result = modrinth_client.install_modpack(
+            project_id=project_id,
+            install_path=install_path,
+            mc_version=mc_version,
+            loader=loader,
+        )
+    except ModrinthApiError as exc:
+        return _modrinth_error_response(exc)
+
+    return jsonify({'success': True, 'message': 'Modpack installed successfully', **result})
 
 
 @modrinth_bp.route('/version/<version_id>', methods=['GET'])

@@ -225,9 +225,6 @@
             </button>
           </div>
 
-          <p class="form-hint">
-            Modpack installation wiring is next; this step stores your chosen modpack with the new server.
-          </p>
         </div>
       </section>
 
@@ -465,6 +462,7 @@
 import BaseModal from './BaseModal.vue'
 import { createServer, installServer, getFabricGameVersions, getJavaStatus } from '../../api/servers'
 import { getProjectDetails, searchModpacks } from '../../api/modrinth'
+import { getProjectDetails, searchModpacks, installModpack } from '../../api/modrinth'
 import { useToast } from '../../composables/useToast'
 
 export default {
@@ -735,7 +733,16 @@ export default {
     },
     
     async handleCreate() {
-      // Validate EULA acceptance
+      if (!this.formData.name.trim()) {
+        this.toast.warning('Please enter a server name.', 'Name Required')
+        return
+      }
+
+      if (!this.formData.version) {
+        this.toast.warning('Please select a Minecraft version.', 'Version Required')
+        return
+      }
+
       if (!this.formData.acceptEula) {
         this.toast.warning('You must accept the Minecraft EULA to create a server.', 'EULA Required')
         return
@@ -756,24 +763,25 @@ export default {
 
         if (installResult.success) {
           const createdServer = installResult.server || server
-          const payload = this.selectedModpack && this.formData.setupMode === 'modpack'
-            ? {
-              ...createdServer,
-              modpackSelection: {
-                id: this.selectedModpack.id,
-                slug: this.selectedModpack.slug,
-                title: this.selectedModpack.title,
-                source: this.formData.modpackImportMethod
-              }
+
+          if (this.formData.setupMode === 'modpack' && this.selectedModpack) {
+            this.toast.info(`Installing ${this.selectedModpack.title}...`, 'Modpack')
+            try {
+              await installModpack(this.selectedModpack.id, {
+                mc_version: this.formData.version,
+                loader: this.formData.loader,
+                server_id: createdServer.id
+              })
+              this.toast.success(`${this.selectedModpack.title} installed successfully!`, 'Modpack Installed')
+            } catch (modpackError) {
+              this.toast.error(
+                modpackError.message || 'Modpack installation failed. You can install it manually from the server dashboard.',
+                'Modpack Failed'
+              )
             }
-            : createdServer
-
-          this.$emit('create', payload)
-
-          if (payload.modpackSelection) {
-            this.toast.info('Modpack selected and attached to this server. Backend install step is next.', 'Modpack Ready')
           }
 
+          this.$emit('create', createdServer)
           this.$emit('close')
           this.resetForm()
         } else {

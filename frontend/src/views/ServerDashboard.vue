@@ -10,7 +10,7 @@ import ServerHeader from '../components/server/ServerHeader.vue'
 import ServerOverviewTab from '../components/server/ServerOverviewTab.vue'
 import ServerConsoleTab from '../components/server/ServerConsoleTab.vue'
 import ServerFilesTab from '../components/server/ServerFilesTab.vue'
-import { installMod } from '../api/modrinth'
+import { installMod, installModpack } from '../api/modrinth'
 import {
   getServer,
   getInstalledMods,
@@ -60,6 +60,7 @@ const showConfirmModal = ref(false)
 const confirmModalData = ref({})
 const modToRemove = ref(null)
 const installLoading = ref(false)
+const modpackInstalling = ref(false)
 const activeTab = ref('overview')
 const actionState = ref({ start: false, stop: false, restart: false })
 const consoleCommand = ref('')
@@ -572,13 +573,24 @@ const handleUpdateMod = (mod) => {
   toast.info('Mod updates coming soon', 'Not Implemented')
 }
 
-const handleSelectModpack = (modpackData) => {
-  showModpackBrowser.value = false
-  toast.success(
-    `${modpackData.title} selected for Minecraft ${modpackData.mcVersion}.`,
-    'Modpack Selected'
-  )
-  logActivity({ type: 'modpack_select', modpack: modpackData.title })
+const handleInstallModpack = async (modpackData) => {
+  modpackInstalling.value = true
+  try {
+    await installModpack(modpackData.projectId, {
+      mc_version: modpackData.mcVersion,
+      loader: modpackData.loader,
+      server_id: serverId.value
+    })
+    showModpackBrowser.value = false
+    toast.success(`${modpackData.title} installed successfully!`, 'Modpack Installed')
+    logActivity({ type: 'modpack_install', modpack: modpackData.title })
+    await loadMods()
+  } catch (error) {
+    console.error('Modpack install failed:', error)
+    toast.error(error.message || 'Modpack installation failed', 'Installation Failed')
+  } finally {
+    modpackInstalling.value = false
+  }
 }
 
 const handleRemoveMod = (mod) => {
@@ -883,8 +895,9 @@ onUnmounted(() => {
       :show="showModpackBrowser"
       :mc-version="server?.version || serverStatus.version"
       :loader="(server?.loader || serverStatus.loader).toLowerCase()"
+      :installing="modpackInstalling"
       @close="showModpackBrowser = false"
-      @select="handleSelectModpack"
+      @install="handleInstallModpack"
     />
 
     <ConfirmModal

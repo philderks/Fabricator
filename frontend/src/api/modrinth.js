@@ -5,26 +5,6 @@
 
 import { get, post } from './client'
 
-const MODRINTH_PUBLIC_API = 'https://api.modrinth.com/v2'
-
-async function requestPublic(path, params = {}) {
-  const queryString = new URLSearchParams(params).toString()
-  const url = queryString ? `${MODRINTH_PUBLIC_API}${path}?${queryString}` : `${MODRINTH_PUBLIC_API}${path}`
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: {
-      Accept: 'application/json'
-    }
-  })
-
-  if (!response.ok) {
-    const payload = await response.json().catch(() => ({}))
-    const message = payload.description || payload.error || `Modrinth request failed (${response.status})`
-    throw new Error(message)
-  }
-
-  return response.json()
-}
 
 /**
  * Search for mods on Modrinth
@@ -119,7 +99,6 @@ export async function getGameVersions() {
 
 /**
  * Search for modpacks on Modrinth.
- * Uses Modrinth public API from the frontend until dedicated backend routes are added.
  * @param {Object} params - Search parameters
  * @param {string} params.query - Search query
  * @param {string} params.version - Minecraft version
@@ -135,24 +114,17 @@ export async function searchModpacks({
   loader = '',
   sort = 'relevance',
   limit = 8,
-  offset = 0
+  offset = 0,
+  strictVersion = false
 }) {
-  const facets = [["project_type:modpack"]]
-
-  if (loader) {
-    facets.push([`categories:${loader}`])
-  }
-
-  if (version) {
-    facets.push([`versions:${version}`])
-  }
-
-  return requestPublic('/search', {
+  return get('/api/modrinth/modpacks/search', {
     query,
+    mc_version: version,
+    loader,
+    strict_version: strictVersion,
     index: sort,
     limit: Math.min(limit, 50),
-    offset,
-    facets: JSON.stringify(facets)
+    offset
   })
 }
 
@@ -162,5 +134,23 @@ export async function searchModpacks({
  * @returns {Promise<Object>} Project details
  */
 export async function getProjectDetails(projectIdOrSlug) {
-  return requestPublic(`/project/${encodeURIComponent(projectIdOrSlug)}`)
+  return get(`/api/modrinth/project/${encodeURIComponent(projectIdOrSlug)}`)
+}
+
+/**
+ * Install a modpack on a server.
+ * Downloads the .mrpack, installs all server-side mods, and applies overrides.
+ * @param {string} projectId - Modrinth project ID or slug
+ * @param {Object} options - Installation options
+ * @param {string} options.mc_version - Minecraft version
+ * @param {string} options.loader - Mod loader
+ * @param {string|number} options.server_id - Target server identifier
+ * @returns {Promise<Object>} Installation result
+ */
+export async function installModpack(projectId, { mc_version, loader, server_id }) {
+  return post(`/api/modrinth/modpack/${encodeURIComponent(projectId)}/install`, {
+    mc_version,
+    loader,
+    server_id
+  })
 }

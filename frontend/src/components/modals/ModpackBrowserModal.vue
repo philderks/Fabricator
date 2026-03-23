@@ -73,7 +73,11 @@
         :key="pack.project_id"
         type="button"
         class="modpack-card"
-        :class="{ selected: selectedModpack && selectedModpack.id === (pack.project_id || pack.id) }"
+        :class="{
+          selected: selectedModpack && selectedModpack.id === (pack.project_id || pack.id),
+          installing: installing && selectedModpack && selectedModpack.id === (pack.project_id || pack.id)
+        }"
+        :disabled="installing"
         @click="selectPack(pack)"
       >
         <img
@@ -86,6 +90,12 @@
           <p>{{ truncate(pack.description, 120) }}</p>
           <span class="meta">{{ formatNumber(pack.downloads || 0) }} downloads</span>
         </div>
+        <div
+          v-if="installing && selectedModpack && selectedModpack.id === (pack.project_id || pack.id)"
+          class="installing-indicator"
+        >
+          <div class="spinner"></div>
+        </div>
       </button>
     </div>
 
@@ -95,14 +105,7 @@
     </div>
 
     <template #footer>
-      <button class="btn btn-secondary" @click="$emit('close')">Close</button>
-      <button
-        class="btn btn-primary"
-        :disabled="!selectedModpack"
-        @click="confirmSelection"
-      >
-        Select Modpack
-      </button>
+      <button class="btn btn-secondary" :disabled="installing" @click="$emit('close')">Close</button>
     </template>
   </BaseModal>
 </template>
@@ -128,9 +131,13 @@ export default {
     loader: {
       type: String,
       default: 'fabric'
+    },
+    installing: {
+      type: Boolean,
+      default: false
     }
   },
-  emits: ['close', 'select'],
+  emits: ['close', 'install'],
   data() {
     return {
       importMethod: 'search',
@@ -247,7 +254,7 @@ export default {
         }
 
         this.results = [project]
-        this.selectedModpack = this.normalize(project)
+        this.selectPack(project)
       } catch (error) {
         this.errorMessage = error.message || 'Could not resolve modpack from link.'
       } finally {
@@ -256,18 +263,13 @@ export default {
     },
 
     selectPack(pack) {
+      if (this.installing) return
       this.selectedModpack = this.normalize(pack)
-    },
-
-    confirmSelection() {
-      if (!this.selectedModpack) {
-        return
-      }
-      this.$emit('select', {
-        ...this.selectedModpack,
+      this.$emit('install', {
+        projectId: this.selectedModpack.id,
+        title: this.selectedModpack.title,
         mcVersion: this.mcVersion,
         loader: (this.loader || 'fabric').toLowerCase(),
-        source: this.importMethod
       })
     },
 
@@ -363,6 +365,18 @@ export default {
 .modpack-card.selected {
   border-color: var(--primary);
   box-shadow: 0 0 0 2px color-mix(in oklch, var(--primary) 18%, transparent);
+}
+
+.modpack-card.installing {
+  opacity: 0.8;
+  cursor: wait;
+}
+
+.installing-indicator {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .modpack-icon {
