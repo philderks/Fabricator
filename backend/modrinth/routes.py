@@ -18,7 +18,11 @@ process_registry = get_server_process_registry()
 
 def _modrinth_error_response(exc: ModrinthApiError):
     status = exc.status_code or 502
-    return jsonify({'error': str(exc)}), status
+    payload = {'error': str(exc)}
+    details = getattr(exc, 'details', None)
+    if isinstance(details, dict):
+        payload.update(details)
+    return jsonify(payload), status
 
 
 def _parse_bool(value, default: bool = False) -> bool:
@@ -319,6 +323,8 @@ def install_modpack(project_id):
     server_id = data.get('server_id')
     clean_install = True
     create_backup = _parse_bool(data.get('create_backup'), default=False)
+    allow_missing = _parse_bool(data.get('allow_missing'), default=False)
+    mod_side_overrides = data.get('mod_side_overrides')
 
     if not server_id:
         return jsonify({'error': 'server_id is required'}), 400
@@ -355,6 +361,10 @@ def install_modpack(project_id):
         # not yet expose the clean_install argument.
         if 'clean_install' in inspect.signature(modrinth_client.install_modpack).parameters:
             install_kwargs['clean_install'] = clean_install
+        if 'allow_missing' in inspect.signature(modrinth_client.install_modpack).parameters:
+            install_kwargs['allow_missing'] = allow_missing
+        if 'mod_side_overrides' in inspect.signature(modrinth_client.install_modpack).parameters:
+            install_kwargs['mod_side_overrides'] = mod_side_overrides
 
         result = modrinth_client.install_modpack(**install_kwargs)
     except ModrinthApiError as exc:

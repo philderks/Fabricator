@@ -456,19 +456,29 @@
       </button>
     </template>
   </BaseModal>
+
+  <ModSideDecisionModal
+    :show="showUncertainModsModal"
+    :mods="uncertainModsReport"
+    :loading="creating"
+    @confirm="confirmUncertainModsDecision"
+    @cancel="cancelUncertainModsDecision"
+    @close="cancelUncertainModsDecision"
+  />
 </template>
 
 <script>
 import BaseModal from './BaseModal.vue'
 import { createServer, installServer, getFabricGameVersions, getJavaStatus } from '../../api/servers'
-import { getProjectDetails, searchModpacks } from '../../api/modrinth'
-import { getProjectDetails, searchModpacks, installModpack } from '../../api/modrinth'
+import ModSideDecisionModal from './ModSideDecisionModal.vue'
+import { getProjectDetails, searchModpacks, installModpack, resolveProjectVersion } from '../../api/modrinth'
 import { useToast } from '../../composables/useToast'
 
 export default {
   name: 'ServerCreateModal',
   components: {
-    BaseModal
+    BaseModal,
+    ModSideDecisionModal
   },
   props: {
     show: {
@@ -494,6 +504,9 @@ export default {
       modpackSearchResults: [],
       modpackError: '',
       selectedModpack: null,
+      showUncertainModsModal: false,
+      uncertainModsReport: [],
+      pendingUncertainModsResolver: null,
       gameVersions: [],
       javaStatus: null,
       javaRequirementWarning: '',
@@ -696,6 +709,62 @@ export default {
       this.setSelectedModpack(pack)
     },
 
+    async validateSelectedModpackCompatibility() {
+      if (this.formData.setupMode !== 'modpack' || !this.selectedModpack) {
+        return true
+      }
+
+      try {
+        await resolveProjectVersion(this.selectedModpack.id, {
+          mc_version: this.formData.version,
+          loader: this.formData.loader
+        })
+        return true
+      } catch (error) {
+        const message = error?.message || 'No compatible modpack version found for the selected Minecraft version.'
+        this.modpackError = message
+        this.toast.error(message, 'Modpack Incompatible')
+        return false
+      }
+    },
+
+    requestUncertainModsDecision(uncertainMods = []) {
+      return new Promise((resolve, reject) => {
+        this.uncertainModsReport = Array.isArray(uncertainMods) ? uncertainMods : []
+        this.showUncertainModsModal = true
+        this.pendingUncertainModsResolver = { resolve, reject }
+      })
+    },
+
+    confirmUncertainModsDecision(overrides) {
+      const resolver = this.pendingUncertainModsResolver
+      this.pendingUncertainModsResolver = null
+      this.showUncertainModsModal = false
+      this.uncertainModsReport = []
+      if (resolver?.resolve) {
+        resolver.resolve(overrides || {})
+      }
+    },
+
+    cancelUncertainModsDecision() {
+      const resolver = this.pendingUncertainModsResolver
+      this.pendingUncertainModsResolver = null
+      this.showUncertainModsModal = false
+      this.uncertainModsReport = []
+      if (resolver?.reject) {
+        resolver.reject(new Error('Modpack installation canceled. Unknown mod sides were not confirmed.'))
+      }
+    },
+
+    async installSelectedModpackOnServer(serverId, modSideOverrides = null) {
+      return installModpack(this.selectedModpack.id, {
+        mc_version: this.formData.version,
+        loader: this.formData.loader,
+        server_id: serverId,
+        mod_side_overrides: modSideOverrides
+      })
+    },
+
     handleClose() {
       if (!this.creating) {
         this.$emit('close');
@@ -770,6 +839,13 @@ export default {
         return
       }
 
+      if (this.formData.setupMode === 'modpack') {
+        const compatible = await this.validateSelectedModpackCompatibility()
+        if (!compatible) {
+          return
+        }
+      }
+
       this.creating = true
       
       try {
@@ -780,25 +856,54 @@ export default {
 
         if (installResult.success) {
           const createdServer = installResult.server || server
+          let modpackInstallError = null
 
           if (this.formData.setupMode === 'modpack' && this.selectedModpack) {
             this.toast.info(`Installing ${this.selectedModpack.title}...`, 'Modpack')
             try {
-              await installModpack(this.selectedModpack.id, {
-                mc_version: this.formData.version,
-                loader: this.formData.loader,
-                server_id: createdServer.id
-              })
+              let installResult = null
+              let overrideMap = null
+              while (true) {
+                try {
+                  installResult = await this.installSelectedModpackOnServer(createdServer.id, overrideMap)
+                  break
+                } catch (installError) {
+                  const uncertainMods = installError?.data?.uncertain_mod_files
+                  const canContinueWithUncertain = Boolean(installError?.data?.can_continue_with_uncertain)
+                  if (
+                    installError?.status === 409
+                    && canContinueWithUncertain
+                    && Array.isArray(uncertainMods)
+                    && uncertainMods.length
+                  ) {
+                    this.toast.warning('Some mods need a server/client decision before install can continue.', 'Uncertain Mod Side')
+                    overrideMap = await this.requestUncertainModsDecision(uncertainMods)
+                    continue
+                  }
+                  throw installError
+                }
+              }
+
+              if (installResult?.uncertain_mod_files?.length) {
+                this.toast.info(
+                  `${installResult.uncertain_mod_files.length} uncertain mods were classified by your selection.`,
+                  'Modpack Choices Applied'
+                )
+              }
               this.toast.success(`${this.selectedModpack.title} installed successfully!`, 'Modpack Installed')
             } catch (modpackError) {
+              modpackInstallError = modpackError?.message || 'Modpack installation failed. You can install it manually from the server dashboard.'
               this.toast.error(
-                modpackError.message || 'Modpack installation failed. You can install it manually from the server dashboard.',
+                modpackInstallError,
                 'Modpack Failed'
               )
             }
           }
 
-          this.$emit('create', createdServer)
+          this.$emit('create', {
+            ...createdServer,
+            modpackInstallError
+          })
           this.$emit('close')
           this.resetForm()
         } else {
@@ -855,6 +960,9 @@ export default {
       this.modpackSearchResults = []
       this.modpackError = ''
       this.selectedModpack = null
+      this.showUncertainModsModal = false
+      this.uncertainModsReport = []
+      this.pendingUncertainModsResolver = null
     }
   },
   computed: {

@@ -138,6 +138,21 @@ export async function getProjectDetails(projectIdOrSlug) {
 }
 
 /**
+ * Resolve a project version compatible with the requested game version/loader.
+ * @param {string} projectId - Modrinth project ID or slug
+ * @param {Object} options - Resolve options
+ * @param {string} options.mc_version - Minecraft version
+ * @param {string} options.loader - Loader (fabric, quilt, etc.)
+ * @returns {Promise<Object>} Resolved version payload
+ */
+export async function resolveProjectVersion(projectId, { mc_version, loader }) {
+  return get(`/api/modrinth/project/${encodeURIComponent(projectId)}/resolve-version`, {
+    mc_version,
+    loader
+  })
+}
+
+/**
  * Install a modpack on a server.
  * Downloads the .mrpack, installs all server-side mods, and applies overrides.
  * @param {string} projectId - Modrinth project ID or slug
@@ -152,13 +167,17 @@ export async function installModpack(projectId, {
   loader,
   server_id,
   clean_install = false,
-  create_backup = false
+  create_backup = false,
+  allow_missing = false,
+  mod_side_overrides = null
 }) {
   return post(`/api/modrinth/modpack/${encodeURIComponent(projectId)}/install`, {
     mc_version,
     loader,
     server_id,
     clean_install,
-    create_backup
+    create_backup,
+    allow_missing,
+    mod_side_overrides
   })
 }

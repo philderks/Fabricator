@@ -5,6 +5,7 @@ import ModBrowserModal from '../components/modals/ModBrowserModal.vue'
 import ModpackBrowserModal from '../components/modals/ModpackBrowserModal.vue'
 import ConfirmModal from '../components/modals/ConfirmModal.vue'
 import JavaInstallModal from '../components/modals/JavaInstallModal.vue'
+import ModSideDecisionModal from '../components/modals/ModSideDecisionModal.vue'
 import ServerSettingsTab from '../components/server/ServerSettingsTab.vue'
 import ServerHeader from '../components/server/ServerHeader.vue'
 import ServerOverviewTab from '../components/server/ServerOverviewTab.vue'
@@ -79,6 +80,12 @@ const deletingServer = ref(false)
 const settingsTabRef = ref(null)
 const showModpackInstallConfirmModal = ref(false)
 const pendingModpackInstall = ref(null)
+const showMissingModsConfirmModal = ref(false)
+const pendingMissingModsInstall = ref(null)
+const missingModsReport = ref([])
+const showUncertainModsModal = ref(false)
+const uncertainModsReport = ref([])
+const pendingUncertainModpackData = ref(null)
 
 const defaultSettings = (data = {}) => ({
   name: data.name || 'Minecraft Server',
@@ -589,13 +596,22 @@ const cancelModpackInstallConfirmation = () => {
   pendingModpackInstall.value = null
 }
 
-const confirmModpackInstall = async () => {
-  const modpackData = pendingModpackInstall.value
+const formatMissingModsDescription = (missingFiles = []) => {
+  if (!Array.isArray(missingFiles) || !missingFiles.length) {
+    return ''
+  }
+  const preview = missingFiles.slice(0, 8)
+    .map((item) => `- ${item.path}: ${item.reason}`)
+    .join('\n')
+  const remaining = missingFiles.length - preview.split('\n').length
+  const suffix = remaining > 0 ? `\n...and ${remaining} more.` : ''
+  return `The following files could not be downloaded:\n${preview}${suffix}\n\nInstall anyway without these files?`
+}
+
+const runModpackInstall = async (modpackData) => {
   if (!modpackData) {
     return
   }
-
-  showModpackInstallConfirmModal.value = false
 
   modpackInstalling.value = true
   try {
@@ -609,29 +625,101 @@ const confirmModpackInstall = async () => {
       loader: modpackData.loader,
       server_id: serverId.value,
       clean_install: true,
-      create_backup: modpackData.createBackup
+      create_backup: modpackData.createBackup,
+      allow_missing: Boolean(modpackData.allowMissing),
+      mod_side_overrides: modpackData.modSideOverrides || null
     })
     showModpackBrowser.value = false
     const cleanedCount = Array.isArray(result?.cleaned_paths) ? result.cleaned_paths.length : 0
-    const removedClientModsCount = Array.isArray(result?.removed_client_mods) ? result.removed_client_mods.length : 0
+    const missingCount = Array.isArray(result?.missing_files) ? result.missing_files.length : 0
     const cleanedNote = ` Replaced folders: ${cleanedCount}.`
-    const removedClientModsNote = removedClientModsCount
-      ? ` Removed incompatible client mods: ${removedClientModsCount}.`
+    const missingNote = missingCount
+      ? ` Missing files skipped: ${missingCount}.`
       : ''
     const backupNote = result?.backup_file ? ` Backup: ${result.backup_file}.` : ''
     toast.success(
-      `${modpackData.title} installed successfully.${cleanedNote}${removedClientModsNote}${backupNote}`,
+      `${modpackData.title} installed successfully.${cleanedNote}${missingNote}${backupNote}`,
       'Modpack Installed'
     )
     logActivity({ type: 'modpack_install', modpack: modpackData.title })
     await loadMods()
   } catch (error) {
+    const uncertainMods = error?.data?.uncertain_mod_files
+    const canContinueWithUncertain = Boolean(error?.data?.can_continue_with_uncertain)
+    if (
+      error?.status === 409
+      && canContinueWithUncertain
+      && Array.isArray(uncertainMods)
+      && uncertainMods.length
+    ) {
+      pendingUncertainModpackData.value = modpackData
+      uncertainModsReport.value = uncertainMods
+      showUncertainModsModal.value = true
+      toast.warning('Some mods need a server/client decision before install can continue.', 'Uncertain Mod Side')
+      return
+    }
+
+    const missingFiles = error?.data?.missing_files
+    const canContinue = Boolean(error?.data?.can_continue_with_missing)
+    if (!modpackData.allowMissing && error?.status === 409 && canContinue && Array.isArray(missingFiles) && missingFiles.length) {
+      pendingMissingModsInstall.value = { ...modpackData, allowMissing: true }
+      missingModsReport.value = missingFiles
+      showMissingModsConfirmModal.value = true
+      toast.warning(`${missingFiles.length} files could not be downloaded. Choose if you want to continue without them.`, 'Missing Modpack Files')
+      return
+    }
     console.error('Modpack install failed:', error)
     toast.error(error.message || 'Modpack installation failed', 'Installation Failed')
   } finally {
     modpackInstalling.value = false
-    pendingModpackInstall.value = null
   }
+}
+
+const confirmModpackInstall = async () => {
+  const modpackData = pendingModpackInstall.value
+  if (!modpackData) {
+    return
+  }
+
+  showModpackInstallConfirmModal.value = false
+  await runModpackInstall({ ...modpackData, allowMissing: false })
+  pendingModpackInstall.value = null
+}
+
+const cancelMissingModsConfirmation = () => {
+  showMissingModsConfirmModal.value = false
+  pendingMissingModsInstall.value = null
+  missingModsReport.value = []
+}
+
+const confirmInstallWithMissingMods = async () => {
+  const modpackData = pendingMissingModsInstall.value
+  if (!modpackData) {
+    return
+  }
+
+  showMissingModsConfirmModal.value = false
+  await runModpackInstall(modpackData)
+  pendingMissingModsInstall.value = null
+  missingModsReport.value = []
+}
+
+const cancelUncertainModsDecision = () => {
+  showUncertainModsModal.value = false
+  uncertainModsReport.value = []
+  pendingUncertainModpackData.value = null
+  toast.info('Modpack install canceled. Unknown mod sides were not confirmed.', 'Install Canceled')
+}
+
+const confirmUncertainModsDecision = async (overrides) => {
+  const modpackData = pendingUncertainModpackData.value
+  showUncertainModsModal.value = false
+  uncertainModsReport.value = []
+  pendingUncertainModpackData.value = null
+  if (!modpackData) {
+    return
+  }
+  await runModpackInstall({ ...modpackData, modSideOverrides: overrides || {} })
 }
 
 const handleRemoveMod = (mod) => {
@@ -776,6 +864,14 @@ const resetDashboardState = () => {
   backupLoading.value = false
   installLoading.value = false
   modpackInstalling.value = false
+  showModpackInstallConfirmModal.value = false
+  showMissingModsConfirmModal.value = false
+  pendingModpackInstall.value = null
+  pendingMissingModsInstall.value = null
+  missingModsReport.value = []
+  showUncertainModsModal.value = false
+  uncertainModsReport.value = []
+  pendingUncertainModpackData.value = null
   actionState.value = { start: false, stop: false, restart: false }
 }
 
@@ -948,8 +1044,8 @@ onUnmounted(() => {
       :message="pendingModpackInstall ? `Install ${pendingModpackInstall.title} on this server?` : ''"
       :description="pendingModpackInstall
         ? (pendingModpackInstall.createBackup
-            ? 'Replace mode updates pack-managed folders (mods/config/defaultconfigs/kubejs/scripts). World, server settings, logs and backups stay intact. A backup will be created before install.'
-            : 'Replace mode updates pack-managed folders (mods/config/defaultconfigs/kubejs/scripts). World, server settings, logs and backups stay intact. Backup is disabled.')
+            ? 'Replace mode updates pack-managed folders (mods/config/defaultconfigs/kubejs/scripts). World, server settings, logs and backups stay intact. A backup will be created before install. If some files are unavailable you will be asked whether to continue.'
+            : 'Replace mode updates pack-managed folders (mods/config/defaultconfigs/kubejs/scripts). World, server settings, logs and backups stay intact. Backup is disabled. If some files are unavailable you will be asked whether to continue.')
         : ''"
       type="warning"
       confirm-text="Install"
@@ -958,6 +1054,29 @@ onUnmounted(() => {
       @confirm="confirmModpackInstall"
       @cancel="cancelModpackInstallConfirmation"
       @close="cancelModpackInstallConfirmation"
+    />
+
+    <ConfirmModal
+      :show="showMissingModsConfirmModal"
+      title="Missing Modpack Files"
+      :message="missingModsReport.length ? `${missingModsReport.length} files could not be downloaded.` : ''"
+      :description="formatMissingModsDescription(missingModsReport)"
+      type="warning"
+      confirm-text="Install Anyway"
+      cancel-text="Cancel"
+      :loading="modpackInstalling"
+      @confirm="confirmInstallWithMissingMods"
+      @cancel="cancelMissingModsConfirmation"
+      @close="cancelMissingModsConfirmation"
+    />
+
+    <ModSideDecisionModal
+      :show="showUncertainModsModal"
+      :mods="uncertainModsReport"
+      :loading="modpackInstalling"
+      @confirm="confirmUncertainModsDecision"
+      @cancel="cancelUncertainModsDecision"
+      @close="cancelUncertainModsDecision"
     />
 
     <ConfirmModal
