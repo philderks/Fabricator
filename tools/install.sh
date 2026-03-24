@@ -212,7 +212,6 @@ main() {
     $SUDO rsync -a --delete --exclude .git "$APP_SRC_DIR/" "$APP_DIR/"
     $SUDO chown -R root:root "$APP_DIR"
     $SUDO chmod -R 755 "$APP_DIR"
-    $SUDO chown -R "$SERVICE_USER:$SERVICE_USER" "$VENV_DIR"
 
     if [[ -n "${TAG:-}" ]]; then
         echo "$TAG" | $SUDO tee "$APP_DIR/.fabricator_version" >/dev/null
@@ -229,6 +228,7 @@ main() {
     # 4a) Setup Python venv + requirements
     info "Creating Python virtualenv..."
     run_as_service_user python3 -m venv "$VENV_DIR"
+    $SUDO chown -R "$SERVICE_USER:$SERVICE_USER" "$VENV_DIR"
     run_as_service_user "$VENV_DIR/bin/pip" install --upgrade pip </dev/null
 
     if [ -f "$APP_DIR/requirements.txt" ]; then
