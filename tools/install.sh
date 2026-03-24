@@ -106,12 +106,36 @@ main() {
             fi
             ;;
         pacman)
-            DEPS="python python-pip jre-openjdk nodejs npm curl ca-certificates grep sed tar rsync"
+            DEPS="python python-pip jre-openjdk curl ca-certificates grep sed tar rsync"
             $SUDO pacman -Sy --noconfirm $DEPS </dev/null
+            node_ver="$(node -v 2>/dev/null | sed 's/v//' | cut -d. -f1 || true)"
+            if [ -z "$node_ver" ] || [ "$node_ver" -lt 18 ]; then
+                info "Installing nodejs and npm (>= 18 required for Vue/Vite)..."
+                $SUDO pacman -S --noconfirm nodejs npm </dev/null
+            fi
+            node_ver="$(node -v 2>/dev/null | sed 's/v//' | cut -d. -f1 || true)"
+            if [ -n "$node_ver" ] && [ "$node_ver" -lt 18 ]; then
+                warn "Node.js $node_ver is below the required v18+. The frontend build may fail."
+                warn "Consider installing a newer version via nvm or your package manager."
+            fi
             ;;
         dnf)
-            DEPS="python3 python3-pip java-17-openjdk nodejs npm curl ca-certificates grep sed tar rsync"
+            DEPS="python3 python3-pip java-17-openjdk curl ca-certificates grep sed tar rsync"
             $SUDO dnf install -y $DEPS </dev/null
+            node_ver="$(node -v 2>/dev/null | sed 's/v//' | cut -d. -f1 || true)"
+            if [ -z "$node_ver" ] || [ "$node_ver" -lt 18 ]; then
+                info "Installing Node.js 20.x from NodeSource (>= 18 required for Vue/Vite)..."
+                SETUP_SCRIPT="$(mktemp)"
+                curl -fsSL https://rpm.nodesource.com/setup_20.x -o "$SETUP_SCRIPT"
+                info "NodeSource setup script SHA256: $(sha256sum "$SETUP_SCRIPT" | cut -d' ' -f1)"
+                if [ -n "$SUDO" ]; then
+                    $SUDO -E bash "$SETUP_SCRIPT"
+                else
+                    bash "$SETUP_SCRIPT"
+                fi
+                rm -f "$SETUP_SCRIPT"
+                $SUDO dnf install -y nodejs </dev/null
+            fi
             ;;
         *)
             error "internal error: unknown PACKAGETYPE: $PACKAGETYPE"
@@ -132,9 +156,9 @@ main() {
     # Helper to run commands as the service user
     run_as_service_user() {
         if [ "$(id -u)" -eq 0 ]; then
-            su -s /bin/bash - "$SERVICE_USER" -c "$(printf '%q ' "$@")"
+            su -s /bin/bash "$SERVICE_USER" -c "export PATH='$PATH'; $(printf '%q ' "$@")"
         else
-            $SUDO -u "$SERVICE_USER" "$@"
+            $SUDO -u "$SERVICE_USER" --preserve-env=PATH "$@"
         fi
     }
 
@@ -160,10 +184,10 @@ main() {
       tar -xzf "$TMP_DIR/fabricator.tar.gz" -C "$TMP_DIR"
     }
 
+    TAG=""
     if [[ "$FABRICATOR_VERSION" == "main" ]]; then
       download_tarball "heads" "$FABRICATOR_BRANCH"
     else
-      TAG=""
       if [[ "$FABRICATOR_VERSION" == "latest" ]]; then
         TAG="$(get_latest_tag || true)"
       else
@@ -227,8 +251,9 @@ main() {
 
     # 4a) Setup Python venv + requirements
     info "Creating Python virtualenv..."
-    run_as_service_user python3 -m venv "$VENV_DIR"
+    $SUDO mkdir -p "$VENV_DIR"
     $SUDO chown -R "$SERVICE_USER:$SERVICE_USER" "$VENV_DIR"
+    run_as_service_user python3 -m venv "$VENV_DIR"
     run_as_service_user "$VENV_DIR/bin/pip" install --upgrade pip </dev/null
 
     if [ -f "$APP_DIR/requirements.txt" ]; then
@@ -241,7 +266,10 @@ main() {
     # 4b) Build frontend (Vue/Vite)
     if [ -d "$APP_DIR/frontend" ] && [ -f "$APP_DIR/frontend/package.json" ]; then
         info "Building frontend..."
+        $SUDO chown -R "$SERVICE_USER:$SERVICE_USER" "$APP_DIR/frontend"
         run_as_service_user sh -c "cd \"$APP_DIR/frontend\" && npm ci && npm run build" </dev/null
+        $SUDO chown -R root:root "$APP_DIR/frontend"
+        $SUDO chmod -R 755 "$APP_DIR/frontend"
     else
         info "No frontend folder found, skipping frontend build."
     fi
