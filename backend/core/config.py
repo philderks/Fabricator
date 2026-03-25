@@ -30,6 +30,7 @@ class DevelopmentConfig(Config):
 class ProductionConfig(Config):
     """Production configuration."""
     DEBUG = False
+    SERVERS_ROOT = os.environ.get('SERVER_ROOT', '/var/lib/fabricator/servers')
 
 
 config = {

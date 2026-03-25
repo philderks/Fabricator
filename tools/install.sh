@@ -149,8 +149,8 @@ main() {
     if ! id "$SERVICE_USER" >/dev/null 2>&1; then
         $SUDO useradd --system --home "$DATA_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
     fi
-    $SUDO mkdir -p "$DATA_DIR"
-    $SUDO chown "$SERVICE_USER:$SERVICE_USER" "$DATA_DIR"
+    $SUDO mkdir -p "$DATA_DIR" "$DATA_DIR/servers"
+    $SUDO chown -R "$SERVICE_USER:$SERVICE_USER" "$DATA_DIR"
     $SUDO chmod 0750 "$DATA_DIR"
 
     # Helper to run commands as the service user
@@ -234,8 +234,8 @@ main() {
     fi
     $SUDO mkdir -p "$APP_DIR"
     $SUDO rsync -a --delete --exclude .git "$APP_SRC_DIR/" "$APP_DIR/"
-    $SUDO chown -R root:root "$APP_DIR"
-    $SUDO chmod -R 755 "$APP_DIR"
+    $SUDO chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
+    $SUDO chmod -R 755 "$INSTALL_DIR"
 
     if [[ -n "${TAG:-}" ]]; then
         echo "$TAG" | $SUDO tee "$APP_DIR/.fabricator_version" >/dev/null
@@ -251,8 +251,7 @@ main() {
 
     # 4a) Setup Python venv + requirements
     info "Creating Python virtualenv..."
-    $SUDO python3 -m venv "$VENV_DIR"
-    $SUDO chown -R "$SERVICE_USER:$SERVICE_USER" "$VENV_DIR"
+    run_as_service_user python3 -m venv "$VENV_DIR"
     run_as_service_user "$VENV_DIR/bin/pip" install --upgrade pip </dev/null
 
     if [ -f "$APP_DIR/requirements.txt" ]; then
@@ -265,10 +264,7 @@ main() {
     # 4b) Build frontend (Vue/Vite)
     if [ -d "$APP_DIR/frontend" ] && [ -f "$APP_DIR/frontend/package.json" ]; then
         info "Building frontend..."
-        $SUDO chown -R "$SERVICE_USER:$SERVICE_USER" "$APP_DIR/frontend"
         run_as_service_user sh -c "cd \"$APP_DIR/frontend\" && npm ci && npm run build" </dev/null
-        $SUDO chown -R root:root "$APP_DIR/frontend"
-        $SUDO chmod -R 755 "$APP_DIR/frontend"
     else
         info "No frontend folder found, skipping frontend build."
     fi
@@ -284,9 +280,10 @@ main() {
 # Fabricator environment configuration
 # Listens on localhost only. Fabricator will not be reachable from other
 # machines without a reverse proxy (e.g. nginx or caddy) in front of it.
-FABRICATOR_HOST=127.0.0.1
-FABRICATOR_PORT=5000
-FABRICATOR_ENV=production
+HOST=127.0.0.1
+PORT=5000
+FLASK_ENV=production
+SERVER_ROOT=${DATA_DIR}/servers
 EOF
         $SUDO chown root:fabricator "$ENV_FILE"
         $SUDO chmod 0640 "$ENV_FILE"
