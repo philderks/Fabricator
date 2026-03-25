@@ -743,6 +743,7 @@ def start_server_by_id(server_id):
     response = {
         'success': success,
         'message': result.get('message', ''),
+        'java_missing': result.get('java_missing', False),
         'server': _augment_with_runtime(updated_server or server)
     }
     return jsonify(response), 200 if success else 400
@@ -795,6 +796,42 @@ def restart_server_by_id(server_id):
         'server': _augment_with_runtime(updated_server or server)
     }
     return jsonify(response), 200 if success else 400
+
+
+@server_bp.route('/java/status', methods=['GET'])
+def get_java_status():
+    """Check Java installation status and return platform-appropriate download URL."""
+    import platform as _platform
+    import subprocess
+    import re
+
+    system = _platform.system().lower()
+    download_urls = {
+        'windows': 'https://adoptium.net/temurin/releases/?version=21&os=windows&arch=x64',
+        'darwin':  'https://adoptium.net/temurin/releases/?version=21&os=mac&arch=x64',
+        'linux':   'https://adoptium.net/temurin/releases/?version=21&os=linux&arch=x64',
+    }
+    download_url = download_urls.get(system, 'https://adoptium.net/temurin/releases/?version=21')
+
+    try:
+        result = subprocess.run(['java', '-version'], capture_output=True, text=True)
+        version_output = (result.stdout or '') + (result.stderr or '')
+        installed = result.returncode == 0
+        version = None
+        if installed:
+            match = re.search(r'version "([^"]+)"', version_output)
+            if match:
+                version = match.group(1)
+    except FileNotFoundError:
+        installed = False
+        version = None
+
+    return jsonify({
+        'installed': installed,
+        'version': version,
+        'platform': system,
+        'download_url': download_url,
+    })
 
 
 @server_bp.route('/metrics/system', methods=['GET'])

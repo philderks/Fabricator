@@ -4,7 +4,8 @@ import { useRouter } from 'vue-router'
 import ServerCard from '../components/ui/ServerCard.vue'
 import StatCard from '../components/ui/StatCard.vue'
 import ServerCreateModal from '../components/modals/ServerCreateModal.vue'
-import { getServers, startServer, stopServer, getSystemMetrics } from '../api/servers'
+import JavaInstallModal from '../components/modals/JavaInstallModal.vue'
+import { getServers, startServer, stopServer, getSystemMetrics, getJavaStatus } from '../api/servers'
 import { useToast } from '../composables/useToast'
 
 const router = useRouter()
@@ -13,6 +14,8 @@ const toast = useToast()
 const servers = ref([])
 const loading = ref(true)
 const showCreateModal = ref(false)
+const showJavaModal = ref(false)
+const javaStatus = ref({ platform: '', download_url: 'https://adoptium.net/temurin/releases/?version=21' })
 const serverActions = ref({})
 const systemMetrics = ref({ cpuPercent: null })
 let systemMetricsIntervalId = null
@@ -99,7 +102,12 @@ const handleStartStop = async (id, actionFn, successMessage, errorTitle) => {
     }
   } catch (error) {
     console.error(error)
-    toast.error('Request failed', errorTitle)
+    if (error.data?.java_missing) {
+      try { javaStatus.value = await getJavaStatus() } catch (_) { /* ignore */ }
+      showJavaModal.value = true
+    } else {
+      toast.error(error.message || 'Request failed', errorTitle)
+    }
   } finally {
     setServerActionState(id, false)
     await loadServers()
@@ -195,6 +203,13 @@ onUnmounted(() => {
       :show="showCreateModal"
       @close="showCreateModal = false"
       @create="handleCreateServer"
+    />
+
+    <JavaInstallModal
+      :show="showJavaModal"
+      :platform="javaStatus.platform"
+      :download-url="javaStatus.download_url"
+      @close="showJavaModal = false"
     />
   </div>
 </template>

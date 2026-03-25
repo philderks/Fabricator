@@ -107,10 +107,13 @@ class ServerManager:
             eula_file.write("eula=true\n")
 
     def _check_java_version(self) -> tuple[bool, str]:
-        result = subprocess.run([
-            "java",
-            "-version",
-        ], capture_output=True, text=True)
+        try:
+            result = subprocess.run([
+                "java",
+                "-version",
+            ], capture_output=True, text=True)
+        except FileNotFoundError:
+            return False, "Java is not installed or not found in PATH. Please install Java 21 or later."
         version_output = (result.stdout or "") + (result.stderr or "")
         if result.returncode != 0:
             return False, "Java executable not available"
@@ -205,7 +208,8 @@ class ServerManager:
             self._ensure_eula()
             java_ok, java_message = self._check_java_version()
             if not java_ok:
-                return {"status": "stopped", "message": java_message}
+                java_missing = "not installed" in java_message or "not found" in java_message
+                return {"status": "stopped", "message": java_message, "java_missing": java_missing}
 
             started, message = self._spawn_process(command_to_run)
             status = "running" if started else "stopped"

@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ModBrowserModal from '../components/modals/ModBrowserModal.vue'
 import ConfirmModal from '../components/modals/ConfirmModal.vue'
+import JavaInstallModal from '../components/modals/JavaInstallModal.vue'
 import ServerSettingsTab from '../components/server/ServerSettingsTab.vue'
 import ServerHeader from '../components/server/ServerHeader.vue'
 import ServerOverviewTab from '../components/server/ServerOverviewTab.vue'
@@ -24,7 +25,8 @@ import {
   getBackups,
   restoreBackup,
   deleteBackup,
-  deleteServer
+  deleteServer,
+  getJavaStatus
 } from '../api/servers'
 import { useToast } from '../composables/useToast'
 
@@ -43,6 +45,8 @@ const logs = ref({ stdout: [], stderr: [], running: false })
 const recentActivity = ref([])
 const serverSettings = ref(null)
 const showModBrowser = ref(false)
+const showJavaModal = ref(false)
+const javaStatus = ref({ platform: '', download_url: 'https://adoptium.net/temurin/releases/?version=21' })
 const showConfirmModal = ref(false)
 const confirmModalData = ref({})
 const modToRemove = ref(null)
@@ -606,7 +610,12 @@ const performServerAction = async (action, fn, successMessage) => {
     }
   } catch (error) {
     console.error(`Failed to ${action} server:`, error)
-    toast.error(`Failed to ${action} server`, 'Server Error')
+    if (error.data?.java_missing) {
+      try { javaStatus.value = await getJavaStatus() } catch (_) { /* ignore */ }
+      showJavaModal.value = true
+    } else {
+      toast.error(error.message || `Failed to ${action} server`, 'Server Error')
+    }
   } finally {
     actionState.value = { ...actionState.value, [action]: false }
     await loadServer()
@@ -895,6 +904,13 @@ onUnmounted(() => {
       @confirm="confirmDeleteServer"
       @cancel="cancelDeleteServer"
       @close="cancelDeleteServer"
+    />
+
+    <JavaInstallModal
+      :show="showJavaModal"
+      :platform="javaStatus.platform"
+      :download-url="javaStatus.download_url"
+      @close="showJavaModal = false"
     />
   </div>
 </template>

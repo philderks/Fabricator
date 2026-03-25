@@ -247,3 +247,11 @@ export async function getFabricLoaderVersions(mcVersion) {
 export async function getSystemMetrics() {
   return get('/api/metrics/system')
 }
+
+/**
+ * Get Java installation status and platform download URL
+ * @returns {Promise<Object>} { installed, version, platform, download_url }
+ */
+export async function getJavaStatus() {
+  return get('/api/java/status')
+}
