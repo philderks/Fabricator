@@ -308,7 +308,10 @@ class FabricInstaller(InstallerBase):
         # running into permission issues.
         fabric_cache = self.install_path / ".fabric"
         fabric_cache.mkdir(exist_ok=True)
-        os.chmod(fabric_cache, DIR_PERMISSIONS)
+        try:
+            os.chmod(fabric_cache, DIR_PERMISSIONS)
+        except OSError:
+            pass
 
         # Write eula.txt
         print("Writing eula.txt...")

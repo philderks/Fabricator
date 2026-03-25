@@ -6,17 +6,20 @@ A minimal Flask + Vue 3 project for managing a personal Minecraft server.
 
 ```
 Fabricator/
-├── app.py                  # Flask REST API server
+├── run.py                  # Application entry point (Werkzeug server + optional tray)
 ├── requirements.txt        # Python dependencies
 ├── .gitignore             # Git ignore rules
+├── backend/               # Flask backend package
+│   ├── core/              # App factory and configuration
+│   ├── server/            # Server management routes, storage, installer
+│   ├── modrinth/          # Modrinth API client and routes
+│   ├── system/            # Self-update routes and service
+│   └── utils/             # Cross-platform helpers
 ├── frontend/              # Vue 3 frontend application
 │   ├── src/
 │   │   ├── main.js        # Vue app entry point
 │   │   ├── App.vue        # Root component
-│   │   ├── style.css      # Global styles
-│   │   └── components/
-│   │       └── ServerStatus.vue  # Server status component
-│   ├── public/            # Static assets
+│   │   └── components/    # Vue components
 │   ├── index.html         # HTML entry point
 │   ├── vite.config.js     # Vite configuration (includes API proxy)
 │   └── package.json       # Node.js dependencies
@@ -46,18 +49,21 @@ Fabricator/
    pip install -r requirements.txt
    ```
 
-2. Run the Flask development server:
+2. Run the server:
    ```bash
-   python app.py
+   python run.py
    ```
 
    The API will be available at `http://localhost:5000`
 
    **Note:** By default, Flask runs in debug mode for development. To run in production mode, set the environment variable:
    ```bash
-   FLASK_ENV=production python app.py
+   FLASK_ENV=production python run.py
    ```
-   For production deployments, use a production WSGI server like gunicorn.
+   To run without the system tray icon (e.g., on a headless server):
+   ```bash
+   FABRICATOR_NO_TRAY=1 python run.py
+   ```
 
 ### Frontend Setup
 
@@ -84,7 +90,7 @@ You need to run both servers simultaneously in separate terminal windows:
 
 **Terminal 1 (Backend):**
 ```bash
-python app.py
+python run.py
 ```
 
 **Terminal 2 (Frontend):**

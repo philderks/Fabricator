@@ -38,7 +38,10 @@ class ServerProcessRegistry:
     def __init__(self, base_dir: str | Path):
         self.base_dir = Path(base_dir).expanduser().resolve()
         self.base_dir.mkdir(parents=True, exist_ok=True)
-        os.chmod(self.base_dir, DIR_PERMISSIONS)
+        try:
+            os.chmod(self.base_dir, DIR_PERMISSIONS)
+        except OSError:
+            pass
         self._lock = threading.RLock()
         self._instances: Dict[str, ServerManager] = {}
         self._started_at: Dict[str, float] = {}
@@ -52,7 +55,10 @@ class ServerProcessRegistry:
                 f"Install path '{candidate}' is outside of configured server root"
             ) from exc
         candidate.mkdir(parents=True, exist_ok=True)
-        os.chmod(candidate, DIR_PERMISSIONS)
+        try:
+            os.chmod(candidate, DIR_PERMISSIONS)
+        except OSError:
+            pass
         return candidate
 
     def _resolve_install_path(self, server: Dict[str, object]) -> Path:

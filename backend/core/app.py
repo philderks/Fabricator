@@ -22,17 +22,14 @@ def create_app() -> Flask:
     """Create and configure the Flask application."""
     base_path = get_base_path()
     static_dir = Path(base_path) / "frontend" / "dist"
+    static_folder_path = str(static_dir)
 
-    app = Flask(
-        __name__,
-        static_folder=str(static_dir),
-        static_url_path="",
-    )
+    app = Flask(__name__, static_folder=None)
 
     config = get_config()
     app.config.from_object(config)
 
-    CORS(app)
+    CORS(app, origins=config.CORS_ORIGINS)
 
     app.register_blueprint(server_bp)
     app.register_blueprint(modrinth_bp)
@@ -43,14 +40,14 @@ def create_app() -> Flask:
     def serve_frontend(path: str):
         """Serve Vue build files when available, otherwise warn the user."""
 
-        index_file = Path(app.static_folder) / "index.html"
-        requested = Path(app.static_folder) / path
+        index_file = Path(static_folder_path) / "index.html"
+        requested = Path(static_folder_path) / path
 
         if path and requested.exists() and requested.is_file():
-            return send_from_directory(app.static_folder, path)
+            return send_from_directory(static_folder_path, path)
 
         if index_file.exists():
-            return send_from_directory(app.static_folder, "index.html")
+            return send_from_directory(static_folder_path, "index.html")
 
         return (
             jsonify(

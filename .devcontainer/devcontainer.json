@@ -15,7 +15,7 @@
       ]
     }
   },
-  "forwardPorts": [5000, 5173],
+  "forwardPorts": [5000, 3000],
   "postCreateCommand": "pip install -r requirements.txt && cd frontend && npm install",
   "remoteUser": "vscode"
 }

@@ -102,7 +102,10 @@ class InstallerBase(ABC):
         and for admin users who need to manage servers manually.
         """
         self.install_path.mkdir(parents=True, exist_ok=True)
-        os.chmod(self.install_path, DIR_PERMISSIONS)
+        try:
+            os.chmod(self.install_path, DIR_PERMISSIONS)
+        except OSError:
+            pass
 
     def _write_eula(self, accepted: bool = True) -> Path:
         """Write eula.txt file.
