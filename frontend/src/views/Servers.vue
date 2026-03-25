@@ -5,7 +5,15 @@ import ServerCard from '../components/ui/ServerCard.vue'
 import StatCard from '../components/ui/StatCard.vue'
 import ServerCreateModal from '../components/modals/ServerCreateModal.vue'
 import JavaInstallModal from '../components/modals/JavaInstallModal.vue'
-import { getServers, startServer, stopServer, getSystemMetrics, getJavaStatus } from '../api/servers'
+import {
+  getServers,
+  startServer,
+  stopServer,
+  getSystemMetrics,
+  getJavaStatus,
+  getUpdateStatus,
+  triggerUpdate
+} from '../api/servers'
 import { useToast } from '../composables/useToast'
 
 const router = useRouter()
@@ -18,7 +26,18 @@ const showJavaModal = ref(false)
 const javaStatus = ref({ platform: '', download_url: 'https://adoptium.net/temurin/releases/?version=21' })
 const serverActions = ref({})
 const systemMetrics = ref({ cpuPercent: null })
+const updateState = ref({
+  inProgress: false,
+  currentVersion: 'unknown',
+  latestVersion: null,
+  updateAvailable: false,
+  lastError: null,
+  lastExitCode: null
+})
+const updateStatusLoading = ref(false)
+const updateTriggering = ref(false)
 let systemMetricsIntervalId = null
+let updateStatusIntervalId = null
 
 // Load servers from API
 const loadServers = async () => {
@@ -61,6 +80,24 @@ const loadSystemMetrics = async () => {
   } catch (error) {
     console.error('Failed to load system metrics:', error)
     systemMetrics.value = { cpuPercent: null }
+  }
+}
+
+const loadUpdateState = async ({ silent = false } = {}) => {
+  if (!silent) {
+    updateStatusLoading.value = true
+  }
+  try {
+    updateState.value = await getUpdateStatus()
+  } catch (error) {
+    console.error('Failed to load update status:', error)
+    if (!silent) {
+      toast.error(error.message || 'Failed to load update status', 'Update Status')
+    }
+  } finally {
+    if (!silent) {
+      updateStatusLoading.value = false
+    }
   }
 }
 
@@ -125,17 +162,68 @@ const cpuStatLabel = computed(() => {
   return `${value}%`
 })
 
+const updateStatusLabel = computed(() => {
+  if (updateState.value.inProgress) {
+    return 'Updating…'
+  }
+  if (updateState.value.lastError) {
+    return 'Last update failed'
+  }
+  if (updateState.value.lastExitCode === 0) {
+    return 'Last update succeeded'
+  }
+  if (updateState.value.updateAvailable) {
+    return 'Update available'
+  }
+  return 'Up to date'
+})
+
+const canTriggerUpdate = computed(() => !updateState.value.inProgress && !updateTriggering.value)
+
+const runUpdate = async () => {
+  const confirmed = window.confirm(
+    'Run Fabricator update now? The service may restart briefly while preserving server data and config.'
+  )
+  if (!confirmed) {
+    return
+  }
+
+  updateTriggering.value = true
+  try {
+    const result = await triggerUpdate()
+    if (result.started) {
+      toast.success('Update started in background', 'Fabricator Update')
+      await loadUpdateState({ silent: true })
+    } else {
+      toast.error(result.error || 'Unable to start update', 'Fabricator Update')
+    }
+  } catch (error) {
+    console.error('Failed to trigger update:', error)
+    toast.error(error.message || 'Failed to trigger update', 'Fabricator Update')
+  } finally {
+    updateTriggering.value = false
+  }
+}
+
 // Load servers on mount and refresh system metrics periodically
-onMounted(() => {
+onMounted(async () => {
   loadServers()
   loadSystemMetrics()
+  await loadUpdateState()
   systemMetricsIntervalId = setInterval(loadSystemMetrics, 2500)
+  updateStatusIntervalId = setInterval(() => {
+    loadUpdateState({ silent: true })
+  }, 4000)
 })
 
 onUnmounted(() => {
   if (systemMetricsIntervalId) {
     clearInterval(systemMetricsIntervalId)
     systemMetricsIntervalId = null
+  }
+  if (updateStatusIntervalId) {
+    clearInterval(updateStatusIntervalId)
+    updateStatusIntervalId = null
   }
 })
 </script>
@@ -170,6 +258,28 @@ onUnmounted(() => {
           <StatCard label="Players" :value="servers.reduce((sum, s) => sum + s.players.online, 0)" />
           <StatCard label="CPU" :value="cpuStatLabel" />
         </div>
+
+        <section class="update-card">
+          <div class="update-card__meta">
+            <h3>Fabricator Update</h3>
+            <p class="update-card__subtitle">
+              Current: {{ updateState.currentVersion || 'unknown' }} · Latest:
+              {{ updateState.latestVersion || 'unknown' }}
+            </p>
+            <p class="update-card__status">{{ updateStatusLabel }}</p>
+            <p v-if="updateState.lastError" class="update-card__error">
+              {{ updateState.lastError }}
+            </p>
+          </div>
+          <div class="update-card__actions">
+            <button class="btn" :disabled="updateStatusLoading" @click="loadUpdateState()">
+              {{ updateStatusLoading ? 'Checking…' : 'Check for Updates' }}
+            </button>
+            <button class="btn btn-primary" :disabled="!canTriggerUpdate" @click="runUpdate">
+              {{ updateState.inProgress || updateTriggering ? 'Updating…' : 'Update Fabricator' }}
+            </button>
+          </div>
+        </section>
 
         <div v-if="loading" class="loading-state">
           <p>Loading servers...</p>
@@ -227,6 +337,43 @@ onUnmounted(() => {
   gap: 1.25rem;
 }
 
+.update-card {
+  margin-bottom: 1.5rem;
+  border: 1px solid var(--border-subtle, #dcdfe6);
+  border-radius: 12px;
+  padding: 1rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+  background: var(--panel-bg, #fff);
+}
+
+.update-card__meta h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.update-card__subtitle {
+  margin: 0.35rem 0 0;
+  opacity: 0.8;
+}
+
+.update-card__status {
+  margin: 0.35rem 0 0;
+  font-weight: 600;
+}
+
+.update-card__error {
+  margin: 0.35rem 0 0;
+  color: #d72c2c;
+}
+
+.update-card__actions {
+  display: flex;
+  gap: 0.6rem;
+}
+
 @media (max-width: 1024px) {
   .stats {
     grid-template-columns: repeat(2, 1fr);
@@ -236,6 +383,17 @@ onUnmounted(() => {
 @media (max-width: 768px) {
   .stats {
     grid-template-columns: 1fr;
+  }
+
+  .update-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .update-card__actions {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
   }
 }
 </style>

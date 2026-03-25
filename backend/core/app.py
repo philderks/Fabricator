@@ -9,6 +9,7 @@ from flask_cors import CORS
 from backend.core.config import get_config
 from backend.server.routes import server_bp
 from backend.modrinth.routes import modrinth_bp
+from backend.system.routes import system_bp
 
 def get_base_path() -> str:
     """Return base path that works in dev and when frozen with PyInstaller."""
@@ -35,6 +36,7 @@ def create_app() -> Flask:
 
     app.register_blueprint(server_bp)
     app.register_blueprint(modrinth_bp)
+    app.register_blueprint(system_bp)
 
     @app.route("/", defaults={"path": ""})
     @app.route("/<path:path>")

@@ -22,12 +22,38 @@ main() {
     FABRICATOR_BRANCH="${FABRICATOR_BRANCH:-main}"
     FABRICATOR_VERSION="${FABRICATOR_VERSION:-latest}"  # latest | main | v1.2.3
     APP_SUBDIR="${APP_SUBDIR:-}"                        # e.g. "backend" if run.py lives there
+    MODE="${FABRICATOR_MODE:-install}"                  # install | update
+    SERVER_INDEX_FILE="${SERVER_INDEX_FILE:-${DATA_DIR}/servers.json}"
+    ENV_FILE="/etc/fabricator/fabricator.env"
+
+    if [[ "${1:-}" == "--update" ]]; then
+        MODE="update"
+        shift
+    elif [[ "${1:-}" == "--install" ]]; then
+        MODE="install"
+        shift
+    fi
+
+    case "$MODE" in
+        install|update) ;;
+        *)
+            error "Unsupported mode '$MODE'. Use --install or --update."
+            ;;
+    esac
 
     if [ -f "$APP_DIR/.fabricator_version" ]; then
         EXISTING_VERSION="$(cat "$APP_DIR/.fabricator_version")"
-        info "Existing Fabricator install detected (version: $EXISTING_VERSION). Upgrading..."
+        if [[ "$MODE" == "update" ]]; then
+            info "Existing Fabricator install detected (version: $EXISTING_VERSION). Running update..."
+        else
+            info "Existing Fabricator install detected (version: $EXISTING_VERSION). Upgrading..."
+        fi
     else
-        info "No existing install detected. Performing fresh install..."
+        if [[ "$MODE" == "update" ]]; then
+            warn "No existing install detected. Continuing update mode as install-like bootstrap."
+        else
+            info "No existing install detected. Performing fresh install..."
+        fi
     fi
 
     # --- root/sudo detection ---
@@ -227,13 +253,43 @@ main() {
       error "Hint: set APP_SUBDIR (e.g. APP_SUBDIR=backend) if your run.py is not at repo root."
     fi
 
+    backup_update_state() {
+        local timestamp backup_dir
+        timestamp="$(date +%Y%m%d-%H%M%S)"
+        backup_dir="${DATA_DIR}/update-backups/${timestamp}"
+        $SUDO mkdir -p "$backup_dir"
+
+        if [[ -f "$SERVER_INDEX_FILE" ]]; then
+            $SUDO cp -a "$SERVER_INDEX_FILE" "${backup_dir}/servers.json"
+            info "Backed up server index to ${backup_dir}/servers.json"
+        fi
+
+        if [[ -f "$APP_DIR/servers.json" ]]; then
+            $SUDO cp -a "$APP_DIR/servers.json" "${backup_dir}/servers.appdir.json"
+            info "Backed up legacy app-dir server index to ${backup_dir}/servers.appdir.json"
+        fi
+
+        if [[ -f "$ENV_FILE" ]]; then
+            $SUDO cp -a "$ENV_FILE" "${backup_dir}/fabricator.env"
+            info "Backed up env config to ${backup_dir}/fabricator.env"
+        fi
+    }
+
+    if [[ "$MODE" == "update" ]]; then
+        backup_update_state
+    fi
+
     # Sync into install location
     if $SUDO systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
         info "Stopping running Fabricator service before update..."
         $SUDO systemctl stop "$SERVICE_NAME"
     fi
     $SUDO mkdir -p "$APP_DIR"
-    $SUDO rsync -a --delete --exclude .git "$APP_SRC_DIR/" "$APP_DIR/"
+    $SUDO rsync -a --delete \
+        --exclude .git \
+        --exclude servers.json \
+        --exclude .fabricator_version \
+        "$APP_SRC_DIR/" "$APP_DIR/"
     $SUDO chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
     $SUDO chmod -R 755 "$INSTALL_DIR"
 
@@ -273,7 +329,6 @@ main() {
     info "Creating config directory /etc/fabricator..."
     $SUDO mkdir -p /etc/fabricator
 
-    ENV_FILE="/etc/fabricator/fabricator.env"
     if [ ! -f "$ENV_FILE" ]; then
         info "Creating default env file at $ENV_FILE"
         $SUDO tee "$ENV_FILE" >/dev/null <<EOF
@@ -282,6 +337,7 @@ HOST=0.0.0.0
 PORT=5000
 FLASK_ENV=production
 SERVER_ROOT=${DATA_DIR}/servers
+SERVER_INDEX_FILE=${DATA_DIR}/servers.json
 EOF
         $SUDO chown root:fabricator "$ENV_FILE"
         $SUDO chmod 0640 "$ENV_FILE"

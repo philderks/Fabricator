@@ -255,3 +255,20 @@ export async function getSystemMetrics() {
 export async function getJavaStatus() {
   return get('/api/java/status')
 }
+
+/**
+ * Get Fabricator self-update status.
+ * @returns {Promise<Object>} Update state and latest-version information
+ */
+export async function getUpdateStatus() {
+  return get('/api/system/update/status')
+}
+
+/**
+ * Trigger Fabricator self-update.
+ * @param {string} version - Optional target version (default latest)
+ * @returns {Promise<Object>} Update start result
+ */
+export async function triggerUpdate(version = 'latest') {
+  return post('/api/system/update', { version })
+}

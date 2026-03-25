@@ -1,20 +1,48 @@
 """JSON-based storage for server data."""
 import json
+import shutil
 import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from backend.core.config import get_config
 
-SERVERS_FILE = Path("servers.json")
+
+def _resolve_servers_file() -> Path:
+    config = get_config()
+    configured = getattr(config, 'SERVERS_FILE', 'servers.json')
+    return Path(configured).expanduser()
+
+
+SERVERS_FILE = _resolve_servers_file()
+LEGACY_SERVERS_FILE = Path.cwd() / "servers.json"
 _storage_lock = threading.Lock()
 
 
 def _ensure_file_exists():
     """Create servers.json if it doesn't exist."""
+    SERVERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    # One-time migration from the historical cwd-based location.
+    if (
+        not SERVERS_FILE.exists()
+        and LEGACY_SERVERS_FILE != SERVERS_FILE
+        and LEGACY_SERVERS_FILE.exists()
+    ):
+        try:
+            shutil.move(str(LEGACY_SERVERS_FILE), str(SERVERS_FILE))
+            return
+        except OSError:
+            try:
+                shutil.copy2(str(LEGACY_SERVERS_FILE), str(SERVERS_FILE))
+                return
+            except OSError:
+                pass
+
     if not SERVERS_FILE.exists():
-        SERVERS_FILE.write_text("[]")
+        SERVERS_FILE.write_text("[]", encoding='utf-8')
 
 
 def load_servers() -> List[Dict[str, Any]]:
@@ -25,7 +53,7 @@ def load_servers() -> List[Dict[str, Any]]:
     """
     _ensure_file_exists()
     try:
-        with open(SERVERS_FILE, 'r') as f:
+        with open(SERVERS_FILE, 'r', encoding='utf-8') as f:
             return json.load(f)
     except json.JSONDecodeError:
         return []
@@ -37,7 +65,8 @@ def save_servers(servers: List[Dict[str, Any]]) -> None:
     Args:
         servers: List of server dictionaries
     """
-    with open(SERVERS_FILE, 'w') as f:
+    SERVERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(SERVERS_FILE, 'w', encoding='utf-8') as f:
         json.dump(servers, f, indent=2)
 
 
