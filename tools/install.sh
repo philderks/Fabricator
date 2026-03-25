@@ -278,9 +278,7 @@ main() {
         info "Creating default env file at $ENV_FILE"
         $SUDO tee "$ENV_FILE" >/dev/null <<EOF
 # Fabricator environment configuration
-# Listens on localhost only. Fabricator will not be reachable from other
-# machines without a reverse proxy (e.g. nginx or caddy) in front of it.
-HOST=127.0.0.1
+HOST=0.0.0.0
 PORT=5000
 FLASK_ENV=production
 SERVER_ROOT=${DATA_DIR}/servers
