@@ -251,9 +251,8 @@ main() {
 
     # 4a) Setup Python venv + requirements
     info "Creating Python virtualenv..."
-    $SUDO mkdir -p "$VENV_DIR"
+    $SUDO python3 -m venv "$VENV_DIR"
     $SUDO chown -R "$SERVICE_USER:$SERVICE_USER" "$VENV_DIR"
-    run_as_service_user python3 -m venv "$VENV_DIR"
     run_as_service_user "$VENV_DIR/bin/pip" install --upgrade pip </dev/null
 
     if [ -f "$APP_DIR/requirements.txt" ]; then
