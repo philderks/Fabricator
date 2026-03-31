@@ -250,10 +250,24 @@ export async function getSystemMetrics() {
 
 /**
  * Get Java installation status and platform download URL
- * @returns {Promise<Object>} { installed, version, platform, download_url }
+ * @param {Object} options
+ * @param {string} options.mcVersion - Optional Minecraft version to resolve required Java.
+ * @param {number} options.requiredJava - Optional forced required Java version.
+ * @param {string} options.javaPath - Optional java executable/path to check.
+ * @returns {Promise<Object>} Java runtime and recommendation payload
  */
-export async function getJavaStatus() {
-  return get('/api/java/status')
+export async function getJavaStatus(options = {}) {
+  const params = {}
+  if (options.mcVersion) {
+    params.mc_version = options.mcVersion
+  }
+  if (options.requiredJava) {
+    params.required_java = options.requiredJava
+  }
+  if (options.javaPath) {
+    params.java_path = options.javaPath
+  }
+  return get('/api/java/status', params)
 }
 
 /**

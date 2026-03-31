@@ -35,6 +35,25 @@ def _format_uptime(seconds: int) -> str:
 class ServerProcessRegistry:
     """Keeps track of ServerManager instances per server ID."""
 
+    def _build_command(self, server: Dict[str, object]) -> list[str]:
+        custom_command = server.get('command')
+        if custom_command:
+            if isinstance(custom_command, str):
+                return ServerManager._split_command(custom_command)
+            if isinstance(custom_command, list):
+                return [str(part) for part in custom_command]
+
+        memory = server.get('memory', 4)
+        java_exec = str(server.get('javaPath') or 'java')
+        return [
+            java_exec,
+            f'-Xms{memory}G',
+            f'-Xmx{memory}G',
+            '-jar',
+            'server.jar',
+            'nogui'
+        ]
+
     def __init__(self, base_dir: str | Path):
         self.base_dir = Path(base_dir).expanduser().resolve()
         self.base_dir.mkdir(parents=True, exist_ok=True)
@@ -84,15 +103,7 @@ class ServerProcessRegistry:
                 return manager
 
             install_path = self._resolve_install_path(server)
-            memory = server.get('memory', 4)
-            command = server.get('command') or [
-                'java',
-                f'-Xms{memory}G',
-                f'-Xmx{memory}G',
-                '-jar',
-                'server.jar',
-                'nogui'
-            ]
+            command = self._build_command(server)
             manager = ServerManager(command=command, cwd=str(install_path))
             self._instances[server_id] = manager
             return manager
@@ -116,14 +127,22 @@ class ServerProcessRegistry:
                 self._started_at.pop(server_id, None)
         return status
 
-    def start_server(self, server: Dict[str, object]) -> Dict[str, object]:
+    def start_server(
+        self,
+        server: Dict[str, object],
+        required_java_major: Optional[int] = None
+    ) -> Dict[str, object]:
         manager = self._get_or_create_manager(server)
-        result = manager.start()
+        result = manager.start(required_java_major=required_java_major)
         if result.get('status') == 'running':
             server_id = str(server['id'])
             with self._lock:
                 self._started_at[server_id] = time.time()
         return result
+
+    def get_java_runtime(self, server: Dict[str, object]) -> Dict[str, object]:
+        manager = self._get_or_create_manager(server)
+        return manager.probe_java()
 
     def stop_server(self, server_id: str) -> Dict[str, object]:
         server_id = str(server_id)

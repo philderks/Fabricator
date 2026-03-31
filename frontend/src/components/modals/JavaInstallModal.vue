@@ -14,20 +14,35 @@
         </svg>
       </div>
 
-      <p class="java-heading">Java 21 is not installed</p>
+      <p class="java-heading">{{ headingText }}</p>
       <p class="java-subtext">
-        A Minecraft server requires <strong>Java 21</strong> or later to run.
-        Download and install it, then try starting your server again.
+        <template v-if="requiredJava">
+          A Minecraft server requires <strong>Java {{ requiredJava }}</strong> or later to run.
+          Download and install it, then try again.
+        </template>
+        <template v-else>
+          A Minecraft server requires Java. Download and install it, then try again.
+        </template>
       </p>
+
+      <div v-if="detectedJava" class="java-platform">
+        <span class="platform-label">Detected Java:</span>
+        <span class="platform-value">{{ detectedJava }}</span>
+      </div>
 
       <div class="java-platform">
         <span class="platform-label">Your platform:</span>
         <span class="platform-value">{{ platformLabel }}</span>
       </div>
 
+      <div v-if="javaPath" class="java-platform">
+        <span class="platform-label">Checked executable:</span>
+        <span class="platform-value">{{ javaPath }}</span>
+      </div>
+
       <div v-if="platform === 'linux'" class="java-tip">
         <p class="tip-title">Quick install via terminal</p>
-        <code class="tip-code">sudo apt install openjdk-21-jre-headless</code>
+        <code class="tip-code">{{ linuxInstallCommand }}</code>
         <p class="tip-note">Works on Debian / Ubuntu. For other distros, use the download button below.</p>
       </div>
 
@@ -63,7 +78,7 @@
           <path d="M12 3v12M12 15l-4-4M12 15l4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           <path d="M3 20h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
         </svg>
-        Download Java 21
+        Download Java {{ requiredJava || 21 }}
       </a>
     </template>
   </BaseModal>
@@ -93,12 +108,34 @@ export default {
     downloadUrl: {
       type: String,
       default: 'https://adoptium.net/temurin/releases/?version=21'
+    },
+    requiredJava: {
+      type: Number,
+      default: 21
+    },
+    detectedJava: {
+      type: [Number, String],
+      default: null
+    },
+    javaPath: {
+      type: String,
+      default: ''
+    },
+    linuxInstallCommand: {
+      type: String,
+      default: 'sudo apt install openjdk-21-jre-headless'
     }
   },
   emits: ['close'],
   computed: {
     platformLabel() {
       return PLATFORM_LABELS[this.platform] || 'Unknown'
+    },
+    headingText() {
+      if (this.detectedJava) {
+        return `Java ${this.detectedJava} detected`
+      }
+      return `Java ${this.requiredJava || 21} is not installed`
     }
   }
 }

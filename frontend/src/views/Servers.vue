@@ -23,7 +23,14 @@ const servers = ref([])
 const loading = ref(true)
 const showCreateModal = ref(false)
 const showJavaModal = ref(false)
-const javaStatus = ref({ platform: '', download_url: 'https://adoptium.net/temurin/releases/?version=21' })
+const javaStatus = ref({
+  platform: '',
+  download_url: 'https://adoptium.net/temurin/releases/?version=21',
+  required_java: 21,
+  detected_major: null,
+  java_path: 'java',
+  linux_install_command: 'sudo apt install openjdk-21-jre-headless'
+})
 const serverActions = ref({})
 const systemMetrics = ref({ cpuPercent: null })
 const updateState = ref({
@@ -139,8 +146,13 @@ const handleStartStop = async (id, actionFn, successMessage, errorTitle) => {
     }
   } catch (error) {
     console.error(error)
-    if (error.data?.java_missing) {
-      try { javaStatus.value = await getJavaStatus() } catch (_) { /* ignore */ }
+    if (error.data?.java_missing || error.data?.java_too_old) {
+      try {
+        javaStatus.value = await getJavaStatus({
+          requiredJava: error.data?.required_java,
+          javaPath: error.data?.server_java_target
+        })
+      } catch (_) { /* ignore */ }
       showJavaModal.value = true
     } else {
       toast.error(error.message || 'Request failed', errorTitle)
@@ -319,6 +331,10 @@ onUnmounted(() => {
       :show="showJavaModal"
       :platform="javaStatus.platform"
       :download-url="javaStatus.download_url"
+      :required-java="javaStatus.required_java || 21"
+      :detected-java="javaStatus.detected_major"
+      :java-path="javaStatus.java_path"
+      :linux-install-command="javaStatus.linux_install_command"
       @close="showJavaModal = false"
     />
   </div>

@@ -41,7 +41,7 @@ Fabricator/
 
 ### Voraussetzungen
 - Python 3.11+
-- Java 21 (für Minecraft Server)
+- Java 21+ (neuere Minecraft-Versionen können Java 25 benötigen)
 
 ### Setup
 

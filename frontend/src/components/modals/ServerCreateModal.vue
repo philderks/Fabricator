@@ -27,6 +27,7 @@
             <select 
               id="minecraft-version"
               v-model="formData.version"
+              @change="handleVersionChange"
               :disabled="versionsLoading || !gameVersions.length"
               required
             >
@@ -42,6 +43,8 @@
                 {{ version.version }}<template v-if="version.stable"> (stable)</template>
               </option>
             </select>
+            <span v-if="requiredJavaText" class="form-hint">{{ requiredJavaText }}</span>
+            <span v-if="javaRequirementWarning" class="form-hint warning-hint">{{ javaRequirementWarning }}</span>
           </div>
 
           <div class="form-group">
@@ -182,6 +185,18 @@
           </div>
         </div>
 
+        <div class="form-group">
+          <label for="java-path">Java Executable Path (Optional)</label>
+          <input
+            id="java-path"
+            v-model.trim="formData.javaPath"
+            @blur="refreshJavaRequirement"
+            type="text"
+            placeholder="java or /path/to/java"
+          >
+          <span class="form-hint">Use a specific Java runtime for this server.</span>
+        </div>
+
         <div class="form-checkboxes">
           <label class="checkbox-label">
             <input type="checkbox" v-model="formData.generateStructures">
@@ -309,7 +324,7 @@
 
 <script>
 import BaseModal from './BaseModal.vue'
-import { createServer, installServer, getFabricGameVersions } from '../../api/servers'
+import { createServer, installServer, getFabricGameVersions, getJavaStatus } from '../../api/servers'
 import { useToast } from '../../composables/useToast'
 
 export default {
@@ -332,7 +347,10 @@ export default {
     return {
       creating: false,
       versionsLoading: false,
+      javaRequirementLoading: false,
       gameVersions: [],
+      javaStatus: null,
+      javaRequirementWarning: '',
       loaderOptions: [
         { value: 'fabric', label: 'Fabric (supported)' }
       ],
@@ -354,6 +372,7 @@ export default {
         spawnMonsters: true,
         spawnNpcs: true,
         memory: 4,
+        javaPath: '',
         simulationDistance: 10,
         onlineMode: true,
         whitelist: false,
@@ -386,12 +405,39 @@ export default {
         if ((!this.formData.version || !versionExists) && fallback) {
           this.formData.version = fallback.version
         }
+        await this.refreshJavaRequirement()
       } catch (error) {
         console.error('Failed to load Fabric game versions:', error)
         this.toast.error('Could not load Minecraft versions.', 'Version Fetch Failed')
       } finally {
         this.versionsLoading = false
       }
+    },
+
+    async refreshJavaRequirement() {
+      if (!this.formData.version) {
+        this.javaStatus = null
+        this.javaRequirementWarning = ''
+        return
+      }
+
+      this.javaRequirementLoading = true
+      try {
+        this.javaStatus = await getJavaStatus({
+          mcVersion: this.formData.version,
+          javaPath: this.formData.javaPath || undefined
+        })
+        this.javaRequirementWarning = this.javaStatus?.compatibility?.warning || ''
+      } catch (error) {
+        console.error('Failed to resolve Java requirement:', error)
+        this.javaRequirementWarning = 'Could not verify Java requirement right now.'
+      } finally {
+        this.javaRequirementLoading = false
+      }
+    },
+
+    async handleVersionChange() {
+      await this.refreshJavaRequirement()
     },
     
     async handleCreate() {
@@ -444,6 +490,7 @@ export default {
         spawnMonsters: true,
         spawnNpcs: true,
         memory: 4,
+        javaPath: '',
         simulationDistance: 10,
         onlineMode: true,
         whitelist: false,
@@ -452,6 +499,21 @@ export default {
         motd: 'A Minecraft Server',
         acceptEula: false
       }
+      this.javaStatus = null
+      this.javaRequirementWarning = ''
+    }
+  },
+  computed: {
+    requiredJavaText() {
+      const required = this.javaStatus?.required_java
+      if (!required) {
+        return ''
+      }
+      const detected = this.javaStatus?.detected_major
+      if (detected && detected < required) {
+        return `Requires Java ${required}+ (detected Java ${detected}).`
+      }
+      return `Requires Java ${required}+`
     }
   }
 }
@@ -478,6 +540,10 @@ export default {
   margin: 0 0 0.5rem 0;
   padding-bottom: 0.5rem;
   border-bottom: 1px solid var(--border-color);
+}
+
+.warning-hint {
+  color: var(--warning, #f59e0b);
 }
 
 /* EULA Section */
