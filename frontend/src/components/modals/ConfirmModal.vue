@@ -22,6 +22,9 @@
       </div>
       <p class="confirm-message">{{ message }}</p>
       <p v-if="description" class="confirm-description">{{ description }}</p>
+      <div v-if="$slots.extra" class="confirm-extra">
+        <slot name="extra" />
+      </div>
     </div>
 
     <template #footer>
@@ -155,6 +158,32 @@ export default {
   color: var(--text-secondary);
   margin: 0;
   line-height: 1.5;
+}
+
+.confirm-extra {
+  margin-top: 16px;
+  text-align: left;
+}
+
+:deep(.confirm-checkbox) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 0.9375rem;
+  color: var(--text-primary);
+}
+
+:deep(.confirm-checkbox) input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+:deep(.confirm-checkbox) input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .btn-warning {

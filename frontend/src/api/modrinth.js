@@ -153,6 +153,15 @@ export async function resolveProjectVersion(projectId, { mc_version, loader }) {
 }
 
 /**
+ * Poll modpack install progress for a server.
+ * @param {string|number} serverId - Server identifier
+ * @returns {Promise<Object>} Progress info with active, stage, current, total, detail
+ */
+export async function getModpackInstallProgress(serverId) {
+  return get(`/api/modrinth/modpack/install-progress/${encodeURIComponent(serverId)}`)
+}
+
+/**
  * Install a modpack on a server.
  * Downloads the .mrpack, installs all server-side mods, and applies overrides.
  * @param {string} projectId - Modrinth project ID or slug

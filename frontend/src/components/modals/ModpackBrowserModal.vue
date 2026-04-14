@@ -24,73 +24,59 @@
       <div v-if="importMethod === 'search'" class="search-row">
         <div class="search-bar">
           <input
-            v-model="searchQuery"
+            v-model="imp.searchQuery.value"
             type="text"
             placeholder="Search modpacks..."
-            @keyup.enter="performSearch"
+            @keyup.enter="imp.performSearch()"
           >
         </div>
         <button
           type="button"
           class="btn btn-secondary"
-          :disabled="loading || !searchQuery.trim()"
-          @click="performSearch"
+          :disabled="imp.loading.value || !imp.searchQuery.value.trim()"
+          @click="imp.performSearch()"
         >
-          {{ loading ? 'Searching...' : 'Search' }}
+          {{ imp.loading.value ? 'Searching...' : 'Search' }}
         </button>
       </div>
 
       <div v-else class="search-row">
         <div class="search-bar">
           <input
-            v-model="modpackLink"
+            v-model="imp.modpackLink.value"
             type="text"
             placeholder="https://modrinth.com/modpack/... or slug"
-            @keyup.enter="resolveByLink"
+            @keyup.enter="imp.resolveByLink()"
           >
         </div>
         <button
           type="button"
           class="btn btn-secondary"
-          :disabled="resolving || !modpackLink.trim()"
-          @click="resolveByLink"
+          :disabled="imp.resolving.value || !imp.modpackLink.value.trim()"
+          @click="imp.resolveByLink()"
         >
-          {{ resolving ? 'Resolving...' : 'Resolve' }}
+          {{ imp.resolving.value ? 'Resolving...' : 'Resolve' }}
         </button>
       </div>
 
-      <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
-
-      <div class="switch-options">
-        <label class="switch-option">
-          <input type="checkbox" v-model="createBackup" :disabled="installing">
-          <span>Create backup before replacing</span>
-        </label>
-      </div>
-
-      <div class="clean-warning">
-        <strong>Replace mode:</strong> Only modpack-managed folders are replaced (mods/config/defaultconfigs/kubejs/scripts).
-        World, server settings, logs and backups are kept. Enable backup if you may want to restore the previous state.
-      </div>
+      <p v-if="imp.errorMessage.value" class="error-text">{{ imp.errorMessage.value }}</p>
     </div>
 
-    <div v-if="loading" class="empty-state">
+    <div v-if="imp.loading.value" class="empty-state">
       <div class="spinner"></div>
       <p>Searching modpacks...</p>
     </div>
 
-    <div v-else-if="results.length" class="results-grid">
+    <div v-else-if="imp.searchResults.value.length" class="results-grid">
       <button
-        v-for="pack in results"
+        v-for="pack in imp.searchResults.value"
         :key="pack.project_id"
         type="button"
         class="modpack-card"
         :class="{
-          selected: selectedModpack && selectedModpack.id === (pack.project_id || pack.id),
-          installing: installing && selectedModpack && selectedModpack.id === (pack.project_id || pack.id)
+          selected: imp.selectedModpack.value && imp.selectedModpack.value.id === (pack.project_id || pack.id),
         }"
-        :disabled="installing"
-        @click="selectPack(pack)"
+        @click="handleSelectPack(pack)"
       >
         <img
           :src="pack.icon_url || pack.iconUrl || 'https://via.placeholder.com/80?text=Pack'"
@@ -100,13 +86,7 @@
         <div class="modpack-info">
           <h3>{{ pack.title || pack.name || pack.slug }}</h3>
           <p>{{ truncate(pack.description, 120) }}</p>
-          <span class="meta">{{ formatNumber(pack.downloads || 0) }} downloads</span>
-        </div>
-        <div
-          v-if="installing && selectedModpack && selectedModpack.id === (pack.project_id || pack.id)"
-          class="installing-indicator"
-        >
-          <div class="spinner"></div>
+          <span class="meta">{{ formatDownloads(pack.downloads || 0) }} downloads</span>
         </div>
       </button>
     </div>
@@ -117,222 +97,71 @@
     </div>
 
     <template #footer>
-      <button class="btn btn-secondary" :disabled="installing" @click="$emit('close')">Close</button>
+      <button class="btn btn-secondary" @click="$emit('close')">Close</button>
       <button
         class="btn btn-primary"
-        :disabled="installing || !selectedModpack"
+        :disabled="!imp.selectedModpack.value"
         @click="confirmInstall"
       >
-        {{ installing ? 'Installing...' : 'Install Selected Modpack' }}
+        Install Selected Modpack
       </button>
     </template>
   </BaseModal>
 </template>
 
-<script>
+<script setup>
+import { ref, computed, watch } from 'vue'
 import BaseModal from './BaseModal.vue'
-import { getProjectDetails, searchModpacks } from '../../api/modrinth'
+import { useModpackImport, formatDownloads } from '../../composables/useModpackImport'
 
-export default {
-  name: 'ModpackBrowserModal',
-  components: {
-    BaseModal
-  },
-  props: {
-    show: {
-      type: Boolean,
-      required: true
-    },
-    mcVersion: {
-      type: String,
-      default: ''
-    },
-    loader: {
-      type: String,
-      default: 'fabric'
-    },
-    installing: {
-      type: Boolean,
-      default: false
-    }
-  },
-  emits: ['close', 'install'],
-  data() {
-    return {
-      importMethod: 'search',
-      searchQuery: '',
-      modpackLink: '',
-      sortBy: 'downloads',
-      loading: false,
-      resolving: false,
-      errorMessage: '',
-      results: [],
-      selectedModpack: null,
-      createBackup: true
-    }
-  },
-  computed: {
-    loaderLabel() {
-      const value = (this.loader || 'fabric').toLowerCase()
-      return value.charAt(0).toUpperCase() + value.slice(1)
-    }
-  },
-  watch: {
-    show(next) {
-      if (!next) {
-        this.resetState()
-      }
-    }
-  },
-  methods: {
-    isNotFoundError(error) {
-      if (!error) {
-        return false
-      }
-      if (error.status === 404) {
-        return true
-      }
-      const message = String(error.message || '').toLowerCase()
-      return message.includes('not found')
-    },
+const props = defineProps({
+  show: { type: Boolean, required: true },
+  mcVersion: { type: String, default: '' },
+  loader: { type: String, default: 'fabric' },
+})
 
-    resetState() {
-      this.importMethod = 'search'
-      this.searchQuery = ''
-      this.modpackLink = ''
-      this.sortBy = 'downloads'
-      this.loading = false
-      this.resolving = false
-      this.errorMessage = ''
-      this.results = []
-      this.selectedModpack = null
-      this.createBackup = true
-    },
+const emit = defineEmits(['close', 'install'])
 
-    normalize(project) {
-      return {
-        id: project.project_id || project.id,
-        slug: project.slug || '',
-        title: project.title || project.name || project.slug || 'Unknown Modpack',
-        description: project.description || '',
-        downloads: project.downloads || 0,
-        iconUrl: project.icon_url || '',
-        projectType: project.project_type || 'modpack'
-      }
-    },
+const importMethod = ref('search')
 
-    parseProjectRef(input) {
-      const raw = (input || '').trim()
-      if (!raw) {
-        return ''
-      }
+const loaderLabel = computed(() => {
+  const value = (props.loader || 'fabric').toLowerCase()
+  return value.charAt(0).toUpperCase() + value.slice(1)
+})
 
-      if (!raw.startsWith('http://') && !raw.startsWith('https://')) {
-        return raw.replace(/^@/, '')
-      }
+const imp = useModpackImport({
+  mcVersion: () => props.mcVersion,
+  loader: () => props.loader
+})
 
-      try {
-        const parsed = new URL(raw)
-        const parts = parsed.pathname.split('/').filter(Boolean)
-        if ((parts[0] === 'modpack' || parts[0] === 'project') && parts[1]) {
-          return parts[1]
-        }
-        return parts[parts.length - 1] || ''
-      } catch {
-        return ''
-      }
-    },
-
-    async performSearch() {
-      const query = this.searchQuery.trim()
-      if (!query) {
-        this.results = []
-        return
-      }
-
-      this.loading = true
-      this.errorMessage = ''
-      try {
-        const response = await searchModpacks({
-          query,
-          version: this.mcVersion,
-          loader: this.loader,
-          sort: this.sortBy,
-          limit: 12
-        })
-        this.results = Array.isArray(response.hits) ? response.hits : []
-      } catch (error) {
-        this.results = []
-        this.errorMessage = error.message || 'Failed to search modpacks.'
-      } finally {
-        this.loading = false
-      }
-    },
-
-    async resolveByLink() {
-      const projectRef = this.parseProjectRef(this.modpackLink)
-      if (!projectRef) {
-        this.errorMessage = 'Enter a valid Modrinth modpack link, slug, or project ID.'
-        return
-      }
-
-      this.resolving = true
-      this.errorMessage = ''
-      try {
-        const project = await getProjectDetails(projectRef)
-        if (project.project_type !== 'modpack') {
-          this.errorMessage = 'This project exists but is not a modpack.'
-          return
-        }
-
-        this.results = [project]
-        this.selectPack(project)
-      } catch (error) {
-        if (this.isNotFoundError(error)) {
-          this.errorMessage = `No exact modpack found for "${projectRef}". Showing search results instead.`
-          this.searchQuery = projectRef
-          await this.performSearch()
-        } else {
-          this.errorMessage = error.message || 'Could not resolve modpack from link.'
-        }
-      } finally {
-        this.resolving = false
-      }
-    },
-
-    selectPack(pack) {
-      if (this.installing) {
-        return
-      }
-      this.selectedModpack = this.normalize(pack)
-    },
-
-    confirmInstall() {
-      if (!this.selectedModpack || this.installing) {
-        return
-      }
-
-      this.$emit('install', {
-        projectId: this.selectedModpack.id,
-        title: this.selectedModpack.title,
-        mcVersion: this.mcVersion,
-        loader: (this.loader || 'fabric').toLowerCase(),
-        cleanInstall: true,
-        createBackup: this.createBackup
-      })
-    },
-
-    truncate(text, length = 100) {
-      if (!text) {
-        return ''
-      }
-      return text.length > length ? `${text.slice(0, length)}...` : text
-    },
-
-    formatNumber(value) {
-      return new Intl.NumberFormat().format(value || 0)
-    }
+watch(() => props.show, (next) => {
+  if (!next) {
+    importMethod.value = 'search'
+    imp.resetAll()
   }
+})
+
+function handleSelectPack(pack) {
+  imp.selectPack(pack)
+}
+
+function confirmInstall() {
+  if (!imp.selectedModpack.value) {
+    return
+  }
+  emit('install', {
+    projectId: imp.selectedModpack.value.id,
+    title: imp.selectedModpack.value.title,
+    mcVersion: props.mcVersion,
+    loader: (props.loader || 'fabric').toLowerCase(),
+  })
+}
+
+function truncate(text, length = 100) {
+  if (!text) {
+    return ''
+  }
+  return text.length > length ? `${text.slice(0, length)}...` : text
 }
 </script>
 
@@ -416,17 +245,6 @@ export default {
   box-shadow: 0 0 0 2px color-mix(in oklch, var(--primary) 18%, transparent);
 }
 
-.modpack-card.installing {
-  opacity: 0.8;
-  cursor: wait;
-}
-
-.installing-indicator {
-  display: flex;
-  align-items: center;
-  margin-left: auto;
-  flex-shrink: 0;
-}
 
 .modpack-icon {
   width: 56px;
@@ -467,29 +285,6 @@ export default {
   font-size: 0.875rem;
 }
 
-.switch-options {
-  display: grid;
-  gap: 0.35rem;
-  margin-top: 0.4rem;
-}
-
-.switch-option {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  color: var(--text-secondary);
-  font-size: 0.84rem;
-}
-
-.clean-warning {
-  border: 1px solid color-mix(in oklch, #f59e0b 70%, var(--border-color));
-  background: color-mix(in oklch, #f59e0b 14%, var(--surface));
-  color: var(--text-primary);
-  border-radius: 10px;
-  padding: 0.65rem 0.75rem;
-  font-size: 0.82rem;
-  line-height: 1.35;
-}
 
 .spinner {
   width: 20px;
@@ -505,6 +300,7 @@ export default {
     transform: rotate(360deg);
   }
 }
+
 
 @media (max-width: 768px) {
   .search-row {

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import tempfile
@@ -307,6 +308,7 @@ class ModrinthClient:
         clean_install: bool = False,
         allow_missing: bool = False,
         mod_side_overrides: Optional[Dict[str, str]] = None,
+        progress_callback: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """Download and install a modpack into a server directory.
 
@@ -314,87 +316,37 @@ class ModrinthClient:
         modrinth.index.json, and extracts overrides/ and server-overrides/ into
         the server root.
         """
-        loaders = [loader] if loader else None
-        game_versions = [mc_version] if mc_version else None
+        def _report(stage: str, current: int = 0, total: int = 0, detail: str = ""):
+            if progress_callback:
+                progress_callback(stage=stage, current=current, total=total, detail=detail)
 
-        versions = self.get_project_versions(project_id, loaders=loaders, game_versions=game_versions)
-        best = self.pick_best_version(versions)
+        _report("resolving")
+        project_details = self.get_project(project_id)
+        project_title = project_details.get("title", project_id)
 
-        if not best and loaders:
-            versions = self.get_project_versions(project_id, loaders=None, game_versions=game_versions)
-            best = self.pick_best_version(versions)
-
-        if not best and (loaders or game_versions):
-            versions = self.get_project_versions(project_id)
-            best = self.pick_best_version(versions)
-
-        if not best:
-            raise ModrinthApiError("No suitable modpack version found")
-
-        version_game_versions = best.get("game_versions") or []
-        if mc_version and version_game_versions and mc_version not in version_game_versions:
-            raise ModrinthApiError(
-                (
-                    f"Selected server version {mc_version} is not compatible with this modpack version "
-                    f"({', '.join(version_game_versions)})."
-                ),
-                status_code=409,
-                details={
-                    "requested_mc_version": mc_version,
-                    "modpack_game_versions": version_game_versions,
-                },
-            )
-
-        version_loaders = [str(value).lower() for value in (best.get("loaders") or [])]
-        if loader and version_loaders and loader.lower() not in version_loaders:
-            raise ModrinthApiError(
-                (
-                    f"Selected loader {loader} is not compatible with this modpack version "
-                    f"({', '.join(version_loaders)})."
-                ),
-                status_code=409,
-                details={
-                    "requested_loader": loader.lower(),
-                    "modpack_loaders": version_loaders,
-                },
-            )
-
+        best = self._resolve_modpack_version(project_id, mc_version, loader)
         download_url = self.get_primary_file_url(best)
         if not download_url:
             raise ModrinthApiError("No download URL found for modpack version")
 
         install_path = Path(install_path).resolve()
-        files_installed: List[str] = []
-        files_skipped: List[str] = []
-        missing_files: List[Dict[str, str]] = []
-        uncertain_mod_files: List[Dict[str, str]] = []
-        index: Dict[str, Any] = {}
-        cleaned_paths: List[str] = []
         normalized_overrides = self._normalize_mod_side_overrides(mod_side_overrides)
+        cleaned_paths: List[str] = []
 
         if clean_install:
+            _report("cleaning")
             cleaned_paths = self.clean_modpack_switch_paths(install_path)
 
+        _report("downloading_pack")
         with tempfile.TemporaryDirectory() as tmp_dir:
-            mrpack_path = Path(tmp_dir) / "modpack.mrpack"
-
-            with self._request(
-                "get",
-                download_url,
-                stream=True,
-                timeout=120,
-                error_context="Failed to download modpack",
-            ) as response:
-                with open(mrpack_path, "wb") as fh:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        if chunk:
-                            fh.write(chunk)
+            mrpack_path = self._download_mrpack(download_url, Path(tmp_dir))
 
             with zipfile.ZipFile(mrpack_path, "r") as zf:
                 with zf.open("modrinth.index.json") as fh:
                     index = json.loads(fh.read())
 
                 if not allow_missing:
+                    _report("checking_availability")
                     precheck_missing = self._collect_unavailable_modpack_entries(
                         index.get("files", []),
                         normalized_overrides,
@@ -409,191 +361,361 @@ class ModrinthClient:
                             },
                         )
 
-                for entry in index.get("files", []):
-                    env = entry.get("env", {})
-                    if env.get("server", "required") == "unsupported":
-                        files_skipped.append(entry.get("path", "<unknown>"))
-                        continue
+                result = self._install_index_files(
+                    index.get("files", []),
+                    install_path,
+                    normalized_overrides,
+                    allow_missing,
+                    progress_callback=_report,
+                )
+                _report("extracting_overrides")
+                self._extract_overrides(
+                    zf, install_path, normalized_overrides,
+                    result["files_installed"],
+                    result["files_skipped"],
+                    result["uncertain_mod_files"],
+                )
 
-                    entry_path = entry.get("path")
-                    if not entry_path:
-                        files_skipped.append("<unknown>")
-                        continue
-
-                    if entry_path.lower().startswith("mods/") and entry_path.lower().endswith(".jar"):
-                        decision, reason = self._resolve_index_mod_side(entry_path, env, normalized_overrides)
-                        if decision == "client":
-                            files_skipped.append(entry_path)
-                            continue
-
-                    target = (install_path / entry_path).resolve()
-                    if not str(target).startswith(str(install_path)):
-                        raise ModrinthApiError(f"Invalid path in modpack index: {entry_path}")
-
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    downloads = entry.get("downloads", [])
-                    if not downloads:
-                        missing_files.append(
-                            {
-                                "path": entry_path,
-                                "reason": "No download URL in modpack index",
-                            }
-                        )
-                        files_skipped.append(entry_path)
-                        if allow_missing:
-                            continue
-                        raise ModrinthApiError(
-                            "Some modpack files could not be downloaded",
-                            status_code=409,
-                            details={
-                                "missing_files": missing_files,
-                                "can_continue_with_missing": True,
-                            },
-                        )
-
-                    try:
-                        with self._request(
-                            "get",
-                            downloads[0],
-                            stream=True,
-                            timeout=60,
-                            error_context=f"Failed to download {entry_path}",
-                        ) as r:
-                            with open(target, "wb") as fh:
-                                for chunk in r.iter_content(chunk_size=8192):
-                                    if chunk:
-                                        fh.write(chunk)
-
-                        if entry_path.lower().startswith("mods/") and entry_path.lower().endswith(".jar"):
-                            forced_side = normalized_overrides.get(entry_path)
-                            classification, class_reason = self._classify_mod_jar_for_server(target)
-
-                            if forced_side == "client":
-                                try:
-                                    target.unlink()
-                                except OSError:
-                                    pass
-                                files_skipped.append(entry_path)
-                                continue
-
-                            if forced_side == "server":
-                                files_installed.append(entry_path)
-                                continue
-
-                            if classification == "client":
-                                try:
-                                    target.unlink()
-                                except OSError:
-                                    pass
-                                files_skipped.append(entry_path)
-                                continue
-
-                            if classification == "uncertain":
-                                try:
-                                    target.unlink()
-                                except OSError:
-                                    pass
-                                uncertain_mod_files.append(
-                                    {
-                                        "path": entry_path,
-                                        "reason": class_reason or "Unable to detect dedicated-server compatibility from mod metadata",
-                                    }
-                                )
-                                continue
-
-                        files_installed.append(entry_path)
-                    except ModrinthApiError as exc:
-                        missing_files.append(
-                            {
-                                "path": entry_path,
-                                "reason": str(exc),
-                            }
-                        )
-                        files_skipped.append(entry_path)
-                        if allow_missing:
-                            continue
-                        raise ModrinthApiError(
-                            "Some modpack files could not be downloaded",
-                            status_code=409,
-                            details={
-                                "missing_files": missing_files,
-                                "can_continue_with_missing": True,
-                            },
-                        ) from exc
-
-                for member in zf.infolist():
-                    if member.is_dir():
-                        continue
-
-                    relative: Optional[str] = None
-                    for prefix in ("server-overrides/", "overrides/"):
-                        if member.filename.startswith(prefix):
-                            relative = member.filename[len(prefix):]
-                            break
-                    if not relative:
-                        continue
-
-                    target = (install_path / relative).resolve()
-                    if not str(target).startswith(str(install_path)):
-                        continue
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    with zf.open(member) as src, open(target, "wb") as dst:
-                        shutil.copyfileobj(src, dst)
-
-                    if relative.lower().startswith("mods/") and relative.lower().endswith(".jar"):
-                        scoped_path = f"{prefix}{relative}"
-                        forced_side = normalized_overrides.get(scoped_path) or normalized_overrides.get(relative)
-                        classification, reason = self._classify_mod_jar_for_server(target)
-
-                        if forced_side == "client":
-                            try:
-                                target.unlink()
-                            except OSError:
-                                pass
-                            files_skipped.append(scoped_path)
-                            continue
-
-                        if classification == "client":
-                            try:
-                                target.unlink()
-                            except OSError:
-                                pass
-                            files_skipped.append(scoped_path)
-                            continue
-
-                        if classification == "uncertain" and forced_side != "server":
-                            try:
-                                target.unlink()
-                            except OSError:
-                                pass
-                            uncertain_mod_files.append({
-                                "path": scoped_path,
-                                "reason": reason or "Unable to detect dedicated-server compatibility from mod metadata",
-                            })
-                            continue
-
-        if uncertain_mod_files:
+        if result["uncertain_mod_files"]:
             raise ModrinthApiError(
                 "Some mods could not be classified as client or server",
                 status_code=409,
                 details={
-                    "uncertain_mod_files": uncertain_mod_files,
+                    "uncertain_mod_files": result["uncertain_mod_files"],
                     "can_continue_with_uncertain": True,
                 },
             )
 
         return {
             "version": best.get("version_number"),
-            "name": best.get("name"),
-            "files_installed": len(files_installed),
-            "files_skipped": len(files_skipped),
+            "name": project_title,
+            "version_name": best.get("name"),
+            "mc_version": (best.get("game_versions") or [None])[0],
+            "loaders": best.get("loaders", []),
+            "project_id": project_id,
+            "version_id": best.get("id"),
+            "files_installed": len(result["files_installed"]),
+            "files_skipped": len(result["files_skipped"]),
             "clean_install": clean_install,
             "cleaned_paths": cleaned_paths,
-            "missing_files": missing_files,
+            "missing_files": result["missing_files"],
             "allow_missing": allow_missing,
             "dependencies": index.get("dependencies", {}),
+            "uncertain_mod_files": result["uncertain_mod_files"],
+        }
+
+    def _resolve_modpack_version(
+        self,
+        project_id: str,
+        mc_version: Optional[str],
+        loader: Optional[str],
+    ) -> Dict[str, Any]:
+        """Find the best modpack version, with progressive fallbacks."""
+        loaders = [loader] if loader else None
+        game_versions = [mc_version] if mc_version else None
+
+        best = self.pick_best_version(
+            self.get_project_versions(project_id, loaders=loaders, game_versions=game_versions)
+        )
+        if not best and loaders:
+            best = self.pick_best_version(
+                self.get_project_versions(project_id, loaders=None, game_versions=game_versions)
+            )
+        if not best and (loaders or game_versions):
+            best = self.pick_best_version(self.get_project_versions(project_id))
+        if not best:
+            raise ModrinthApiError("No suitable modpack version found")
+
+        version_game_versions = best.get("game_versions") or []
+        if mc_version and version_game_versions and mc_version not in version_game_versions:
+            raise ModrinthApiError(
+                f"Selected server version {mc_version} is not compatible with this modpack version "
+                f"({', '.join(version_game_versions)}).",
+                status_code=409,
+                details={
+                    "requested_mc_version": mc_version,
+                    "modpack_game_versions": version_game_versions,
+                },
+            )
+
+        version_loaders = [str(v).lower() for v in (best.get("loaders") or [])]
+        if loader and version_loaders and loader.lower() not in version_loaders:
+            raise ModrinthApiError(
+                f"Selected loader {loader} is not compatible with this modpack version "
+                f"({', '.join(version_loaders)}).",
+                status_code=409,
+                details={
+                    "requested_loader": loader.lower(),
+                    "modpack_loaders": version_loaders,
+                },
+            )
+
+        return best
+
+    def _download_mrpack(self, download_url: str, tmp_dir: Path) -> Path:
+        """Download the .mrpack archive to a temporary directory."""
+        mrpack_path = tmp_dir / "modpack.mrpack"
+        with self._request(
+            "get", download_url, stream=True, timeout=120,
+            error_context="Failed to download modpack",
+        ) as response:
+            with open(mrpack_path, "wb") as fh:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        fh.write(chunk)
+        return mrpack_path
+
+    def _download_and_verify(
+        self,
+        url: str,
+        target: Path,
+        hashes: Optional[Dict[str, str]],
+        error_context: str,
+    ) -> None:
+        """Download a file and verify its hash against the index entry."""
+        sha1 = hashlib.sha1()
+        sha512 = hashlib.sha512()
+
+        with self._request(
+            "get", url, stream=True, timeout=60,
+            error_context=error_context,
+        ) as r:
+            with open(target, "wb") as fh:
+                for chunk in r.iter_content(chunk_size=8192):
+                    if chunk:
+                        fh.write(chunk)
+                        sha1.update(chunk)
+                        sha512.update(chunk)
+
+        if not hashes:
+            return
+
+        expected_sha512 = hashes.get("sha512")
+        if expected_sha512 and sha512.hexdigest() != expected_sha512:
+            target.unlink(missing_ok=True)
+            raise ModrinthApiError(
+                f"{error_context}: SHA-512 mismatch (expected {expected_sha512[:16]}...)",
+            )
+
+        expected_sha1 = hashes.get("sha1")
+        if expected_sha1 and sha1.hexdigest() != expected_sha1:
+            target.unlink(missing_ok=True)
+            raise ModrinthApiError(
+                f"{error_context}: SHA-1 mismatch (expected {expected_sha1})",
+            )
+
+    def _install_index_files(
+        self,
+        entries: List[Dict[str, Any]],
+        install_path: Path,
+        overrides: Dict[str, str],
+        allow_missing: bool,
+        progress_callback: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """Download and classify every file listed in the modpack index."""
+        files_installed: List[str] = []
+        files_skipped: List[str] = []
+        missing_files: List[Dict[str, str]] = []
+        uncertain_mod_files: List[Dict[str, str]] = []
+
+        server_entries = []
+        index_env_decisions: Dict[str, str] = {}
+        for entry in entries:
+            env = entry.get("env", {})
+            entry_path = entry.get("path", "")
+            if env.get("server", "required") == "unsupported":
+                files_skipped.append(entry_path or "<unknown>")
+                continue
+            if not entry_path:
+                files_skipped.append("<unknown>")
+                continue
+            entry_lower = entry_path.lower()
+            if any(entry_lower.startswith(p) for p in self.CLIENT_ONLY_PREFIXES):
+                files_skipped.append(entry_path)
+                continue
+            is_mod_jar = entry_lower.startswith("mods/") and entry_lower.endswith(".jar")
+            if is_mod_jar:
+                decision, _ = self._resolve_index_mod_side(entry_path, env, overrides)
+                if decision == "client":
+                    existing = (install_path / entry_path).resolve()
+                    if existing.is_file() and str(existing).startswith(str(install_path)):
+                        existing.unlink(missing_ok=True)
+                    files_skipped.append(entry_path)
+                    continue
+                index_env_decisions[entry_path] = decision
+            server_entries.append(entry)
+
+        total = len(server_entries)
+
+        for idx, entry in enumerate(server_entries):
+            entry_path = entry.get("path")
+
+            if progress_callback:
+                progress_callback(stage="installing_files", current=idx + 1, total=total, detail=entry_path)
+
+            is_mod_jar = entry_path.lower().startswith("mods/") and entry_path.lower().endswith(".jar")
+
+            target = (install_path / entry_path).resolve()
+            if not str(target).startswith(str(install_path)):
+                raise ModrinthApiError(f"Invalid path in modpack index: {entry_path}")
+
+            target.parent.mkdir(parents=True, exist_ok=True)
+            downloads = entry.get("downloads", [])
+            if not downloads:
+                missing_files.append({"path": entry_path, "reason": "No download URL in modpack index"})
+                files_skipped.append(entry_path)
+                if allow_missing:
+                    continue
+                raise ModrinthApiError(
+                    "Some modpack files could not be downloaded",
+                    status_code=409,
+                    details={"missing_files": missing_files, "can_continue_with_missing": True},
+                )
+
+            try:
+                self._download_and_verify(
+                    downloads[0], target,
+                    hashes=entry.get("hashes"),
+                    error_context=f"Failed to download {entry_path}",
+                )
+            except ModrinthApiError as exc:
+                missing_files.append({"path": entry_path, "reason": str(exc)})
+                files_skipped.append(entry_path)
+                if allow_missing:
+                    continue
+                raise ModrinthApiError(
+                    "Some modpack files could not be downloaded",
+                    status_code=409,
+                    details={"missing_files": missing_files, "can_continue_with_missing": True},
+                ) from exc
+
+            if is_mod_jar:
+                disposition = self._classify_installed_mod(
+                    target, entry_path, overrides,
+                    files_installed, files_skipped, uncertain_mod_files,
+                    index_env_decision=index_env_decisions.get(entry_path, ""),
+                )
+                if disposition is not None:
+                    continue
+
+            files_installed.append(entry_path)
+
+        return {
+            "files_installed": files_installed,
+            "files_skipped": files_skipped,
+            "missing_files": missing_files,
             "uncertain_mod_files": uncertain_mod_files,
         }
+
+    def _classify_installed_mod(
+        self,
+        target: Path,
+        entry_path: str,
+        overrides: Dict[str, str],
+        files_installed: List[str],
+        files_skipped: List[str],
+        uncertain_mod_files: List[Dict[str, str]],
+        index_env_decision: str = "",
+    ) -> Optional[str]:
+        """After downloading a mod JAR, classify and possibly remove it.
+
+        Returns a disposition string if the file was handled, or None to let
+        the caller append it to files_installed.
+        """
+        forced_side = overrides.get(entry_path)
+        classification, class_reason = self._classify_mod_jar_for_server(target)
+
+        if forced_side == "client":
+            target.unlink(missing_ok=True)
+            files_skipped.append(entry_path)
+            return "skipped"
+
+        if forced_side == "server":
+            files_installed.append(entry_path)
+            return "installed"
+
+        if classification == "client":
+            target.unlink(missing_ok=True)
+            files_skipped.append(entry_path)
+            return "skipped"
+
+        if classification == "uncertain":
+            if index_env_decision == "server":
+                files_installed.append(entry_path)
+                return "installed"
+            uncertain_mod_files.append({
+                "path": entry_path,
+                "reason": class_reason or "Unable to detect dedicated-server compatibility from mod metadata",
+            })
+            return "uncertain"
+
+        return None
+
+    def _extract_overrides(
+        self,
+        zf: zipfile.ZipFile,
+        install_path: Path,
+        overrides: Dict[str, str],
+        files_installed: List[str],
+        files_skipped: List[str],
+        uncertain_mod_files: List[Dict[str, str]],
+    ) -> None:
+        """Extract server-overrides/ and overrides/ from the .mrpack."""
+        for member in zf.infolist():
+            if member.is_dir():
+                continue
+
+            relative: Optional[str] = None
+            matched_prefix = ""
+            for prefix in ("server-overrides/", "overrides/"):
+                if member.filename.startswith(prefix):
+                    relative = member.filename[len(prefix):]
+                    matched_prefix = prefix
+                    break
+            if not relative:
+                continue
+
+            if any(relative.lower().startswith(p) for p in self.CLIENT_ONLY_PREFIXES):
+                files_skipped.append(f"{matched_prefix}{relative}")
+                continue
+
+            is_override_jar = relative.lower().startswith("mods/") and relative.lower().endswith(".jar")
+            if is_override_jar:
+                scoped_path = f"{matched_prefix}{relative}"
+                forced = overrides.get(scoped_path, overrides.get(relative, ""))
+                if forced == "client":
+                    existing = (install_path / relative).resolve()
+                    if existing.is_file() and str(existing).startswith(str(install_path)):
+                        existing.unlink(missing_ok=True)
+                    files_skipped.append(scoped_path)
+                    continue
+
+            target = (install_path / relative).resolve()
+            if not str(target).startswith(str(install_path)):
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with zf.open(member) as src, open(target, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+
+            if is_override_jar:
+                scoped_path = f"{matched_prefix}{relative}"
+                override_lookup = {
+                    scoped_path: overrides.get(scoped_path, overrides.get(relative, "")),
+                }
+                disposition = self._classify_installed_mod(
+                    target, scoped_path,
+                    override_lookup,
+                    files_installed, files_skipped, uncertain_mod_files,
+                )
+                if disposition is None:
+                    files_installed.append(scoped_path)
+            else:
+                files_installed.append(f"{matched_prefix}{relative}")
+
+    CLIENT_ONLY_PREFIXES = (
+        "resourcepacks/", "shaderpacks/",
+        "config/iris/", "config/oculus/", "config/optifine/",
+    )
 
     def _collect_unavailable_modpack_entries(
         self,
@@ -608,9 +730,11 @@ class ModrinthClient:
                 continue
 
             path = entry.get("path") or "<unknown>"
+            if any(path.lower().startswith(p) for p in self.CLIENT_ONLY_PREFIXES):
+                continue
             if path.lower().startswith("mods/") and path.lower().endswith(".jar"):
                 decision, _reason = self._resolve_index_mod_side(path, env, overrides)
-                if decision != "server":
+                if decision == "client":
                     continue
 
             downloads = entry.get("downloads", [])
@@ -626,8 +750,8 @@ class ModrinthClient:
 
     def _probe_download_url(self, url: str) -> str:
         try:
-            with self.session.get(url, stream=True, timeout=20) as response:
-                response.raise_for_status()
+            response = self.session.head(url, timeout=20, allow_redirects=True)
+            response.raise_for_status()
             return ""
         except requests.exceptions.RequestException as exc:
             response = getattr(exc, "response", None)
@@ -662,10 +786,15 @@ class ModrinthClient:
             return forced_side, "User override"
 
         server_env = str(env.get("server") or "").strip().lower()
+        client_env = str(env.get("client") or "").strip().lower()
+
         if server_env == "unsupported":
             return "client", "Index env marks server as unsupported"
         if server_env in ("required", "optional"):
             return "server", "Index env allows server"
+
+        if client_env == "required" and not server_env:
+            return "client", "Index env requires client only (no server env specified)"
 
         return "uncertain", "No server env metadata in modpack index"
 

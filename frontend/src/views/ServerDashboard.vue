@@ -11,7 +11,7 @@ import ServerHeader from '../components/server/ServerHeader.vue'
 import ServerOverviewTab from '../components/server/ServerOverviewTab.vue'
 import ServerConsoleTab from '../components/server/ServerConsoleTab.vue'
 import ServerFilesTab from '../components/server/ServerFilesTab.vue'
-import { installMod, installModpack } from '../api/modrinth'
+import { installMod, installModpack, getModpackInstallProgress } from '../api/modrinth'
 import {
   getServer,
   getInstalledMods,
@@ -78,8 +78,39 @@ const deletingBackup = ref(false)
 const showDeleteServerModal = ref(false)
 const deletingServer = ref(false)
 const settingsTabRef = ref(null)
+const modpackProgress = ref(null)
+let modpackProgressIntervalId = null
 const showModpackInstallConfirmModal = ref(false)
 const pendingModpackInstall = ref(null)
+const modpackCreateBackup = ref(true)
+
+const MODPACK_STAGE_LABELS = {
+  starting: 'Starting install...',
+  resolving: 'Resolving modpack version...',
+  cleaning: 'Cleaning old modpack files...',
+  downloading_pack: 'Downloading modpack archive...',
+  checking_availability: 'Checking file availability...',
+  installing_files: 'Downloading mods...',
+  extracting_overrides: 'Extracting override files...',
+  done: 'Finishing up...'
+}
+
+const modpackProgressLabel = computed(() => {
+  const p = modpackProgress.value
+  if (!p?.active) return ''
+  const stage = MODPACK_STAGE_LABELS[p.stage] || p.stage || 'Working...'
+  if (p.stage === 'installing_files' && p.total > 0) {
+    return `${stage} (${p.current}/${p.total})`
+  }
+  return stage
+})
+
+const modpackProgressPercent = computed(() => {
+  const p = modpackProgress.value
+  if (!p?.active || !p.total) return 0
+  return Math.round((p.current / p.total) * 100)
+})
+
 const showMissingModsConfirmModal = ref(false)
 const pendingMissingModsInstall = ref(null)
 const missingModsReport = ref([])
@@ -587,6 +618,7 @@ const handleInstallModpack = async (modpackData) => {
     return
   }
 
+  showModpackBrowser.value = false
   pendingModpackInstall.value = modpackData
   showModpackInstallConfirmModal.value = true
 }
@@ -594,6 +626,7 @@ const handleInstallModpack = async (modpackData) => {
 const cancelModpackInstallConfirmation = () => {
   showModpackInstallConfirmModal.value = false
   pendingModpackInstall.value = null
+  modpackCreateBackup.value = true
 }
 
 const formatMissingModsDescription = (missingFiles = []) => {
@@ -608,28 +641,58 @@ const formatMissingModsDescription = (missingFiles = []) => {
   return `The following files could not be downloaded:\n${preview}${suffix}\n\nInstall anyway without these files?`
 }
 
+const fetchModpackProgress = async () => {
+  try {
+    const progress = await getModpackInstallProgress(serverId.value)
+    modpackProgress.value = progress?.active ? progress : null
+  } catch {
+    // polling failure is non-critical
+  }
+}
+
+const startModpackProgressPolling = () => {
+  if (modpackProgressIntervalId) {
+    return
+  }
+  fetchModpackProgress()
+  modpackProgressIntervalId = setInterval(fetchModpackProgress, 1500)
+}
+
+const stopModpackProgressPolling = () => {
+  if (modpackProgressIntervalId) {
+    clearInterval(modpackProgressIntervalId)
+    modpackProgressIntervalId = null
+  }
+  modpackProgress.value = null
+}
+
 const runModpackInstall = async (modpackData) => {
   if (!modpackData) {
     return
   }
 
-  modpackInstalling.value = true
-  try {
-    const preInstallMessage = modpackData.createBackup
-      ? 'Replace mode active: old mod/config folders will be removed. A backup will be created first.'
-      : 'Replace mode active: old mod/config folders will be removed and backup is disabled.'
-    toast.warning(preInstallMessage, 'Modpack Switch')
+  const isRetry = Boolean(modpackData.allowMissing || modpackData.modSideOverrides)
 
+  modpackInstalling.value = true
+  if (isRetry) {
+    pendingModpackInstall.value = modpackData
+    showModpackInstallConfirmModal.value = true
+  }
+  startModpackProgressPolling()
+  try {
     const result = await installModpack(modpackData.projectId, {
       mc_version: modpackData.mcVersion,
       loader: modpackData.loader,
       server_id: serverId.value,
-      clean_install: true,
-      create_backup: modpackData.createBackup,
+      clean_install: !isRetry,
+      create_backup: isRetry ? false : modpackData.createBackup,
       allow_missing: Boolean(modpackData.allowMissing),
       mod_side_overrides: modpackData.modSideOverrides || null
     })
     showModpackBrowser.value = false
+    showModpackInstallConfirmModal.value = false
+    pendingModpackInstall.value = null
+    modpackCreateBackup.value = true
     const cleanedCount = Array.isArray(result?.cleaned_paths) ? result.cleaned_paths.length : 0
     const missingCount = Array.isArray(result?.missing_files) ? result.missing_files.length : 0
     const cleanedNote = ` Replaced folders: ${cleanedCount}.`
@@ -641,8 +704,11 @@ const runModpackInstall = async (modpackData) => {
       `${modpackData.title} installed successfully.${cleanedNote}${missingNote}${backupNote}`,
       'Modpack Installed'
     )
+    if (result?.java_warning) {
+      toast.warning(result.java_warning.message, 'Java Version Mismatch')
+    }
     logActivity({ type: 'modpack_install', modpack: modpackData.title })
-    await loadMods()
+    await Promise.all([loadServer({ silent: true }), loadMods()])
   } catch (error) {
     const uncertainMods = error?.data?.uncertain_mod_files
     const canContinueWithUncertain = Boolean(error?.data?.can_continue_with_uncertain)
@@ -652,6 +718,7 @@ const runModpackInstall = async (modpackData) => {
       && Array.isArray(uncertainMods)
       && uncertainMods.length
     ) {
+      showModpackInstallConfirmModal.value = false
       pendingUncertainModpackData.value = modpackData
       uncertainModsReport.value = uncertainMods
       showUncertainModsModal.value = true
@@ -662,15 +729,18 @@ const runModpackInstall = async (modpackData) => {
     const missingFiles = error?.data?.missing_files
     const canContinue = Boolean(error?.data?.can_continue_with_missing)
     if (!modpackData.allowMissing && error?.status === 409 && canContinue && Array.isArray(missingFiles) && missingFiles.length) {
+      showModpackInstallConfirmModal.value = false
       pendingMissingModsInstall.value = { ...modpackData, allowMissing: true }
       missingModsReport.value = missingFiles
       showMissingModsConfirmModal.value = true
       toast.warning(`${missingFiles.length} files could not be downloaded. Choose if you want to continue without them.`, 'Missing Modpack Files')
       return
     }
+    showModpackInstallConfirmModal.value = false
     console.error('Modpack install failed:', error)
     toast.error(error.message || 'Modpack installation failed', 'Installation Failed')
   } finally {
+    stopModpackProgressPolling()
     modpackInstalling.value = false
   }
 }
@@ -681,9 +751,7 @@ const confirmModpackInstall = async () => {
     return
   }
 
-  showModpackInstallConfirmModal.value = false
-  await runModpackInstall({ ...modpackData, allowMissing: false })
-  pendingModpackInstall.value = null
+  await runModpackInstall({ ...modpackData, createBackup: modpackCreateBackup.value, allowMissing: false })
 }
 
 const cancelMissingModsConfirmation = () => {
@@ -864,9 +932,11 @@ const resetDashboardState = () => {
   backupLoading.value = false
   installLoading.value = false
   modpackInstalling.value = false
+  modpackProgress.value = null
   showModpackInstallConfirmModal.value = false
   showMissingModsConfirmModal.value = false
   pendingModpackInstall.value = null
+  modpackCreateBackup.value = true
   pendingMissingModsInstall.value = null
   missingModsReport.value = []
   showUncertainModsModal.value = false
@@ -898,6 +968,7 @@ onMounted(async () => {
 onUnmounted(() => {
   stopLogPolling()
   stopServerStatusPolling()
+  stopModpackProgressPolling()
 })
 </script>
 
@@ -956,12 +1027,13 @@ onUnmounted(() => {
           :server-status="serverStatus"
           :players-display="playersDisplay"
           :installed-mods="installedMods"
+          :active-modpack="server?.modpack || null"
           v-model:mod-search="modSearch"
           :mods-loading="modsLoading"
           :filtered-mods="filteredMods"
           :ram-metrics="ramMetrics"
           :recent-activity="recentActivity"
-          :install-loading="installLoading"
+          :install-loading="installLoading || modpackInstalling"
           :backup-loading="backupLoading"
           :backups="backups"
           :format-backup-time="formatBackupTime"
@@ -1033,28 +1105,43 @@ onUnmounted(() => {
       :show="showModpackBrowser"
       :mc-version="server?.version || serverStatus.version"
       :loader="(server?.loader || serverStatus.loader).toLowerCase()"
-      :installing="modpackInstalling"
       @close="showModpackBrowser = false"
       @install="handleInstallModpack"
     />
 
     <ConfirmModal
       :show="showModpackInstallConfirmModal"
-      title="Confirm Modpack Replace"
-      :message="pendingModpackInstall ? `Install ${pendingModpackInstall.title} on this server?` : ''"
-      :description="pendingModpackInstall
-        ? (pendingModpackInstall.createBackup
-            ? 'Replace mode updates pack-managed folders (mods/config/defaultconfigs/kubejs/scripts). World, server settings, logs and backups stay intact. A backup will be created before install. If some files are unavailable you will be asked whether to continue.'
-            : 'Replace mode updates pack-managed folders (mods/config/defaultconfigs/kubejs/scripts). World, server settings, logs and backups stay intact. Backup is disabled. If some files are unavailable you will be asked whether to continue.')
+      :title="modpackInstalling ? 'Installing Modpack...' : 'Confirm Modpack Replace'"
+      :message="pendingModpackInstall
+        ? (modpackInstalling
+            ? (modpackProgressLabel || 'Preparing...')
+            : `Install ${pendingModpackInstall.title} on this server?`)
         : ''"
-      type="warning"
+      :description="modpackInstalling
+        ? ''
+        : 'Pack-managed folders (mods, config, defaultconfigs, kubejs, scripts) will be replaced. World data, logs and backups stay intact. Server settings may be overwritten if the pack includes them. If some files are unavailable you will be asked whether to continue.'"
+      :type="modpackInstalling ? 'info' : 'warning'"
       confirm-text="Install"
       cancel-text="Cancel"
+      loading-text="Installing..."
       :loading="modpackInstalling"
       @confirm="confirmModpackInstall"
       @cancel="cancelModpackInstallConfirmation"
       @close="cancelModpackInstallConfirmation"
-    />
+    >
+      <template #extra>
+        <div v-if="modpackInstalling" class="install-progress">
+          <div class="install-progress__track">
+            <div class="install-progress__fill" :style="{ width: modpackProgressPercent + '%' }"></div>
+          </div>
+          <p v-if="modpackProgress?.detail" class="install-progress__detail">{{ modpackProgress.detail }}</p>
+        </div>
+        <label v-else class="confirm-checkbox">
+          <input type="checkbox" v-model="modpackCreateBackup">
+          <span>Create backup before installing</span>
+        </label>
+      </template>
+    </ConfirmModal>
 
     <ConfirmModal
       :show="showMissingModsConfirmModal"
@@ -1148,3 +1235,33 @@ onUnmounted(() => {
     />
   </div>
 </template>
+
+<style scoped>
+.install-progress {
+  margin-top: 4px;
+}
+
+.install-progress__track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border-color);
+  overflow: hidden;
+}
+
+.install-progress__fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--primary);
+  transition: width 0.3s ease;
+}
+
+.install-progress__detail {
+  margin: 6px 0 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+</style>

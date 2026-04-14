@@ -48,7 +48,7 @@
               <button
                 type="button"
                 class="toggle-btn"
-                :class="{ active: selectionFor(mod.path) === 'server' }"
+                :class="{ active: selections[mod.path] === 'server' }"
                 @click="setSide(mod.path, 'server')"
               >
                 Server
@@ -56,7 +56,7 @@
               <button
                 type="button"
                 class="toggle-btn"
-                :class="{ active: selectionFor(mod.path) === 'client' }"
+                :class="{ active: selections[mod.path] === 'client' }"
                 @click="setSide(mod.path, 'client')"
               >
                 Client
@@ -85,239 +85,199 @@
   </BaseModal>
 </template>
 
-<script>
+<script setup>
+import { ref, computed, watch } from 'vue'
 import BaseModal from './BaseModal.vue'
 import { getModDetails, searchMods } from '../../api/modrinth'
 
-export default {
-  name: 'ModSideDecisionModal',
-  components: {
-    BaseModal
-  },
-  props: {
-    show: {
-      type: Boolean,
-      required: true
-    },
-    mods: {
-      type: Array,
-      default: () => []
-    },
-    loading: {
-      type: Boolean,
-      default: false
+const props = defineProps({
+  show: { type: Boolean, required: true },
+  mods: { type: Array, default: () => [] },
+  mcVersion: { type: String, default: '' },
+  loader: { type: String, default: '' },
+  loading: { type: Boolean, default: false }
+})
+
+const emit = defineEmits(['confirm', 'cancel', 'close'])
+
+const selections = ref({})
+const checks = ref({})
+const checkingAll = ref(false)
+const checkedCount = ref(0)
+const apiError = ref('')
+
+const unresolvedCount = computed(() =>
+  props.mods.reduce((count, mod) => {
+    const selected = selections.value[mod.path]
+    return selected === 'server' || selected === 'client' ? count : count + 1
+  }, 0)
+)
+
+function rowChecking(path) {
+  return checks.value[path]?.state === 'checking'
+}
+
+function apiCheckSummary(path) {
+  const check = checks.value[path]
+  if (!check || check.state === 'idle') {
+    return ''
+  }
+  if (check.state === 'checking') {
+    return 'Checking Modrinth API...'
+  }
+  if (check.state === 'error') {
+    return check.message || 'API check failed.'
+  }
+  const recommendation = check.recommendation ? `Recommendation: ${check.recommendation.toUpperCase()}. ` : ''
+  const serverSide = check.serverSide ? `server_side=${check.serverSide}. ` : ''
+  const project = check.projectTitle ? `Match: ${check.projectTitle}.` : 'No exact match found.'
+  return `${recommendation}${serverSide}${project}`
+}
+
+function setSide(path, side) {
+  selections.value = { ...selections.value, [path]: side }
+}
+
+function deriveSearchQuery(path) {
+  const fileName = String(path || '').split('/').pop() || String(path || '')
+  const base = fileName
+    .replace(/\.jar$/i, '')
+    .replace(/[-_+]?mc\d+(?:\.\d+){1,3}.*/i, '')
+    .replace(/[-_+]?fabric.*/i, '')
+    .replace(/[-_+]?forge.*/i, '')
+    .replace(/[-_+]?quilt.*/i, '')
+    .replace(/[0-9]+(?:\.[0-9]+){1,4}.*/i, '')
+    .replace(/[_+.-]+/g, ' ')
+    .trim()
+  return base || fileName
+}
+
+async function checkModViaApi(mod) {
+  const path = mod?.path || ''
+  const query = deriveSearchQuery(path)
+  checks.value = {
+    ...checks.value,
+    [path]: { state: 'checking', message: '', recommendation: '', serverSide: '', projectTitle: '' }
+  }
+
+  try {
+    const search = await searchMods({
+      query,
+      version: props.mcVersion || '',
+      loader: props.loader || '',
+      limit: 5,
+      offset: 0
+    })
+
+    const hits = Array.isArray(search?.hits) ? search.hits : []
+    if (!hits.length) {
+      checks.value = {
+        ...checks.value,
+        [path]: { state: 'done', message: 'No Modrinth search result found.', recommendation: '', serverSide: '', projectTitle: '' }
+      }
+      return
     }
-  },
-  emits: ['confirm', 'cancel', 'close'],
-  data() {
-    return {
-      selections: {},
-      checks: {},
-      checkingAll: false,
-      checkedCount: 0,
-      apiError: ''
+
+    const projectId = hits[0].project_id
+    const projectTitle = hits[0].title || hits[0].slug || projectId
+    const details = await getModDetails(projectId)
+    const serverSide = String(details?.server_side || '').toLowerCase()
+
+    let recommendation = ''
+    if (serverSide === 'required' || serverSide === 'optional') {
+      recommendation = 'server'
+    } else if (serverSide === 'unsupported') {
+      recommendation = 'client'
     }
-  },
-  computed: {
-    unresolvedCount() {
-      return this.mods.reduce((count, mod) => {
-        const selected = this.selections[mod.path]
-        return selected === 'server' || selected === 'client' ? count : count + 1
-      }, 0)
+
+    if (recommendation) {
+      setSide(path, recommendation)
     }
-  },
-  methods: {
-    selectionFor(path) {
-      return this.selections[path] || ''
-    },
-    rowChecking(path) {
-      return this.checks[path]?.state === 'checking'
-    },
-    apiCheckSummary(path) {
-      const check = this.checks[path]
-      if (!check || check.state === 'idle') {
-        return ''
-      }
-      if (check.state === 'checking') {
-        return 'Checking Modrinth API...'
-      }
-      if (check.state === 'error') {
-        return check.message || 'API check failed.'
-      }
 
-      const recommendation = check.recommendation ? `Recommendation: ${check.recommendation.toUpperCase()}. ` : ''
-      const serverSide = check.serverSide ? `server_side=${check.serverSide}. ` : ''
-      const project = check.projectTitle ? `Match: ${check.projectTitle}.` : 'No exact match found.'
-      return `${recommendation}${serverSide}${project}`
-    },
-    setSide(path, side) {
-      this.selections = {
-        ...this.selections,
-        [path]: side
-      }
-    },
-    deriveSearchQuery(path) {
-      const fileName = String(path || '').split('/').pop() || String(path || '')
-      const base = fileName
-        .replace(/\.jar$/i, '')
-        .replace(/[-_+]?mc\d+(?:\.\d+){1,3}.*/i, '')
-        .replace(/[-_+]?fabric.*/i, '')
-        .replace(/[-_+]?forge.*/i, '')
-        .replace(/[-_+]?quilt.*/i, '')
-        .replace(/[0-9]+(?:\.[0-9]+){1,4}.*/i, '')
-        .replace(/[_+.-]+/g, ' ')
-        .trim()
-      return base || fileName
-    },
-    async checkModViaApi(mod) {
-      const path = mod?.path || ''
-      const query = this.deriveSearchQuery(path)
-      this.checks = {
-        ...this.checks,
-        [path]: { state: 'checking', message: '', recommendation: '', serverSide: '', projectTitle: '' }
-      }
-
-      try {
-        const search = await searchMods({
-          query,
-          version: this.mcVersion || '',
-          loader: this.loader || '',
-          limit: 5,
-          offset: 0
-        })
-
-        const hits = Array.isArray(search?.hits) ? search.hits : []
-        if (!hits.length) {
-          this.checks = {
-            ...this.checks,
-            [path]: {
-              state: 'done',
-              message: 'No Modrinth search result found.',
-              recommendation: '',
-              serverSide: '',
-              projectTitle: ''
-            }
-          }
-          return
-        }
-
-        const projectId = hits[0].project_id
-        const projectTitle = hits[0].title || hits[0].slug || projectId
-        const details = await getModDetails(projectId)
-        const serverSide = String(details?.server_side || '').toLowerCase()
-
-        let recommendation = ''
-        if (serverSide === 'required' || serverSide === 'optional') {
-          recommendation = 'server'
-        } else if (serverSide === 'unsupported') {
-          recommendation = 'client'
-        }
-
-        if (recommendation) {
-          this.setSide(path, recommendation)
-        }
-
-        this.checks = {
-          ...this.checks,
-          [path]: {
-            state: 'done',
-            message: '',
-            recommendation,
-            serverSide,
-            projectTitle
-          }
-        }
-      } catch (error) {
-        this.checks = {
-          ...this.checks,
-          [path]: {
-            state: 'error',
-            message: error?.message || 'API check failed.',
-            recommendation: '',
-            serverSide: '',
-            projectTitle: ''
-          }
-        }
-      }
-    },
-    async checkSingleViaApi(mod) {
-      this.apiError = ''
-      await this.checkModViaApi(mod)
-    },
-    async checkAllViaApi() {
-      this.apiError = ''
-      const maxSafe = 120
-      if (this.mods.length > maxSafe) {
-        this.apiError = `Too many mods to check in one run (${this.mods.length}). Please keep it below ${maxSafe} or check individually.`
-        return
-      }
-
-      this.checkingAll = true
-      this.checkedCount = 0
-      try {
-        for (const mod of this.mods) {
-          await this.checkModViaApi(mod)
-          this.checkedCount += 1
-        }
-      } finally {
-        this.checkingAll = false
-      }
-    },
-    handleCancel() {
-      if (this.loading) {
-        return
-      }
-      this.$emit('cancel')
-      this.$emit('close')
-    },
-    handleConfirm() {
-      if (this.loading || this.unresolvedCount > 0) {
-        return
-      }
-      const payload = {}
-      for (const mod of this.mods) {
-        const selected = this.selections[mod.path]
-        if (selected === 'server' || selected === 'client') {
-          payload[mod.path] = selected
-        }
-      }
-      this.$emit('confirm', payload)
-    },
-    resetSelections() {
-      const initial = {}
-      for (const mod of this.mods) {
-        initial[mod.path] = ''
-      }
-      this.selections = initial
-      const nextChecks = {}
-      for (const mod of this.mods) {
-        nextChecks[mod.path] = {
-          state: 'idle',
-          message: '',
-          recommendation: '',
-          serverSide: '',
-          projectTitle: ''
-        }
-      }
-      this.checks = nextChecks
-      this.apiError = ''
-      this.checkingAll = false
-      this.checkedCount = 0
+    checks.value = {
+      ...checks.value,
+      [path]: { state: 'done', message: '', recommendation, serverSide, projectTitle }
     }
-  },
-  watch: {
-    show(value) {
-      if (value) {
-        this.resetSelections()
-      }
-    },
-    mods() {
-      if (this.show) {
-        this.resetSelections()
-      }
+  } catch (error) {
+    checks.value = {
+      ...checks.value,
+      [path]: { state: 'error', message: error?.message || 'API check failed.', recommendation: '', serverSide: '', projectTitle: '' }
     }
   }
 }
+
+async function checkSingleViaApi(mod) {
+  apiError.value = ''
+  await checkModViaApi(mod)
+}
+
+async function checkAllViaApi() {
+  apiError.value = ''
+  const maxSafe = 120
+  if (props.mods.length > maxSafe) {
+    apiError.value = `Too many mods to check in one run (${props.mods.length}). Please keep it below ${maxSafe} or check individually.`
+    return
+  }
+
+  checkingAll.value = true
+  checkedCount.value = 0
+  try {
+    for (const mod of props.mods) {
+      await checkModViaApi(mod)
+      checkedCount.value += 1
+    }
+  } finally {
+    checkingAll.value = false
+  }
+}
+
+function handleCancel() {
+  if (props.loading) {
+    return
+  }
+  emit('cancel')
+  emit('close')
+}
+
+function handleConfirm() {
+  if (props.loading || unresolvedCount.value > 0) {
+    return
+  }
+  const payload = {}
+  for (const mod of props.mods) {
+    const selected = selections.value[mod.path]
+    if (selected === 'server' || selected === 'client') {
+      payload[mod.path] = selected
+    }
+  }
+  emit('confirm', payload)
+}
+
+function resetSelections() {
+  const initial = {}
+  const nextChecks = {}
+  for (const mod of props.mods) {
+    initial[mod.path] = ''
+    nextChecks[mod.path] = { state: 'idle', message: '', recommendation: '', serverSide: '', projectTitle: '' }
+  }
+  selections.value = initial
+  checks.value = nextChecks
+  apiError.value = ''
+  checkingAll.value = false
+  checkedCount.value = 0
+}
+
+watch(() => props.show, (value) => {
+  if (value) {
+    resetSelections()
+  }
+})
+
+watch(() => props.mods, () => {
+  if (props.show) {
+    resetSelections()
+  }
+})
 </script>
 
 <style scoped>

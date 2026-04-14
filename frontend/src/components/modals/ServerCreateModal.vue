@@ -203,7 +203,7 @@
                     <p>{{ pack.description || 'No description provided.' }}</p>
                   </div>
                 </div>
-                <span class="modpack-meta">{{ formatNumber(pack.downloads || 0) }} downloads</span>
+                <span class="modpack-meta">{{ formatDownloads(pack.downloads || 0) }} downloads</span>
               </button>
             </div>
 
@@ -473,8 +473,9 @@
 import BaseModal from './BaseModal.vue'
 import { createServer, installServer, getFabricGameVersions, getJavaStatus } from '../../api/servers'
 import ModSideDecisionModal from './ModSideDecisionModal.vue'
-import { getProjectDetails, searchModpacks, installModpack, resolveProjectVersion } from '../../api/modrinth'
+import { installModpack, resolveProjectVersion } from '../../api/modrinth'
 import { useToast } from '../../composables/useToast'
+import { useModpackImport, formatDownloads } from '../../composables/useModpackImport'
 
 export default {
   name: 'ServerCreateModal',
@@ -491,21 +492,14 @@ export default {
   emits: ['close', 'create'],
   setup() {
     const toast = useToast()
-    return { toast }
+    return { toast, formatDownloads }
   },
   data() {
     return {
       creating: false,
       versionsLoading: false,
       javaRequirementLoading: false,
-      modpackLookupLoading: false,
-      modpackSearchLoading: false,
-      modpackSearchDone: false,
-      modpackLinkInput: '',
-      modpackSearchQuery: '',
-      modpackSearchResults: [],
-      modpackError: '',
-      selectedModpack: null,
+      imp: null,
       showUncertainModsModal: false,
       uncertainModsReport: [],
       pendingUncertainModsResolver: null,
@@ -518,7 +512,6 @@ export default {
       formData: {
         setupMode: 'custom',
         modpackImportMethod: 'link',
-        modpackReference: '',
         name: '',
         version: '',
         loader: 'fabric',
@@ -548,7 +541,40 @@ export default {
     };
   },
   created() {
+    this.imp = useModpackImport({
+      mcVersion: () => this.formData.version,
+      loader: () => this.formData.loader
+    })
     this.loadGameVersions()
+  },
+  computed: {
+    selectedModpack() {
+      return this.imp?.selectedModpack?.value ?? null
+    },
+    modpackLinkInput: {
+      get() { return this.imp?.modpackLink?.value ?? '' },
+      set(v) { if (this.imp) this.imp.modpackLink.value = v }
+    },
+    modpackSearchQuery: {
+      get() { return this.imp?.searchQuery?.value ?? '' },
+      set(v) { if (this.imp) this.imp.searchQuery.value = v }
+    },
+    modpackSearchResults() {
+      return this.imp?.searchResults?.value ?? []
+    },
+    modpackSearchDone() {
+      return this.imp?.searchDone?.value ?? false
+    },
+    modpackLookupLoading() {
+      return this.imp?.resolving?.value ?? false
+    },
+    modpackSearchLoading() {
+      return this.imp?.loading?.value ?? false
+    },
+    modpackError: {
+      get() { return this.imp?.errorMessage?.value ?? '' },
+      set(v) { if (this.imp) this.imp.errorMessage.value = v }
+    }
   },
   methods: {
     buildServerPayload() {
@@ -580,135 +606,24 @@ export default {
       }
     },
 
-    extractProjectIdOrSlug(input) {
-      if (!input) {
-        return ''
-      }
-
-      const raw = input.trim()
-      if (!raw) {
-        return ''
-      }
-
-      if (!raw.startsWith('http://') && !raw.startsWith('https://')) {
-        return raw.replace(/^@/, '')
-      }
-
-      try {
-        const parsed = new URL(raw)
-        const pathParts = parsed.pathname.split('/').filter(Boolean)
-        if (!pathParts.length) {
-          return ''
-        }
-
-        if ((pathParts[0] === 'modpack' || pathParts[0] === 'project') && pathParts[1]) {
-          return pathParts[1]
-        }
-
-        return pathParts[pathParts.length - 1]
-      } catch {
-        return ''
-      }
+    resolveModpackByLink() {
+      return this.imp.resolveByLink()
     },
 
-    normalizeModpack(project) {
-      return {
-        id: project.project_id || project.id,
-        slug: project.slug || '',
-        title: project.title || project.name || project.slug || 'Unknown Modpack',
-        description: project.description || '',
-        downloads: project.downloads || 0,
-        iconUrl: project.icon_url || '',
-        projectType: project.project_type || 'modpack'
-      }
-    },
-
-    formatNumber(value) {
-      return new Intl.NumberFormat().format(value || 0)
-    },
-
-    setSelectedModpack(project) {
-      const normalized = this.normalizeModpack(project)
-      this.selectedModpack = normalized
-      this.formData.modpackReference = normalized.slug || normalized.id || ''
-      this.modpackError = ''
-    },
-
-    clearSelectedModpack() {
-      this.selectedModpack = null
-      this.formData.modpackReference = ''
-    },
-
-    isNotFoundError(error) {
-      if (!error) {
-        return false
-      }
-      if (error.status === 404) {
-        return true
-      }
-      const message = String(error.message || '').toLowerCase()
-      return message.includes('not found')
-    },
-
-    async resolveModpackByLink() {
-      const projectRef = this.extractProjectIdOrSlug(this.modpackLinkInput)
-      if (!projectRef) {
-        this.modpackError = 'Enter a valid Modrinth modpack URL, slug, or project ID.'
-        return
-      }
-
-      this.modpackLookupLoading = true
-      this.modpackError = ''
-      try {
-        const project = await getProjectDetails(projectRef)
-        if (project.project_type !== 'modpack') {
-          this.modpackError = 'That project exists, but it is not a modpack.'
-          return
-        }
-        this.setSelectedModpack(project)
-      } catch (error) {
-        if (this.isNotFoundError(error)) {
-          this.modpackError = `No exact modpack found for "${projectRef}". Showing search results instead.`
-          this.modpackSearchQuery = projectRef
-          await this.searchForModpacks()
-        } else {
-          this.modpackError = error.message || 'Could not resolve modpack from the provided link.'
-        }
-      } finally {
-        this.modpackLookupLoading = false
-      }
-    },
-
-    async searchForModpacks() {
-      const query = this.modpackSearchQuery.trim()
-      if (!query) {
-        this.modpackSearchResults = []
-        this.modpackSearchDone = false
-        return
-      }
-
-      this.modpackSearchLoading = true
-      this.modpackSearchDone = false
-      this.modpackError = ''
-      try {
-        const response = await searchModpacks({
-          query,
-          version: this.formData.version,
-          loader: this.formData.loader,
-          limit: 8
-        })
-        this.modpackSearchResults = Array.isArray(response.hits) ? response.hits : []
-      } catch (error) {
-        this.modpackSearchResults = []
-        this.modpackError = error.message || 'Failed to search modpacks.'
-      } finally {
-        this.modpackSearchLoading = false
-        this.modpackSearchDone = true
-      }
+    searchForModpacks() {
+      return this.imp.performSearch()
     },
 
     selectModpackFromSearch(pack) {
-      this.setSelectedModpack(pack)
+      this.imp.selectPack(pack)
+    },
+
+    clearSelectedModpack() {
+      this.imp.clearSelection()
+    },
+
+    formatNumber(value) {
+      return formatDownloads(value)
     },
 
     async validateSelectedModpackCompatibility() {
@@ -763,6 +678,8 @@ export default {
         mc_version: this.formData.version,
         loader: this.formData.loader,
         server_id: serverId,
+        clean_install: false,
+        create_backup: false,
         mod_side_overrides: modSideOverrides
       })
     },
@@ -924,7 +841,6 @@ export default {
       this.formData = {
         setupMode: 'custom',
         modpackImportMethod: 'link',
-        modpackReference: '',
         name: '',
         version: preservedVersion || (this.gameVersions[0]?.version || ''),
         loader: 'fabric',
@@ -954,14 +870,9 @@ export default {
       this.javaStatus = null
       this.javaRequirementWarning = ''
 
-      this.modpackLookupLoading = false
-      this.modpackSearchLoading = false
-      this.modpackSearchDone = false
-      this.modpackLinkInput = ''
-      this.modpackSearchQuery = ''
-      this.modpackSearchResults = []
-      this.modpackError = ''
-      this.selectedModpack = null
+      if (this.imp) {
+        this.imp.resetAll()
+      }
       this.showUncertainModsModal = false
       this.uncertainModsReport = []
       this.pendingUncertainModsResolver = null
