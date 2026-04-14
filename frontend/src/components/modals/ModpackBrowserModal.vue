@@ -60,6 +60,18 @@
       </div>
 
       <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
+
+      <div class="switch-options">
+        <label class="switch-option">
+          <input type="checkbox" v-model="createBackup" :disabled="installing">
+          <span>Create backup before replacing</span>
+        </label>
+      </div>
+
+      <div class="clean-warning">
+        <strong>Replace mode:</strong> Only modpack-managed folders are replaced (mods/config/defaultconfigs/kubejs/scripts).
+        World, server settings, logs and backups are kept. Enable backup if you may want to restore the previous state.
+      </div>
     </div>
 
     <div v-if="loading" class="empty-state">
@@ -106,6 +118,13 @@
 
     <template #footer>
       <button class="btn btn-secondary" :disabled="installing" @click="$emit('close')">Close</button>
+      <button
+        class="btn btn-primary"
+        :disabled="installing || !selectedModpack"
+        @click="confirmInstall"
+      >
+        {{ installing ? 'Installing...' : 'Install Selected Modpack' }}
+      </button>
     </template>
   </BaseModal>
 </template>
@@ -148,7 +167,8 @@ export default {
       resolving: false,
       errorMessage: '',
       results: [],
-      selectedModpack: null
+      selectedModpack: null,
+      createBackup: true
     }
   },
   computed: {
@@ -165,6 +185,17 @@ export default {
     }
   },
   methods: {
+    isNotFoundError(error) {
+      if (!error) {
+        return false
+      }
+      if (error.status === 404) {
+        return true
+      }
+      const message = String(error.message || '').toLowerCase()
+      return message.includes('not found')
+    },
+
     resetState() {
       this.importMethod = 'search'
       this.searchQuery = ''
@@ -175,6 +206,7 @@ export default {
       this.errorMessage = ''
       this.results = []
       this.selectedModpack = null
+      this.createBackup = true
     },
 
     normalize(project) {
@@ -256,20 +288,37 @@ export default {
         this.results = [project]
         this.selectPack(project)
       } catch (error) {
-        this.errorMessage = error.message || 'Could not resolve modpack from link.'
+        if (this.isNotFoundError(error)) {
+          this.errorMessage = `No exact modpack found for "${projectRef}". Showing search results instead.`
+          this.searchQuery = projectRef
+          await this.performSearch()
+        } else {
+          this.errorMessage = error.message || 'Could not resolve modpack from link.'
+        }
       } finally {
         this.resolving = false
       }
     },
 
     selectPack(pack) {
-      if (this.installing) return
+      if (this.installing) {
+        return
+      }
       this.selectedModpack = this.normalize(pack)
+    },
+
+    confirmInstall() {
+      if (!this.selectedModpack || this.installing) {
+        return
+      }
+
       this.$emit('install', {
         projectId: this.selectedModpack.id,
         title: this.selectedModpack.title,
         mcVersion: this.mcVersion,
         loader: (this.loader || 'fabric').toLowerCase(),
+        cleanInstall: true,
+        createBackup: this.createBackup
       })
     },
 
@@ -416,6 +465,30 @@ export default {
   margin: 0;
   color: var(--danger, #d14343);
   font-size: 0.875rem;
+}
+
+.switch-options {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.4rem;
+}
+
+.switch-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+}
+
+.clean-warning {
+  border: 1px solid color-mix(in oklch, #f59e0b 70%, var(--border-color));
+  background: color-mix(in oklch, #f59e0b 14%, var(--surface));
+  color: var(--text-primary);
+  border-radius: 10px;
+  padding: 0.65rem 0.75rem;
+  font-size: 0.82rem;
+  line-height: 1.35;
 }
 
 .spinner {
