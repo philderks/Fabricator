@@ -10,7 +10,7 @@ from flask import Blueprint, current_app, jsonify, request
 from backend.modrinth.client import ModrinthClient, ModrinthApiError
 from backend.server import storage
 from backend.server.registry import get_server_process_registry
-from backend.server.java_compat import resolve_required_java
+from backend.server.java_compat import resolve_required_java, skip_java_enforcement
 
 modrinth_bp = Blueprint('modrinth', __name__, url_prefix='/api/modrinth')
 modrinth_client = ModrinthClient()
@@ -429,7 +429,7 @@ def install_modpack(project_id):
 
     java_warning = None
     effective_mc = result.get('mc_version') or mc_version or server.get('version', '')
-    if effective_mc:
+    if effective_mc and not skip_java_enforcement():
         compat = resolve_required_java(effective_mc)
         if compat.enforceable:
             runtime = process_registry.get_java_runtime(server)

@@ -18,8 +18,20 @@ def get_base_path() -> str:
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+def _load_dotenv() -> None:
+    """Load ``.env`` from project root (and optionally cwd). Optional dependency."""
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    base = Path(get_base_path())
+    load_dotenv(base / ".env")
+    load_dotenv()
+
+
 def create_app() -> Flask:
     """Create and configure the Flask application."""
+    _load_dotenv()
     base_path = get_base_path()
     static_dir = Path(base_path) / "frontend" / "dist"
     static_folder_path = str(static_dir)

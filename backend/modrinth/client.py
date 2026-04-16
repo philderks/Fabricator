@@ -43,6 +43,11 @@ class ModrinthClient:
         "libraries",
         "versions",
     }
+    CLIENT_ONLY_PREFIXES = (
+        "resourcepacks/", "shaderpacks/",
+        "config/iris/", "config/oculus/", "config/optifine/",
+    )
+
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update(
@@ -679,9 +684,11 @@ class ModrinthClient:
                 files_skipped.append(f"{matched_prefix}{relative}")
                 continue
 
-            is_override_jar = relative.lower().startswith("mods/") and relative.lower().endswith(".jar")
+            rel_lower = relative.lower()
+            is_override_jar = rel_lower.startswith("mods/") and rel_lower.endswith(".jar")
+            scoped_path = f"{matched_prefix}{relative}"
+
             if is_override_jar:
-                scoped_path = f"{matched_prefix}{relative}"
                 forced = overrides.get(scoped_path, overrides.get(relative, ""))
                 if forced == "client":
                     existing = (install_path / relative).resolve()
@@ -698,7 +705,6 @@ class ModrinthClient:
                 shutil.copyfileobj(src, dst)
 
             if is_override_jar:
-                scoped_path = f"{matched_prefix}{relative}"
                 override_lookup = {
                     scoped_path: overrides.get(scoped_path, overrides.get(relative, "")),
                 }
@@ -710,12 +716,7 @@ class ModrinthClient:
                 if disposition is None:
                     files_installed.append(scoped_path)
             else:
-                files_installed.append(f"{matched_prefix}{relative}")
-
-    CLIENT_ONLY_PREFIXES = (
-        "resourcepacks/", "shaderpacks/",
-        "config/iris/", "config/oculus/", "config/optifine/",
-    )
+                files_installed.append(scoped_path)
 
     def _collect_unavailable_modpack_entries(
         self,

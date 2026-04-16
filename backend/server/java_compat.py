@@ -2,8 +2,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 import re
 from typing import Optional
+
+
+def skip_java_enforcement() -> bool:
+    """Return True when Java version checks should not block install/start.
+
+    Set environment variable ``FABRICATOR_SKIP_JAVA_CHECK`` to ``1``, ``true``,
+    ``yes``, or ``on`` for local development/testing only. Do not enable in
+    production: servers may fail at runtime with the wrong JVM.
+    """
+    val = os.environ.get("FABRICATOR_SKIP_JAVA_CHECK", "").strip().lower()
+    return val in ("1", "true", "yes", "on")
 
 
 @dataclass(frozen=True)

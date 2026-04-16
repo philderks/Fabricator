@@ -467,10 +467,23 @@
     @cancel="cancelUncertainModsDecision"
     @close="cancelUncertainModsDecision"
   />
+
+  <JavaInstallModal
+    :show="showJavaModal"
+    :platform="javaModalData.platform"
+    :download-url="javaModalData.downloadUrl"
+    :required-java="javaModalData.requiredJava"
+    :detected-java="javaModalData.detectedJava"
+    :java-path="javaModalData.javaPath"
+    :linux-install-command="javaModalData.linuxInstallCommand"
+    @close="showJavaModal = false"
+  />
+
 </template>
 
 <script>
 import BaseModal from './BaseModal.vue'
+import JavaInstallModal from './JavaInstallModal.vue'
 import { createServer, installServer, getFabricGameVersions, getJavaStatus } from '../../api/servers'
 import ModSideDecisionModal from './ModSideDecisionModal.vue'
 import { installModpack, resolveProjectVersion } from '../../api/modrinth'
@@ -481,6 +494,7 @@ export default {
   name: 'ServerCreateModal',
   components: {
     BaseModal,
+    JavaInstallModal,
     ModSideDecisionModal
   },
   props: {
@@ -500,6 +514,15 @@ export default {
       versionsLoading: false,
       javaRequirementLoading: false,
       imp: null,
+      showJavaModal: false,
+      javaModalData: {
+        platform: '',
+        downloadUrl: 'https://adoptium.net/temurin/releases/?version=21',
+        requiredJava: 21,
+        detectedJava: null,
+        javaPath: 'java',
+        linuxInstallCommand: 'sudo apt install openjdk-21-jre-headless'
+      },
       showUncertainModsModal: false,
       uncertainModsReport: [],
       pendingUncertainModsResolver: null,
@@ -549,31 +572,42 @@ export default {
   },
   computed: {
     selectedModpack() {
-      return this.imp?.selectedModpack?.value ?? null
+      return this.imp?.selectedModpack ?? null
     },
     modpackLinkInput: {
-      get() { return this.imp?.modpackLink?.value ?? '' },
-      set(v) { if (this.imp) this.imp.modpackLink.value = v }
+      get() { return this.imp?.modpackLink ?? '' },
+      set(v) { if (this.imp) this.imp.modpackLink = v }
     },
     modpackSearchQuery: {
-      get() { return this.imp?.searchQuery?.value ?? '' },
-      set(v) { if (this.imp) this.imp.searchQuery.value = v }
+      get() { return this.imp?.searchQuery ?? '' },
+      set(v) { if (this.imp) this.imp.searchQuery = v }
     },
     modpackSearchResults() {
-      return this.imp?.searchResults?.value ?? []
+      return this.imp?.searchResults ?? []
     },
     modpackSearchDone() {
-      return this.imp?.searchDone?.value ?? false
+      return this.imp?.searchDone ?? false
     },
     modpackLookupLoading() {
-      return this.imp?.resolving?.value ?? false
+      return this.imp?.resolving ?? false
     },
     modpackSearchLoading() {
-      return this.imp?.loading?.value ?? false
+      return this.imp?.loading ?? false
     },
     modpackError: {
-      get() { return this.imp?.errorMessage?.value ?? '' },
-      set(v) { if (this.imp) this.imp.errorMessage.value = v }
+      get() { return this.imp?.errorMessage ?? '' },
+      set(v) { if (this.imp) this.imp.errorMessage = v }
+    },
+    requiredJavaText() {
+      const required = this.javaStatus?.required_java
+      if (!required) {
+        return ''
+      }
+      const detected = this.javaStatus?.detected_major
+      if (detected && detected < required) {
+        return `Requires Java ${required}+ (detected Java ${detected}).`
+      }
+      return `Requires Java ${required}+`
     }
   },
   methods: {
@@ -602,7 +636,8 @@ export default {
         pvp: this.formData.pvp,
         commandBlocks: this.formData.commandBlocks,
         motd: this.formData.motd,
-        acceptEula: this.formData.acceptEula
+        acceptEula: this.formData.acceptEula,
+        javaPath: this.formData.javaPath || undefined
       }
     },
 
@@ -737,6 +772,19 @@ export default {
       await this.refreshJavaRequirement()
     },
     
+    openJavaModal(data) {
+      const rec = data?.recommended_install || {}
+      this.javaModalData = {
+        platform: data?.compatibility?.platform || data?.platform || '',
+        downloadUrl: rec.download_url || data?.download_url || 'https://adoptium.net/temurin/releases/?version=21',
+        requiredJava: data?.required_java || 21,
+        detectedJava: data?.detected_java ?? null,
+        javaPath: data?.server_java_target || data?.java_path || 'java',
+        linuxInstallCommand: rec.linux_install_command || 'sudo apt install openjdk-21-jre-headless'
+      }
+      this.showJavaModal = true
+    },
+
     async handleCreate() {
       if (!this.formData.name.trim()) {
         this.toast.warning('Please enter a server name.', 'Name Required')
@@ -765,11 +813,25 @@ export default {
         }
       }
 
+      try {
+        const status = await getJavaStatus({
+          mcVersion: this.formData.version,
+          javaPath: this.formData.javaPath || undefined
+        })
+        if (status?.required_java && !status?.meets_requirement) {
+          this.openJavaModal(status)
+          return
+        }
+      } catch (err) {
+        console.error('Java pre-check failed:', err)
+      }
+
       this.creating = true
+      let createdServerId = null
       
       try {
-        // Create server via API
         const server = await createServer(this.buildServerPayload())
+        createdServerId = server.id
         this.toast.info('Installing server...', 'Installation')
         const installResult = await installServer(server.id)
 
@@ -780,11 +842,11 @@ export default {
           if (this.formData.setupMode === 'modpack' && this.selectedModpack) {
             this.toast.info(`Installing ${this.selectedModpack.title}...`, 'Modpack')
             try {
-              let installResult = null
+              let mpResult = null
               let overrideMap = null
               while (true) {
                 try {
-                  installResult = await this.installSelectedModpackOnServer(createdServer.id, overrideMap)
+                  mpResult = await this.installSelectedModpackOnServer(createdServer.id, overrideMap)
                   break
                 } catch (installError) {
                   const uncertainMods = installError?.data?.uncertain_mod_files
@@ -803,34 +865,46 @@ export default {
                 }
               }
 
-              if (installResult?.uncertain_mod_files?.length) {
+              if (mpResult?.uncertain_mod_files?.length) {
                 this.toast.info(
-                  `${installResult.uncertain_mod_files.length} uncertain mods were classified by your selection.`,
+                  `${mpResult.uncertain_mod_files.length} uncertain mods were classified by your selection.`,
                   'Modpack Choices Applied'
                 )
               }
               this.toast.success(`${this.selectedModpack.title} installed successfully!`, 'Modpack Installed')
             } catch (modpackError) {
               modpackInstallError = modpackError?.message || 'Modpack installation failed. You can install it manually from the server dashboard.'
-              this.toast.error(
-                modpackInstallError,
-                'Modpack Failed'
-              )
+              this.toast.error(modpackInstallError, 'Modpack Failed')
             }
           }
 
-          this.$emit('create', {
-            ...createdServer,
-            modpackInstallError
-          })
+          this.$emit('create', { ...createdServer, modpackInstallError })
           this.$emit('close')
           this.resetForm()
         } else {
-          this.toast.error(installResult.message || 'Installation failed', 'Server Installation Failed')
+          const isJavaIssue = installResult.java_missing || installResult.java_too_old
+          if (isJavaIssue) {
+            this.openJavaModal(installResult)
+          } else {
+            this.toast.error(installResult.message || 'Installation failed', 'Server Installation Failed')
+          }
+          this.$emit('create', { id: createdServerId, name: this.formData.name })
+          this.$emit('close')
+          this.resetForm()
         }
       } catch (error) {
         console.error('Failed to create server:', error)
-        this.toast.error(error.message, 'Server Creation Failed')
+        const isJavaIssue = error?.data?.java_missing || error?.data?.java_too_old
+        if (isJavaIssue) {
+          this.openJavaModal(error.data)
+        } else {
+          this.toast.error(error.message, 'Server Creation Failed')
+        }
+        if (createdServerId) {
+          this.$emit('create', { id: createdServerId, name: this.formData.name })
+          this.$emit('close')
+          this.resetForm()
+        }
       } finally {
         this.creating = false
       }
@@ -869,6 +943,7 @@ export default {
       }
       this.javaStatus = null
       this.javaRequirementWarning = ''
+      this.showJavaModal = false
 
       if (this.imp) {
         this.imp.resetAll()
@@ -876,19 +951,6 @@ export default {
       this.showUncertainModsModal = false
       this.uncertainModsReport = []
       this.pendingUncertainModsResolver = null
-    }
-  },
-  computed: {
-    requiredJavaText() {
-      const required = this.javaStatus?.required_java
-      if (!required) {
-        return ''
-      }
-      const detected = this.javaStatus?.detected_major
-      if (detected && detected < required) {
-        return `Requires Java ${required}+ (detected Java ${detected}).`
-      }
-      return `Requires Java ${required}+`
     }
   }
 }
@@ -998,6 +1060,7 @@ export default {
   border-radius: 10px;
   padding: 0.75rem;
   background: var(--bg-primary);
+  color: var(--text-primary);
   cursor: pointer;
   display: flex;
   justify-content: space-between;

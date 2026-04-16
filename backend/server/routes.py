@@ -11,7 +11,7 @@ from flask import Blueprint, jsonify, request
 from backend.server.registry import get_server_process_registry
 from backend.server import storage
 from backend.server.installer import FabricInstaller, InstallStatus
-from backend.server.java_compat import resolve_required_java
+from backend.server.java_compat import resolve_required_java, skip_java_enforcement
 from backend.utils import platform as platform_utils
 
 try:
@@ -283,6 +283,9 @@ def _server_java_check_payload(server: dict) -> dict:
         isinstance(detected_java, int) and
         detected_java >= int(required_java)
     )
+    enforcement_skipped = skip_java_enforcement()
+    if enforcement_skipped and compat.enforceable:
+        meets_requirement = True
     return {
         'runtime': runtime,
         'compatibility': compat.to_dict(),
@@ -290,6 +293,7 @@ def _server_java_check_payload(server: dict) -> dict:
         'detected_java': detected_java,
         'enforceable': compat.enforceable,
         'meets_requirement': bool(meets_requirement),
+        'java_enforcement_skipped': enforcement_skipped,
     }
 
 
@@ -818,6 +822,8 @@ def start_server_by_id(server_id):
 
     compat = resolve_required_java(server.get('version', ''))
     required_java_major = compat.required_java if compat.enforceable else None
+    if skip_java_enforcement():
+        required_java_major = None
 
     try:
         result = process_registry.start_server(
@@ -950,12 +956,15 @@ def get_java_status():
         _build_java_recommendation(system, int(required_java))
         if required_java is not None else None
     )
+    enforcement_skipped = skip_java_enforcement()
     meets_requirement = (
         installed and
         required_java is not None and
         detected_major is not None and
         detected_major >= required_java
     )
+    if enforcement_skipped and required_java is not None:
+        meets_requirement = True
     return jsonify({
         'installed': installed,
         'version': version,
@@ -963,6 +972,7 @@ def get_java_status():
         'java_path': java_path,
         'required_java': required_java,
         'meets_requirement': meets_requirement,
+        'java_enforcement_skipped': enforcement_skipped,
         'platform': system,
         'download_url': recommendation['download_url'] if recommendation else _java_download_url(system, 21),
         'linux_install_command': recommendation['linux_install_command'] if recommendation else _linux_install_command(21),

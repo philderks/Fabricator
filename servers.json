@@ -1,11 +1,11 @@
 [
   {
-    "id": "srv_6a9857c6",
+    "id": "srv_338f643c",
     "status": "stopped",
-    "createdAt": "2026-04-14T09:56:14.175771Z",
-    "updatedAt": "2026-04-14T11:26:06.328816Z",
-    "name": "test1",
-    "version": "1.21.11",
+    "createdAt": "2026-04-16T06:41:48.738307Z",
+    "updatedAt": "2026-04-16T06:41:50.583644Z",
+    "name": "23321",
+    "version": "26.1.2",
     "loader": "fabric",
     "port": 25565,
     "installPath": "",
@@ -29,31 +29,20 @@
     "motd": "A Minecraft Server",
     "acceptEula": true,
     "javaCompatibility": {
-      "mc_version": "1.21.11",
-      "required_java": 21,
-      "confidence": "high",
-      "reason": "Minecraft 1.21.x uses Java 21.",
-      "warning": null,
-      "enforceable": true
-    },
-    "modpack": {
-      "projectId": "jSVtuptz",
-      "versionId": "igTvNuGF",
-      "name": "Escape From Tarkraft",
-      "version": "1.21.11",
-      "mcVersion": "1.21.11",
-      "loaders": [
-        "fabric"
-      ],
-      "installedAt": "2026-04-14T11:26:06.328682Z"
+      "mc_version": "26.1.2",
+      "required_java": null,
+      "confidence": "low",
+      "reason": "Unsupported major version family: 26.",
+      "warning": "Minecraft version family is not recognized. Please verify Java requirement manually.",
+      "enforceable": false
     }
   },
   {
-    "id": "srv_796fb176",
+    "id": "srv_149cc6d9",
     "status": "stopped",
-    "createdAt": "2026-04-14T11:50:41.670311Z",
-    "updatedAt": "2026-04-14T13:24:27.570127Z",
-    "name": "Test2",
+    "createdAt": "2026-04-16T06:43:00.603359Z",
+    "updatedAt": "2026-04-16T06:46:10.049064Z",
+    "name": "Modpack",
     "version": "1.21.10",
     "loader": "fabric",
     "port": 25566,
@@ -86,15 +75,15 @@
       "enforceable": true
     },
     "modpack": {
-      "projectId": "bHUKuhiA",
-      "versionId": "PwOUB05O",
-      "name": "OptiFabric",
-      "version": "6.10.2",
+      "projectId": "22jj8tHD",
+      "versionId": "U5VZfst5",
+      "name": "Spunky Optimized",
+      "version": "1.21.10",
       "mcVersion": "1.21.10",
       "loaders": [
         "fabric"
       ],
-      "installedAt": "2026-04-14T13:24:27.569740Z"
+      "installedAt": "2026-04-16T06:44:19.549830Z"
     }
   }
 ]
