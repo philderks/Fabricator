@@ -35,6 +35,21 @@ def platform_label() -> str:
     return _system_name()
 
 
+@lru_cache(maxsize=1)
+def arch_label() -> str:
+    """Return the Adoptium-compatible architecture label for this machine."""
+    machine = platform.machine().lower()
+    mapping = {
+        'x86_64': 'x64',
+        'amd64': 'x64',
+        'aarch64': 'aarch64',
+        'arm64': 'aarch64',
+        'armv7l': 'arm',
+        'armv8l': 'arm',
+    }
+    return mapping.get(machine, 'x64')
+
+
 def split_command(command: str) -> List[str]:
     """Split shell commands with the correct POSIX flag for the host OS."""
     if not command:

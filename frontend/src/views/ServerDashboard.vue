@@ -54,7 +54,9 @@ const javaStatus = ref({
   required_java: 21,
   detected_major: null,
   java_path: 'java',
-  linux_install_command: 'sudo apt install openjdk-21-jre-headless'
+  linux_install_command: 'sudo apt install openjdk-21-jre-headless',
+  installer_type: 'installer',
+  arch: 'x64'
 })
 const showModpackBrowser = ref(false)
 const showConfirmModal = ref(false)
@@ -1231,6 +1233,8 @@ onUnmounted(() => {
       :detected-java="javaStatus.detected_major"
       :java-path="javaStatus.java_path"
       :linux-install-command="javaStatus.linux_install_command"
+      :installer-type="javaStatus.installer_type"
+      :arch="javaStatus.arch"
       @close="showJavaModal = false"
     />
   </div>

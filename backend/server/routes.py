@@ -245,15 +245,19 @@ def _safe_extract_zip(zip_file: zipfile.ZipFile, destination: Path) -> None:
 
 
 def _java_download_url(system: str, java_major: int) -> str:
-    os_map = {
-        'windows': 'windows',
-        'darwin': 'mac',
-        'linux': 'linux',
-    }
+    os_map = {'windows': 'windows', 'darwin': 'mac', 'linux': 'linux'}
     os_label = os_map.get(system)
+    arch = platform_utils.arch_label()
     if not os_label:
         return f'https://adoptium.net/temurin/releases/?version={java_major}'
-    return f'https://adoptium.net/temurin/releases/?version={java_major}&os={os_label}&arch=x64'
+    return (
+        f'https://api.adoptium.net/v3/binary/latest/{java_major}/ga'
+        f'/{os_label}/{arch}/jre/hotspot/normal/eclipse'
+    )
+
+
+def _installer_type(system: str) -> str:
+    return {'windows': 'msi', 'darwin': 'pkg', 'linux': 'tar.gz'}.get(system, 'installer')
 
 
 def _linux_install_command(java_major: int) -> str:
@@ -265,6 +269,8 @@ def _build_java_recommendation(system: str, required_java: int) -> dict:
         'required_java': required_java,
         'download_url': _java_download_url(system, required_java),
         'linux_install_command': _linux_install_command(required_java),
+        'installer_type': _installer_type(system),
+        'arch': platform_utils.arch_label(),
     }
 
 

@@ -78,7 +78,7 @@
           <path d="M12 3v12M12 15l-4-4M12 15l4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           <path d="M3 20h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
         </svg>
-        Download Java {{ requiredJava || 21 }}
+        {{ downloadLabel }}
       </a>
     </template>
   </BaseModal>
@@ -124,6 +124,14 @@ export default {
     linuxInstallCommand: {
       type: String,
       default: 'sudo apt install openjdk-21-jre-headless'
+    },
+    installerType: {
+      type: String,
+      default: 'installer'
+    },
+    arch: {
+      type: String,
+      default: 'x64'
     }
   },
   emits: ['close'],
@@ -136,6 +144,12 @@ export default {
         return `Java ${this.detectedJava} detected`
       }
       return `Java ${this.requiredJava || 21} is not installed`
+    },
+    downloadLabel() {
+      const version = this.requiredJava || 21
+      const type = this.installerType.toUpperCase()
+      const arch = this.arch || 'x64'
+      return `Download Java ${version} JRE (${type}, ${arch})`
     }
   }
 }

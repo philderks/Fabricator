@@ -476,6 +476,8 @@
     :detected-java="javaModalData.detectedJava"
     :java-path="javaModalData.javaPath"
     :linux-install-command="javaModalData.linuxInstallCommand"
+    :installer-type="javaModalData.installerType"
+    :arch="javaModalData.arch"
     @close="showJavaModal = false"
   />
 
@@ -521,7 +523,9 @@ export default {
         requiredJava: 21,
         detectedJava: null,
         javaPath: 'java',
-        linuxInstallCommand: 'sudo apt install openjdk-21-jre-headless'
+        linuxInstallCommand: 'sudo apt install openjdk-21-jre-headless',
+        installerType: 'installer',
+        arch: 'x64'
       },
       showUncertainModsModal: false,
       uncertainModsReport: [],
@@ -780,7 +784,9 @@ export default {
         requiredJava: data?.required_java || 21,
         detectedJava: data?.detected_java ?? null,
         javaPath: data?.server_java_target || data?.java_path || 'java',
-        linuxInstallCommand: rec.linux_install_command || 'sudo apt install openjdk-21-jre-headless'
+        linuxInstallCommand: rec.linux_install_command || 'sudo apt install openjdk-21-jre-headless',
+        installerType: rec.installer_type || data?.installer_type || 'installer',
+        arch: rec.arch || data?.arch || 'x64'
       }
       this.showJavaModal = true
     },
