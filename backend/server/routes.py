@@ -963,7 +963,12 @@ def get_java_status():
         detected_major is not None and
         detected_major >= required_java
     )
-    if enforcement_skipped and required_java is not None:
+    if (
+        enforcement_skipped and
+        required_java is not None and
+        installed and
+        isinstance(detected_major, int)
+    ):
         meets_requirement = True
     return jsonify({
         'installed': installed,
