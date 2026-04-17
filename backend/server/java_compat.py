@@ -86,6 +86,17 @@ def resolve_required_java(mc_version: str) -> JavaCompatibility:
         )
 
     major, minor, patch = parsed
+
+    # Mojang switched to year-based versioning (e.g. 24.x, 25.x, 26.x).
+    # These releases require Java 25+.
+    if major >= 24:
+        return JavaCompatibility(
+            mc_version=mc_version,
+            required_java=25,
+            confidence="medium",
+            reason=f"Minecraft {major}.x uses year-based versioning and requires Java 25.",
+        )
+
     if major != 1:
         return JavaCompatibility(
             mc_version=mc_version,
