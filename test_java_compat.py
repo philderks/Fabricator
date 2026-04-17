@@ -1,6 +1,8 @@
 """Tests for Minecraft-to-Java compatibility mapping."""
 
-from backend.server.java_compat import resolve_required_java
+import pytest
+
+from backend.server.java_compat import resolve_required_java, skip_java_enforcement
 
 
 def test_legacy_and_modern_version_rules():
@@ -25,3 +27,16 @@ def test_unparseable_versions_return_low_confidence_warning():
     assert compat.required_java is None
     assert compat.confidence == "low"
     assert compat.warning is not None
+
+
+@pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", "on"])
+def test_skip_java_enforcement_enabled(monkeypatch, value):
+    monkeypatch.setenv("FABRICATOR_SKIP_JAVA_CHECK", value)
+    assert skip_java_enforcement() is True
+
+
+def test_skip_java_enforcement_disabled(monkeypatch):
+    monkeypatch.delenv("FABRICATOR_SKIP_JAVA_CHECK", raising=False)
+    assert skip_java_enforcement() is False
+    monkeypatch.setenv("FABRICATOR_SKIP_JAVA_CHECK", "0")
+    assert skip_java_enforcement() is False

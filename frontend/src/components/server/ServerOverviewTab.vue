@@ -18,6 +18,10 @@ const props = defineProps({
     type: Array,
     default: () => []
   },
+  activeModpack: {
+    type: Object,
+    default: null
+  },
   modSearch: {
     type: String,
     default: ''
@@ -59,6 +63,7 @@ const props = defineProps({
 const emit = defineEmits([
   'update:modSearch',
   'browse-mods',
+  'browse-modpacks',
   'remove-mod',
   'update-mod',
   'create-backup',
@@ -75,6 +80,7 @@ const modSearchModel = computed({
 })
 
 const handleBrowseMods = () => emit('browse-mods')
+const handleBrowseModpacks = () => emit('browse-modpacks')
 const handleCreateBackup = () => emit('create-backup')
 const handleOpenConsole = () => emit('open-console')
 const handleOpenFiles = () => emit('open-files')
@@ -90,6 +96,29 @@ const handleRequestDelete = (backup) => emit('request-delete-backup', backup)
       <StatCard label="Uptime" :value="serverStatus.uptime" />
       <StatCard label="TPS" :value="serverStatus.tps" />
       <StatCard label="Mods" :value="installedMods.length" />
+    </div>
+
+    <div v-if="activeModpack" class="modpack-info">
+      <div class="modpack-info__icon">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+          <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+          <line x1="12" y1="22.08" x2="12" y2="12"/>
+        </svg>
+      </div>
+      <div class="modpack-info__details">
+        <span class="modpack-info__name">{{ activeModpack.name || activeModpack.projectId }}</span>
+        <span class="modpack-info__meta">
+          <span v-if="activeModpack.version">{{ activeModpack.version }}</span>
+          <span v-if="activeModpack.mcVersion" class="modpack-info__sep">MC {{ activeModpack.mcVersion }}</span>
+          <span v-if="activeModpack.installedAt" class="modpack-info__sep">
+            installed {{ new Date(activeModpack.installedAt).toLocaleDateString() }}
+          </span>
+        </span>
+      </div>
+      <button class="btn-text" :disabled="installLoading" @click="handleBrowseModpacks">
+        Change
+      </button>
     </div>
 
     <div class="two-col">
@@ -114,9 +143,14 @@ const handleRequestDelete = (backup) => emit('request-delete-backup', backup)
         <div class="card">
           <div class="card-header">
             <h3>Installed Mods ({{ installedMods.length }})</h3>
-            <button class="btn btn-primary" :disabled="installLoading" @click="handleBrowseMods">
-              {{ installLoading ? 'Installing…' : 'Browse Mods' }}
-            </button>
+            <div class="mod-actions">
+              <button class="btn btn-secondary" :disabled="installLoading" @click="handleBrowseModpacks">
+                Browse Modpacks
+              </button>
+              <button class="btn btn-primary" :disabled="installLoading" @click="handleBrowseMods">
+                {{ installLoading ? 'Installing…' : 'Browse Mods' }}
+              </button>
+            </div>
           </div>
           <div class="search-box">
             <input
@@ -190,6 +224,53 @@ const handleRequestDelete = (backup) => emit('request-delete-backup', backup)
 </template>
 
 <style scoped>
+.modpack-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.85rem;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  margin-bottom: 1.5rem;
+}
+
+.modpack-info__icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  display: flex;
+}
+
+.modpack-info__details {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.modpack-info__name {
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.modpack-info__meta {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  display: flex;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.modpack-info__sep::before {
+  content: '\00b7';
+  margin-right: 0.25rem;
+}
+
 .col {
   display: flex;
   flex-direction: column;
@@ -234,6 +315,12 @@ const handleRequestDelete = (backup) => emit('request-delete-backup', backup)
   border: 1px dashed var(--border-color);
   border-radius: 8px;
   background: var(--bg-secondary);
+}
+
+.mod-actions {
+  display: inline-flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .backups-list {

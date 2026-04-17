@@ -480,13 +480,13 @@ export default {
       const status = this.getCompatibilityStatus(mod)
       switch (status) {
         case 'full':
-          return 'Vollständig kompatibel'
+          return 'Fully compatible'
         case 'likely':
-          return 'Wahrscheinlich kompatibel (ähnliche Version)'
+          return 'Likely compatible (similar version)'
         case 'unlikely':
-          return 'Möglicherweise inkompatibel'
+          return 'Possibly incompatible'
         default:
-          return 'Kompatibilität unbekannt'
+          return 'Compatibility unknown'
       }
     },
 
