@@ -595,8 +595,8 @@ export default {
       return this.imp?.loading ?? false
     },
     modpackError: {
-      get() { return this.imp?.errorMessage ?? '' },
-      set(v) { if (this.imp) this.imp.errorMessage = v }
+      get() { return this.imp?.errorMessage?.value ?? '' },
+      set(v) { if (this.imp?.errorMessage) this.imp.errorMessage.value = v }
     },
     requiredJavaText() {
       const required = this.javaStatus?.required_java
