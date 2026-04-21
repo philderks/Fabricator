@@ -23,24 +23,30 @@
 
         <div class="form-row">
           <div class="form-group">
-            <label for="minecraft-version">Minecraft Version</label>
+            <div class="version-label-row">
+              <label for="minecraft-version">Minecraft Version</label>
+              <label class="snapshot-toggle">
+                <input type="checkbox" v-model="showSnapshots">
+                <span>Show snapshots</span>
+              </label>
+            </div>
             <select 
               id="minecraft-version"
               v-model="formData.version"
               @change="handleVersionChange"
-              :disabled="versionsLoading || !gameVersions.length"
+              :disabled="versionsLoading || !filteredGameVersions.length"
               required
             >
               <option v-if="versionsLoading" disabled value="">Loading versions...</option>
-              <option v-else-if="!versionsLoading && !gameVersions.length" disabled value="">
+              <option v-else-if="!versionsLoading && !filteredGameVersions.length" disabled value="">
                 No versions available
               </option>
               <option 
-                v-for="version in gameVersions" 
+                v-for="version in filteredGameVersions" 
                 :key="version.version"
                 :value="version.version"
               >
-                {{ version.version }}<template v-if="version.stable"> (stable)</template>
+                {{ version.version }}
               </option>
             </select>
             <span v-if="requiredJavaText" class="form-hint">{{ requiredJavaText }}</span>
@@ -531,6 +537,7 @@ export default {
       uncertainModsReport: [],
       pendingUncertainModsResolver: null,
       gameVersions: [],
+      showSnapshots: false,
       javaStatus: null,
       javaRequirementWarning: '',
       loaderOptions: [
@@ -575,6 +582,10 @@ export default {
     this.loadGameVersions()
   },
   computed: {
+    filteredGameVersions() {
+      if (this.showSnapshots) return this.gameVersions
+      return this.gameVersions.filter(v => v.stable)
+    },
     selectedModpack() {
       return this.imp?.selectedModpack ?? null
     },
@@ -612,6 +623,20 @@ export default {
         return `Requires Java ${required}+ (detected Java ${detected}).`
       }
       return `Requires Java ${required}+`
+    }
+  },
+  watch: {
+    showSnapshots(val) {
+      if (!val) {
+        const currentVersion = this.gameVersions.find(v => v.version === this.formData.version)
+        if (currentVersion && !currentVersion.stable) {
+          const firstStable = this.gameVersions.find(v => v.stable)
+          if (firstStable) {
+            this.formData.version = firstStable.version
+            this.refreshJavaRequirement()
+          }
+        }
+      }
     }
   },
   methods: {
@@ -735,11 +760,11 @@ export default {
       try {
         const versions = await getFabricGameVersions()
         this.gameVersions = Array.isArray(versions) ? versions : []
-        const preferred = this.gameVersions.find(v => v.stable)
-        const fallback = preferred || this.gameVersions[0]
-        const versionExists = this.gameVersions.some(v => v.version === this.formData.version)
-        if ((!this.formData.version || !versionExists) && fallback) {
-          this.formData.version = fallback.version
+        const stableVersions = this.gameVersions.filter(v => v.stable)
+        const preferred = stableVersions[0] || this.gameVersions[0]
+        const versionExists = this.filteredGameVersions.some(v => v.version === this.formData.version)
+        if ((!this.formData.version || !versionExists) && preferred) {
+          this.formData.version = preferred.version
         }
         await this.refreshJavaRequirement()
       } catch (error) {
@@ -964,6 +989,32 @@ export default {
 
 <style scoped>
 /* Modal-specific styles only */
+
+.version-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.snapshot-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.8125rem;
+  font-weight: 400;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.snapshot-toggle input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--accent, #6366f1);
+}
 .settings-form {
   display: flex;
   flex-direction: column;
