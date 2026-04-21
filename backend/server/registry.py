@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from backend.core.config import get_config
+from backend.server import java_manager
 from backend.server.manager import ServerManager
 
 DIR_PERMISSIONS = 0o775
@@ -44,7 +45,7 @@ class ServerProcessRegistry:
                 return [str(part) for part in custom_command]
 
         memory = server.get('memory', 4)
-        java_exec = str(server.get('javaPath') or 'java')
+        java_exec = self._resolve_java_exec(server)
         return [
             java_exec,
             f'-Xms{memory}G',
@@ -53,6 +54,25 @@ class ServerProcessRegistry:
             'server.jar',
             'nogui'
         ]
+
+    def _resolve_java_exec(self, server: Dict[str, object]) -> str:
+        """Resolve the JVM binary for ``server``.
+
+        Precedence:
+        1. Explicit ``javaPath`` on the server record (user override).
+        2. Managed Java install matching the server's MC version.
+        3. Fall back to ``'java'`` on PATH so the existing probe / missing-java
+           error flow can trigger the install modal.
+        """
+        explicit = server.get('javaPath')
+        if explicit:
+            return str(explicit)
+        try:
+            required = java_manager.required_java_for(str(server.get('version') or ''))
+            resolved = java_manager.find_compatible_java(required)
+        except Exception:
+            resolved = None
+        return resolved or 'java'
 
     def __init__(self, base_dir: str | Path):
         self.base_dir = Path(base_dir).expanduser().resolve()
@@ -133,6 +153,10 @@ class ServerProcessRegistry:
         required_java_major: Optional[int] = None
     ) -> Dict[str, object]:
         manager = self._get_or_create_manager(server)
+        # Rebuild command so a freshly-installed managed Java is picked up
+        # without requiring an explicit invalidate() between attempts.
+        if not manager.is_running:
+            manager.command = self._build_command(server)
         result = manager.start(required_java_major=required_java_major)
         if result.get('status') == 'running':
             server_id = str(server['id'])

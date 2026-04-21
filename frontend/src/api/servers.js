@@ -271,6 +271,24 @@ export async function getJavaStatus(options = {}) {
 }
 
 /**
+ * Start a managed Java install for the given major version.
+ * @param {number} major - Java major version to install (e.g. 21)
+ * @returns {Promise<Object>} Task descriptor including task_id
+ */
+export async function installJava(major) {
+  return post('/api/java/install', { major })
+}
+
+/**
+ * Poll a managed Java install task for progress.
+ * @param {string} taskId - Task id returned by installJava()
+ * @returns {Promise<Object>} Current task status and bytes-downloaded
+ */
+export async function getJavaInstallProgress(taskId) {
+  return get(`/api/java/install/progress/${taskId}`)
+}
+
+/**
  * Get Fabricator self-update status.
  * @returns {Promise<Object>} Update state and latest-version information
  */

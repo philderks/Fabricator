@@ -27,8 +27,7 @@ import {
   getBackups,
   restoreBackup,
   deleteBackup,
-  deleteServer,
-  getJavaStatus
+  deleteServer
 } from '../api/servers'
 import { useToast } from '../composables/useToast'
 
@@ -48,16 +47,7 @@ const recentActivity = ref([])
 const serverSettings = ref(null)
 const showModBrowser = ref(false)
 const showJavaModal = ref(false)
-const javaStatus = ref({
-  platform: '',
-  download_url: 'https://adoptium.net/temurin/releases/?version=21',
-  required_java: 21,
-  detected_major: null,
-  java_path: 'java',
-  linux_install_command: 'sudo apt install openjdk-21-jre-headless',
-  installer_type: 'installer',
-  arch: 'x64'
-})
+const pendingJavaAction = ref(null)
 const showModpackBrowser = ref(false)
 const showConfirmModal = ref(false)
 const confirmModalData = ref({})
@@ -843,13 +833,11 @@ const performServerAction = async (action, fn, successMessage) => {
     }
   } catch (error) {
     console.error(`Failed to ${action} server:`, error)
-    if (error.data?.java_missing || error.data?.java_too_old) {
-      try {
-        javaStatus.value = await getJavaStatus({
-          requiredJava: error.data?.required_java,
-          javaPath: error.data?.server_java_target
-        })
-      } catch (_) { /* ignore */ }
+    if (
+      (action === 'start' || action === 'restart') &&
+      (error.data?.java_missing || error.data?.java_too_old)
+    ) {
+      pendingJavaAction.value = action
       showJavaModal.value = true
     } else {
       toast.error(error.message || `Failed to ${action} server`, 'Server Error')
@@ -873,6 +861,17 @@ const performServerAction = async (action, fn, successMessage) => {
 const handleStart = () => performServerAction('start', startServer, 'Server start requested')
 const handleStop = () => performServerAction('stop', stopServer, 'Server stop requested')
 const handleRestart = () => performServerAction('restart', restartServer, 'Server restart requested')
+
+const handleJavaInstalled = () => {
+  const action = pendingJavaAction.value
+  showJavaModal.value = false
+  pendingJavaAction.value = null
+  if (action === 'restart') {
+    handleRestart()
+  } else {
+    handleStart()
+  }
+}
 
 const canSendCommand = computed(() => serverStatus.value.status === 'running' && !!server.value)
 
@@ -1227,15 +1226,9 @@ onUnmounted(() => {
 
     <JavaInstallModal
       :show="showJavaModal"
-      :platform="javaStatus.platform"
-      :download-url="javaStatus.download_url"
-      :required-java="javaStatus.required_java || 21"
-      :detected-java="javaStatus.detected_major"
-      :java-path="javaStatus.java_path"
-      :linux-install-command="javaStatus.linux_install_command"
-      :installer-type="javaStatus.installer_type"
-      :arch="javaStatus.arch"
+      :mc-version="server?.version || ''"
       @close="showJavaModal = false"
+      @java-installed="handleJavaInstalled"
     />
   </div>
 </template>

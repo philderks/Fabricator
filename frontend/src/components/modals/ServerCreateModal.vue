@@ -476,15 +476,9 @@
 
   <JavaInstallModal
     :show="showJavaModal"
-    :platform="javaModalData.platform"
-    :download-url="javaModalData.downloadUrl"
-    :required-java="javaModalData.requiredJava"
-    :detected-java="javaModalData.detectedJava"
-    :java-path="javaModalData.javaPath"
-    :linux-install-command="javaModalData.linuxInstallCommand"
-    :installer-type="javaModalData.installerType"
-    :arch="javaModalData.arch"
+    :mc-version="pendingJavaMcVersion"
     @close="showJavaModal = false"
+    @java-installed="handleJavaInstalled"
   />
 
 </template>
@@ -523,16 +517,8 @@ export default {
       javaRequirementLoading: false,
       imp: null,
       showJavaModal: false,
-      javaModalData: {
-        platform: '',
-        downloadUrl: 'https://adoptium.net/temurin/releases/?version=21',
-        requiredJava: 21,
-        detectedJava: null,
-        javaPath: 'java',
-        linuxInstallCommand: 'sudo apt install openjdk-21-jre-headless',
-        installerType: 'installer',
-        arch: 'x64'
-      },
+      pendingJavaMcVersion: '',
+      pendingJavaRetryServerId: null,
       showUncertainModsModal: false,
       uncertainModsReport: [],
       pendingUncertainModsResolver: null,
@@ -801,19 +787,36 @@ export default {
       await this.refreshJavaRequirement()
     },
     
-    openJavaModal(data) {
-      const rec = data?.recommended_install || {}
-      this.javaModalData = {
-        platform: data?.compatibility?.platform || data?.platform || '',
-        downloadUrl: rec.download_url || data?.download_url || 'https://adoptium.net/temurin/releases/?version=21',
-        requiredJava: data?.required_java || 21,
-        detectedJava: data?.detected_java ?? null,
-        javaPath: data?.server_java_target || data?.java_path || 'java',
-        linuxInstallCommand: rec.linux_install_command || 'sudo apt install openjdk-21-jre-headless',
-        installerType: rec.installer_type || data?.installer_type || 'installer',
-        arch: rec.arch || data?.arch || 'x64'
-      }
+    openJavaModal({ createdServerId = null } = {}) {
+      this.pendingJavaMcVersion = this.formData.version || ''
+      this.pendingJavaRetryServerId = createdServerId
       this.showJavaModal = true
+    },
+
+    async handleJavaInstalled() {
+      const retryServerId = this.pendingJavaRetryServerId
+      this.showJavaModal = false
+      this.pendingJavaRetryServerId = null
+      if (retryServerId) {
+        // Server was already created; retry just the install step.
+        try {
+          this.toast.info('Re-running server install with Java installed...', 'Installation')
+          const installResult = await installServer(retryServerId)
+          if (installResult?.success) {
+            this.toast.success('Server installed successfully.', 'Server Installation')
+          } else {
+            this.toast.error(
+              installResult?.message || 'Installation failed',
+              'Server Installation Failed'
+            )
+          }
+        } catch (error) {
+          this.toast.error(error?.message || 'Installation failed', 'Server Installation Failed')
+        }
+      } else {
+        // Pre-check path: retry the full create flow now that Java exists.
+        this.handleCreate()
+      }
     },
 
     async handleCreate() {
@@ -849,8 +852,10 @@ export default {
           mcVersion: this.formData.version,
           javaPath: this.formData.javaPath || undefined
         })
-        if (status?.required_java && !status?.meets_requirement) {
-          this.openJavaModal(status)
+        const hasManaged = !!status?.managed_java?.installed
+        const meetsRequirement = !!status?.meets_requirement || !!status?.system_java?.meets_requirement
+        if (status?.required_java && !meetsRequirement && !hasManaged) {
+          this.openJavaModal()
           return
         }
       } catch (err) {
@@ -915,33 +920,33 @@ export default {
         } else {
           const isJavaIssue = installResult.java_missing || installResult.java_too_old
           if (isJavaIssue) {
-            this.openJavaModal(installResult)
+            this.openJavaModal({ createdServerId })
           } else {
             this.toast.error(installResult.message || 'Installation failed', 'Server Installation Failed')
           }
           this.$emit('create', { id: createdServerId, name: this.formData.name })
           this.$emit('close')
-          this.resetForm()
+          this.resetForm({ keepJavaModal: isJavaIssue })
         }
       } catch (error) {
         console.error('Failed to create server:', error)
         const isJavaIssue = error?.data?.java_missing || error?.data?.java_too_old
         if (isJavaIssue) {
-          this.openJavaModal(error.data)
+          this.openJavaModal({ createdServerId })
         } else {
           this.toast.error(error.message, 'Server Creation Failed')
         }
         if (createdServerId) {
           this.$emit('create', { id: createdServerId, name: this.formData.name })
           this.$emit('close')
-          this.resetForm()
+          this.resetForm({ keepJavaModal: isJavaIssue })
         }
       } finally {
         this.creating = false
       }
     },
     
-    resetForm() {
+    resetForm({ keepJavaModal = false } = {}) {
       const preservedVersion = this.formData.version
       this.formData = {
         setupMode: 'custom',
@@ -974,7 +979,11 @@ export default {
       }
       this.javaStatus = null
       this.javaRequirementWarning = ''
-      this.showJavaModal = false
+      if (!keepJavaModal) {
+        this.showJavaModal = false
+        this.pendingJavaMcVersion = ''
+        this.pendingJavaRetryServerId = null
+      }
 
       if (this.imp) {
         this.imp.resetAll()

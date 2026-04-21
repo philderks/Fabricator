@@ -12,6 +12,7 @@ from backend.server.registry import get_server_process_registry
 from backend.server import storage
 from backend.server.installer import FabricInstaller, InstallStatus
 from backend.server.java_compat import resolve_required_java, skip_java_enforcement
+from backend.server import java_manager
 from backend.utils import platform as platform_utils
 
 try:
@@ -916,7 +917,7 @@ def restart_server_by_id(server_id):
 
 @server_bp.route('/java/status', methods=['GET'])
 def get_java_status():
-    """Check Java installation status and return platform-appropriate download URL."""
+    """Return managed Java status, system Java probe and Temurin asset metadata."""
     import subprocess
     import re
 
@@ -934,6 +935,8 @@ def get_java_status():
             required_java = None
     if required_java is None and compat and compat.required_java is not None:
         required_java = int(compat.required_java)
+    if required_java is None and mc_version:
+        required_java = java_manager.required_java_for(mc_version)
 
     try:
         result = subprocess.run([java_path, '-version'], capture_output=True, text=True)
@@ -976,20 +979,96 @@ def get_java_status():
         isinstance(detected_major, int)
     ):
         meets_requirement = True
+
+    system_java_block = {
+        'path': java_path,
+        'version': detected_major,
+        'meets_requirement': bool(meets_requirement),
+    }
+
+    managed_block = None
+    asset_block = None
+    install_major = None
+    asset_error = None
+    if required_java is not None:
+        managed_info = java_manager.managed_java_info(int(required_java))
+        install_major = managed_info['major']
+        managed_block = {
+            'path': managed_info['path'],
+            'installed': managed_info['installed'],
+            'major': managed_info['major'],
+            'substituted': managed_info['substituted'],
+        }
+        try:
+            asset = java_manager.adoptium_asset_url(int(required_java))
+            asset_block = {
+                'download_url': asset['download_url'],
+                'filename': asset['filename'],
+                'size_bytes': asset['size_bytes'],
+                'checksum_algorithm': asset['checksum_algorithm'],
+                'install_major': asset['install_major'],
+                'substituted': asset['substituted'],
+            }
+        except RuntimeError as exc:
+            asset_error = str(exc)
+
     return jsonify({
+        # New structured fields consumed by JavaInstallModal.vue
+        'required_java': required_java,
+        'install_major': install_major,
+        'system_java': system_java_block,
+        'managed_java': managed_block,
+        'asset': asset_block,
+        'asset_error': asset_error,
+        'arch': platform_utils.arch_label(),
+        # Legacy flat fields kept for backward compatibility
         'installed': installed,
         'version': version,
         'detected_major': detected_major,
         'java_path': java_path,
-        'required_java': required_java,
         'meets_requirement': meets_requirement,
         'java_enforcement_skipped': enforcement_skipped,
         'platform': system,
-        'download_url': recommendation['download_url'] if recommendation else _java_download_url(system, 21),
+        'download_url': (
+            asset_block['download_url'] if asset_block
+            else (recommendation['download_url'] if recommendation else _java_download_url(system, 21))
+        ),
         'linux_install_command': recommendation['linux_install_command'] if recommendation else _linux_install_command(21),
         'recommended_install': recommendation,
         'compatibility': compat.to_dict() if compat else None,
     })
+
+
+@server_bp.route('/java/install', methods=['POST'])
+def install_java_endpoint():
+    """Kick off a managed Java install for the given major version."""
+    data = request.get_json(silent=True) or {}
+    major_raw = data.get('major')
+    try:
+        major = int(major_raw)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Field "major" must be an integer'}), 400
+    if major < 8 or major > 99:
+        return jsonify({'error': f'Unsupported Java major: {major}'}), 400
+
+    task_id = java_manager.start_install_task(major)
+    task = java_manager.get_install_task(task_id) or {}
+    return jsonify({
+        'task_id': task_id,
+        'status': task.get('status', 'queued'),
+        'requested_major': task.get('requested_major'),
+        'install_major': task.get('install_major'),
+        'substituted': task.get('substituted', False),
+    })
+
+
+@server_bp.route('/java/install/progress/<task_id>', methods=['GET'])
+def get_java_install_progress(task_id):
+    """Poll for progress of a managed Java install task."""
+    task = java_manager.get_install_task(task_id)
+    if not task:
+        return jsonify({'error': 'Task not found'}), 404
+    return jsonify(task)
 
 
 @server_bp.route('/metrics/system', methods=['GET'])

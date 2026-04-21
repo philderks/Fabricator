@@ -21,6 +21,10 @@ class Config:
         'SERVER_INDEX_FILE',
         os.path.join(PROJECT_ROOT, 'servers.json')
     )
+    JAVA_ROOT = os.environ.get(
+        'JAVA_ROOT',
+        os.path.join(PROJECT_ROOT, 'java')
+    )
 
     # API
     API_VERSION = '1.0.0'
@@ -39,6 +43,7 @@ class ProductionConfig(Config):
     DEBUG = False
     SERVERS_ROOT = os.environ.get('SERVER_ROOT', '/var/lib/fabricator/servers')
     SERVERS_FILE = os.environ.get('SERVER_INDEX_FILE', '/var/lib/fabricator/servers.json')
+    JAVA_ROOT = os.environ.get('JAVA_ROOT', '/var/lib/fabricator/java')
 
 
 config = {
