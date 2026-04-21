@@ -1,6 +1,5 @@
 """Fabric server installer using the Fabric Meta API."""
 import os
-import shutil
 import requests
 from pathlib import Path
 from typing import List, Optional, Dict, Any
@@ -173,8 +172,7 @@ class FabricInstaller(InstallerBase):
             Path to downloaded JAR or None on failure
         """
         url = self._get_server_jar_url(mc_version, loader_version, installer_version)
-        jar_name = f"fabric-server-mc.{mc_version}-loader.{loader_version}-launcher.jar"
-        jar_path = self.install_path / jar_name
+        jar_path = self.install_path / "server.jar"
         
         try:
             print(f"Downloading Fabric server from: {url}")
@@ -209,29 +207,6 @@ class FabricInstaller(InstallerBase):
             if jar_path.exists():
                 jar_path.unlink()
             return None
-
-    def _create_server_jar_symlink(self, actual_jar: Path) -> Path:
-        """Create a server.jar symlink pointing to the actual JAR.
-        
-        Args:
-            actual_jar: Path to the actual server JAR
-            
-        Returns:
-            Path to server.jar symlink
-        """
-        server_jar = self.install_path / "server.jar"
-        
-        # Remove existing symlink or file
-        if server_jar.exists() or server_jar.is_symlink():
-            server_jar.unlink()
-
-        # Create relative symlink, fall back to copy on Windows permission issues
-        try:
-            server_jar.symlink_to(actual_jar.name)
-        except OSError as exc:
-            print(f"Symlink creation failed ({exc}); copying server.jar instead.")
-            shutil.copy2(actual_jar, server_jar)
-        return server_jar
 
     def install(
         self,
@@ -300,9 +275,6 @@ class FabricInstaller(InstallerBase):
                 }
             )
         
-        # Create server.jar symlink
-        server_jar = self._create_server_jar_symlink(jar_path)
-        
         # Pre-create .fabric cache directory so the launcher can
         # download the vanilla server JAR on first start without
         # running into permission issues.
@@ -320,8 +292,8 @@ class FabricInstaller(InstallerBase):
         return InstallResult(
             success=True,
             status=InstallStatus.COMPLETED,
-            message=f"Fabric server installed successfully",
-            server_jar=server_jar,
+            message="Fabric server installed successfully",
+            server_jar=jar_path,
             details={
                 "mc_version": mc_version,
                 "loader_version": loader_version,
