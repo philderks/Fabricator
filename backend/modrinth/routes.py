@@ -280,18 +280,16 @@ def get_mod_download_url(mod_id):
         return jsonify({"error": "mc_version parameter is required"}), 400
 
     try:
-        download_url = modrinth_client.get_mod_download_url(
-            mod_id=mod_id,
-            mc_version=mc_version,
-            loader=loader
+        resolved = modrinth_client.get_mod_download_url(
+            mod_id=mod_id, mc_version=mc_version, loader=loader
         )
     except ModrinthApiError as exc:
         return _modrinth_error_response(exc)
 
-    if not download_url:
+    if not resolved:
         return jsonify({"error": "No suitable version found"}), 404
 
-    return jsonify({"download_url": download_url})
+    return jsonify({"download_url": resolved["url"]})
 
 
 @modrinth_bp.route('/mod/<mod_id>/install', methods=['POST'])
@@ -323,19 +321,19 @@ def install_mod(mod_id):
         target_path = Path(mods_folder)
 
         try:
-            download_url = modrinth_client.get_mod_download_url(
-                mod_id=mod_id,
-                mc_version=mc_version,
-                loader=loader
+            resolved = modrinth_client.get_mod_download_url(
+                mod_id=mod_id, mc_version=mc_version, loader=loader
             )
         except ModrinthApiError as exc:
             return _modrinth_error_response(exc)
 
-        if not download_url:
+        if not resolved:
             return jsonify({"error": "No suitable version found"}), 404
 
         try:
-            file_path = modrinth_client.download_mod(download_url, target_path)
+            file_path = modrinth_client.download_mod(
+                resolved["url"], target_path, hashes=resolved["hashes"]
+            )
         except ModrinthApiError as exc:
             return _modrinth_error_response(exc)
 
