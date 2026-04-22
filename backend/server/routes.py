@@ -14,6 +14,7 @@ from backend.server import storage
 from backend.server.installer import FabricInstaller, InstallStatus
 from backend.server.java_compat import resolve_required_java, skip_java_enforcement
 from backend.server import java_manager
+from backend.server.locks import get_server_lock, try_acquire, discard_lock
 from backend.utils import platform as platform_utils
 
 try:
@@ -488,22 +489,28 @@ def update_server_file_content(server_id):
     if not server:
         return jsonify({'error': 'Server not found'}), 404
 
+    lock = try_acquire(server_id)
+    if lock is None:
+        return jsonify({'error': 'Another operation is in progress for this server'}), 409
     try:
-        base_path = _get_install_path(server)
-        target_path = _ensure_child_path(base_path, path_param)
-    except ValueError as exc:
-        return jsonify({'error': str(exc)}), 400
+        try:
+            base_path = _get_install_path(server)
+            target_path = _ensure_child_path(base_path, path_param)
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
 
-    if not target_path.exists() or not target_path.is_file():
-        return jsonify({'error': 'File not found'}), 404
+        if not target_path.exists() or not target_path.is_file():
+            return jsonify({'error': 'File not found'}), 404
 
-    try:
-        with open(target_path, 'w', encoding='utf-8') as file_handle:
-            file_handle.write(content)
-    except OSError as exc:
-        return jsonify({'error': f'Failed to write file: {exc}'}), 500
+        try:
+            with open(target_path, 'w', encoding='utf-8') as file_handle:
+                file_handle.write(content)
+        except OSError as exc:
+            return jsonify({'error': f'Failed to write file: {exc}'}), 500
 
-    return jsonify({'success': True})
+        return jsonify({'success': True})
+    finally:
+        lock.release()
 
 
 @server_bp.route('/servers/<server_id>/mods', methods=['GET'])
@@ -570,39 +577,45 @@ def create_server_backup(server_id):
     if not server:
         return jsonify({'error': 'Server not found'}), 404
 
-    runtime_status = _registry().get_status(server_id)
-    if runtime_status.get('status') == 'running':
-        return jsonify({'error': 'Stop the server before creating a backup to avoid data corruption'}), 400
-
+    lock = try_acquire(server_id)
+    if lock is None:
+        return jsonify({'error': 'Another operation is in progress for this server'}), 409
     try:
-        base_path = _get_install_path(server)
-    except ValueError as exc:
-        return jsonify({'error': str(exc)}), 400
+        runtime_status = _registry().get_status(server_id)
+        if runtime_status.get('status') == 'running':
+            return jsonify({'error': 'Stop the server before creating a backup to avoid data corruption'}), 400
 
-    backups_dir = _get_backups_dir(base_path)
-    timestamp = datetime.utcnow().strftime('%Y%m%d-%H%M%S')
-    archive_path = backups_dir / f'{timestamp}.zip'
+        try:
+            base_path = _get_install_path(server)
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
 
-    try:
-        with zipfile.ZipFile(archive_path, 'w', compression=zipfile.ZIP_DEFLATED) as zip_file:
-            for file_path in base_path.rglob('*'):
-                if backups_dir in file_path.parents or file_path == backups_dir:
-                    continue
-                if file_path.is_dir():
-                    continue
-                zip_file.write(file_path, file_path.relative_to(base_path))
-    except OSError as exc:
-        if archive_path.exists():
-            try:
-                _unlink_with_retry(archive_path)
-            except OSError:
-                pass
-        return jsonify({'error': f'Failed to create backup: {exc}'}), 500
+        backups_dir = _get_backups_dir(base_path)
+        timestamp = datetime.utcnow().strftime('%Y%m%d-%H%M%S')
+        archive_path = backups_dir / f'{timestamp}.zip'
 
-    return jsonify({
-        'success': True,
-        'backup': _serialize_file_entry(archive_path, backups_dir)
-    })
+        try:
+            with zipfile.ZipFile(archive_path, 'w', compression=zipfile.ZIP_DEFLATED) as zip_file:
+                for file_path in base_path.rglob('*'):
+                    if backups_dir in file_path.parents or file_path == backups_dir:
+                        continue
+                    if file_path.is_dir():
+                        continue
+                    zip_file.write(file_path, file_path.relative_to(base_path))
+        except OSError as exc:
+            if archive_path.exists():
+                try:
+                    _unlink_with_retry(archive_path)
+                except OSError:
+                    pass
+            return jsonify({'error': f'Failed to create backup: {exc}'}), 500
+
+        return jsonify({
+            'success': True,
+            'backup': _serialize_file_entry(archive_path, backups_dir)
+        })
+    finally:
+        lock.release()
 
 
 @server_bp.route('/servers/<server_id>/backups/<backup_id>/restore', methods=['POST'])
@@ -611,41 +624,47 @@ def restore_server_backup(server_id, backup_id):
     if not server:
         return jsonify({'error': 'Server not found'}), 404
 
+    lock = try_acquire(server_id)
+    if lock is None:
+        return jsonify({'error': 'Another operation is in progress for this server'}), 409
     try:
-        base_path = _get_install_path(server)
-    except ValueError as exc:
-        return jsonify({'error': str(exc)}), 400
+        try:
+            base_path = _get_install_path(server)
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
 
-    status = _registry().get_status(server_id)
-    if status.get('status') == 'running':
-        return jsonify({'error': 'Stop the server before restoring a backup'}), 400
+        status = _registry().get_status(server_id)
+        if status.get('status') == 'running':
+            return jsonify({'error': 'Stop the server before restoring a backup'}), 400
 
-    backups_dir = _get_backups_dir(base_path)
-    try:
-        backup_path = _ensure_child_path(backups_dir, f'{backup_id}.zip')
-    except ValueError:
-        return jsonify({'error': 'Invalid backup ID'}), 400
+        backups_dir = _get_backups_dir(base_path)
+        try:
+            backup_path = _ensure_child_path(backups_dir, f'{backup_id}.zip')
+        except ValueError:
+            return jsonify({'error': 'Invalid backup ID'}), 400
 
-    if not backup_path.exists():
-        return jsonify({'error': 'Backup not found'}), 404
+        if not backup_path.exists():
+            return jsonify({'error': 'Backup not found'}), 404
 
-    try:
-        for entry in base_path.iterdir():
-            if entry == backups_dir:
-                continue
-            if entry.is_dir():
-                shutil.rmtree(entry, onerror=_handle_remove_readonly)
-            else:
-                _unlink_with_retry(entry)
+        try:
+            for entry in base_path.iterdir():
+                if entry == backups_dir:
+                    continue
+                if entry.is_dir():
+                    shutil.rmtree(entry, onerror=_handle_remove_readonly)
+                else:
+                    _unlink_with_retry(entry)
 
-        with zipfile.ZipFile(backup_path, 'r') as zip_file:
-            _safe_extract_zip(zip_file, base_path)
-    except OSError as exc:
-        return jsonify({'error': f'Failed to restore backup: {exc}'}), 500
-    except ValueError as exc:
-        return jsonify({'error': str(exc)}), 400
+            with zipfile.ZipFile(backup_path, 'r') as zip_file:
+                _safe_extract_zip(zip_file, base_path)
+        except OSError as exc:
+            return jsonify({'error': f'Failed to restore backup: {exc}'}), 500
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
 
-    return jsonify({'success': True, 'message': 'Backup restored successfully'})
+        return jsonify({'success': True, 'message': 'Backup restored successfully'})
+    finally:
+        lock.release()
 
 
 @server_bp.route('/servers/<server_id>/backups/<backup_id>', methods=['DELETE'])
@@ -692,22 +711,28 @@ def update_server_settings(server_id):
     if not server:
         return jsonify({'error': 'Server not found'}), 404
 
-    runtime_status = _registry().get_status(server_id)
-    if runtime_status.get('status') == 'running':
-        return jsonify({'error': 'Stop the server before changing settings'}), 409
+    lock = try_acquire(server_id)
+    if lock is None:
+        return jsonify({'error': 'Another operation is in progress for this server'}), 409
+    try:
+        runtime_status = _registry().get_status(server_id)
+        if runtime_status.get('status') == 'running':
+            return jsonify({'error': 'Stop the server before changing settings'}), 409
 
-    server = storage.update_server(server_id, data)
+        server = storage.update_server(server_id, data)
 
-    if not server:
-        return jsonify({'error': 'Server not found'}), 404
+        if not server:
+            return jsonify({'error': 'Server not found'}), 404
 
-    success, error_message = _write_server_properties(server)
-    if not success:
-        return jsonify({'error': error_message}), 500
+        success, error_message = _write_server_properties(server)
+        if not success:
+            return jsonify({'error': error_message}), 500
 
-    _registry().invalidate(server_id)
+        _registry().invalidate(server_id)
 
-    return jsonify(server)
+        return jsonify(server)
+    finally:
+        lock.release()
 
 
 @server_bp.route('/servers/<server_id>', methods=['DELETE'])
@@ -716,34 +741,41 @@ def delete_server_route(server_id):
     if not server:
         return jsonify({'error': 'Server not found'}), 404
 
-    # Stop running process if needed
-    _registry().stop_server(server_id)
-
-    # Resolve install path to clean up files
-    install_path = None
+    lock = try_acquire(server_id)
+    if lock is None:
+        return jsonify({'error': 'Another operation is in progress for this server'}), 409
     try:
-        install_path = _get_install_path(server)
-    except ValueError:
+        # Stop running process if needed
+        _registry().stop_server(server_id)
+
+        # Resolve install path to clean up files
         install_path = None
-
-    # Remove server from storage
-    storage.delete_server(server_id)
-
-    # Delete files on disk
-    removal_error = None
-    if install_path and install_path.exists():
         try:
-            shutil.rmtree(install_path, onerror=_handle_remove_readonly)
-        except OSError as exc:
-            removal_error = str(exc)
+            install_path = _get_install_path(server)
+        except ValueError:
+            install_path = None
 
-    response = {
-        'success': removal_error is None,
-        'message': 'Server deleted successfully' if not removal_error else 'Server removed but files could not be deleted',
-    }
-    if removal_error:
-        response['error'] = removal_error
-    return jsonify(response), 200 if removal_error is None else 500
+        # Remove server from storage
+        storage.delete_server(server_id)
+        discard_lock(server_id)
+
+        # Delete files on disk
+        removal_error = None
+        if install_path and install_path.exists():
+            try:
+                shutil.rmtree(install_path, onerror=_handle_remove_readonly)
+            except OSError as exc:
+                removal_error = str(exc)
+
+        response = {
+            'success': removal_error is None,
+            'message': 'Server deleted successfully' if not removal_error else 'Server removed but files could not be deleted',
+        }
+        if removal_error:
+            response['error'] = removal_error
+        return jsonify(response), 200 if removal_error is None else 500
+    finally:
+        lock.release()
 
 
 @server_bp.route('/servers/<server_id>/install', methods=['POST'])
@@ -753,84 +785,90 @@ def install_server(server_id):
     if not server:
         return jsonify({'error': 'Server not found'}), 404
 
-    loader = (server.get('loader') or '').strip().lower()
-    if not loader:
-        return jsonify({'error': 'Server has no mod loader configured'}), 400
-    mc_version = server.get('version')
-
-    if not mc_version:
-        return jsonify({'error': 'Server has no Minecraft version configured'}), 400
-
+    lock = try_acquire(server_id)
+    if lock is None:
+        return jsonify({'error': 'Another operation is in progress for this server'}), 409
     try:
-        install_path = _registry()._resolve_install_path(server)
-    except ValueError as exc:
-        return jsonify({'error': str(exc)}), 400
+        loader = (server.get('loader') or '').strip().lower()
+        if not loader:
+            return jsonify({'error': 'Server has no mod loader configured'}), 400
+        mc_version = server.get('version')
 
-    installer = _get_installer(loader, install_path)
-    if not installer:
-        supported_loaders = ['fabric']
-        return jsonify({
-            'error': (
-                f'Unsupported loader: {loader}. '
-                f'Supported loaders: {", ".join(supported_loaders)}.'
-            )
-        }), 400
+        if not mc_version:
+            return jsonify({'error': 'Server has no Minecraft version configured'}), 400
 
-    storage.update_server_status(server_id, 'installing')
+        try:
+            install_path = _registry()._resolve_install_path(server)
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
 
-    try:
-        java_check = _server_java_check_payload(server)
-        compat = java_check['compatibility']
-        if java_check['enforceable'] and not java_check['meets_requirement']:
-            required_java = int(java_check['required_java'])
-            detected_java = java_check['detected_java']
-            runtime = java_check['runtime']
-            storage.update_server_status(server_id, 'stopped')
+        installer = _get_installer(loader, install_path)
+        if not installer:
+            supported_loaders = ['fabric']
             return jsonify({
-                'success': False,
                 'error': (
-                    f'Java {required_java}+ is required for Minecraft {server.get("version")} '
-                    f'(detected: {detected_java if detected_java is not None else "unknown"})'
-                ),
-                'java_missing': bool(runtime.get('java_missing', False)),
-                'java_too_old': detected_java is not None,
-                'required_java': required_java,
-                'detected_java': detected_java,
-                'server_java_target': runtime.get('java_exec'),
-                'compatibility': compat,
-                'recommended_install': _build_java_recommendation(
-                    platform_utils.platform_label(),
-                    required_java
+                    f'Unsupported loader: {loader}. '
+                    f'Supported loaders: {", ".join(supported_loaders)}.'
                 )
             }), 400
 
-        result = installer.install_with_config(
-            mc_version=mc_version,
-            server_config=server
-        )
+        storage.update_server_status(server_id, 'installing')
 
-        if result.success:
-            storage.update_server_status(server_id, 'stopped')
-            return jsonify({
-                'success': True,
-                'message': result.message,
-                'details': result.details,
-                'server': _augment_with_runtime(storage.get_server(server_id))
-            })
-        else:
+        try:
+            java_check = _server_java_check_payload(server)
+            compat = java_check['compatibility']
+            if java_check['enforceable'] and not java_check['meets_requirement']:
+                required_java = int(java_check['required_java'])
+                detected_java = java_check['detected_java']
+                runtime = java_check['runtime']
+                storage.update_server_status(server_id, 'stopped')
+                return jsonify({
+                    'success': False,
+                    'error': (
+                        f'Java {required_java}+ is required for Minecraft {server.get("version")} '
+                        f'(detected: {detected_java if detected_java is not None else "unknown"})'
+                    ),
+                    'java_missing': bool(runtime.get('java_missing', False)),
+                    'java_too_old': detected_java is not None,
+                    'required_java': required_java,
+                    'detected_java': detected_java,
+                    'server_java_target': runtime.get('java_exec'),
+                    'compatibility': compat,
+                    'recommended_install': _build_java_recommendation(
+                        platform_utils.platform_label(),
+                        required_java
+                    )
+                }), 400
+
+            result = installer.install_with_config(
+                mc_version=mc_version,
+                server_config=server
+            )
+
+            if result.success:
+                storage.update_server_status(server_id, 'stopped')
+                return jsonify({
+                    'success': True,
+                    'message': result.message,
+                    'details': result.details,
+                    'server': _augment_with_runtime(storage.get_server(server_id))
+                })
+            else:
+                storage.update_server_status(server_id, 'failed')
+                return jsonify({
+                    'success': False,
+                    'message': result.message,
+                    'details': result.details
+                }), 500
+
+        except Exception as exc:
             storage.update_server_status(server_id, 'failed')
             return jsonify({
                 'success': False,
-                'message': result.message,
-                'details': result.details
+                'message': f'Installation failed: {str(exc)}'
             }), 500
-
-    except Exception as exc:
-        storage.update_server_status(server_id, 'failed')
-        return jsonify({
-            'success': False,
-            'message': f'Installation failed: {str(exc)}'
-        }), 500
+    finally:
+        lock.release()
 
 
 @server_bp.route('/servers/<server_id>/start', methods=['POST'])
@@ -839,53 +877,59 @@ def start_server_by_id(server_id):
     if not server:
         return jsonify({'error': 'Server not found'}), 404
 
-    if server.get('status') == 'pending':
-        return jsonify({
-            'error': 'Server not installed yet. Call /install first.'
-        }), 400
-
-    if server.get('status') == 'installing':
-        return jsonify({
-            'error': 'Server is currently installing. Please wait.'
-        }), 400
-
-    compat = resolve_required_java(server.get('version', ''))
-    required_java_major = compat.required_java if compat.enforceable else None
-    if skip_java_enforcement():
-        required_java_major = None
-
+    lock = try_acquire(server_id)
+    if lock is None:
+        return jsonify({'error': 'Another operation is in progress for this server'}), 409
     try:
-        result = _registry().start_server(
-            server,
-            required_java_major=required_java_major
-        )
-    except ValueError as exc:
-        return jsonify({'error': str(exc)}), 400
+        if server.get('status') == 'pending':
+            return jsonify({
+                'error': 'Server not installed yet. Call /install first.'
+            }), 400
 
-    status_value = result.get('status')
-    success = status_value == 'running'
-    updated_server = (
-        storage.update_server_status(server_id, status_value)
-        if status_value else server
-    )
+        if server.get('status') == 'installing':
+            return jsonify({
+                'error': 'Server is currently installing. Please wait.'
+            }), 400
 
-    response = {
-        'success': success,
-        'message': result.get('message', ''),
-        'java_missing': result.get('java_missing', False),
-        'java_too_old': result.get('java_too_old', False),
-        'required_java': result.get('required_java', required_java_major),
-        'detected_java': result.get('detected_java'),
-        'server_java_target': result.get('server_java_target'),
-        'compatibility': compat.to_dict(),
-        'server': _augment_with_runtime(updated_server or server)
-    }
-    if required_java_major:
-        response['recommended_install'] = _build_java_recommendation(
-            platform_utils.platform_label(),
-            int(required_java_major)
+        compat = resolve_required_java(server.get('version', ''))
+        required_java_major = compat.required_java if compat.enforceable else None
+        if skip_java_enforcement():
+            required_java_major = None
+
+        try:
+            result = _registry().start_server(
+                server,
+                required_java_major=required_java_major
+            )
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
+
+        status_value = result.get('status')
+        success = status_value == 'running'
+        updated_server = (
+            storage.update_server_status(server_id, status_value)
+            if status_value else server
         )
-    return jsonify(response), 200 if success else 400
+
+        response = {
+            'success': success,
+            'message': result.get('message', ''),
+            'java_missing': result.get('java_missing', False),
+            'java_too_old': result.get('java_too_old', False),
+            'required_java': result.get('required_java', required_java_major),
+            'detected_java': result.get('detected_java'),
+            'server_java_target': result.get('server_java_target'),
+            'compatibility': compat.to_dict(),
+            'server': _augment_with_runtime(updated_server or server)
+        }
+        if required_java_major:
+            response['recommended_install'] = _build_java_recommendation(
+                platform_utils.platform_label(),
+                int(required_java_major)
+            )
+        return jsonify(response), 200 if success else 400
+    finally:
+        lock.release()
 
 
 @server_bp.route('/servers/<server_id>/stop', methods=['POST'])
@@ -894,20 +938,26 @@ def stop_server_by_id(server_id):
     if not server:
         return jsonify({'error': 'Server not found'}), 404
 
-    result = _registry().stop_server(server_id)
-    status_value = result.get('status')
-    success = status_value == 'stopped'
-    updated_server = (
-        storage.update_server_status(server_id, status_value)
-        if status_value else server
-    )
+    lock = try_acquire(server_id)
+    if lock is None:
+        return jsonify({'error': 'Another operation is in progress for this server'}), 409
+    try:
+        result = _registry().stop_server(server_id)
+        status_value = result.get('status')
+        success = status_value == 'stopped'
+        updated_server = (
+            storage.update_server_status(server_id, status_value)
+            if status_value else server
+        )
 
-    response = {
-        'success': success,
-        'message': result.get('message', ''),
-        'server': _augment_with_runtime(updated_server or server)
-    }
-    return jsonify(response), 200 if success else 400
+        response = {
+            'success': success,
+            'message': result.get('message', ''),
+            'server': _augment_with_runtime(updated_server or server)
+        }
+        return jsonify(response), 200 if success else 400
+    finally:
+        lock.release()
 
 
 @server_bp.route('/servers/<server_id>/restart', methods=['POST'])
@@ -916,25 +966,31 @@ def restart_server_by_id(server_id):
     if not server:
         return jsonify({'error': 'Server not found'}), 404
 
+    lock = try_acquire(server_id)
+    if lock is None:
+        return jsonify({'error': 'Another operation is in progress for this server'}), 409
     try:
-        result = _registry().restart_server(server)
-    except (ValueError, RuntimeError) as exc:
-        return jsonify({'error': str(exc)}), 400
+        try:
+            result = _registry().restart_server(server)
+        except (ValueError, RuntimeError) as exc:
+            return jsonify({'error': str(exc)}), 400
 
-    start_status = result['start'].get('status')
-    success = start_status == 'running'
-    updated_server = (
-        storage.update_server_status(server_id, start_status)
-        if start_status else server
-    )
+        start_status = result['start'].get('status')
+        success = start_status == 'running'
+        updated_server = (
+            storage.update_server_status(server_id, start_status)
+            if start_status else server
+        )
 
-    response = {
-        'success': success,
-        'message': result['start'].get('message', ''),
-        'details': result,
-        'server': _augment_with_runtime(updated_server or server)
-    }
-    return jsonify(response), 200 if success else 400
+        response = {
+            'success': success,
+            'message': result['start'].get('message', ''),
+            'details': result,
+            'server': _augment_with_runtime(updated_server or server)
+        }
+        return jsonify(response), 200 if success else 400
+    finally:
+        lock.release()
 
 
 @server_bp.route('/java/status', methods=['GET'])
