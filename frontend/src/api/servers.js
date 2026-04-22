@@ -250,10 +250,42 @@ export async function getSystemMetrics() {
 
 /**
  * Get Java installation status and platform download URL
- * @returns {Promise<Object>} { installed, version, platform, download_url }
+ * @param {Object} options
+ * @param {string} options.mcVersion - Optional Minecraft version to resolve required Java.
+ * @param {number} options.requiredJava - Optional forced required Java version.
+ * @param {string} options.javaPath - Optional java executable/path to check.
+ * @returns {Promise<Object>} Java runtime and recommendation payload
  */
-export async function getJavaStatus() {
-  return get('/api/java/status')
+export async function getJavaStatus(options = {}) {
+  const params = {}
+  if (options.mcVersion) {
+    params.mc_version = options.mcVersion
+  }
+  if (options.requiredJava) {
+    params.required_java = options.requiredJava
+  }
+  if (options.javaPath) {
+    params.java_path = options.javaPath
+  }
+  return get('/api/java/status', params)
+}
+
+/**
+ * Start a managed Java install for the given major version.
+ * @param {number} major - Java major version to install (e.g. 21)
+ * @returns {Promise<Object>} Task descriptor including task_id
+ */
+export async function installJava(major) {
+  return post('/api/java/install', { major })
+}
+
+/**
+ * Poll a managed Java install task for progress.
+ * @param {string} taskId - Task id returned by installJava()
+ * @returns {Promise<Object>} Current task status and bytes-downloaded
+ */
+export async function getJavaInstallProgress(taskId) {
+  return get(`/api/java/install/progress/${taskId}`)
 }
 
 /**

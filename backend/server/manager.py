@@ -106,27 +106,77 @@ class ServerManager:
         with open(eula_path, "w", encoding="utf-8") as eula_file:
             eula_file.write("eula=true\n")
 
-    def _check_java_version(self) -> tuple[bool, str]:
+    @staticmethod
+    def _resolve_java_major(version_output: str) -> Optional[int]:
+        match = re.search(r'version "([^"]+)"', version_output)
+        if not match:
+            return None
+        raw = match.group(1).strip()
+        # Legacy Java 8 format is 1.8.x, where major version is 8.
+        if raw.startswith("1."):
+            parts = raw.split(".")
+            if len(parts) > 1 and parts[1].isdigit():
+                return int(parts[1])
+            return None
+        major_match = re.match(r"^(\d+)", raw)
+        if not major_match:
+            return None
+        return int(major_match.group(1))
+
+    def _java_executable(self) -> str:
+        if self.command and isinstance(self.command[0], str) and self.command[0].strip():
+            return self.command[0]
+        return "java"
+
+    def probe_java(self) -> dict:
+        java_exec = self._java_executable()
         try:
             result = subprocess.run([
-                "java",
+                java_exec,
                 "-version",
             ], capture_output=True, text=True)
         except FileNotFoundError:
-            return False, "Java is not installed or not found in PATH. Please install Java 21 or later."
+            return {
+                "available": False,
+                "java_exec": java_exec,
+                "major_version": None,
+                "version_output": "",
+                "message": (
+                    f"Java executable '{java_exec}' is not installed or not found. "
+                    "Please install Java or update server Java path."
+                ),
+                "java_missing": True,
+            }
         version_output = (result.stdout or "") + (result.stderr or "")
         if result.returncode != 0:
-            return False, "Java executable not available"
+            return {
+                "available": False,
+                "java_exec": java_exec,
+                "major_version": None,
+                "version_output": version_output.strip(),
+                "message": f"Java executable '{java_exec}' is not available",
+                "java_missing": False,
+            }
 
-        match = re.search(r'version "(\d+)', version_output)
-        if not match:
-            return False, "Could not determine Java version"
+        major_version = self._resolve_java_major(version_output)
+        if major_version is None:
+            return {
+                "available": False,
+                "java_exec": java_exec,
+                "major_version": None,
+                "version_output": version_output.strip(),
+                "message": "Could not determine Java version",
+                "java_missing": False,
+            }
 
-        major_version = int(match.group(1))
-        if major_version < 21:
-            return False, f"Java 21 is required (found Java {major_version})"
-
-        return True, version_output.strip()
+        return {
+            "available": True,
+            "java_exec": java_exec,
+            "major_version": major_version,
+            "version_output": version_output.strip(),
+            "message": version_output.strip(),
+            "java_missing": False,
+        }
 
     def _start_log_streams(self) -> None:
         if not self._process:
@@ -191,7 +241,7 @@ class ServerManager:
             self._process = None
             return False, f"Failed to start server: {exc}"
 
-    def start(self) -> dict:
+    def start(self, required_java_major: Optional[int] = None) -> dict:
         """Start the server process if it is not already running."""
         with self._lock:
             if self.is_running:
@@ -206,18 +256,43 @@ class ServerManager:
                 }
 
             self._ensure_eula()
-            java_ok, java_message = self._check_java_version()
-            if not java_ok:
-                java_missing = "not installed" in java_message or "not found" in java_message
-                return {"status": "stopped", "message": java_message, "java_missing": java_missing}
+            java_info = self.probe_java()
+            if not java_info.get("available"):
+                return {
+                    "status": "stopped",
+                    "message": java_info.get("message", "Java executable not available"),
+                    "java_missing": bool(java_info.get("java_missing", False)),
+                    "server_java_target": java_info.get("java_exec"),
+                }
+
+            detected_java = int(java_info.get("major_version"))
+            if required_java_major is not None and detected_java < required_java_major:
+                return {
+                    "status": "stopped",
+                    "message": (
+                        f"Java {required_java_major}+ is required "
+                        f"(found Java {detected_java})"
+                    ),
+                    "java_missing": False,
+                    "java_too_old": True,
+                    "required_java": required_java_major,
+                    "detected_java": detected_java,
+                    "server_java_target": java_info.get("java_exec"),
+                }
 
             started, message = self._spawn_process(command_to_run)
             status = "running" if started else "stopped"
             combined_message = message
             if started:
-                combined_message = f"{message} (Java verified: {java_message})"
+                combined_message = f"{message} (Java verified: {java_info.get('message', '')})"
 
-            return {"status": status, "message": combined_message, "command": command_to_run}
+            return {
+                "status": status,
+                "message": combined_message,
+                "command": command_to_run,
+                "detected_java": detected_java,
+                "server_java_target": java_info.get("java_exec"),
+            }
 
     def stop(self) -> dict:
         """Stop the server process if it is running."""

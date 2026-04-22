@@ -10,7 +10,6 @@ import {
   startServer,
   stopServer,
   getSystemMetrics,
-  getJavaStatus,
   getUpdateStatus,
   triggerUpdate
 } from '../api/servers'
@@ -23,7 +22,7 @@ const servers = ref([])
 const loading = ref(true)
 const showCreateModal = ref(false)
 const showJavaModal = ref(false)
-const javaStatus = ref({ platform: '', download_url: 'https://adoptium.net/temurin/releases/?version=21' })
+const pendingJavaServer = ref(null)
 const serverActions = ref({})
 const systemMetrics = ref({ cpuPercent: null })
 const updateState = ref({
@@ -103,7 +102,19 @@ const loadUpdateState = async ({ silent = false } = {}) => {
 
 const handleCreateServer = async (createdServer) => {
   try {
-    toast.success(`Server "${createdServer.name}" created successfully!`, 'Server Created')
+    const modpackTitle = createdServer?.modpackSelection?.title
+    const modpackInstallError = createdServer?.modpackInstallError
+    if (modpackInstallError) {
+      toast.warning(
+        `Server "${createdServer.name}" was created, but modpack install failed: ${modpackInstallError}`,
+        'Modpack Install Failed'
+      )
+    } else {
+      const message = modpackTitle
+        ? `Server "${createdServer.name}" created. Selected modpack: ${modpackTitle}.`
+        : `Server "${createdServer.name}" created successfully!`
+      toast.success(message, 'Server Created')
+    }
     await loadServers()
   } catch (error) {
     console.error('Failed to refresh servers:', error)
@@ -125,7 +136,7 @@ const setServerActionState = (id, value) => {
   serverActions.value = next
 }
 
-const handleStartStop = async (id, actionFn, successMessage, errorTitle) => {
+const handleStartStop = async (id, actionFn, successMessage, errorTitle, { isStart = false } = {}) => {
   if (serverActions.value[id]) {
     return
   }
@@ -139,8 +150,8 @@ const handleStartStop = async (id, actionFn, successMessage, errorTitle) => {
     }
   } catch (error) {
     console.error(error)
-    if (error.data?.java_missing) {
-      try { javaStatus.value = await getJavaStatus() } catch (_) { /* ignore */ }
+    if (isStart && (error.data?.java_missing || error.data?.java_too_old)) {
+      pendingJavaServer.value = servers.value.find(s => s.id === id) || { id }
       showJavaModal.value = true
     } else {
       toast.error(error.message || 'Request failed', errorTitle)
@@ -151,8 +162,17 @@ const handleStartStop = async (id, actionFn, successMessage, errorTitle) => {
   }
 }
 
-const handleStart = (id) => handleStartStop(id, startServer, 'Server start requested', 'Start Failed')
+const handleStart = (id) => handleStartStop(id, startServer, 'Server start requested', 'Start Failed', { isStart: true })
 const handleStop = (id) => handleStartStop(id, stopServer, 'Server stop requested', 'Stop Failed')
+
+const handleJavaInstalled = () => {
+  const pending = pendingJavaServer.value
+  showJavaModal.value = false
+  pendingJavaServer.value = null
+  if (pending?.id) {
+    handleStart(pending.id)
+  }
+}
 
 const cpuStatLabel = computed(() => {
   const value = systemMetrics.value.cpuPercent
@@ -317,9 +337,9 @@ onUnmounted(() => {
 
     <JavaInstallModal
       :show="showJavaModal"
-      :platform="javaStatus.platform"
-      :download-url="javaStatus.download_url"
+      :mc-version="pendingJavaServer?.version || ''"
       @close="showJavaModal = false"
+      @java-installed="handleJavaInstalled"
     />
   </div>
 </template>

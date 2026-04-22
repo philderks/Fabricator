@@ -5,6 +5,7 @@
 
 import { get, post } from './client'
 
+
 /**
  * Search for mods on Modrinth
  * @param {Object} params - Search parameters
@@ -94,4 +95,98 @@ export async function getLoaders() {
  */
 export async function getGameVersions() {
   return get('/api/modrinth/game-versions')
+}
+
+/**
+ * Search for modpacks on Modrinth.
+ * @param {Object} params - Search parameters
+ * @param {string} params.query - Search query
+ * @param {string} params.version - Minecraft version
+ * @param {string} params.loader - Mod loader (fabric, quilt, etc.)
+ * @param {string} params.sort - Sort order
+ * @param {number} params.limit - Number of results
+ * @param {number} params.offset - Pagination offset
+ * @returns {Promise<Object>} Search results with hits array
+ */
+export async function searchModpacks({
+  query = '',
+  version = '',
+  loader = '',
+  sort = 'relevance',
+  limit = 8,
+  offset = 0,
+  strictVersion = false
+}) {
+  return get('/api/modrinth/modpacks/search', {
+    query,
+    mc_version: version,
+    loader,
+    strict_version: strictVersion,
+    index: sort,
+    limit: Math.min(limit, 50),
+    offset
+  })
+}
+
+/**
+ * Fetch details for a Modrinth project by slug or ID.
+ * @param {string} projectIdOrSlug - Modrinth project identifier
+ * @returns {Promise<Object>} Project details
+ */
+export async function getProjectDetails(projectIdOrSlug) {
+  return get(`/api/modrinth/project/${encodeURIComponent(projectIdOrSlug)}`)
+}
+
+/**
+ * Resolve a project version compatible with the requested game version/loader.
+ * @param {string} projectId - Modrinth project ID or slug
+ * @param {Object} options - Resolve options
+ * @param {string} options.mc_version - Minecraft version
+ * @param {string} options.loader - Loader (fabric, quilt, etc.)
+ * @returns {Promise<Object>} Resolved version payload
+ */
+export async function resolveProjectVersion(projectId, { mc_version, loader }) {
+  return get(`/api/modrinth/project/${encodeURIComponent(projectId)}/resolve-version`, {
+    mc_version,
+    loader
+  })
+}
+
+/**
+ * Poll modpack install progress for a server.
+ * @param {string|number} serverId - Server identifier
+ * @returns {Promise<Object>} Progress info with active, stage, current, total, detail
+ */
+export async function getModpackInstallProgress(serverId) {
+  return get(`/api/modrinth/modpack/install-progress/${encodeURIComponent(serverId)}`)
+}
+
+/**
+ * Install a modpack on a server.
+ * Downloads the .mrpack, installs all server-side mods, and applies overrides.
+ * @param {string} projectId - Modrinth project ID or slug
+ * @param {Object} options - Installation options
+ * @param {string} options.mc_version - Minecraft version
+ * @param {string} options.loader - Mod loader
+ * @param {string|number} options.server_id - Target server identifier
+ * @returns {Promise<Object>} Installation result
+ */
+export async function installModpack(projectId, {
+  mc_version,
+  loader,
+  server_id,
+  clean_install = false,
+  create_backup = false,
+  allow_missing = false,
+  mod_side_overrides = null
+}) {
+  return post(`/api/modrinth/modpack/${encodeURIComponent(projectId)}/install`, {
+    mc_version,
+    loader,
+    server_id,
+    clean_install,
+    create_backup,
+    allow_missing,
+    mod_side_overrides
+  })
 }

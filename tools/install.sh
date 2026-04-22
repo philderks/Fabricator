@@ -109,7 +109,9 @@ main() {
 
     case "$PACKAGETYPE" in
         apt)
-            DEPS="python3 python3-venv python3-pip openjdk-17-jre curl ca-certificates grep sed tar rsync"
+            # Install a modern Java baseline. Individual servers can still use
+            # a custom Java path when newer versions (e.g. Java 25) are needed.
+            DEPS="python3 python3-venv python3-pip openjdk-21-jre curl ca-certificates grep sed tar rsync"
             $SUDO apt-get update </dev/null
             $SUDO apt-get install -y $DEPS </dev/null
             # Node.js 18+ required for Vue/Vite frontend; use NodeSource on Debian/Ubuntu
@@ -146,7 +148,7 @@ main() {
             fi
             ;;
         dnf)
-            DEPS="python3 python3-pip java-17-openjdk curl ca-certificates grep sed tar rsync"
+            DEPS="python3 python3-pip java-21-openjdk curl ca-certificates grep sed tar rsync"
             $SUDO dnf install -y $DEPS </dev/null
             node_ver="$(node -v 2>/dev/null | sed 's/v//' | cut -d. -f1 || true)"
             if [ -z "$node_ver" ] || [ "$node_ver" -lt 18 ]; then

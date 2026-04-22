@@ -68,3 +68,6 @@ build/
 # Servers
 /servers
 servers.json
+
+# Java
+java/

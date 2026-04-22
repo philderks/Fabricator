@@ -11,6 +11,8 @@ from flask import Blueprint, jsonify, request
 from backend.server.registry import get_server_process_registry
 from backend.server import storage
 from backend.server.installer import FabricInstaller, InstallStatus
+from backend.server.java_compat import resolve_required_java, skip_java_enforcement
+from backend.server import java_manager
 from backend.utils import platform as platform_utils
 
 try:
@@ -243,6 +245,65 @@ def _safe_extract_zip(zip_file: zipfile.ZipFile, destination: Path) -> None:
             shutil.copyfileobj(source, target)
 
 
+def _java_download_url(system: str, java_major: int) -> str:
+    os_map = {'windows': 'windows', 'darwin': 'mac', 'linux': 'linux'}
+    os_label = os_map.get(system)
+    arch = platform_utils.arch_label()
+    if not os_label:
+        return f'https://adoptium.net/temurin/releases/?version={java_major}'
+    return (
+        f'https://api.adoptium.net/v3/binary/latest/{java_major}/ga'
+        f'/{os_label}/{arch}/jre/hotspot/normal/eclipse'
+    )
+
+
+def _installer_type(system: str) -> str:
+    return {'windows': 'msi', 'darwin': 'pkg', 'linux': 'tar.gz'}.get(system, 'installer')
+
+
+def _linux_install_command(java_major: int) -> str:
+    return f"sudo apt install openjdk-{java_major}-jre-headless"
+
+
+def _build_java_recommendation(system: str, required_java: int) -> dict:
+    return {
+        'required_java': required_java,
+        'download_url': _java_download_url(system, required_java),
+        'linux_install_command': _linux_install_command(required_java),
+        'installer_type': _installer_type(system),
+        'arch': platform_utils.arch_label(),
+    }
+
+
+def _java_compat_payload(mc_version: str) -> dict:
+    compat = resolve_required_java(mc_version)
+    return compat.to_dict()
+
+
+def _server_java_check_payload(server: dict) -> dict:
+    runtime = process_registry.get_java_runtime(server)
+    compat = resolve_required_java(server.get('version', ''))
+    detected_java = runtime.get('major_version')
+    required_java = compat.required_java
+    meets_requirement = (
+        compat.enforceable and
+        isinstance(detected_java, int) and
+        detected_java >= int(required_java)
+    )
+    enforcement_skipped = skip_java_enforcement()
+    if enforcement_skipped and compat.enforceable:
+        meets_requirement = True
+    return {
+        'runtime': runtime,
+        'compatibility': compat.to_dict(),
+        'required_java': required_java,
+        'detected_java': detected_java,
+        'enforceable': compat.enforceable,
+        'meets_requirement': bool(meets_requirement),
+        'java_enforcement_skipped': enforcement_skipped,
+    }
+
+
 @server_bp.route('/status', methods=['GET'])
 def get_status():
     return jsonify({
@@ -297,7 +358,20 @@ def create_server():
 
     try:
         data['status'] = 'pending'
+        compatibility = _java_compat_payload(data.get('version', ''))
+        data['javaCompatibility'] = compatibility
         server = storage.create_server(data)
+        java_check = _server_java_check_payload(server)
+        recommendation = None
+        if compatibility.get('required_java'):
+            recommendation = _build_java_recommendation(
+                platform_utils.platform_label(),
+                int(compatibility['required_java'])
+            )
+        server['javaRequirement'] = {
+            **java_check,
+            'recommended_install': recommendation
+        }
         return jsonify(server), 201
     except Exception as exc:
         return jsonify({'error': str(exc)}), 500
@@ -683,6 +757,31 @@ def install_server(server_id):
     storage.update_server_status(server_id, 'installing')
 
     try:
+        java_check = _server_java_check_payload(server)
+        compat = java_check['compatibility']
+        if java_check['enforceable'] and not java_check['meets_requirement']:
+            required_java = int(java_check['required_java'])
+            detected_java = java_check['detected_java']
+            runtime = java_check['runtime']
+            storage.update_server_status(server_id, 'stopped')
+            return jsonify({
+                'success': False,
+                'error': (
+                    f'Java {required_java}+ is required for Minecraft {server.get("version")} '
+                    f'(detected: {detected_java if detected_java is not None else "unknown"})'
+                ),
+                'java_missing': bool(runtime.get('java_missing', False)),
+                'java_too_old': detected_java is not None,
+                'required_java': required_java,
+                'detected_java': detected_java,
+                'server_java_target': runtime.get('java_exec'),
+                'compatibility': compat,
+                'recommended_install': _build_java_recommendation(
+                    platform_utils.platform_label(),
+                    required_java
+                )
+            }), 400
+
         result = installer.install_with_config(
             mc_version=mc_version,
             server_config=server
@@ -728,8 +827,16 @@ def start_server_by_id(server_id):
             'error': 'Server is currently installing. Please wait.'
         }), 400
 
+    compat = resolve_required_java(server.get('version', ''))
+    required_java_major = compat.required_java if compat.enforceable else None
+    if skip_java_enforcement():
+        required_java_major = None
+
     try:
-        result = process_registry.start_server(server)
+        result = process_registry.start_server(
+            server,
+            required_java_major=required_java_major
+        )
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
 
@@ -744,8 +851,18 @@ def start_server_by_id(server_id):
         'success': success,
         'message': result.get('message', ''),
         'java_missing': result.get('java_missing', False),
+        'java_too_old': result.get('java_too_old', False),
+        'required_java': result.get('required_java', required_java_major),
+        'detected_java': result.get('detected_java'),
+        'server_java_target': result.get('server_java_target'),
+        'compatibility': compat.to_dict(),
         'server': _augment_with_runtime(updated_server or server)
     }
+    if required_java_major:
+        response['recommended_install'] = _build_java_recommendation(
+            platform_utils.platform_label(),
+            int(required_java_major)
+        )
     return jsonify(response), 200 if success else 400
 
 
@@ -800,38 +917,158 @@ def restart_server_by_id(server_id):
 
 @server_bp.route('/java/status', methods=['GET'])
 def get_java_status():
-    """Check Java installation status and return platform-appropriate download URL."""
-    import platform as _platform
+    """Return managed Java status, system Java probe and Temurin asset metadata."""
     import subprocess
     import re
 
-    system = _platform.system().lower()
-    download_urls = {
-        'windows': 'https://adoptium.net/temurin/releases/?version=21&os=windows&arch=x64',
-        'darwin':  'https://adoptium.net/temurin/releases/?version=21&os=mac&arch=x64',
-        'linux':   'https://adoptium.net/temurin/releases/?version=21&os=linux&arch=x64',
-    }
-    download_url = download_urls.get(system, 'https://adoptium.net/temurin/releases/?version=21')
+    system = platform_utils.platform_label()
+    mc_version = request.args.get('mc_version', '').strip()
+    required_java_param = request.args.get('required_java')
+    java_path = request.args.get('java_path') or 'java'
+
+    compat = resolve_required_java(mc_version) if mc_version else None
+    required_java = None
+    if required_java_param:
+        try:
+            required_java = int(required_java_param)
+        except ValueError:
+            required_java = None
+    if required_java is None and compat and compat.required_java is not None:
+        required_java = int(compat.required_java)
+    if required_java is None and mc_version:
+        required_java = java_manager.required_java_for(mc_version)
 
     try:
-        result = subprocess.run(['java', '-version'], capture_output=True, text=True)
+        result = subprocess.run([java_path, '-version'], capture_output=True, text=True)
         version_output = (result.stdout or '') + (result.stderr or '')
         installed = result.returncode == 0
         version = None
+        detected_major = None
         if installed:
             match = re.search(r'version "([^"]+)"', version_output)
             if match:
                 version = match.group(1)
+                if version.startswith('1.'):
+                    parts = version.split('.')
+                    if len(parts) > 1 and parts[1].isdigit():
+                        detected_major = int(parts[1])
+                else:
+                    major_match = re.match(r'^(\d+)', version)
+                    if major_match:
+                        detected_major = int(major_match.group(1))
     except FileNotFoundError:
         installed = False
         version = None
+        detected_major = None
+
+    recommendation = (
+        _build_java_recommendation(system, int(required_java))
+        if required_java is not None else None
+    )
+    enforcement_skipped = skip_java_enforcement()
+    meets_requirement = (
+        installed and
+        required_java is not None and
+        detected_major is not None and
+        detected_major >= required_java
+    )
+    if (
+        enforcement_skipped and
+        required_java is not None and
+        installed and
+        isinstance(detected_major, int)
+    ):
+        meets_requirement = True
+
+    system_java_block = {
+        'path': java_path,
+        'version': detected_major,
+        'meets_requirement': bool(meets_requirement),
+    }
+
+    managed_block = None
+    asset_block = None
+    install_major = None
+    asset_error = None
+    if required_java is not None:
+        managed_info = java_manager.managed_java_info(int(required_java))
+        install_major = managed_info['major']
+        managed_block = {
+            'path': managed_info['path'],
+            'installed': managed_info['installed'],
+            'major': managed_info['major'],
+            'substituted': managed_info['substituted'],
+        }
+        try:
+            asset = java_manager.adoptium_asset_url(int(required_java))
+            asset_block = {
+                'download_url': asset['download_url'],
+                'filename': asset['filename'],
+                'size_bytes': asset['size_bytes'],
+                'checksum_algorithm': asset['checksum_algorithm'],
+                'install_major': asset['install_major'],
+                'substituted': asset['substituted'],
+            }
+        except RuntimeError as exc:
+            asset_error = str(exc)
 
     return jsonify({
+        # New structured fields consumed by JavaInstallModal.vue
+        'required_java': required_java,
+        'install_major': install_major,
+        'system_java': system_java_block,
+        'managed_java': managed_block,
+        'asset': asset_block,
+        'asset_error': asset_error,
+        'arch': platform_utils.arch_label(),
+        # Legacy flat fields kept for backward compatibility
         'installed': installed,
         'version': version,
+        'detected_major': detected_major,
+        'java_path': java_path,
+        'meets_requirement': meets_requirement,
+        'java_enforcement_skipped': enforcement_skipped,
         'platform': system,
-        'download_url': download_url,
+        'download_url': (
+            asset_block['download_url'] if asset_block
+            else (recommendation['download_url'] if recommendation else _java_download_url(system, 21))
+        ),
+        'linux_install_command': recommendation['linux_install_command'] if recommendation else _linux_install_command(21),
+        'recommended_install': recommendation,
+        'compatibility': compat.to_dict() if compat else None,
     })
+
+
+@server_bp.route('/java/install', methods=['POST'])
+def install_java_endpoint():
+    """Kick off a managed Java install for the given major version."""
+    data = request.get_json(silent=True) or {}
+    major_raw = data.get('major')
+    try:
+        major = int(major_raw)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Field "major" must be an integer'}), 400
+    if major < 8 or major > 99:
+        return jsonify({'error': f'Unsupported Java major: {major}'}), 400
+
+    task_id = java_manager.start_install_task(major)
+    task = java_manager.get_install_task(task_id) or {}
+    return jsonify({
+        'task_id': task_id,
+        'status': task.get('status', 'queued'),
+        'requested_major': task.get('requested_major'),
+        'install_major': task.get('install_major'),
+        'substituted': task.get('substituted', False),
+    })
+
+
+@server_bp.route('/java/install/progress/<task_id>', methods=['GET'])
+def get_java_install_progress(task_id):
+    """Poll for progress of a managed Java install task."""
+    task = java_manager.get_install_task(task_id)
+    if not task:
+        return jsonify({'error': 'Task not found'}), 404
+    return jsonify(task)
 
 
 @server_bp.route('/metrics/system', methods=['GET'])
