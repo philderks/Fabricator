@@ -1,5 +1,6 @@
 """Server management routes and blueprints."""
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 import os
 import shutil
@@ -21,21 +22,42 @@ except ImportError:  # pragma: no cover - optional dependency fallback
     psutil = None
 
 server_bp = Blueprint('server', __name__, url_prefix='/api')
-process_registry = get_server_process_registry()
-FABRIC_META_STAGING_DIR = platform_utils.temp_directory('fabricator-meta')
 
 
 def _cleanup_stale_statuses() -> None:
+    """Reset 'installing'/'starting'/'stopping' records from a previous run.
+
+    Called once from create_app() — must tolerate a missing or malformed
+    servers.json without crashing startup.
+    """
+    import json as _json
+
     stale_states = {'installing', 'starting', 'stopping'}
-    for server in storage.get_all_servers():
+    try:
+        servers = storage.get_all_servers()
+    except (OSError, _json.JSONDecodeError):
+        return
+
+    for server in servers:
         server_id = server.get('id')
         if not server_id:
             continue
         if (server.get('status') or '').lower() in stale_states:
-            storage.update_server_status(server_id, 'stopped')
+            try:
+                storage.update_server_status(server_id, 'stopped')
+            except OSError:
+                pass
 
 
-_cleanup_stale_statuses()
+def _registry():
+    """Lazy accessor for the process registry."""
+    return get_server_process_registry()
+
+
+@lru_cache(maxsize=1)
+def _fabric_meta_dir():
+    """Lazy, cached accessor for the Fabric meta staging temp dir."""
+    return platform_utils.temp_directory('fabricator-meta')
 
 
 def _handle_remove_readonly(func, path, exc_info):
@@ -61,9 +83,9 @@ def _augment_with_runtime(server: dict) -> dict:
     if not server or 'id' not in server:
         return server
 
-    runtime = dict(process_registry.get_status(server['id']) or {})
+    runtime = dict(_registry().get_status(server['id']) or {})
     try:
-        mods_path = process_registry.resolve_mods_path(server)
+        mods_path = _registry().resolve_mods_path(server)
         runtime['mods'] = sum(1 for f in mods_path.iterdir() if f.is_file() and f.suffix == '.jar')
     except Exception:
         pass
@@ -118,7 +140,7 @@ def _get_installer(loader: str, install_path: Path):
 
 def _get_install_path(server: dict) -> Path:
     try:
-        return process_registry._resolve_install_path(server)
+        return _registry()._resolve_install_path(server)
     except ValueError as exc:
         raise ValueError(str(exc)) from exc
 
@@ -281,7 +303,7 @@ def _java_compat_payload(mc_version: str) -> dict:
 
 
 def _server_java_check_payload(server: dict) -> dict:
-    runtime = process_registry.get_java_runtime(server)
+    runtime = _registry().get_java_runtime(server)
     compat = resolve_required_java(server.get('version', ''))
     detected_java = runtime.get('major_version')
     required_java = compat.required_java
@@ -390,7 +412,7 @@ def get_server_details(server_id):
 @server_bp.route('/servers/<server_id>/logs', methods=['GET'])
 def get_server_logs(server_id):
     limit = request.args.get('limit', default=200, type=int)
-    logs = process_registry.get_logs(server_id, limit)
+    logs = _registry().get_logs(server_id, limit)
     return jsonify(logs)
 
 
@@ -491,7 +513,7 @@ def list_server_mods(server_id):
         return jsonify({'error': 'Server not found'}), 404
 
     try:
-        mods_path = process_registry.resolve_mods_path(server)
+        mods_path = _registry().resolve_mods_path(server)
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
 
@@ -510,7 +532,7 @@ def delete_server_mod(server_id, filename):
         return jsonify({'error': 'Server not found'}), 404
 
     try:
-        mods_path = process_registry.resolve_mods_path(server)
+        mods_path = _registry().resolve_mods_path(server)
         target = _ensure_child_path(mods_path, filename)
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
@@ -548,7 +570,7 @@ def create_server_backup(server_id):
     if not server:
         return jsonify({'error': 'Server not found'}), 404
 
-    runtime_status = process_registry.get_status(server_id)
+    runtime_status = _registry().get_status(server_id)
     if runtime_status.get('status') == 'running':
         return jsonify({'error': 'Stop the server before creating a backup to avoid data corruption'}), 400
 
@@ -594,7 +616,7 @@ def restore_server_backup(server_id, backup_id):
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
 
-    status = process_registry.get_status(server_id)
+    status = _registry().get_status(server_id)
     if status.get('status') == 'running':
         return jsonify({'error': 'Stop the server before restoring a backup'}), 400
 
@@ -670,7 +692,7 @@ def update_server_settings(server_id):
     if not server:
         return jsonify({'error': 'Server not found'}), 404
 
-    runtime_status = process_registry.get_status(server_id)
+    runtime_status = _registry().get_status(server_id)
     if runtime_status.get('status') == 'running':
         return jsonify({'error': 'Stop the server before changing settings'}), 409
 
@@ -683,7 +705,7 @@ def update_server_settings(server_id):
     if not success:
         return jsonify({'error': error_message}), 500
 
-    process_registry.invalidate(server_id)
+    _registry().invalidate(server_id)
 
     return jsonify(server)
 
@@ -695,7 +717,7 @@ def delete_server_route(server_id):
         return jsonify({'error': 'Server not found'}), 404
 
     # Stop running process if needed
-    process_registry.stop_server(server_id)
+    _registry().stop_server(server_id)
 
     # Resolve install path to clean up files
     install_path = None
@@ -740,7 +762,7 @@ def install_server(server_id):
         return jsonify({'error': 'Server has no Minecraft version configured'}), 400
 
     try:
-        install_path = process_registry._resolve_install_path(server)
+        install_path = _registry()._resolve_install_path(server)
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
 
@@ -833,7 +855,7 @@ def start_server_by_id(server_id):
         required_java_major = None
 
     try:
-        result = process_registry.start_server(
+        result = _registry().start_server(
             server,
             required_java_major=required_java_major
         )
@@ -872,7 +894,7 @@ def stop_server_by_id(server_id):
     if not server:
         return jsonify({'error': 'Server not found'}), 404
 
-    result = process_registry.stop_server(server_id)
+    result = _registry().stop_server(server_id)
     status_value = result.get('status')
     success = status_value == 'stopped'
     updated_server = (
@@ -895,7 +917,7 @@ def restart_server_by_id(server_id):
         return jsonify({'error': 'Server not found'}), 404
 
     try:
-        result = process_registry.restart_server(server)
+        result = _registry().restart_server(server)
     except (ValueError, RuntimeError) as exc:
         return jsonify({'error': str(exc)}), 400
 
@@ -1097,7 +1119,7 @@ def get_server_metrics(server_id):
     if not server:
         return jsonify({'error': 'Server not found'}), 404
 
-    runtime = process_registry.get_status(server_id) or {}
+    runtime = _registry().get_status(server_id) or {}
 
     metrics = {
         'status': runtime.get('status', 'stopped'),
@@ -1111,7 +1133,7 @@ def get_server_metrics(server_id):
 @server_bp.route('/fabric/versions/game', methods=['GET'])
 def get_fabric_game_versions():
     """Get Minecraft versions supported by Fabric."""
-    installer = FabricInstaller(FABRIC_META_STAGING_DIR)
+    installer = FabricInstaller(_fabric_meta_dir())
     versions = installer.get_minecraft_versions()
     return jsonify(versions)
 
@@ -1120,7 +1142,7 @@ def get_fabric_game_versions():
 def get_fabric_loader_versions():
     """Get available Fabric loader versions."""
     mc_version = request.args.get('mc_version')
-    installer = FabricInstaller(FABRIC_META_STAGING_DIR)
+    installer = FabricInstaller(_fabric_meta_dir())
     versions = installer.get_available_versions(mc_version)
     return jsonify(versions)
 
@@ -1137,6 +1159,6 @@ def send_console_command(server_id):
     if not server:
         return jsonify({'error': 'Server not found'}), 404
 
-    result = process_registry.send_command(server_id, command)
+    result = _registry().send_command(server_id, command)
     status_code = 200 if result.get('success') else 400
     return jsonify(result), status_code

@@ -14,7 +14,11 @@ from backend.server.java_compat import resolve_required_java, skip_java_enforcem
 
 modrinth_bp = Blueprint('modrinth', __name__, url_prefix='/api/modrinth')
 modrinth_client = ModrinthClient()
-process_registry = get_server_process_registry()
+
+
+def _registry():
+    """Lazy accessor for the process registry."""
+    return get_server_process_registry()
 
 _install_progress_lock = threading.Lock()
 _install_progress: dict[str, dict] = {}
@@ -90,7 +94,7 @@ def _resolve_mods_folder(server_id: str | None):
         if not server:
             return None, ({'error': 'Server not found'}, 404)
         try:
-            path = process_registry.resolve_mods_path(server)
+            path = _registry().resolve_mods_path(server)
             return path, None
         except ValueError as exc:
             return None, ({'error': str(exc)}, 400)
@@ -358,7 +362,7 @@ def install_modpack(project_id):
     if not server:
         return jsonify({'error': 'Server not found'}), 404
 
-    runtime_status = process_registry.get_status(server_id)
+    runtime_status = _registry().get_status(server_id)
     if runtime_status.get('status') == 'running':
         return jsonify({'error': 'Stop the server before installing a modpack'}), 400
 
@@ -368,7 +372,7 @@ def install_modpack(project_id):
         _active_installs.add(server_id)
 
     try:
-        install_path = process_registry._resolve_install_path(server)
+        install_path = _registry()._resolve_install_path(server)
     except ValueError as exc:
         with _active_installs_lock:
             _active_installs.discard(server_id)
@@ -432,7 +436,7 @@ def install_modpack(project_id):
     if effective_mc and not skip_java_enforcement():
         compat = resolve_required_java(effective_mc)
         if compat.enforceable:
-            runtime = process_registry.get_java_runtime(server)
+            runtime = _registry().get_java_runtime(server)
             detected = runtime.get('major_version')
             if detected is None or detected < compat.required_java:
                 java_warning = {
