@@ -1,5 +1,6 @@
 """JSON-based storage for server data."""
 import json
+import os
 import shutil
 import threading
 import uuid
@@ -48,26 +49,35 @@ def _ensure_file_exists():
 def load_servers() -> List[Dict[str, Any]]:
     """Load all servers from JSON file.
 
-    Returns:
-        List of server dictionaries
+    Raises:
+        json.JSONDecodeError if the file exists but is corrupted. Callers
+        must decide how to surface this to the user — silently returning []
+        would cause the next save to overwrite genuine state with an empty
+        list.
     """
     _ensure_file_exists()
-    try:
-        with open(SERVERS_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except json.JSONDecodeError:
-        return []
+    with open(SERVERS_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 def save_servers(servers: List[Dict[str, Any]]) -> None:
-    """Save servers list to JSON file.
+    """Save servers list to JSON file atomically.
 
-    Args:
-        servers: List of server dictionaries
+    Writes to ``servers.json.tmp`` in the same directory, fsyncs, then
+    ``os.replace`` swaps it into place. A crash between write and replace
+    leaves the previous file intact; a crash after replace leaves the new
+    one fully written.
     """
-    SERVERS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(SERVERS_FILE, 'w', encoding='utf-8') as f:
+    target = SERVERS_FILE
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = target.with_suffix(target.suffix + ".tmp")
+
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(servers, f, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+
+    os.replace(tmp_path, target)
 
 
 def generate_server_id() -> str:
