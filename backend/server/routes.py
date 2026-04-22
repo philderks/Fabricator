@@ -256,8 +256,12 @@ def _safe_extract_zip(zip_file: zipfile.ZipFile, destination: Path) -> None:
     for member in zip_file.infolist():
         member_path = destination / member.filename
         resolved_path = member_path.resolve()
-        if not str(resolved_path).startswith(str(destination)):
-            raise ValueError('Archive contains invalid paths')
+        try:
+            resolved_path.relative_to(destination)
+        except ValueError as exc:
+            raise ValueError(
+                f"Archive member escapes destination: {member.filename!r}"
+            ) from exc
 
         if member.is_dir():
             resolved_path.mkdir(parents=True, exist_ok=True)
@@ -646,21 +650,47 @@ def restore_server_backup(server_id, backup_id):
         if not backup_path.exists():
             return jsonify({'error': 'Backup not found'}), 404
 
+        staging = base_path.parent / f".restore-{server_id}-{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}"
+        staging.mkdir(parents=True, exist_ok=False)
         try:
-            for entry in base_path.iterdir():
-                if entry == backups_dir:
-                    continue
-                if entry.is_dir():
-                    shutil.rmtree(entry, onerror=_handle_remove_readonly)
-                else:
-                    _unlink_with_retry(entry)
-
             with zipfile.ZipFile(backup_path, 'r') as zip_file:
-                _safe_extract_zip(zip_file, base_path)
+                _safe_extract_zip(zip_file, staging)
+        except (OSError, zipfile.BadZipFile, ValueError) as exc:
+            shutil.rmtree(staging, ignore_errors=True)
+            return jsonify({'error': f'Failed to extract backup: {exc}'}), 400
+
+        # Preserve existing backups/ into the staged tree so it survives the swap.
+        staged_backups = staging / 'backups'
+        if not staged_backups.exists():
+            staged_backups.mkdir(parents=True, exist_ok=True)
+        for entry in backups_dir.iterdir():
+            dest = staged_backups / entry.name
+            if dest.exists():
+                continue
+            if entry.is_dir():
+                shutil.copytree(entry, dest)
+            else:
+                shutil.copy2(entry, dest)
+
+        # Swap: rename live dir aside, move staging in, delete old dir.
+        old_dir = base_path.parent / f".old-{server_id}-{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}"
+        try:
+            os.replace(base_path, old_dir)
         except OSError as exc:
-            return jsonify({'error': f'Failed to restore backup: {exc}'}), 500
-        except ValueError as exc:
-            return jsonify({'error': str(exc)}), 400
+            shutil.rmtree(staging, ignore_errors=True)
+            return jsonify({'error': f'Failed to stage restore: {exc}'}), 500
+
+        try:
+            os.replace(staging, base_path)
+        except OSError as exc:
+            try:
+                os.replace(old_dir, base_path)
+            except OSError:
+                pass
+            shutil.rmtree(staging, ignore_errors=True)
+            return jsonify({'error': f'Failed to activate restore: {exc}'}), 500
+
+        shutil.rmtree(old_dir, onerror=_handle_remove_readonly)
 
         return jsonify({'success': True, 'message': 'Backup restored successfully'})
     finally:
