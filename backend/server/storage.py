@@ -66,18 +66,26 @@ def save_servers(servers: List[Dict[str, Any]]) -> None:
     Writes to ``servers.json.tmp`` in the same directory, fsyncs, then
     ``os.replace`` swaps it into place. A crash between write and replace
     leaves the previous file intact; a crash after replace leaves the new
-    one fully written.
+    one fully written. On any exception before the rename, the partial
+    tmp file is removed.
     """
     target = SERVERS_FILE
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = target.with_suffix(target.suffix + ".tmp")
 
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(servers, f, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
-
-    os.replace(tmp_path, target)
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(servers, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, target)
+    except Exception:
+        # Remove the partial tmp file; let the caller see the original error.
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 def generate_server_id() -> str:

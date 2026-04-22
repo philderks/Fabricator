@@ -70,3 +70,23 @@ def test_save_survives_simulated_crash_mid_write(tmp_servers_root, monkeypatch):
     # Previous file untouched.
     with open(storage.SERVERS_FILE, "r", encoding="utf-8") as fh:
         assert json.load(fh) == [{"id": "srv_original", "name": "Keep me"}]
+
+
+def test_save_cleans_up_tmp_on_json_failure(tmp_servers_root, monkeypatch):
+    """If json.dump raises, the tmp file must not be left behind."""
+    import importlib
+    import backend.server.storage as storage
+    importlib.reload(storage)
+
+    # An unserializable value — sets are not JSON-serializable.
+    unserializable = [{"id": "srv_bad", "bad": {1, 2, 3}}]
+
+    with pytest.raises(TypeError):
+        storage.save_servers(unserializable)
+
+    tmp_path = storage.SERVERS_FILE.with_suffix(
+        storage.SERVERS_FILE.suffix + ".tmp"
+    )
+    assert not tmp_path.exists(), (
+        f"Tmp file should have been cleaned up, but it still exists at {tmp_path}"
+    )
