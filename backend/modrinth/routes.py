@@ -365,15 +365,15 @@ def install_modpack(project_id):
     if not server:
         return jsonify({'error': 'Server not found'}), 404
 
-    runtime_status = _registry().get_status(server_id)
-    if runtime_status.get('status') == 'running':
-        return jsonify({'error': 'Stop the server before installing a modpack'}), 400
-
     lock = try_acquire(server_id)
     if lock is None:
         return jsonify({'error': 'A modpack install is already in progress for this server'}), 409
 
     try:
+        runtime_status = _registry().get_status(server_id)
+        if runtime_status.get('status') == 'running':
+            return jsonify({'error': 'Stop the server before installing a modpack'}), 400
+
         try:
             install_path = _registry()._resolve_install_path(server)
         except ValueError as exc:

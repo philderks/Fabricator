@@ -52,8 +52,8 @@ def test_try_acquire_returns_none_when_held_elsewhere():
     acquired.release()
 
 
-def test_install_while_running_returns_409(client, tmp_servers_root):
-    """Install endpoint must 409 when another thread holds the lock.
+def test_install_returns_409_when_lock_held_by_other_thread(client, tmp_servers_root):
+    """Install endpoint must 409 when another thread already holds the lock.
 
     The lock MUST be held by a different thread than the one issuing the
     request — otherwise the request thread (which is the same as the test
