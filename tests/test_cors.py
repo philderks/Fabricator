@@ -73,3 +73,11 @@ def test_cors_header_allows_listed_origin(client):
     )
     assert resp.status_code == 200
     assert resp.headers.get("Access-Control-Allow-Origin") == "http://localhost:3000"
+
+
+def test_origin_without_host_raises(monkeypatch):
+    """Typo like CORS_ORIGINS=https:// must fail fast, not silently match nothing."""
+    monkeypatch.setenv("CORS_ORIGINS", "https://")
+    from backend.core.config import get_config
+    with pytest.raises(ValueError, match="host component"):
+        get_config()

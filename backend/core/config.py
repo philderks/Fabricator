@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 from typing import List
+from urllib.parse import urlparse
 
 
 def _parse_cors_origins(raw: str) -> List[str]:
@@ -32,6 +33,10 @@ def _parse_cors_origins(raw: str) -> List[str]:
         if not origin.startswith(("http://", "https://")):
             raise ValueError(
                 f"CORS_ORIGINS entry '{origin}' must start with http:// or https://."
+            )
+        if not urlparse(origin).netloc:
+            raise ValueError(
+                f"CORS_ORIGINS entry '{origin}' has no host component."
             )
     return origins
 
