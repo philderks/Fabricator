@@ -45,7 +45,7 @@ def _cleanup_stale_statuses() -> None:
         if (server.get('status') or '').lower() in stale_states:
             try:
                 storage.update_server_status(server_id, 'stopped')
-            except OSError:
+            except (OSError, _json.JSONDecodeError):
                 pass
 
 
