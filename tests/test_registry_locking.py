@@ -52,8 +52,16 @@ def test_try_acquire_returns_none_when_held_elsewhere():
     acquired.release()
 
 
-def test_install_while_running_returns_409(client, tmp_servers_root, monkeypatch):
-    """Install endpoint must 409 when another op holds the lock."""
+def test_install_while_running_returns_409(client, tmp_servers_root):
+    """Install endpoint must 409 when another thread holds the lock.
+
+    The lock MUST be held by a different thread than the one issuing the
+    request — otherwise the request thread (which is the same as the test
+    thread under Flask's synchronous test client) would reentrantly acquire
+    the RLock and the 409 path would never trigger. In production Flask's
+    threaded=True dispatch naturally puts contending operations on
+    different threads, so this mirrors real usage.
+    """
     import json
     from pathlib import Path
 
@@ -76,11 +84,22 @@ def test_install_while_running_returns_409(client, tmp_servers_root, monkeypatch
     )
 
     from backend.server.locks import get_server_lock
+
     lock = get_server_lock("srv_test")
-    # Simulate another operation holding the lock.
-    lock.acquire()
+    holder_started = threading.Event()
+    release = threading.Event()
+
+    def hold():
+        with lock:
+            holder_started.set()
+            release.wait(timeout=5)
+
+    holder = threading.Thread(target=hold, daemon=True)
+    holder.start()
     try:
+        assert holder_started.wait(timeout=2)
         resp = client.post("/api/servers/srv_test/install")
         assert resp.status_code == 409, resp.get_json()
     finally:
-        lock.release()
+        release.set()
+        holder.join(timeout=2)
