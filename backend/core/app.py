@@ -47,6 +47,11 @@ def create_app() -> Flask:
     app.register_blueprint(modrinth_bp)
     app.register_blueprint(system_bp)
 
+    # One-time startup cleanup: flip stale 'installing'/'starting' statuses
+    # left over from a previous run. Tolerates a missing/malformed index.
+    from backend.server.routes import _cleanup_stale_statuses
+    _cleanup_stale_statuses()
+
     @app.route("/", defaults={"path": ""})
     @app.route("/<path:path>")
     def serve_frontend(path: str):

@@ -11,15 +11,18 @@ from backend.modrinth.client import ModrinthClient, ModrinthApiError
 from backend.server import storage
 from backend.server.registry import get_server_process_registry
 from backend.server.java_compat import resolve_required_java, skip_java_enforcement
+from backend.server.locks import try_acquire
 
 modrinth_bp = Blueprint('modrinth', __name__, url_prefix='/api/modrinth')
 modrinth_client = ModrinthClient()
-process_registry = get_server_process_registry()
+
+
+def _registry():
+    """Lazy accessor for the process registry."""
+    return get_server_process_registry()
 
 _install_progress_lock = threading.Lock()
 _install_progress: dict[str, dict] = {}
-_active_installs: set[str] = set()
-_active_installs_lock = threading.Lock()
 
 
 def _update_install_progress(server_id: str, **kwargs):
@@ -90,7 +93,7 @@ def _resolve_mods_folder(server_id: str | None):
         if not server:
             return None, ({'error': 'Server not found'}, 404)
         try:
-            path = process_registry.resolve_mods_path(server)
+            path = _registry().resolve_mods_path(server)
             return path, None
         except ValueError as exc:
             return None, ({'error': str(exc)}, 400)
@@ -277,18 +280,16 @@ def get_mod_download_url(mod_id):
         return jsonify({"error": "mc_version parameter is required"}), 400
 
     try:
-        download_url = modrinth_client.get_mod_download_url(
-            mod_id=mod_id,
-            mc_version=mc_version,
-            loader=loader
+        resolved = modrinth_client.get_mod_download_url(
+            mod_id=mod_id, mc_version=mc_version, loader=loader
         )
     except ModrinthApiError as exc:
         return _modrinth_error_response(exc)
 
-    if not download_url:
+    if not resolved:
         return jsonify({"error": "No suitable version found"}), 404
 
-    return jsonify({"download_url": download_url})
+    return jsonify({"download_url": resolved["url"]})
 
 
 @modrinth_bp.route('/mod/<mod_id>/install', methods=['POST'])
@@ -313,31 +314,37 @@ def install_mod(mod_id):
         payload, status = error
         return jsonify(payload), status
 
-    target_path = Path(mods_folder)
-
+    lock = try_acquire(server_id)
+    if lock is None:
+        return jsonify({'error': 'Another operation is in progress for this server'}), 409
     try:
-        download_url = modrinth_client.get_mod_download_url(
-            mod_id=mod_id,
-            mc_version=mc_version,
-            loader=loader
-        )
-    except ModrinthApiError as exc:
-        return _modrinth_error_response(exc)
+        target_path = Path(mods_folder)
 
-    if not download_url:
-        return jsonify({"error": "No suitable version found"}), 404
+        try:
+            resolved = modrinth_client.get_mod_download_url(
+                mod_id=mod_id, mc_version=mc_version, loader=loader
+            )
+        except ModrinthApiError as exc:
+            return _modrinth_error_response(exc)
 
-    try:
-        file_path = modrinth_client.download_mod(download_url, target_path)
-    except ModrinthApiError as exc:
-        return _modrinth_error_response(exc)
+        if not resolved:
+            return jsonify({"error": "No suitable version found"}), 404
 
-    return jsonify({
-        "success": True,
-        "message": "Mod installed successfully",
-        "file": str(file_path.name),
-        "path": str(file_path)
-    })
+        try:
+            file_path = modrinth_client.download_mod(
+                resolved["url"], target_path, hashes=resolved["hashes"]
+            )
+        except ModrinthApiError as exc:
+            return _modrinth_error_response(exc)
+
+        return jsonify({
+            "success": True,
+            "message": "Mod installed successfully",
+            "file": str(file_path.name),
+            "path": str(file_path)
+        })
+    finally:
+        lock.release()
 
 
 @modrinth_bp.route('/modpack/<project_id>/install', methods=['POST'])
@@ -358,81 +365,73 @@ def install_modpack(project_id):
     if not server:
         return jsonify({'error': 'Server not found'}), 404
 
-    runtime_status = process_registry.get_status(server_id)
-    if runtime_status.get('status') == 'running':
-        return jsonify({'error': 'Stop the server before installing a modpack'}), 400
-
-    with _active_installs_lock:
-        if server_id in _active_installs:
-            return jsonify({'error': 'A modpack install is already in progress for this server'}), 409
-        _active_installs.add(server_id)
+    lock = try_acquire(server_id)
+    if lock is None:
+        return jsonify({'error': 'A modpack install is already in progress for this server'}), 409
 
     try:
-        install_path = process_registry._resolve_install_path(server)
-    except ValueError as exc:
-        with _active_installs_lock:
-            _active_installs.discard(server_id)
-        return jsonify({'error': str(exc)}), 400
+        runtime_status = _registry().get_status(server_id)
+        if runtime_status.get('status') == 'running':
+            return jsonify({'error': 'Stop the server before installing a modpack'}), 400
 
-    backup_file = None
-    if create_backup:
         try:
-            backup_file = _create_server_backup(install_path)
-        except OSError as exc:
-            with _active_installs_lock:
-                _active_installs.discard(server_id)
-            return jsonify({'error': f'Failed to create backup before install: {exc}'}), 500
+            install_path = _registry()._resolve_install_path(server)
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
 
-    def _progress_cb(stage='', current=0, total=0, detail=''):
-        _update_install_progress(server_id, stage=stage, current=current, total=total, detail=detail)
+        backup_file = None
+        if create_backup:
+            try:
+                backup_file = _create_server_backup(install_path)
+            except OSError as exc:
+                return jsonify({'error': f'Failed to create backup before install: {exc}'}), 500
 
-    _update_install_progress(server_id, stage='starting', current=0, total=0, detail='')
+        def _progress_cb(stage='', current=0, total=0, detail=''):
+            _update_install_progress(server_id, stage=stage, current=current, total=total, detail=detail)
 
-    try:
-        result = modrinth_client.install_modpack(
-            project_id=project_id,
-            install_path=install_path,
-            mc_version=mc_version,
-            loader=loader,
-            clean_install=clean_install,
-            allow_missing=allow_missing,
-            mod_side_overrides=mod_side_overrides,
-            progress_callback=_progress_cb,
-        )
-    except ModrinthApiError as exc:
+        _update_install_progress(server_id, stage='starting', current=0, total=0, detail='')
+
+        try:
+            result = modrinth_client.install_modpack(
+                project_id=project_id,
+                install_path=install_path,
+                mc_version=mc_version,
+                loader=loader,
+                clean_install=clean_install,
+                allow_missing=allow_missing,
+                mod_side_overrides=mod_side_overrides,
+                progress_callback=_progress_cb,
+            )
+        except ModrinthApiError as exc:
+            _clear_install_progress(server_id)
+            return _modrinth_error_response(exc)
+        except Exception as exc:  # pragma: no cover - defensive error mapping
+            _clear_install_progress(server_id)
+            current_app.logger.exception('Unexpected modpack install failure for %s', project_id)
+            return jsonify({'error': f'Modpack install failed: {exc}'}), 500
+
+        _update_install_progress(server_id, stage='done', current=0, total=0, detail='')
+
+        modpack_info = {
+            'projectId': project_id,
+            'versionId': result.get('version_id'),
+            'name': result.get('name'),
+            'version': result.get('version'),
+            'mcVersion': result.get('mc_version'),
+            'loaders': result.get('loaders', []),
+            'installedAt': datetime.utcnow().isoformat() + 'Z',
+        }
+        storage.update_server(server_id, {'modpack': modpack_info})
         _clear_install_progress(server_id)
-        with _active_installs_lock:
-            _active_installs.discard(server_id)
-        return _modrinth_error_response(exc)
-    except Exception as exc:  # pragma: no cover - defensive error mapping
-        _clear_install_progress(server_id)
-        with _active_installs_lock:
-            _active_installs.discard(server_id)
-        current_app.logger.exception('Unexpected modpack install failure for %s', project_id)
-        return jsonify({'error': f'Modpack install failed: {exc}'}), 500
-
-    _update_install_progress(server_id, stage='done', current=0, total=0, detail='')
-
-    modpack_info = {
-        'projectId': project_id,
-        'versionId': result.get('version_id'),
-        'name': result.get('name'),
-        'version': result.get('version'),
-        'mcVersion': result.get('mc_version'),
-        'loaders': result.get('loaders', []),
-        'installedAt': datetime.utcnow().isoformat() + 'Z',
-    }
-    storage.update_server(server_id, {'modpack': modpack_info})
-    _clear_install_progress(server_id)
-    with _active_installs_lock:
-        _active_installs.discard(server_id)
+    finally:
+        lock.release()
 
     java_warning = None
     effective_mc = result.get('mc_version') or mc_version or server.get('version', '')
     if effective_mc and not skip_java_enforcement():
         compat = resolve_required_java(effective_mc)
         if compat.enforceable:
-            runtime = process_registry.get_java_runtime(server)
+            runtime = _registry().get_java_runtime(server)
             detected = runtime.get('major_version')
             if detected is None or detected < compat.required_java:
                 java_warning = {
