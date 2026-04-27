@@ -67,7 +67,8 @@ build/
 
 # Servers
 /servers
-servers.json
+/servers.json
+/servers.json.tmp
 
 # Java
 java/

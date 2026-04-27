@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 import tempfile
 import zipfile
@@ -254,14 +255,27 @@ class ModrinthClient:
         file_obj = primary_files[0] if primary_files else files[0]
         return file_obj.get("url")
 
-    def get_mod_download_url(self, mod_id: str, mc_version: str, loader: str = "fabric") -> Optional[str]:
-        versions = self.get_mod_versions(mod_id=mod_id, loaders=[loader], game_versions=[mc_version])
-
+    def get_mod_download_url(
+        self, mod_id: str, mc_version: str, loader: str = "fabric"
+    ) -> Optional[Dict[str, Any]]:
+        versions = self.get_mod_versions(
+            mod_id=mod_id, loaders=[loader], game_versions=[mc_version]
+        )
         best_version = self.pick_best_version(versions)
         if not best_version:
             return None
 
-        return self.get_primary_file_url(best_version)
+        url = self.get_primary_file_url(best_version)
+        if not url:
+            return None
+
+        hashes: Dict[str, str] = {}
+        for f in best_version.get("files", []):
+            if f.get("url") == url:
+                hashes = f.get("hashes") or {}
+                break
+
+        return {"url": url, "hashes": hashes}
 
     def resolve_project_version(
         self,
@@ -282,12 +296,57 @@ class ModrinthClient:
             "download_url": self.get_primary_file_url(best_version),
         }
 
-    def download_mod(self, download_url: str, target_folder: Path) -> Optional[Path]:
-        try:
-            target_folder.mkdir(parents=True, exist_ok=True)
-            filename = download_url.split("/")[-1]
-            target_path = target_folder / filename
+    _FILENAME_RE = re.compile(r"^[A-Za-z0-9._+\- ]+$")
 
+    def download_mod(
+        self,
+        download_url: str,
+        target_folder: Path,
+        hashes: Optional[Dict[str, str]] = None,
+    ) -> Optional[Path]:
+        """Download a mod file into ``target_folder`` with path + hash checks.
+
+        - Filename is derived from the last URL path segment and must match
+          a strict safe-character regex; traversal attempts raise
+          ModrinthApiError.
+        - When ``hashes`` is provided, sha1/sha512 are verified; a mismatch
+          deletes the partial file and raises.
+        """
+        from urllib.parse import urlparse, unquote
+
+        parsed = urlparse(download_url)
+        # Reject any URL whose path contains a dot-dot segment (traversal attempt).
+        path_segments = parsed.path.split("/")
+        if ".." in path_segments or "." in path_segments:
+            raise ModrinthApiError(
+                f"Refusing to save mod: URL path contains traversal segments: {parsed.path!r}"
+            )
+        last_segment = unquote(parsed.path.rsplit("/", 1)[-1])
+        filename = last_segment.strip()
+
+        if not filename or not self._FILENAME_RE.match(filename):
+            raise ModrinthApiError(
+                f"Refusing to save mod: unsafe filename derived from URL: {last_segment!r}"
+            )
+
+        try:
+            target_folder = Path(target_folder).resolve()
+            target_folder.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise ModrinthApiError(f"Failed to prepare mods folder: {exc}") from exc
+
+        target_path = (target_folder / filename).resolve()
+        try:
+            target_path.relative_to(target_folder)
+        except ValueError:
+            raise ModrinthApiError(
+                f"Refusing to save mod: resolved path escapes mods folder: {target_path}"
+            )
+
+        sha1 = hashlib.sha1() if hashes and hashes.get("sha1") else None
+        sha512 = hashlib.sha512() if hashes and hashes.get("sha512") else None
+
+        try:
             with self._request(
                 "get",
                 download_url,
@@ -297,12 +356,28 @@ class ModrinthClient:
             ) as response:
                 with open(target_path, "wb") as file_handle:
                     for chunk in response.iter_content(chunk_size=8192):
-                        if chunk:
-                            file_handle.write(chunk)
-
-            return target_path
+                        if not chunk:
+                            continue
+                        file_handle.write(chunk)
+                        if sha1 is not None:
+                            sha1.update(chunk)
+                        if sha512 is not None:
+                            sha512.update(chunk)
         except OSError as exc:
+            try:
+                target_path.unlink(missing_ok=True)
+            except OSError:
+                pass
             raise ModrinthApiError(f"Failed to save mod file: {exc}") from exc
+
+        if sha512 is not None and sha512.hexdigest() != hashes["sha512"].lower():
+            target_path.unlink(missing_ok=True)
+            raise ModrinthApiError(f"Mod download SHA-512 mismatch for {filename}")
+        if sha1 is not None and sha1.hexdigest() != hashes["sha1"].lower():
+            target_path.unlink(missing_ok=True)
+            raise ModrinthApiError(f"Mod download SHA-1 mismatch for {filename}")
+
+        return target_path
 
     def install_modpack(
         self,

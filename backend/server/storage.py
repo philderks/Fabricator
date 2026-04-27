@@ -1,5 +1,6 @@
 """JSON-based storage for server data."""
 import json
+import os
 import shutil
 import threading
 import uuid
@@ -11,13 +12,43 @@ from backend.core.config import get_config
 
 
 def _resolve_servers_file() -> Path:
+    """Resolve the servers.json path from the current environment.
+
+    Called at every access, not cached at module import — so that env vars
+    changed after import (tests, late `.env` load, `sys._MEIPASS` rebinds)
+    take effect.
+    """
     config = get_config()
     configured = getattr(config, 'SERVERS_FILE', 'servers.json')
     return Path(configured).expanduser()
 
 
-SERVERS_FILE = _resolve_servers_file()
-LEGACY_SERVERS_FILE = Path.cwd() / "servers.json"
+def _legacy_servers_file() -> Path:
+    return Path.cwd() / "servers.json"
+
+
+class _LazyServersFile:
+    """Module-level proxy that forwards attribute access to a fresh Path.
+
+    This lets existing call sites (``storage.SERVERS_FILE.parent``,
+    ``storage.SERVERS_FILE.write_text(...)``, etc.) keep working without
+    a broader API change, while resolving the concrete Path lazily.
+    """
+
+    def __getattr__(self, name):
+        return getattr(_resolve_servers_file(), name)
+
+    def __fspath__(self):
+        return str(_resolve_servers_file())
+
+    def __str__(self):
+        return str(_resolve_servers_file())
+
+    def __repr__(self):
+        return f"_LazyServersFile({_resolve_servers_file()!r})"
+
+
+SERVERS_FILE = _LazyServersFile()
 _storage_lock = threading.Lock()
 
 
@@ -26,17 +57,18 @@ def _ensure_file_exists():
     SERVERS_FILE.parent.mkdir(parents=True, exist_ok=True)
 
     # One-time migration from the historical cwd-based location.
+    legacy = _legacy_servers_file()
     if (
         not SERVERS_FILE.exists()
-        and LEGACY_SERVERS_FILE != SERVERS_FILE
-        and LEGACY_SERVERS_FILE.exists()
+        and legacy != _resolve_servers_file()
+        and legacy.exists()
     ):
         try:
-            shutil.move(str(LEGACY_SERVERS_FILE), str(SERVERS_FILE))
+            shutil.move(str(legacy), str(SERVERS_FILE))
             return
         except OSError:
             try:
-                shutil.copy2(str(LEGACY_SERVERS_FILE), str(SERVERS_FILE))
+                shutil.copy2(str(legacy), str(SERVERS_FILE))
                 return
             except OSError:
                 pass
@@ -48,26 +80,43 @@ def _ensure_file_exists():
 def load_servers() -> List[Dict[str, Any]]:
     """Load all servers from JSON file.
 
-    Returns:
-        List of server dictionaries
+    Raises:
+        json.JSONDecodeError if the file exists but is corrupted. Callers
+        must decide how to surface this to the user — silently returning []
+        would cause the next save to overwrite genuine state with an empty
+        list.
     """
     _ensure_file_exists()
-    try:
-        with open(SERVERS_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except json.JSONDecodeError:
-        return []
+    with open(SERVERS_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 def save_servers(servers: List[Dict[str, Any]]) -> None:
-    """Save servers list to JSON file.
+    """Save servers list to JSON file atomically.
 
-    Args:
-        servers: List of server dictionaries
+    Writes to ``servers.json.tmp`` in the same directory, fsyncs, then
+    ``os.replace`` swaps it into place. A crash between write and replace
+    leaves the previous file intact; a crash after replace leaves the new
+    one fully written. On any exception before the rename, the partial
+    tmp file is removed.
     """
-    SERVERS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(SERVERS_FILE, 'w', encoding='utf-8') as f:
-        json.dump(servers, f, indent=2)
+    target = SERVERS_FILE
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = target.with_suffix(target.suffix + ".tmp")
+
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(servers, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, target)
+    except Exception:
+        # Remove the partial tmp file; let the caller see the original error.
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 def generate_server_id() -> str:
