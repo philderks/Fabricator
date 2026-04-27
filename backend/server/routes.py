@@ -661,16 +661,20 @@ def restore_server_backup(server_id, backup_id):
 
         # Preserve existing backups/ into the staged tree so it survives the swap.
         staged_backups = staging / 'backups'
-        if not staged_backups.exists():
-            staged_backups.mkdir(parents=True, exist_ok=True)
-        for entry in backups_dir.iterdir():
-            dest = staged_backups / entry.name
-            if dest.exists():
-                continue
-            if entry.is_dir():
-                shutil.copytree(entry, dest)
-            else:
-                shutil.copy2(entry, dest)
+        try:
+            if not staged_backups.exists():
+                staged_backups.mkdir(parents=True, exist_ok=True)
+            for entry in backups_dir.iterdir():
+                dest = staged_backups / entry.name
+                if dest.exists():
+                    continue
+                if entry.is_dir():
+                    shutil.copytree(entry, dest)
+                else:
+                    shutil.copy2(entry, dest)
+        except (OSError, shutil.Error) as exc:
+            shutil.rmtree(staging, ignore_errors=True)
+            return jsonify({'error': f'Failed to preserve backups: {exc}'}), 500
 
         # Swap: rename live dir aside, move staging in, delete old dir.
         old_dir = base_path.parent / f".old-{server_id}-{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}"

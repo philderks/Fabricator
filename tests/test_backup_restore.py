@@ -130,3 +130,26 @@ def test_restore_keeps_backups_dir_during_swap(client, tmp_servers_root):
     resp = client.post("/api/servers/srv_restore/backups/good/restore")
     assert resp.status_code == 200
     assert (backups / "good.zip").exists()
+
+
+def test_restore_cleans_staging_when_preserving_backups_fails(
+    client, tmp_servers_root, monkeypatch
+):
+    install, backups = _seed_server(tmp_servers_root)
+    _write_good_backup(backups, "good")
+
+    from backend.server import routes
+
+    def fail_copy2(*_args, **_kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(routes.shutil, "copy2", fail_copy2)
+
+    resp = client.post("/api/servers/srv_restore/backups/good/restore")
+    assert resp.status_code == 500
+    assert "Failed to preserve backups" in resp.get_json()["error"]
+
+    assert (install / "world" / "level.dat").read_text() == "LIVE-WORLD"
+    assert (install / "server.properties").read_text() == "port=25565\n"
+    assert (backups / "good.zip").exists()
+    assert not any(path.name.startswith(".restore-srv_restore-") for path in install.parent.iterdir())
