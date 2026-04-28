@@ -1,6 +1,7 @@
 <script setup>
 import AppButton from '../components/ui/AppButton.vue'
 import StatCard from '../components/ui/StatCard.vue'
+import Panel from '../components/ui/Panel.vue'
 
 const colorTokens = [
   { name: '--bg-primary', value: '#0f0f0f' },
@@ -71,6 +72,23 @@ const radiusTokens = [
         <StatCard label="Uptime" value="—" />
         <StatCard label="TPS" value="20" accent="success" />
         <StatCard label="Mods" value="4" accent="primary" />
+      </div>
+    </section>
+    <section class="ds-section">
+      <h2 class="ds-section-title">Panel</h2>
+      <div class="ds-grid-2">
+        <Panel title="Performance">
+          <p class="ds-panel-body-text">RAM · 1.7 / 4.0 GB</p>
+        </Panel>
+        <Panel title="Recent logs">
+          <template #action>
+            <a href="#" class="ds-panel-link">Console →</a>
+          </template>
+          <p class="ds-panel-body-text">Server started · 4 mods loaded</p>
+        </Panel>
+        <Panel>
+          <p class="ds-panel-body-text">Panel without header</p>
+        </Panel>
       </div>
     </section>
     <!-- Sections added by later tasks -->
@@ -193,5 +211,28 @@ const radiusTokens = [
   grid-template-columns: repeat(4, 1fr);
   gap: var(--space-3);
   max-width: 640px;
+}
+
+.ds-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-3);
+  max-width: 640px;
+}
+
+.ds-panel-body-text {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.ds-panel-link {
+  font-size: var(--text-xs);
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.ds-panel-link:hover {
+  text-decoration: underline;
 }
 </style>
