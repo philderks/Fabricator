@@ -2,6 +2,7 @@
 import AppButton from '../components/ui/AppButton.vue'
 import StatCard from '../components/ui/StatCard.vue'
 import Panel from '../components/ui/Panel.vue'
+import StatusPill from '../components/ui/StatusPill.vue'
 
 const colorTokens = [
   { name: '--bg-primary', value: '#0f0f0f' },
@@ -89,6 +90,16 @@ const radiusTokens = [
         <Panel>
           <p class="ds-panel-body-text">Panel without header</p>
         </Panel>
+      </div>
+    </section>
+    <section class="ds-section">
+      <h2 class="ds-section-title">StatusPill</h2>
+      <div class="ds-row">
+        <StatusPill status="running" sub="Fabric 26.1.2" />
+        <StatusPill status="stopped" sub="Fabric 26.1.2" />
+        <StatusPill status="pending" />
+        <StatusPill status="installing" />
+        <StatusPill status="failed" />
       </div>
     </section>
     <!-- Sections added by later tasks -->
