@@ -1,4 +1,5 @@
 import { createApp } from 'vue'
+import '@fontsource-variable/dm-sans'
 import './style.css'
 import './assets/global.css'
 import App from './App.vue'

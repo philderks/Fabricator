@@ -8,6 +8,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource-variable/dm-sans": "^5.2.8",
     "vue": "^3.4.0",
     "vue-router": "^4.6.3"
   },
