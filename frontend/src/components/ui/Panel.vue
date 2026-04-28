@@ -14,7 +14,7 @@ defineProps({
 <template>
   <section class="panel">
     <header v-if="title || $slots.action" class="panel__header">
-      <span v-if="title" class="panel__title">{{ title }}</span>
+      <h3 v-if="title" class="panel__title">{{ title }}</h3>
       <div v-if="$slots.action" class="panel__action">
         <slot name="action" />
       </div>
@@ -43,6 +43,7 @@ defineProps({
 }
 
 .panel__title {
+  margin: 0;
   font-size: var(--text-xs);
   font-weight: 600;
   color: var(--text-muted);
