@@ -20,7 +20,8 @@ defineProps({
   },
   type: {
     type: String,
-    default: 'button'
+    default: 'button',
+    validator: (v) => ['button', 'submit', 'reset'].includes(v)
   }
 })
 
@@ -33,6 +34,7 @@ defineEmits(['click'])
     class="app-btn"
     :class="[`app-btn--${variant}`, `app-btn--${size}`, { 'is-loading': loading }]"
     :disabled="disabled || loading"
+    :aria-busy="loading"
     @click="$emit('click', $event)"
   >
     <span v-if="loading" class="app-btn__spinner" aria-hidden="true"></span>
@@ -53,6 +55,11 @@ defineEmits(['click'])
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
   white-space: nowrap;
+}
+
+.app-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 .app-btn--sm {
