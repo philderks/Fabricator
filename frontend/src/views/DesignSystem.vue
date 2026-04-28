@@ -1,4 +1,6 @@
 <script setup>
+import AppButton from '../components/ui/AppButton.vue'
+
 const colorTokens = [
   { name: '--bg-primary', value: '#0f0f0f' },
   { name: '--bg-secondary', value: '#141414' },
@@ -43,6 +45,22 @@ const radiusTokens = [
         <div v-for="r in radiusTokens" :key="r.name" class="ds-radius-box" :style="{ borderRadius: `var(${r.name})` }">
           <code>{{ r.name }}</code>
         </div>
+      </div>
+    </section>
+    <section class="ds-section">
+      <h2 class="ds-section-title">AppButton</h2>
+      <div class="ds-row">
+        <AppButton variant="primary">Start</AppButton>
+        <AppButton variant="ghost">Restart</AppButton>
+        <AppButton variant="danger">Delete</AppButton>
+      </div>
+      <div class="ds-row">
+        <AppButton variant="primary" size="sm">Save</AppButton>
+        <AppButton variant="ghost" size="sm">Cancel</AppButton>
+      </div>
+      <div class="ds-row">
+        <AppButton variant="primary" loading>Installing</AppButton>
+        <AppButton variant="primary" disabled>Disabled</AppButton>
       </div>
     </section>
     <!-- Sections added by later tasks -->
@@ -151,5 +169,12 @@ const radiusTokens = [
   font-size: var(--text-xs);
   color: var(--text-muted);
   font-family: var(--font-mono);
+}
+
+.ds-row {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  margin-bottom: var(--space-3);
 }
 </style>
