@@ -14,28 +14,34 @@ body {
 
 /* Colors */
 :root {
-  --bg-primary: oklch(0.1 0 0);
-  --bg-secondary: oklch(0.15 0 0);
-  --bg-tertiary: oklch(0.22 0 0);
-  
-  --text-primary: oklch(1 0 0);
-  --text-secondary: oklch(0.92 0 0);
-  --text-muted: oklch(0.68 0 0);
-  --text-disabled: oklch(0.52 0 0);
-  
-  --border-color: oklch(0.25 0 0);
-  --border-hover: oklch(0.68 0.18 55);
-  
-  --success: oklch(0.7 0.18 155);
-  --success-dark: oklch(0.6 0.18 155);
-  --warning: oklch(0.75 0.15 75);
-  --warning-dark: oklch(0.65 0.15 75);
-  --danger: oklch(0.65 0.22 25);
-  --danger-dark: oklch(0.55 0.22 25);
-  --primary: oklch(0.68 0.18 55);
-  --primary-dark: oklch(0.62 0.18 55);
-  --secondary: oklch(0.25 0 0);
-  --secondary-hover: oklch(0.3 0 0);
+  /* Surfaces */
+  --bg-primary: #0f0f0f;
+  --bg-secondary: #141414;
+  --bg-tertiary: #1a1a1a;
+
+  /* Text */
+  --text-primary: #f1f1f1;
+  --text-secondary: #d4d4d4;
+  --text-muted: #888888;
+  --text-disabled: #555555;
+
+  /* Borders */
+  --border-color: #1e1e1e;
+  --border-hover: #f97316;
+
+  /* Status */
+  --success: #22c55e;
+  --success-dark: #16a34a;
+  --warning: #fbbf24;
+  --warning-dark: #f59e0b;
+  --danger: #ef4444;
+  --danger-dark: #dc2626;
+
+  /* Brand */
+  --primary: #f97316;
+  --primary-dark: #ea6d0e;
+  --secondary: #1a1a1a;
+  --secondary-hover: #252525;
 }
 
 /* Page Layout */
