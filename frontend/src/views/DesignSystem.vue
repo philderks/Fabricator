@@ -1,5 +1,6 @@
 <script setup>
 import AppButton from '../components/ui/AppButton.vue'
+import StatCard from '../components/ui/StatCard.vue'
 
 const colorTokens = [
   { name: '--bg-primary', value: '#0f0f0f' },
@@ -61,6 +62,15 @@ const radiusTokens = [
       <div class="ds-row">
         <AppButton variant="primary" loading>Installing</AppButton>
         <AppButton variant="primary" disabled>Disabled</AppButton>
+      </div>
+    </section>
+    <section class="ds-section">
+      <h2 class="ds-section-title">StatCard</h2>
+      <div class="ds-grid-4">
+        <StatCard label="Players" value="0" unit="/20" />
+        <StatCard label="Uptime" value="—" />
+        <StatCard label="TPS" value="20" accent="success" />
+        <StatCard label="Mods" value="4" accent="primary" />
       </div>
     </section>
     <!-- Sections added by later tasks -->
@@ -176,5 +186,12 @@ const radiusTokens = [
   gap: var(--space-3);
   align-items: center;
   margin-bottom: var(--space-3);
+}
+
+.ds-grid-4 {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-3);
+  max-width: 640px;
 }
 </style>
