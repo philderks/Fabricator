@@ -48,7 +48,6 @@ const displayLabel = computed(() => props.label || meta.value.label)
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
   font-size: var(--text-xs);
-  color: var(--text-disabled);
 }
 
 .status-pill__dot {

@@ -58,7 +58,7 @@ defineProps({
   letter-spacing: -0.5px;
   display: flex;
   align-items: baseline;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .stat-card__value--success { color: var(--success); }
@@ -67,7 +67,7 @@ defineProps({
 .stat-card__value--danger  { color: var(--danger); }
 
 .stat-card__unit {
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--text-disabled);
   font-weight: 400;
 }

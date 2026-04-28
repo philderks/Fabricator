@@ -7,7 +7,7 @@
 }
 
 body {
-  font-family: 'DM Sans Variable', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -626,13 +626,13 @@ textarea::placeholder {
 }
 
 .info-notice {
-  background: color-mix(in oklch, var(--warning) 12%, transparent);
-  border: 1px solid color-mix(in oklch, var(--warning) 35%, transparent);
-  color: var(--warning);
+  background: color-mix(in oklch, var(--primary) 12%, transparent);
+  border: 1px solid color-mix(in oklch, var(--primary) 35%, transparent);
+  color: var(--primary);
 }
 
 .info-notice svg {
-  color: var(--warning);
+  color: var(--primary);
   flex-shrink: 0;
   margin-top: 2px;
 }
