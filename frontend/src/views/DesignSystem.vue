@@ -3,6 +3,10 @@ import AppButton from '../components/ui/AppButton.vue'
 import StatCard from '../components/ui/StatCard.vue'
 import Panel from '../components/ui/Panel.vue'
 import StatusPill from '../components/ui/StatusPill.vue'
+import { ref } from 'vue'
+import BaseModal from '../components/modals/BaseModal.vue'
+
+const modalOpen = ref(false)
 
 const colorTokens = [
   { name: '--bg-primary', value: '#0f0f0f' },
@@ -101,6 +105,24 @@ const radiusTokens = [
         <StatusPill status="installing" />
         <StatusPill status="failed" />
       </div>
+    </section>
+    <section class="ds-section">
+      <h2 class="ds-section-title">BaseModal</h2>
+      <div class="ds-row">
+        <AppButton variant="ghost" @click="modalOpen = true">Open modal</AppButton>
+      </div>
+      <BaseModal
+        :show="modalOpen"
+        title="Confirm action"
+        size="small"
+        @close="modalOpen = false"
+      >
+        <p>Are you sure you want to continue? This is the modal body content.</p>
+        <template #footer>
+          <AppButton variant="ghost" @click="modalOpen = false">Cancel</AppButton>
+          <AppButton variant="primary" @click="modalOpen = false">Confirm</AppButton>
+        </template>
+      </BaseModal>
     </section>
     <!-- Sections added by later tasks -->
   </div>
