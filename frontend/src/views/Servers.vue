@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, inject } from 'vue'
 import { useRouter } from 'vue-router'
 import ServerCard from '../components/ui/ServerCard.vue'
 import StatCard from '../components/ui/StatCard.vue'
@@ -20,7 +20,9 @@ const toast = useToast()
 
 const servers = ref([])
 const loading = ref(true)
-const showCreateModal = ref(false)
+// Provided by RootLayout — RootTopbar's "+ Add server" flips it open;
+// the modal close-handler writes false back through the same ref.
+const showCreateModal = inject('showCreateModal', ref(false))
 const showJavaModal = ref(false)
 const pendingJavaServer = ref(null)
 const serverActions = ref({})
@@ -250,18 +252,6 @@ onUnmounted(() => {
 
 <template>
   <div class="page">
-    <header class="header">
-      <div class="header-content">
-        <div class="brand">
-          <img src="/favicon.svg" alt="Fabricator" class="brand-logo" />
-          <h1 class="brand-name">Fabricator</h1>
-        </div>
-        <nav class="nav">
-          <router-link to="/" class="nav-item active">Servers</router-link>
-        </nav>
-      </div>
-    </header>
-
     <main class="main">
       <div class="content">
         <div class="page-header">

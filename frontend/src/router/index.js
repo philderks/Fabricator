@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import RootLayout from '../layouts/RootLayout.vue'
 import Servers from '../views/Servers.vue'
 import ServerLayout from '../layouts/ServerLayout.vue'
 import ServerOverviewPage from '../views/server/ServerOverviewPage.vue'
@@ -10,8 +11,10 @@ import ServerSettingsPage from '../views/server/ServerSettingsPage.vue'
 const routes = [
   {
     path: '/',
-    name: 'Servers',
-    component: Servers
+    component: RootLayout,
+    children: [
+      { path: '', name: 'Servers', component: Servers }
+    ]
   },
   {
     path: '/server/:id',
