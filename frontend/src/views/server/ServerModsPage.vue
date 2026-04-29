@@ -7,6 +7,11 @@ import { useServerStore } from '../../stores/server'
 
 const store = useServerStore()
 
+const initialOf = (name) => {
+  if (!name) return '?'
+  return name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 1).toUpperCase() || '?'
+}
+
 const onSearch = (event) => { store.modSearch = event.target.value }
 
 const showEmpty = computed(() => !store.modsLoading && store.filteredMods.length === 0)
@@ -49,19 +54,18 @@ const showEmpty = computed(() => !store.modsLoading && store.filteredMods.length
       </div>
       <ul v-else class="mods-page__list">
         <li v-for="mod in store.filteredMods" :key="mod.path" class="mods-page__item">
+          <div class="mods-page__icon" aria-hidden="true">{{ initialOf(mod.name) }}</div>
           <div class="mods-page__item-info">
-            <span class="mods-page__item-name">{{ mod.name }}</span>
+            <div class="mods-page__item-name-row">
+              <span class="mods-page__item-name">{{ mod.name }}</span>
+              <span class="mods-page__item-version">{{ mod.version }}</span>
+            </div>
             <span class="mods-page__item-meta">
-              {{ mod.version }}<template v-if="mod.size"> · {{ formatFileSize(mod.size) }}</template>
+              <template v-if="mod.size">{{ formatFileSize(mod.size) }}</template>
+              <template v-else>—</template>
             </span>
           </div>
-          <button
-            type="button"
-            class="mods-page__remove"
-            @click="store.handleRemoveMod(mod)"
-          >
-            Remove
-          </button>
+          <button type="button" class="mods-page__remove" @click="store.handleRemoveMod(mod)">Remove</button>
         </li>
       </ul>
     </Panel>
@@ -136,7 +140,7 @@ const showEmpty = computed(() => !store.modsLoading && store.filteredMods.length
 .mods-page__item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: var(--space-3);
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--border-color);
 }
@@ -146,6 +150,7 @@ const showEmpty = computed(() => !store.modsLoading && store.filteredMods.length
 }
 
 .mods-page__item-info {
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -163,6 +168,39 @@ const showEmpty = computed(() => !store.modsLoading && store.filteredMods.length
 .mods-page__item-meta {
   font-size: var(--text-xs);
   color: var(--text-disabled);
+}
+
+.mods-page__icon {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.mods-page__item-name-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.mods-page__item-version {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-pill);
+  padding: 2px 8px;
+  flex-shrink: 0;
 }
 
 .mods-page__remove {
