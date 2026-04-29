@@ -1,13 +1,27 @@
 <script setup>
 import AppSidebar from '../components/layout/AppSidebar.vue'
 import AppTopbar from '../components/layout/AppTopbar.vue'
+
+// Dummy props until Task 5 wires real state.
+const dummyServerStatus = {
+  status: 'stopped',
+  loader: 'Fabric',
+  version: '1.21.1'
+}
+const dummyActionState = { start: false, stop: false, restart: false }
 </script>
 
 <template>
   <div class="server-layout">
     <AppSidebar />
     <div class="server-layout__main">
-      <AppTopbar />
+      <AppTopbar
+        :server-status="dummyServerStatus"
+        status-label="Stopped"
+        :action-state="dummyActionState"
+        :start-locked="false"
+        start-button-label="Start"
+      />
       <main class="server-layout__content">
         <router-view />
       </main>
