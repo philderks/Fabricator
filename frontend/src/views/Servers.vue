@@ -1,14 +1,13 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, inject } from 'vue'
 import { useRouter } from 'vue-router'
-import ServerCard from '../components/ui/ServerCard.vue'
 import StatCard from '../components/ui/StatCard.vue'
+import StatusPill from '../components/ui/StatusPill.vue'
+import Panel from '../components/ui/Panel.vue'
+import AppButton from '../components/ui/AppButton.vue'
 import ServerCreateModal from '../components/modals/ServerCreateModal.vue'
-import JavaInstallModal from '../components/modals/JavaInstallModal.vue'
 import {
   getServers,
-  startServer,
-  stopServer,
   getSystemMetrics,
   getUpdateStatus,
   triggerUpdate
@@ -20,12 +19,10 @@ const toast = useToast()
 
 const servers = ref([])
 const loading = ref(true)
+const errorMessage = ref(null)
 // Provided by RootLayout — RootTopbar's "+ Add server" flips it open;
 // the modal close-handler writes false back through the same ref.
 const showCreateModal = inject('showCreateModal', ref(false))
-const showJavaModal = ref(false)
-const pendingJavaServer = ref(null)
-const serverActions = ref({})
 const systemMetrics = ref({ cpuPercent: null })
 const updateState = ref({
   inProgress: false,
@@ -43,6 +40,7 @@ let updateStatusIntervalId = null
 // Load servers from API
 const loadServers = async () => {
   loading.value = true
+  errorMessage.value = null
   try {
     const data = await getServers()
     // Transform API data to match component expectations
@@ -66,6 +64,7 @@ const loadServers = async () => {
     })
   } catch (error) {
     console.error('Failed to load servers:', error)
+    errorMessage.value = error?.message || 'Failed to load servers'
     toast.error('Failed to load servers', 'Error')
   } finally {
     loading.value = false
@@ -128,54 +127,6 @@ const selectServer = (id) => {
   router.push(`/server/${id}`)
 }
 
-const setServerActionState = (id, value) => {
-  const next = { ...serverActions.value }
-  if (value) {
-    next[id] = true
-  } else {
-    delete next[id]
-  }
-  serverActions.value = next
-}
-
-const handleStartStop = async (id, actionFn, successMessage, errorTitle, { isStart = false } = {}) => {
-  if (serverActions.value[id]) {
-    return
-  }
-  setServerActionState(id, true)
-  try {
-    const result = await actionFn(id)
-    if (result.success) {
-      toast.success(successMessage, 'Success')
-    } else {
-      toast.error(result.message || 'Operation failed', errorTitle)
-    }
-  } catch (error) {
-    console.error(error)
-    if (isStart && (error.data?.java_missing || error.data?.java_too_old)) {
-      pendingJavaServer.value = servers.value.find(s => s.id === id) || { id }
-      showJavaModal.value = true
-    } else {
-      toast.error(error.message || 'Request failed', errorTitle)
-    }
-  } finally {
-    setServerActionState(id, false)
-    await loadServers()
-  }
-}
-
-const handleStart = (id) => handleStartStop(id, startServer, 'Server start requested', 'Start Failed', { isStart: true })
-const handleStop = (id) => handleStartStop(id, stopServer, 'Server stop requested', 'Stop Failed')
-
-const handleJavaInstalled = () => {
-  const pending = pendingJavaServer.value
-  showJavaModal.value = false
-  pendingJavaServer.value = null
-  if (pending?.id) {
-    handleStart(pending.id)
-  }
-}
-
 const cpuStatLabel = computed(() => {
   const value = systemMetrics.value.cpuPercent
   if (typeof value !== 'number') {
@@ -227,6 +178,35 @@ const runUpdate = async () => {
   }
 }
 
+// StatusPill expects one of: running, stopped, pending, installing, failed.
+// Servers.vue currently maps API status to either 'running' or 'stopped'
+// (via `runtime.status || server.status`); pass the raw value through and
+// fall back to 'stopped' for any unrecognised value.
+const pillStatus = (status) => {
+  const allowed = ['running', 'stopped', 'pending', 'installing', 'failed']
+  return allowed.includes(status) ? status : 'stopped'
+}
+
+const pillLabel = (status) => {
+  switch (status) {
+    case 'running':    return 'Running'
+    case 'pending':    return 'Pending'
+    case 'installing': return 'Installing'
+    case 'failed':     return 'Failed'
+    case 'stopped':
+    default:           return 'Stopped'
+  }
+}
+
+// Drives the colour of the update banner status label (action slot).
+const updateStateClass = computed(() => {
+  if (updateState.value.inProgress || updateTriggering.value) return 'is-updating'
+  if (updateState.value.lastError) return 'is-error'
+  if (updateState.value.lastExitCode === 0) return 'is-success'
+  if (updateState.value.updateAvailable) return 'is-available'
+  return 'is-idle'
+})
+
 // Load servers on mount and refresh system metrics periodically
 onMounted(async () => {
   loadServers()
@@ -251,159 +231,468 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="page">
-    <main class="main">
-      <div class="content">
-        <div class="page-header">
-          <div>
-            <h2 class="page-title">Server Overview</h2>
-            <p class="page-subtitle">Manage your Minecraft servers</p>
-          </div>
-          <button class="btn btn-primary" @click="showCreateModal = true">+ New Server</button>
+  <div class="servers-page">
+    <div class="servers-page__header">
+      <div>
+        <h2 class="servers-page__title">Server Overview</h2>
+        <p class="servers-page__subtitle">Manage your Minecraft servers</p>
+      </div>
+      <AppButton variant="primary" size="md" @click="showCreateModal = true">
+        + New Server
+      </AppButton>
+    </div>
+
+    <div class="servers-page__stats">
+      <StatCard label="Total" :value="servers.length" />
+      <StatCard
+        label="Running"
+        :value="servers.filter(s => s.status === 'running').length"
+        accent="success"
+      />
+      <StatCard
+        label="Players"
+        :value="servers.reduce((sum, s) => sum + s.players.online, 0)"
+      />
+      <StatCard label="CPU" :value="cpuStatLabel" />
+    </div>
+
+    <Panel class="servers-page__update">
+      <template #action>
+        <span class="servers-page__update-status" :class="updateStateClass">
+          {{ updateStatusLabel }}
+        </span>
+      </template>
+      <div class="servers-page__update-body">
+        <div class="servers-page__update-meta">
+          <p class="servers-page__update-versions">
+            <span class="servers-page__update-label">Current</span>
+            <span class="servers-page__update-value">{{ updateState.currentVersion || 'unknown' }}</span>
+            <span class="servers-page__update-sep">·</span>
+            <span class="servers-page__update-label">Latest</span>
+            <span class="servers-page__update-value">{{ updateState.latestVersion || 'unknown' }}</span>
+          </p>
+          <p v-if="updateState.lastError" class="servers-page__update-error">
+            {{ updateState.lastError }}
+          </p>
         </div>
-
-        <div class="stats">
-          <StatCard label="Total" :value="servers.length" />
-          <StatCard label="Running" :value="servers.filter(s => s.status === 'running').length" highlight />
-          <StatCard label="Players" :value="servers.reduce((sum, s) => sum + s.players.online, 0)" />
-          <StatCard label="CPU" :value="cpuStatLabel" />
-        </div>
-
-        <section class="update-card">
-          <div class="update-card__meta">
-            <h3>Fabricator Update</h3>
-            <p class="update-card__subtitle">
-              Current: {{ updateState.currentVersion || 'unknown' }} · Latest:
-              {{ updateState.latestVersion || 'unknown' }}
-            </p>
-            <p class="update-card__status">{{ updateStatusLabel }}</p>
-            <p v-if="updateState.lastError" class="update-card__error">
-              {{ updateState.lastError }}
-            </p>
-          </div>
-          <div class="update-card__actions">
-            <button class="btn" :disabled="updateStatusLoading" @click="loadUpdateState()">
-              {{ updateStatusLoading ? 'Checking…' : 'Check for Updates' }}
-            </button>
-            <button class="btn btn-primary" :disabled="!canTriggerUpdate" @click="runUpdate">
-              {{ updateState.inProgress || updateTriggering ? 'Updating…' : 'Update Fabricator' }}
-            </button>
-          </div>
-        </section>
-
-        <div v-if="loading" class="loading-state">
-          <p>Loading servers...</p>
-        </div>
-
-        <div v-else-if="servers.length === 0" class="empty-state">
-          <svg width="64" height="64" viewBox="0 0 24 24" fill="none">
-            <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="2"/>
-            <path d="M12 8V12M12 16H12.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-          </svg>
-          <h3>No servers yet</h3>
-          <p>Create your first Minecraft server to get started</p>
-          <button class="btn btn-primary" @click="showCreateModal = true">+ Create Server</button>
-        </div>
-
-        <div v-else class="servers">
-          <ServerCard 
-            v-for="server in servers" 
-            :key="server.id" 
-            :server="server"
-            :busy="!!serverActions[server.id]"
-            @click="selectServer"
-            @start="handleStart"
-            @stop="handleStop"
-          />
+        <div class="servers-page__update-actions">
+          <AppButton
+            variant="ghost"
+            size="sm"
+            :disabled="updateStatusLoading"
+            :loading="updateStatusLoading"
+            @click="loadUpdateState()"
+          >
+            {{ updateStatusLoading ? 'Checking' : 'Check' }}
+          </AppButton>
+          <AppButton
+            variant="primary"
+            size="sm"
+            :disabled="!canTriggerUpdate"
+            :loading="updateState.inProgress || updateTriggering"
+            @click="runUpdate"
+          >
+            {{ updateState.inProgress || updateTriggering ? 'Updating' : 'Update' }}
+          </AppButton>
         </div>
       </div>
-    </main>
+    </Panel>
+
+    <!-- State 1: Loading (first fetch in flight) -->
+    <div v-if="loading" class="servers-page__state">
+      <div class="servers-page__spinner" aria-hidden="true"></div>
+      <p>Loading servers…</p>
+    </div>
+
+    <!-- State 2: Error (fetch failed, no data) -->
+    <div v-else-if="errorMessage" class="servers-page__state servers-page__state--error">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.6"/>
+        <path d="M12 8V13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        <circle cx="12" cy="16" r="0.9" fill="currentColor"/>
+      </svg>
+      <h3>Couldn't load servers</h3>
+      <p>{{ errorMessage }}</p>
+      <AppButton variant="ghost" size="md" @click="loadServers">Retry</AppButton>
+    </div>
+
+    <!-- State 3: Empty (fetch succeeded, no servers) -->
+    <div v-else-if="servers.length === 0" class="servers-page__state">
+      <svg width="56" height="56" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="3" y="3" width="18" height="18" rx="2.5" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M9 9H15M9 13H13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      <h3>No servers yet</h3>
+      <p>Create your first Minecraft server to get started.</p>
+      <AppButton variant="primary" size="md" @click="showCreateModal = true">
+        + Create your first server
+      </AppButton>
+    </div>
+
+    <!-- State 4: Populated -->
+    <ul v-else class="servers-page__list">
+      <li v-for="server in servers" :key="server.id">
+        <button
+          type="button"
+          class="server-card"
+          @click="selectServer(server.id)"
+        >
+          <span class="server-card__indicator" :data-status="server.status" aria-hidden="true"></span>
+          <div class="server-card__main">
+            <div class="server-card__head">
+              <h3 class="server-card__name">{{ server.name }}</h3>
+              <StatusPill :status="pillStatus(server.status)" :label="pillLabel(server.status)" />
+            </div>
+            <dl class="server-card__meta">
+              <div class="server-card__cell">
+                <dt>Version</dt>
+                <dd>{{ server.version }}</dd>
+              </div>
+              <div class="server-card__cell">
+                <dt>Loader</dt>
+                <dd>{{ server.loader }}</dd>
+              </div>
+              <div class="server-card__cell">
+                <dt>Players</dt>
+                <dd>{{ server.players.online }}/{{ server.players.max }}</dd>
+              </div>
+              <div class="server-card__cell">
+                <dt>Mods</dt>
+                <dd>{{ server.mods }}</dd>
+              </div>
+              <div class="server-card__cell" v-if="server.uptime">
+                <dt>Uptime</dt>
+                <dd>{{ server.uptime }}</dd>
+              </div>
+            </dl>
+            <p class="server-card__address">{{ server.ip }}</p>
+          </div>
+          <span class="server-card__chevron" aria-hidden="true">→</span>
+        </button>
+      </li>
+    </ul>
 
     <ServerCreateModal
       :show="showCreateModal"
       @close="showCreateModal = false"
       @create="handleCreateServer"
     />
-
-    <JavaInstallModal
-      :show="showJavaModal"
-      :mc-version="pendingJavaServer?.version || ''"
-      @close="showJavaModal = false"
-      @java-installed="handleJavaInstalled"
-    />
   </div>
 </template>
 
 <style scoped>
-.stats {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 1.5rem;
-  margin-bottom: 2rem;
+.servers-page {
+  flex: 1;
+  padding: var(--space-5) var(--space-6);
+  max-width: 1400px;
+  width: 100%;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
 }
 
-.servers {
-  display: grid;
-  gap: 1.25rem;
-}
-
-.update-card {
-  margin-bottom: 1.5rem;
-  border: 1px solid var(--border-subtle, #dcdfe6);
-  border-radius: 12px;
-  padding: 1rem;
+.servers-page__header {
   display: flex;
   justify-content: space-between;
-  gap: 1rem;
-  align-items: center;
-  background: var(--panel-bg, #fff);
+  align-items: flex-end;
 }
 
-.update-card__meta h3 {
+.servers-page__title {
+  margin: 0 0 var(--space-1) 0;
+  font-size: var(--text-xl);
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.servers-page__subtitle {
   margin: 0;
-  font-size: 1rem;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
 }
 
-.update-card__subtitle {
-  margin: 0.35rem 0 0;
-  opacity: 0.8;
+.servers-page__stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-4);
 }
 
-.update-card__status {
-  margin: 0.35rem 0 0;
-  font-weight: 600;
-}
-
-.update-card__error {
-  margin: 0.35rem 0 0;
-  color: #d72c2c;
-}
-
-.update-card__actions {
+/* Update banner */
+.servers-page__update-body {
   display: flex;
-  gap: 0.6rem;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.servers-page__update-meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.servers-page__update-versions {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.servers-page__update-label {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.servers-page__update-value {
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+.servers-page__update-sep {
+  color: var(--text-disabled);
+}
+
+.servers-page__update-error {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--danger);
+}
+
+.servers-page__update-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.servers-page__update-status {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.servers-page__update-status.is-idle      { color: var(--text-muted); }
+.servers-page__update-status.is-available { color: var(--primary); }
+.servers-page__update-status.is-updating  { color: var(--warning); }
+.servers-page__update-status.is-success   { color: var(--success); }
+.servers-page__update-status.is-error     { color: var(--danger); }
+
+/* States: loading / error / empty */
+.servers-page__state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-10) var(--space-5);
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.servers-page__state h3 {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.servers-page__state p {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  max-width: 360px;
+}
+
+.servers-page__state svg {
+  color: var(--text-disabled);
+}
+
+.servers-page__state--error svg {
+  color: var(--danger);
+}
+
+.servers-page__spinner {
+  width: 28px;
+  height: 28px;
+  border: 2px solid var(--border-color);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: servers-page-spin 0.8s linear infinite;
+}
+
+@keyframes servers-page-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Server list */
+.servers-page__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.server-card {
+  width: 100%;
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.server-card:hover {
+  border-color: var(--border-hover);
+  box-shadow: var(--shadow-sm);
+}
+
+.server-card:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.server-card__indicator {
+  width: 3px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+  background: var(--text-disabled);
+}
+
+.server-card__indicator[data-status="running"]    { background: var(--success); }
+.server-card__indicator[data-status="installing"] { background: var(--primary); }
+.server-card__indicator[data-status="pending"]    { background: var(--warning); }
+.server-card__indicator[data-status="failed"]     { background: var(--danger); }
+
+.server-card__main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.server-card__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.server-card__name {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.server-card__meta {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+}
+
+.server-card__cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.server-card__cell dt {
+  font-size: var(--text-xs);
+  color: var(--text-disabled);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.server-card__cell dd {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.server-card__address {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-disabled);
+}
+
+.server-card__chevron {
+  align-self: center;
+  color: var(--text-disabled);
+  font-size: var(--text-md);
+  transition: color 0.15s ease, transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.server-card:hover .server-card__chevron {
+  color: var(--primary);
+  transform: translateX(2px);
 }
 
 @media (max-width: 1024px) {
-  .stats {
+  .servers-page__stats {
     grid-template-columns: repeat(2, 1fr);
   }
 }
 
 @media (max-width: 768px) {
-  .stats {
+  .servers-page {
+    padding: var(--space-4);
+  }
+
+  .servers-page__header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-3);
+  }
+
+  .servers-page__stats {
     grid-template-columns: 1fr;
   }
 
-  .update-card {
+  .servers-page__update-body {
     flex-direction: column;
     align-items: flex-start;
   }
 
-  .update-card__actions {
+  .servers-page__update-actions {
     width: 100%;
-    justify-content: flex-start;
-    flex-wrap: wrap;
+  }
+
+  .server-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .server-card__indicator {
+    width: 100%;
+    height: 3px;
+  }
+
+  .server-card__chevron {
+    display: none;
   }
 }
 </style>
