@@ -1,7 +1,7 @@
 <template>
-  <BaseModal 
-    :show="show" 
-    title="Browse Mods" 
+  <BaseModal
+    :show="show"
+    title="Browse Mods"
     size="xlarge"
     @close="$emit('close')"
   >
@@ -12,19 +12,19 @@
           <circle cx="9" cy="9" r="6" stroke="currentColor" stroke-width="2"/>
           <path d="M14 14L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
         </svg>
-        <input 
-          v-model="searchQuery" 
-          type="text" 
+        <input
+          v-model="searchQuery"
+          type="text"
           placeholder="Search mods..."
           @input="debouncedSearch"
         >
       </div>
-      
+
       <div class="filters">
         <select :value="selectedLoader" disabled>
           <option :value="selectedLoader">{{ loaderLabel }}</option>
         </select>
-        
+
         <select v-model="selectedVersion" @change="performSearch">
           <option value="">All Versions</option>
           <option :value="mcVersion" v-if="mcVersion">{{ mcVersion }} (Server)</option>
@@ -65,80 +65,49 @@
 
     <!-- Results -->
     <div v-else-if="results.length > 0" class="results-grid">
-      <div 
-        v-for="mod in results" 
+      <SearchResultCard
+        v-for="mod in results"
         :key="mod.project_id"
-        class="mod-card"
+        :icon-url="mod.icon_url"
+        :title="mod.title"
+        :description="truncate(mod.description, 100)"
+        :meta="formatModMeta(mod)"
         @click="selectMod(mod)"
       >
-        <img 
-          :src="mod.icon_url || 'https://via.placeholder.com/80?text=No+Image'" 
-          :alt="mod.title"
-          class="mod-icon"
+        <AppButton
+          :variant="getInstallButtonVariant(mod)"
+          size="sm"
+          :title="getInstallButtonTitle(mod)"
+          @click.stop="installMod(mod)"
         >
-        <div class="mod-info">
-          <h3 class="mod-title">{{ mod.title }}</h3>
-          <p class="mod-description">{{ truncate(mod.description, 100) }}</p>
-          <div class="mod-stats">
-            <span class="stat">
-              <svg width="14" height="14" viewBox="0 0 20 20" fill="none">
-                <path d="M10 3V13M10 13L6 9M10 13L14 9M4 17H16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-              {{ formatNumber(mod.downloads) }}
-            </span>
-            <span class="stat" v-if="hasVersionInfo(mod)">
-              <svg width="14" height="14" viewBox="0 0 20 20" fill="none">
-                <rect x="3" y="3" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.5"/>
-                <path d="M7 7H13M7 10H13M7 13H10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-              </svg>
-              {{ formatVersions(getVersionList(mod), selectedVersion || mcVersion) }}
-            </span>
-            <span class="stat category-tag" v-if="mod.categories && mod.categories.length">
-              {{ mod.categories[0] }}
-            </span>
-            <span class="stat category-tag" v-else-if="mod.loaders && mod.loaders.length">
-              {{ mod.loaders[0] }}
-            </span>
-          </div>
-        </div>
-        <div class="mod-actions">
-          <button
-            class="btn btn-sm"
-            :class="getInstallButtonClass(mod)"
-            @click.stop="installMod(mod)"
-            :title="getInstallButtonTitle(mod)"
-          >
-            Install
-          </button>
-        </div>
-      </div>
+          Install
+        </AppButton>
+      </SearchResultCard>
     </div>
 
-    <!-- Empty State -->
-    <div v-else-if="!loading && searchQuery" class="empty-state">
-      <svg width="64" height="64" viewBox="0 0 24 24" fill="none">
+    <!-- Empty State: no results -->
+    <div v-else-if="!loading && searchQuery" class="mod-browser-empty">
+      <svg class="mod-browser-empty__icon" width="64" height="64" viewBox="0 0 24 24" fill="none">
         <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/>
         <path d="M21 21L16.5 16.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
         <path d="M11 8V14M8 11H14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
       </svg>
-      <h3>No mods found</h3>
-      <p>Try adjusting your search or filters</p>
+      <h3 class="mod-browser-empty__heading">No mods found</h3>
+      <p class="mod-browser-empty__body">Try adjusting your search or filters</p>
     </div>
 
     <!-- Initial State -->
-    <div v-else class="empty-state">
-      <svg width="64" height="64" viewBox="0 0 24 24" fill="none">
+    <div v-else class="mod-browser-empty">
+      <svg class="mod-browser-empty__icon" width="64" height="64" viewBox="0 0 24 24" fill="none">
         <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="2"/>
         <path d="M9 9H15M9 13H13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
       </svg>
-      <h3>Search for mods</h3>
-      <p>Start typing to find mods for your server</p>
+      <h3 class="mod-browser-empty__heading">Search for mods</h3>
+      <p class="mod-browser-empty__body">Start typing to find mods for your server</p>
     </div>
 
     <template #footer>
-      <button class="btn btn-secondary" @click="$emit('close')">
-        Close
-      </button>
+      <AppButton variant="ghost" size="md" @click="$emit('close')">Close</AppButton>
     </template>
   </BaseModal>
 
@@ -158,13 +127,17 @@
 <script>
 import BaseModal from './BaseModal.vue'
 import CompatibilityConfirmModal from './CompatibilityConfirmModal.vue'
+import SearchResultCard from '../ui/SearchResultCard.vue'
+import AppButton from '../ui/AppButton.vue'
 import { searchMods, getGameVersions, getModVersions } from '../../api/modrinth'
 
 export default {
   name: 'ModBrowserModal',
   components: {
     BaseModal,
-    CompatibilityConfirmModal
+    CompatibilityConfirmModal,
+    SearchResultCard,
+    AppButton
   },
   props: {
     show: {
@@ -337,7 +310,7 @@ export default {
         this.performSearch();
       }, 500);
     },
-    
+
     async performSearch() {
       if (!this.searchQuery.trim()) {
         this.results = []
@@ -345,7 +318,7 @@ export default {
       }
 
       this.loading = true
-      
+
       try {
         const data = await searchMods({
           query: this.searchQuery,
@@ -427,6 +400,17 @@ export default {
       return num.toString();
     },
 
+    formatModMeta(mod) {
+      const parts = []
+      if (mod.downloads) parts.push(`${this.formatNumber(mod.downloads)} downloads`)
+      if (mod.categories && mod.categories.length) {
+        parts.push(mod.categories[0])
+      } else if (mod.loaders && mod.loaders.length) {
+        parts.push(mod.loaders[0])
+      }
+      return parts.join(' · ')
+    },
+
     formatVersions(versions, highlightVersion = null) {
       if (!versions || !versions.length) return 'N/A'
 
@@ -467,13 +451,11 @@ export default {
       return hasCloseMatch ? 'likely' : 'unlikely'
     },
 
-    getInstallButtonClass(mod) {
+    getInstallButtonVariant(mod) {
       const status = this.getCompatibilityStatus(mod)
-      return {
-        'btn-primary': status === 'full',
-        'btn-warning': status === 'likely',
-        'btn-danger': status === 'unlikely' || status === 'unknown'
-      }
+      if (status === 'full') return 'primary'
+      if (status === 'likely') return 'warning'
+      return 'danger'
     },
 
     getInstallButtonTitle(mod) {
@@ -550,17 +532,17 @@ export default {
 
 <style scoped>
 .search-section {
-  margin-bottom: 24px;
+  margin-bottom: var(--space-6);
 }
 
 .search-bar {
   position: relative;
-  margin-bottom: 16px;
+  margin-bottom: var(--space-4);
 }
 
 .search-icon {
   position: absolute;
-  left: 16px;
+  left: var(--space-4);
   top: 50%;
   transform: translateY(-50%);
   color: var(--text-tertiary);
@@ -568,13 +550,13 @@ export default {
 
 .search-bar input {
   width: 100%;
-  padding: 12px 16px 12px 48px;
+  padding: var(--space-3) var(--space-4) var(--space-3) calc(var(--space-4) + 20px + var(--space-2));
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   color: var(--text-primary);
-  font-size: 0.9375rem;
-  transition: all 0.2s;
+  font-size: var(--text-sm);
+  transition: border-color 0.15s ease;
 }
 
 .search-bar input:focus {
@@ -584,19 +566,19 @@ export default {
 
 .filters {
   display: flex;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .filters select {
   flex: 1;
-  padding: 10px 14px;
+  padding: var(--space-2) var(--space-3);
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   color: var(--text-primary);
-  font-size: 0.875rem;
+  font-size: var(--text-xs);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: border-color 0.15s ease;
 }
 
 .filters select:focus {
@@ -607,14 +589,15 @@ export default {
 .version-warning {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
-  margin-top: 12px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  margin-top: var(--space-3);
   background: color-mix(in oklch, var(--warning) 15%, transparent);
   border: 1px solid color-mix(in oklch, var(--warning) 40%, transparent);
-  border-radius: 8px;
-  font-size: 0.8125rem;
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
   color: var(--warning);
+  line-height: var(--leading-normal);
 }
 
 .version-warning svg {
@@ -625,121 +608,35 @@ export default {
   font-weight: 600;
 }
 
-.loading-spinner {
-  width: 48px;
-  height: 48px;
-  border: 4px solid var(--border-color);
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-8) 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid var(--border-color);
   border-top-color: var(--primary);
   border-radius: 50%;
-  animation: btn-spin 0.8s linear infinite;
-  margin-bottom: 16px;
+  animation: mod-browser-spin 0.8s linear infinite;
+}
+
+@keyframes mod-browser-spin {
+  to { transform: rotate(360deg); }
 }
 
 .results-grid {
   display: grid;
-  gap: 16px;
+  gap: var(--space-3);
   max-height: 500px;
   overflow-y: auto;
-  padding: 4px;
-}
-
-.mod-card {
-  display: flex;
-  gap: 16px;
-  padding: 16px;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.mod-card:hover {
-  border-color: var(--primary);
-  transform: translateY(-2px);
-}
-
-.mod-icon {
-  width: 80px;
-  height: 80px;
-  border-radius: 8px;
-  object-fit: cover;
-  flex-shrink: 0;
-}
-
-.mod-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.mod-title {
-  font-size: 1.125rem;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin: 0 0 8px 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.mod-description {
-  font-size: 0.875rem;
-  color: var(--text-secondary);
-  margin: 0 0 12px 0;
-  line-height: 1.5;
-}
-
-.mod-stats {
-  display: flex;
-  gap: 16px;
-}
-
-.stat {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.8125rem;
-  color: var(--text-tertiary);
-}
-
-.stat svg {
-  color: var(--text-tertiary);
-}
-
-.category-tag {
-  padding: 2px 8px;
-  background: var(--bg-tertiary);
-  border-radius: 4px;
-  font-size: 0.75rem;
-  text-transform: capitalize;
-}
-
-.mod-actions {
-  display: flex;
-  align-items: center;
-}
-
-.btn-sm {
-  padding: 8px 16px;
-  font-size: 0.875rem;
-}
-
-.btn-warning {
-  background: var(--warning);
-  color: #000;
-}
-
-.btn-warning:hover {
-  background: color-mix(in oklch, var(--warning) 85%, #000);
-}
-
-.btn-danger {
-  background: var(--danger);
-  color: #fff;
-}
-
-.btn-danger:hover {
-  background: color-mix(in oklch, var(--danger) 85%, #000);
+  padding: var(--space-1);
 }
 
 /* Scrollbar styling */
@@ -749,15 +646,44 @@ export default {
 
 .results-grid::-webkit-scrollbar-track {
   background: var(--bg-primary);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 .results-grid::-webkit-scrollbar-thumb {
   background: var(--border-color);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 .results-grid::-webkit-scrollbar-thumb:hover {
   background: var(--text-tertiary);
+}
+
+.mod-browser-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-10) 0;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.mod-browser-empty__icon {
+  color: var(--text-disabled);
+}
+
+.mod-browser-empty__heading {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text-secondary);
+  line-height: var(--leading-tight);
+}
+
+.mod-browser-empty__body {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  line-height: var(--leading-normal);
 }
 </style>
