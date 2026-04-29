@@ -16,14 +16,14 @@
     <div class="summary">
       <span>{{ mods.length }} mods require a decision</span>
       <div class="summary-actions">
-        <button
-          type="button"
-          class="btn btn-secondary btn-sm"
+        <AppButton
+          variant="ghost"
+          size="sm"
           :disabled="!mods.length || checkingAll"
           @click="checkAllViaApi"
         >
           {{ checkingAll ? `Checking ${checkedCount}/${mods.length}...` : 'Check All via API' }}
-        </button>
+        </AppButton>
         <span v-if="unresolvedCount > 0" class="summary-warning">{{ unresolvedCount }} unresolved</span>
         <span v-else class="summary-ok">All resolved</span>
       </div>
@@ -36,14 +36,14 @@
         <div class="mod-header">
           <p class="mod-path">{{ mod.path }}</p>
           <div class="mod-actions">
-            <button
-              type="button"
-              class="btn btn-secondary btn-sm"
+            <AppButton
+              variant="ghost"
+              size="sm"
               :disabled="rowChecking(mod.path)"
               @click="checkSingleViaApi(mod)"
             >
               {{ rowChecking(mod.path) ? 'Checking...' : 'Check via API' }}
-            </button>
+            </AppButton>
             <div class="toggle" role="group" :aria-label="`Side selection for ${mod.path}`">
               <button
                 type="button"
@@ -70,17 +70,18 @@
     </div>
 
     <template #footer>
-      <button class="btn btn-secondary" :disabled="loading" @click="handleCancel">
+      <AppButton variant="ghost" size="md" :disabled="loading" @click="handleCancel">
         Cancel
-      </button>
-      <button
-        class="btn btn-primary"
+      </AppButton>
+      <AppButton
+        variant="primary"
+        size="md"
         :disabled="loading || unresolvedCount > 0"
+        :loading="loading"
         @click="handleConfirm"
       >
-        <span v-if="loading" class="btn-loading"></span>
         Apply Decisions
-      </button>
+      </AppButton>
     </template>
   </BaseModal>
 </template>
@@ -88,6 +89,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import BaseModal from './BaseModal.vue'
+import AppButton from '../ui/AppButton.vue'
 import { getModDetails, searchMods } from '../../api/modrinth'
 
 const props = defineProps({
@@ -282,35 +284,35 @@ watch(() => props.mods, () => {
 
 <style scoped>
 .intro {
-  margin-bottom: 0.85rem;
+  margin-bottom: var(--space-3);
 }
 
 .intro-title {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--text-md);
   font-weight: 700;
   color: var(--text-primary);
 }
 
 .intro-text {
-  margin: 0.35rem 0 0;
+  margin: var(--space-1) 0 0;
   color: var(--text-secondary);
-  line-height: 1.45;
+  line-height: var(--leading-normal);
 }
 
 .summary {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
-  margin-bottom: 0.85rem;
+  margin-bottom: var(--space-3);
 }
 
 .summary-actions {
   display: inline-flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: var(--space-2);
 }
 
 .summary-warning {
@@ -325,23 +327,23 @@ watch(() => props.mods, () => {
 
 .mod-list {
   display: grid;
-  gap: 0.65rem;
+  gap: var(--space-2);
   max-height: min(52vh, 480px);
   overflow: auto;
-  padding-right: 0.25rem;
+  padding-right: var(--space-1);
 }
 
 .mod-item {
   border: 1px solid var(--border-color);
-  border-radius: 12px;
-  padding: 0.75rem;
+  border-radius: var(--radius-lg);
+  padding: var(--space-3);
   background: color-mix(in oklch, var(--bg-secondary) 86%, transparent);
 }
 
 .mod-header {
   display: flex;
   justify-content: space-between;
-  gap: 1rem;
+  gap: var(--space-4);
   align-items: center;
   flex-wrap: wrap;
 }
@@ -349,7 +351,7 @@ watch(() => props.mods, () => {
 .mod-actions {
   display: inline-flex;
   align-items: center;
-  gap: 0.55rem;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 
@@ -361,23 +363,23 @@ watch(() => props.mods, () => {
 }
 
 .mod-reason {
-  margin: 0.5rem 0 0;
+  margin: var(--space-2) 0 0;
   color: var(--text-muted);
-  font-size: 0.82rem;
-  line-height: 1.4;
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
 }
 
 .mod-api-result {
-  margin: 0.35rem 0 0;
+  margin: var(--space-1) 0 0;
   color: var(--text-secondary);
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
 }
 
 .toggle {
   display: inline-flex;
   border: 1px solid var(--border-color);
-  border-radius: 999px;
-  padding: 0.2rem;
+  border-radius: var(--radius-pill);
+  padding: var(--space-1);
   background: var(--bg-primary);
 }
 
@@ -385,9 +387,9 @@ watch(() => props.mods, () => {
   border: none;
   background: transparent;
   color: var(--text-secondary);
-  border-radius: 999px;
-  padding: 0.35rem 0.8rem;
-  font-size: 0.8rem;
+  border-radius: var(--radius-pill);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
   font-weight: 700;
   cursor: pointer;
 }
@@ -397,15 +399,9 @@ watch(() => props.mods, () => {
   color: var(--text-primary);
 }
 
-.btn-sm {
-  padding: 0.35rem 0.7rem;
-  font-size: 0.78rem;
-  font-weight: 600;
-}
-
 .api-error {
-  margin: 0 0 0.75rem;
+  margin: 0 0 var(--space-3);
   color: var(--danger, #d14343);
-  font-size: 0.86rem;
+  font-size: var(--text-sm);
 }
 </style>
