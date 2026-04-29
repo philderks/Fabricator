@@ -21,6 +21,7 @@ const recentLogLines = computed(() => {
   const lines = store.logs.stdout || []
   return lines.slice(-4)
 })
+const modPreview = computed(() => store.installedMods.slice(0, 4))
 </script>
 
 <template>
@@ -67,6 +68,21 @@ const recentLogLines = computed(() => {
               {{ line }}
             </div>
           </div>
+        </Panel>
+      </div>
+
+      <div class="overview-page__col">
+        <Panel title="Installed mods">
+          <template #action>
+            <a class="overview-page__panel-link" @click.prevent="store.goToMods">Manage →</a>
+          </template>
+          <div v-if="!modPreview.length" class="overview-page__empty">No mods installed.</div>
+          <ul v-else class="overview-page__mods">
+            <li v-for="mod in modPreview" :key="mod.path" class="overview-page__mod">
+              <span class="overview-page__mod-name">{{ mod.name }}</span>
+              <span class="overview-page__mod-version">{{ mod.version }}</span>
+            </li>
+          </ul>
         </Panel>
       </div>
     </section>
@@ -188,5 +204,40 @@ const recentLogLines = computed(() => {
   font-size: var(--text-sm);
   font-family: var(--font-sans);
   padding: var(--space-2) 0;
+}
+
+.overview-page__mods {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.overview-page__mod {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.overview-page__mod:last-child {
+  border-bottom: none;
+}
+
+.overview-page__mod-name {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.overview-page__mod-version {
+  font-size: var(--text-xs);
+  color: var(--text-disabled);
+  flex-shrink: 0;
+  margin-left: var(--space-3);
 }
 </style>
