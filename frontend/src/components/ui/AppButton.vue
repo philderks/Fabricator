@@ -3,7 +3,7 @@ defineProps({
   variant: {
     type: String,
     default: 'primary',
-    validator: (v) => ['primary', 'ghost', 'danger'].includes(v)
+    validator: (v) => ['primary', 'ghost', 'danger', 'warning'].includes(v)
   },
   size: {
     type: String,
@@ -101,6 +101,15 @@ defineEmits(['click'])
 
 .app-btn--danger:hover:not(:disabled) {
   background: var(--danger-dark);
+}
+
+.app-btn--warning {
+  background: var(--warning);
+  color: var(--bg-primary);
+}
+
+.app-btn--warning:hover:not(:disabled) {
+  background: var(--warning-dark);
 }
 
 .app-btn:disabled {
