@@ -122,7 +122,7 @@ import { ref, computed, watch } from 'vue'
 import BaseModal from './BaseModal.vue'
 import SearchResultCard from '../ui/SearchResultCard.vue'
 import AppButton from '../ui/AppButton.vue'
-import { useModpackImport, formatDownloads } from '../../composables/useModpackImport'
+import { useModpackImport } from '../../composables/useModpackImport'
 
 const props = defineProps({
   show: { type: Boolean, required: true },
