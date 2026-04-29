@@ -1,1039 +1,120 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import ModBrowserModal from '../components/modals/ModBrowserModal.vue'
-import ModpackBrowserModal from '../components/modals/ModpackBrowserModal.vue'
-import ConfirmModal from '../components/modals/ConfirmModal.vue'
-import JavaInstallModal from '../components/modals/JavaInstallModal.vue'
-import ModSideDecisionModal from '../components/modals/ModSideDecisionModal.vue'
+import { onMounted, onUnmounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import AppSidebar from '../components/layout/AppSidebar.vue'
 import AppTopbar from '../components/layout/AppTopbar.vue'
-import { installMod, installModpack, getModpackInstallProgress } from '../api/modrinth'
-import {
-  getServer,
-  getInstalledMods,
-  removeMod,
-  getServerLogs,
-  startServer,
-  stopServer,
-  restartServer,
-  updateServerSettings,
-  sendServerCommand,
-  browseServerFiles,
-  createBackup,
-  getBackups,
-  restoreBackup,
-  deleteBackup,
-  deleteServer
-} from '../api/servers'
-import { useToast } from '../composables/useToast'
-import { provideServerContext } from '../composables/useServerContext'
+import ConfirmModal from '../components/modals/ConfirmModal.vue'
+import JavaInstallModal from '../components/modals/JavaInstallModal.vue'
+import ModBrowserModal from '../components/modals/ModBrowserModal.vue'
+import ModpackBrowserModal from '../components/modals/ModpackBrowserModal.vue'
+import ModSideDecisionModal from '../components/modals/ModSideDecisionModal.vue'
+import { useServerStore } from '../stores/server'
 
 const route = useRoute()
-const router = useRouter()
-const toast = useToast()
-const serverId = computed(() => route.params.id)
+const store = useServerStore()
 
-const goToConsole  = () => router.push({ name: 'ServerConsole',  params: { id: serverId.value } })
-const goToFiles    = () => router.push({ name: 'ServerFiles',    params: { id: serverId.value } })
-const goToSettings = () => router.push({ name: 'ServerSettings', params: { id: serverId.value } })
-const goToMods     = () => router.push({ name: 'ServerMods',     params: { id: serverId.value } })
+// ---------- Route → store synchronization ----------
+// The store deliberately does NOT call useRoute() (setup-store route context
+// is fragile under HMR). The layout owns this sync. Both watchers use
+// immediate: true so the store has the right values before any action runs.
+watch(() => route.params.id, (id) => { store.currentServerId = id }, { immediate: true })
+watch(() => route.name,      (name) => { store.currentRouteName = name }, { immediate: true })
 
-const server = ref(null)
-const serverLoading = ref(true)
-const modsLoading = ref(false)
-const logsLoading = ref(false)
-const installedMods = ref([])
-const modSearch = ref('')
-const logs = ref({ stdout: [], stderr: [], running: false })
-const recentActivity = ref([])
-const serverSettings = ref(null)
-const showModBrowser = ref(false)
-const showJavaModal = ref(false)
-const pendingJavaAction = ref(null)
-const showModpackBrowser = ref(false)
-const showConfirmModal = ref(false)
-const confirmModalData = ref({})
-const modToRemove = ref(null)
-const installLoading = ref(false)
-const modpackInstalling = ref(false)
-const actionState = ref({ start: false, stop: false, restart: false })
-const consoleCommand = ref('')
-const commandSending = ref(false)
-const backups = ref([])
-const backupLoading = ref(false)
-const fileBrowser = ref({ currentPath: '', entries: [], loading: false, error: null })
-const backupToRestore = ref(null)
-const showBackupRestoreModal = ref(false)
-const restoringBackup = ref(false)
-const backupToDelete = ref(null)
-const showBackupDeleteModal = ref(false)
-const deletingBackup = ref(false)
-const showDeleteServerModal = ref(false)
-const deletingServer = ref(false)
-const modpackProgress = ref(null)
-let modpackProgressIntervalId = null
-const showModpackInstallConfirmModal = ref(false)
-const pendingModpackInstall = ref(null)
-const modpackCreateBackup = ref(true)
-
-const MODPACK_STAGE_LABELS = {
-  starting: 'Starting install...',
-  resolving: 'Resolving modpack version...',
-  cleaning: 'Cleaning old modpack files...',
-  downloading_pack: 'Downloading modpack archive...',
-  checking_availability: 'Checking file availability...',
-  installing_files: 'Downloading mods...',
-  extracting_overrides: 'Extracting override files...',
-  done: 'Finishing up...'
-}
-
-const modpackProgressLabel = computed(() => {
-  const p = modpackProgress.value
-  if (!p?.active) return ''
-  const stage = MODPACK_STAGE_LABELS[p.stage] || p.stage || 'Working...'
-  if (p.stage === 'installing_files' && p.total > 0) {
-    return `${stage} (${p.current}/${p.total})`
-  }
-  return stage
-})
-
-const modpackProgressPercent = computed(() => {
-  const p = modpackProgress.value
-  if (!p?.active || !p.total) return 0
-  return Math.round((p.current / p.total) * 100)
-})
-
-const showMissingModsConfirmModal = ref(false)
-const pendingMissingModsInstall = ref(null)
-const missingModsReport = ref([])
-const showUncertainModsModal = ref(false)
-const uncertainModsReport = ref([])
-const pendingUncertainModpackData = ref(null)
-
-const defaultSettings = (data = {}) => ({
-  name: data.name || 'Minecraft Server',
-  port: data.port ?? 25565,
-  serverIp: data.serverIp || '',
-  motd: data.motd || 'A Minecraft Server',
-  bugReportLink: data.bugReportLink || '',
-  maxPlayers: data.maxPlayers ?? 20,
-  difficulty: data.difficulty || 'normal',
-  gamemode: data.gamemode || 'survival',
-  forceGamemode: data.forceGamemode ?? false,
-  hardcore: data.hardcore ?? false,
-  allowFlight: data.allowFlight ?? false,
-  pvp: data.pvp ?? true,
-  spawnProtection: data.spawnProtection ?? 16,
-  commandBlocks: data.commandBlocks ?? true,
-  whitelist: data.whitelist ?? false,
-  enforceWhitelist: data.enforceWhitelist ?? false,
-  functionPermissionLevel: data.functionPermissionLevel ?? 2,
-  opPermissionLevel: data.opPermissionLevel ?? 4,
-  playerIdleTimeout: data.playerIdleTimeout ?? 0,
-  pauseWhenEmptySeconds: data.pauseWhenEmptySeconds ?? 60,
-  onlineMode: data.onlineMode ?? true,
-  enforceSecureProfile: data.enforceSecureProfile ?? true,
-  hideOnlinePlayers: data.hideOnlinePlayers ?? false,
-  preventProxyConnections: data.preventProxyConnections ?? false,
-  logIps: data.logIps ?? true,
-  acceptsTransfers: data.acceptsTransfers ?? false,
-  enableStatus: data.enableStatus ?? true,
-  statusHeartbeatInterval: data.statusHeartbeatInterval ?? 0,
-  broadcastConsoleToOps: data.broadcastConsoleToOps ?? true,
-  broadcastRconToOps: data.broadcastRconToOps ?? true,
-  enableCodeOfConduct: data.enableCodeOfConduct ?? false,
-  enableJmxMonitoring: data.enableJmxMonitoring ?? false,
-  enableQuery: data.enableQuery ?? false,
-  queryPort: data.queryPort ?? data.port ?? 25565,
-  enableRcon: data.enableRcon ?? false,
-  rconPort: data.rconPort ?? 25575,
-  rconPassword: data.rconPassword || '',
-  rateLimit: data.rateLimit ?? 0,
-  networkCompressionThreshold: data.networkCompressionThreshold ?? 256,
-  resourcePack: data.resourcePack || '',
-  resourcePackPrompt: data.resourcePackPrompt || '',
-  resourcePackSha1: data.resourcePackSha1 || '',
-  resourcePackId: data.resourcePackId || '',
-  requireResourcePack: data.requireResourcePack ?? false,
-  initialEnabledPacks: data.initialEnabledPacks || 'vanilla',
-  initialDisabledPacks: data.initialDisabledPacks || '',
-  textFilteringConfig: data.textFilteringConfig || '',
-  textFilteringVersion: data.textFilteringVersion ?? 0,
-  viewDistance: data.viewDistance ?? 10,
-  simulationDistance: data.simulationDistance ?? 10,
-  memory: data.memory ?? 4,
-  levelName: data.levelName || 'world',
-  levelType: data.levelType || 'default',
-  seed: data.seed || '',
-  generatorSettings: data.generatorSettings ?? '',
-  maxWorldSize: data.maxWorldSize ?? 29999984,
-  generateStructures: data.generateStructures ?? true,
-  spawnAnimals: data.spawnAnimals ?? true,
-  spawnMonsters: data.spawnMonsters ?? true,
-  spawnNpcs: data.spawnNpcs ?? true,
-  entityBroadcastRangePercentage: data.entityBroadcastRangePercentage ?? 100,
-  maxChainedNeighborUpdates: data.maxChainedNeighborUpdates ?? 1000000,
-  maxTickTime: data.maxTickTime ?? 60000,
-  syncChunkWrites: data.syncChunkWrites ?? true,
-  useNativeTransport: data.useNativeTransport ?? true,
-  regionFileCompression: data.regionFileCompression || 'deflate'
-})
-
-const loadServer = async (options = {}) => {
-  const { silent = false } = options
-  if (!silent) {
-    serverLoading.value = true
-  }
-  try {
-    const data = await getServer(serverId.value)
-    server.value = data
-    const mappedSettings = defaultSettings(data)
-    if (!serverSettings.value || route.name !== 'ServerSettings') {
-      serverSettings.value = mappedSettings
-    }
-  } catch (error) {
-    console.error('Failed to load server:', error)
-    toast.error('Could not load server details', 'Error')
-  } finally {
-    if (!silent) {
-      serverLoading.value = false
-    }
-  }
-}
-
-const loadMods = async () => {
-  modsLoading.value = true
-  try {
-    const files = await getInstalledMods(serverId.value)
-    installedMods.value = files.map((file) => ({
-      name: file.name,
-      filename: file.name,
-      version: file.version || 'local',
-      downloads: file.downloads || 'N/A',
-      size: file.size,
-      updatedAt: file.updatedAt,
-      path: file.path,
-      source: 'Local',
-      category: 'Mods Folder'
-    }))
-  } catch (error) {
-    console.error('Failed to load mods:', error)
-    toast.error('Failed to load installed mods', 'Error')
-  } finally {
-    modsLoading.value = false
-  }
-}
-
-const loadLogs = async (limit = 200) => {
-  if (!server.value) {
-    return
-  }
-  if (logsLoading.value) {
-    return
-  }
-  logsLoading.value = true
-  try {
-    logs.value = await getServerLogs(serverId.value, { limit })
-  } catch (error) {
-    console.error('Failed to load logs:', error)
-    toast.error('Failed to load console logs', 'Error')
-  } finally {
-    logsLoading.value = false
-  }
-}
-
-const loadBackups = async () => {
-  backupLoading.value = true
-  try {
-    backups.value = await getBackups(serverId.value)
-  } catch (error) {
-    console.error('Failed to load backups:', error)
-    toast.error('Failed to load backups', 'Backups')
-  } finally {
-    backupLoading.value = false
-  }
-}
-
-const refreshAll = async () => {
-  await Promise.all([loadServer(), loadMods(), loadBackups()])
-}
-
-const createBackupAction = async () => {
-  if (backupLoading.value) {
-    return
-  }
-  backupLoading.value = true
-  try {
-    await createBackup(serverId.value)
-    toast.success('Backup created successfully', 'Backups')
-    await loadBackups()
-    // On success, navigate to wherever the backups list lives. Currently the Files page; revisit if backups get their own route.
-    goToFiles()
-  } catch (error) {
-    console.error('Failed to create backup:', error)
-    toast.error(error.message || 'Failed to create backup', 'Backups')
-  } finally {
-    backupLoading.value = false
-  }
-}
-
-const formatBackupTime = (timestamp) => {
-  const date = new Date(timestamp)
-  if (Number.isNaN(date.getTime())) {
-    return 'Unknown'
-  }
-  return date.toLocaleString()
-}
-
-const requestRestoreBackup = (backup) => {
-  backupToRestore.value = backup
-  showBackupRestoreModal.value = true
-}
-
-const confirmRestoreBackup = async () => {
-  if (!backupToRestore.value) {
-    return
-  }
-  restoringBackup.value = true
-  try {
-    const backupId = backupToRestore.value.relativePath.replace(/\.zip$/i, '')
-    await restoreBackup(serverId.value, backupId)
-    toast.success('Backup restored successfully', 'Backups')
-    await Promise.all([openFileBrowser(), loadMods()])
-  } catch (error) {
-    console.error('Failed to restore backup:', error)
-    toast.error(error.message || 'Failed to restore backup', 'Backups')
-  } finally {
-    restoringBackup.value = false
-    showBackupRestoreModal.value = false
-    backupToRestore.value = null
-  }
-}
-
-const cancelRestoreBackup = () => {
-  showBackupRestoreModal.value = false
-  backupToRestore.value = null
-}
-
-const requestDeleteBackup = (backup) => {
-  backupToDelete.value = backup
-  showBackupDeleteModal.value = true
-}
-
-const confirmDeleteBackup = async () => {
-  if (!backupToDelete.value) {
-    return
-  }
-  deletingBackup.value = true
-  try {
-    const backupId = backupToDelete.value.relativePath.replace(/\.zip$/i, '')
-    await deleteBackup(serverId.value, backupId)
-    toast.success('Backup deleted', 'Backups')
-    await loadBackups()
-  } catch (error) {
-    console.error('Failed to delete backup:', error)
-    toast.error(error.message || 'Failed to delete backup', 'Backups')
-  } finally {
-    deletingBackup.value = false
-    showBackupDeleteModal.value = false
-    backupToDelete.value = null
-  }
-}
-
-const cancelDeleteBackup = () => {
-  showBackupDeleteModal.value = false
-  backupToDelete.value = null
-}
-const openFileBrowser = async (path = '') => {
-  fileBrowser.value.loading = true
-  fileBrowser.value.error = null
-  try {
-    const data = await browseServerFiles(serverId.value, path ? { path } : {})
-    fileBrowser.value = { ...data, entries: data.entries, loading: false, error: null }
-  } catch (error) {
-    console.error('Failed to browse files:', error)
-    fileBrowser.value = { currentPath: path, entries: [], loading: false, error: error.message || 'Unable to load files' }
-  }
-}
-
-const enterFileEntry = (entry) => {
-  if (entry.isDir) {
-    openFileBrowser(entry.relativePath)
-  }
-}
-
-const goUpDirectory = () => {
-  if (!fileBrowser.value.currentPath) {
-    return
-  }
-  const parts = fileBrowser.value.currentPath.split('/').filter(Boolean)
-  parts.pop()
-  openFileBrowser(parts.join('/'))
-}
-
-const formatFileSize = (bytes) => {
-  if (!Number.isFinite(bytes)) {
-    return '—'
-  }
-  if (bytes < 1024) {
-    return `${bytes} B`
-  }
-  const units = ['KB', 'MB', 'GB', 'TB']
-  let value = bytes / 1024
-  let idx = 0
-  while (value >= 1024 && idx < units.length - 1) {
-    value /= 1024
-    idx += 1
-  }
-  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[idx]}`
-}
-
-watch(() => route.name, (name) => {
-  if (name === 'ServerConsole') {
-    loadLogs()
-    startLogPolling()
-  } else {
-    stopLogPolling()
-  }
-
-  if (name === 'ServerFiles' && !fileBrowser.value.entries.length && !fileBrowser.value.loading) {
-    openFileBrowser()
-  }
-})
+// ---------- Polling (owned by layout per Phase 3 architecture) ----------
 
 let logsIntervalId = null
 let serverStatusIntervalId = null
+let modpackProgressIntervalId = null
 
-const startLogPolling = () => {
-  if (logsIntervalId || route.name !== 'ServerConsole') {
-    return
-  }
-  logsIntervalId = setInterval(() => {
-    loadLogs()
-  }, 4000)
+function startLogPolling() {
+  if (logsIntervalId || route.name !== 'ServerConsole') return
+  logsIntervalId = setInterval(() => store.loadLogs(), 4000)
 }
 
-const stopLogPolling = () => {
+function stopLogPolling() {
   if (logsIntervalId) {
     clearInterval(logsIntervalId)
     logsIntervalId = null
   }
 }
 
-const startServerStatusPolling = () => {
-  if (serverStatusIntervalId) {
-    return
-  }
-  serverStatusIntervalId = setInterval(() => {
-    loadServer({ silent: true })
-  }, 2500)
+function startServerStatusPolling() {
+  if (serverStatusIntervalId) return
+  serverStatusIntervalId = setInterval(() => store.loadServer({ silent: true }), 2500)
 }
 
-const stopServerStatusPolling = () => {
+function stopServerStatusPolling() {
   if (serverStatusIntervalId) {
     clearInterval(serverStatusIntervalId)
     serverStatusIntervalId = null
   }
 }
 
-const serverStatus = computed(() => {
-  const loaderName = server.value?.loader
-    ? server.value.loader.charAt(0).toUpperCase() + server.value.loader.slice(1)
-    : 'Unknown'
-
-  return {
-    name: server.value?.name || 'Minecraft Server',
-    status: server.value?.runtime?.status || server.value?.status || 'pending',
-    uptime: server.value?.runtime?.uptime || '—',
-    version: server.value?.version || '—',
-    loader: loaderName,
-    players: {
-      online: server.value?.runtime?.players?.online ?? 0,
-      max: server.value?.maxPlayers ?? server.value?.runtime?.players?.max ?? 0
-    },
-    tps: server.value?.runtime?.tps ?? 20
-  }
-})
-
-const canEditSettings = computed(() => serverStatus.value.status !== 'running')
-
-const ramMetrics = computed(() => {
-  const runtimeRam = server.value?.runtime?.ram
-  const runtimeLimit = typeof runtimeRam?.limitGB === 'number' ? runtimeRam.limitGB : null
-  const configuredTotal = Number(server.value?.memory ?? serverSettings.value?.memory ?? 0)
-  let total = runtimeLimit ?? configuredTotal
-  if (!Number.isFinite(total) || total <= 0) {
-    total = 1
-  }
-  let used = 0
-
-  if (runtimeRam) {
-    if (typeof runtimeRam.usedGB === 'number') {
-      used = runtimeRam.usedGB
-    } else if (typeof runtimeRam.usedBytes === 'number') {
-      used = runtimeRam.usedBytes / (1024 ** 3)
-    } else if (typeof runtimeRam.used === 'number') {
-      used = runtimeRam.used
-    }
-  }
-
-  used = Math.max(0, Math.min(used, total))
-
-  return {
-    used,
-    total,
-    running: serverStatus.value.status === 'running'
-  }
-})
-
-const filteredMods = computed(() => {
-  if (!modSearch.value) {
-    return installedMods.value
-  }
-  return installedMods.value.filter((mod) =>
-    mod.name.toLowerCase().includes(modSearch.value.toLowerCase())
-  )
-})
-
-const activeModpack = computed(() => server.value?.modpack || null)
-
-const isInstalling = computed(() => installLoading.value || modpackInstalling.value)
-
-const playersDisplay = computed(() => {
-  const online = serverStatus.value.players.online
-  const max = serverStatus.value.players.max
-  return max ? `${online}/${max}` : `${online}`
-})
-
-const statusLabel = computed(() => {
-  const status = serverStatus.value.status
-  if (status === 'running') {
-    return 'Running'
-  }
-  if (status === 'stopped') {
-    return 'Stopped'
-  }
-  if (status === 'pending') {
-    return 'Install Required'
-  }
-  if (status === 'installing') {
-    return 'Installing'
-  }
-  if (status === 'failed') {
-    return 'Failed'
-  }
-  return status?.charAt(0).toUpperCase() + status?.slice(1) || 'Unknown'
-})
-
-const logActivity = (entry) => {
-  recentActivity.value.unshift({
-    ...entry,
-    time: new Date().toLocaleTimeString()
-  })
-  if (recentActivity.value.length > 20) {
-    recentActivity.value.pop()
-  }
+function startModpackProgressPolling() {
+  if (modpackProgressIntervalId) return
+  store.fetchModpackProgress()
+  modpackProgressIntervalId = setInterval(() => store.fetchModpackProgress(), 1500)
 }
 
-const startLocked = computed(() => ['installing', 'pending'].includes(serverStatus.value.status))
-
-const startButtonLabel = computed(() => {
-  if (serverStatus.value.status === 'installing') {
-    return 'Installing…'
-  }
-  if (serverStatus.value.status === 'pending') {
-    return 'Install Required'
-  }
-  return actionState.value.start ? 'Starting…' : 'Start'
-})
-
-const openModBrowser = () => {
-  showModBrowser.value = true
-}
-
-const openModpackBrowser = () => {
-  showModpackBrowser.value = true
-}
-
-const openDeleteServerModal = () => {
-  showDeleteServerModal.value = true
-}
-
-const cancelDeleteServer = () => {
-  showDeleteServerModal.value = false
-}
-
-const confirmDeleteServer = async () => {
-  deletingServer.value = true
-  try {
-    await deleteServer(serverId.value)
-    toast.success('Server deleted', 'Servers')
-    router.push('/')
-  } catch (error) {
-    console.error('Failed to delete server:', error)
-    toast.error(error.message || 'Failed to delete server', 'Server Error')
-  } finally {
-    deletingServer.value = false
-    showDeleteServerModal.value = false
-  }
-}
-
-const handleInstallMod = async (modData) => {
-  if (!server.value) {
-    return
-  }
-  installLoading.value = true
-  try {
-    await installMod(modData.modId, {
-      mc_version: modData.mcVersion,
-      loader: modData.loader,
-      server_id: serverId.value
-    })
-    showModBrowser.value = false
-    toast.success(`${modData.modTitle} installed successfully!`, 'Mod Installed')
-    logActivity({ type: 'mod_install', mod: modData.modTitle })
-    await loadMods()
-  } catch (error) {
-    console.error('Install failed:', error)
-    toast.error(error.message || 'Mod installation failed', 'Installation Failed')
-  } finally {
-    installLoading.value = false
-  }
-}
-
-const handleUpdateMod = (mod) => {
-  console.log('Update mod placeholder:', mod)
-  toast.info('Mod updates coming soon', 'Not Implemented')
-}
-
-const handleInstallModpack = async (modpackData) => {
-  if (!modpackData) {
-    return
-  }
-
-  showModpackBrowser.value = false
-  pendingModpackInstall.value = modpackData
-  showModpackInstallConfirmModal.value = true
-}
-
-const cancelModpackInstallConfirmation = () => {
-  showModpackInstallConfirmModal.value = false
-  pendingModpackInstall.value = null
-  modpackCreateBackup.value = true
-}
-
-const formatMissingModsDescription = (missingFiles = []) => {
-  if (!Array.isArray(missingFiles) || !missingFiles.length) {
-    return ''
-  }
-  const preview = missingFiles.slice(0, 8)
-    .map((item) => `- ${item.path}: ${item.reason}`)
-    .join('\n')
-  const remaining = missingFiles.length - preview.split('\n').length
-  const suffix = remaining > 0 ? `\n...and ${remaining} more.` : ''
-  return `The following files could not be downloaded:\n${preview}${suffix}\n\nInstall anyway without these files?`
-}
-
-const fetchModpackProgress = async () => {
-  try {
-    const progress = await getModpackInstallProgress(serverId.value)
-    modpackProgress.value = progress?.active ? progress : null
-  } catch {
-    // polling failure is non-critical
-  }
-}
-
-const startModpackProgressPolling = () => {
-  if (modpackProgressIntervalId) {
-    return
-  }
-  fetchModpackProgress()
-  modpackProgressIntervalId = setInterval(fetchModpackProgress, 1500)
-}
-
-const stopModpackProgressPolling = () => {
+function stopModpackProgressPolling() {
   if (modpackProgressIntervalId) {
     clearInterval(modpackProgressIntervalId)
     modpackProgressIntervalId = null
   }
-  modpackProgress.value = null
+  store.modpackProgress = null
 }
 
-const runModpackInstall = async (modpackData) => {
-  if (!modpackData) {
-    return
-  }
+// ---------- Watches ----------
 
-  const isRetry = Boolean(modpackData.allowMissing || modpackData.modSideOverrides)
-
-  modpackInstalling.value = true
-  if (isRetry) {
-    pendingModpackInstall.value = modpackData
-    showModpackInstallConfirmModal.value = true
-  }
-  startModpackProgressPolling()
-  try {
-    const result = await installModpack(modpackData.projectId, {
-      mc_version: modpackData.mcVersion,
-      loader: modpackData.loader,
-      server_id: serverId.value,
-      clean_install: !isRetry,
-      create_backup: isRetry ? false : modpackData.createBackup,
-      allow_missing: Boolean(modpackData.allowMissing),
-      mod_side_overrides: modpackData.modSideOverrides || null
-    })
-    showModpackBrowser.value = false
-    showModpackInstallConfirmModal.value = false
-    pendingModpackInstall.value = null
-    modpackCreateBackup.value = true
-    const cleanedCount = Array.isArray(result?.cleaned_paths) ? result.cleaned_paths.length : 0
-    const missingCount = Array.isArray(result?.missing_files) ? result.missing_files.length : 0
-    const cleanedNote = ` Replaced folders: ${cleanedCount}.`
-    const missingNote = missingCount
-      ? ` Missing files skipped: ${missingCount}.`
-      : ''
-    const backupNote = result?.backup_file ? ` Backup: ${result.backup_file}.` : ''
-    toast.success(
-      `${modpackData.title} installed successfully.${cleanedNote}${missingNote}${backupNote}`,
-      'Modpack Installed'
-    )
-    if (result?.java_warning) {
-      toast.warning(result.java_warning.message, 'Java Version Mismatch')
-    }
-    logActivity({ type: 'modpack_install', modpack: modpackData.title })
-    await Promise.all([loadServer({ silent: true }), loadMods()])
-  } catch (error) {
-    const uncertainMods = error?.data?.uncertain_mod_files
-    const canContinueWithUncertain = Boolean(error?.data?.can_continue_with_uncertain)
-    if (
-      error?.status === 409
-      && canContinueWithUncertain
-      && Array.isArray(uncertainMods)
-      && uncertainMods.length
-    ) {
-      showModpackInstallConfirmModal.value = false
-      pendingUncertainModpackData.value = modpackData
-      uncertainModsReport.value = uncertainMods
-      showUncertainModsModal.value = true
-      toast.warning('Some mods need a server/client decision before install can continue.', 'Uncertain Mod Side')
-      return
-    }
-
-    const missingFiles = error?.data?.missing_files
-    const canContinue = Boolean(error?.data?.can_continue_with_missing)
-    if (!modpackData.allowMissing && error?.status === 409 && canContinue && Array.isArray(missingFiles) && missingFiles.length) {
-      showModpackInstallConfirmModal.value = false
-      pendingMissingModsInstall.value = { ...modpackData, allowMissing: true }
-      missingModsReport.value = missingFiles
-      showMissingModsConfirmModal.value = true
-      toast.warning(`${missingFiles.length} files could not be downloaded. Choose if you want to continue without them.`, 'Missing Modpack Files')
-      return
-    }
-    showModpackInstallConfirmModal.value = false
-    console.error('Modpack install failed:', error)
-    toast.error(error.message || 'Modpack installation failed', 'Installation Failed')
-  } finally {
-    stopModpackProgressPolling()
-    modpackInstalling.value = false
-  }
-}
-
-const confirmModpackInstall = async () => {
-  const modpackData = pendingModpackInstall.value
-  if (!modpackData) {
-    return
-  }
-
-  await runModpackInstall({ ...modpackData, createBackup: modpackCreateBackup.value, allowMissing: false })
-}
-
-const cancelMissingModsConfirmation = () => {
-  showMissingModsConfirmModal.value = false
-  pendingMissingModsInstall.value = null
-  missingModsReport.value = []
-}
-
-const confirmInstallWithMissingMods = async () => {
-  const modpackData = pendingMissingModsInstall.value
-  if (!modpackData) {
-    return
-  }
-
-  showMissingModsConfirmModal.value = false
-  await runModpackInstall(modpackData)
-  pendingMissingModsInstall.value = null
-  missingModsReport.value = []
-}
-
-const cancelUncertainModsDecision = () => {
-  showUncertainModsModal.value = false
-  uncertainModsReport.value = []
-  pendingUncertainModpackData.value = null
-  toast.info('Modpack install canceled. Unknown mod sides were not confirmed.', 'Install Canceled')
-}
-
-const confirmUncertainModsDecision = async (overrides) => {
-  const modpackData = pendingUncertainModpackData.value
-  showUncertainModsModal.value = false
-  uncertainModsReport.value = []
-  pendingUncertainModpackData.value = null
-  if (!modpackData) {
-    return
-  }
-  await runModpackInstall({ ...modpackData, modSideOverrides: overrides || {} })
-}
-
-const handleRemoveMod = (mod) => {
-  modToRemove.value = mod
-  confirmModalData.value = {
-    title: 'Remove Mod',
-    message: `Remove ${mod.name}?`,
-    description: 'This will delete the mod file from the server. This action cannot be undone.',
-    type: 'danger',
-    confirmText: 'Remove',
-    cancelText: 'Cancel'
-  }
-  showConfirmModal.value = true
-}
-
-const confirmRemoveMod = async () => {
-  if (!modToRemove.value) {
-    return
-  }
-  try {
-    await removeMod(serverId.value, modToRemove.value.filename || modToRemove.value.name)
-    toast.success(`${modToRemove.value.name} removed`, 'Mod Removed')
-    logActivity({ type: 'mod_remove', mod: modToRemove.value.name })
-    await loadMods()
-  } catch (error) {
-    console.error('Failed to remove mod:', error)
-    toast.error('Failed to remove mod', 'Error')
-  } finally {
-    showConfirmModal.value = false
-    modToRemove.value = null
-  }
-}
-
-const cancelRemoveMod = () => {
-  showConfirmModal.value = false
-  modToRemove.value = null
-}
-
-const performServerAction = async (action, fn, successMessage) => {
-  if (actionState.value[action]) {
-    return
-  }
-  actionState.value = { ...actionState.value, [action]: true }
-  try {
-    const result = await fn(serverId.value)
-    if (result.success) {
-      toast.success(successMessage, 'Server Updated')
-      logActivity({ type: `server_${action}` })
-    } else {
-      toast.error(result.message || 'Operation failed', 'Server Error')
-    }
-  } catch (error) {
-    console.error(`Failed to ${action} server:`, error)
-    if (
-      (action === 'start' || action === 'restart') &&
-      (error.data?.java_missing || error.data?.java_too_old)
-    ) {
-      pendingJavaAction.value = action
-      showJavaModal.value = true
-    } else {
-      toast.error(error.message || `Failed to ${action} server`, 'Server Error')
-    }
-  } finally {
-    actionState.value = { ...actionState.value, [action]: false }
-    await loadServer()
-    if (action === 'stop') {
-      stopLogPolling()
-      logs.value = { stdout: [], stderr: [], running: false }
-    }
-    if (action === 'start' || action === 'restart') {
-      await loadLogs()
-      if (route.name === 'ServerConsole') {
-        startLogPolling()
-      }
-    }
-  }
-}
-
-const handleStart = () => performServerAction('start', startServer, 'Server start requested')
-const handleStop = () => performServerAction('stop', stopServer, 'Server stop requested')
-const handleRestart = () => performServerAction('restart', restartServer, 'Server restart requested')
-
-const handleJavaInstalled = () => {
-  const action = pendingJavaAction.value
-  showJavaModal.value = false
-  pendingJavaAction.value = null
-  if (action === 'restart') {
-    handleRestart()
-  } else {
-    handleStart()
-  }
-}
-
-const canSendCommand = computed(() => serverStatus.value.status === 'running' && !!server.value)
-
-const sendConsoleCommand = async () => {
-  if (!canSendCommand.value || !consoleCommand.value.trim()) {
-    return
-  }
-  commandSending.value = true
-  try {
-    await sendServerCommand(serverId.value, consoleCommand.value.trim())
-    toast.success('Command sent to server', 'Console')
-    consoleCommand.value = ''
-    await loadLogs()
-  } catch (error) {
-    console.error('Failed to send command:', error)
-    toast.error('Failed to send console command', 'Console Error')
-  } finally {
-    commandSending.value = false
-  }
-}
-
-const handleSaveSettings = async (settings) => {
-  if (!server.value) {
-    return
-  }
-  try {
-    const updated = await updateServerSettings(serverId.value, settings)
-    server.value = updated
-    serverSettings.value = defaultSettings(updated)
-    toast.success('Settings saved successfully', 'Settings Updated')
-    logActivity({ type: 'settings_update' })
-  } catch (error) {
-    console.error('Failed to save settings:', error)
-    toast.error(error.message || 'Failed to save settings', 'Error')
-  }
-}
-
-const resetSettings = () => {
-  if (!server.value) {
-    return
-  }
-  serverSettings.value = defaultSettings(server.value)
-}
-
-const resetDashboardState = () => {
-  server.value = null
-  serverSettings.value = null
-  installedMods.value = []
-  logs.value = { stdout: [], stderr: [], running: false }
-  recentActivity.value = []
-  backups.value = []
-  fileBrowser.value = { currentPath: '', entries: [], loading: false, error: null }
-  modSearch.value = ''
-  modToRemove.value = null
-  backupToRestore.value = null
-  serverLoading.value = true
-  modsLoading.value = false
-  logsLoading.value = false
-  backupLoading.value = false
-  installLoading.value = false
-  modpackInstalling.value = false
-  modpackProgress.value = null
-  showModpackInstallConfirmModal.value = false
-  showMissingModsConfirmModal.value = false
-  pendingModpackInstall.value = null
-  modpackCreateBackup.value = true
-  pendingMissingModsInstall.value = null
-  missingModsReport.value = []
-  showUncertainModsModal.value = false
-  uncertainModsReport.value = []
-  pendingUncertainModpackData.value = null
-  actionState.value = { start: false, stop: false, restart: false }
-}
-
-watch(serverId, async (newId, oldId) => {
-  if (!newId || newId === oldId) {
-    return
-  }
+watch(() => store.currentServerId, async (newId, oldId) => {
+  if (!newId || newId === oldId) return
   stopLogPolling()
   stopServerStatusPolling()
-  resetDashboardState()
-  await refreshAll()
+  store.resetState()
+  await store.refreshAll()
   if (route.name === 'ServerConsole') {
-    await loadLogs()
+    await store.loadLogs()
     startLogPolling()
   }
   startServerStatusPolling()
 })
 
+watch(() => route.name, (name) => {
+  if (name === 'ServerConsole') {
+    store.loadLogs()
+    startLogPolling()
+  } else {
+    stopLogPolling()
+  }
+  if (name === 'ServerFiles' && !store.fileBrowser.entries.length && !store.fileBrowser.loading) {
+    store.openFileBrowser()
+  }
+})
+
+// Drive modpack-progress polling from the store's installing flag.
+watch(() => store.modpackInstalling, (installing) => {
+  if (installing) startModpackProgressPolling()
+  else stopModpackProgressPolling()
+})
+
+// ---------- Lifecycle ----------
+
 onMounted(async () => {
-  await refreshAll()
+  await store.refreshAll()
   startServerStatusPolling()
+  if (route.name === 'ServerConsole') {
+    await store.loadLogs()
+    startLogPolling()
+  }
+  if (route.name === 'ServerFiles') {
+    store.openFileBrowser()
+  }
 })
 
 onUnmounted(() => {
   stopLogPolling()
   stopServerStatusPolling()
   stopModpackProgressPolling()
-})
-
-provideServerContext({
-  serverId,
-  server,
-  serverLoading,
-  serverStatus,
-  statusLabel,
-  playersDisplay,
-  installedMods,
-  modSearch,
-  modsLoading,
-  filteredMods,
-  installLoading,
-  modpackInstalling,
-  isInstalling,
-  modpackProgress,
-  modpackProgressLabel,
-  modpackProgressPercent,
-  logs,
-  logsLoading,
-  consoleCommand,
-  commandSending,
-  canSendCommand,
-  recentActivity,
-  activeModpack,
-  ramMetrics,
-  serverSettings,
-  canEditSettings,
-  backups,
-  backupLoading,
-  formatBackupTime,
-  formatFileSize,
-  fileBrowser,
-  actionState,
-  startLocked,
-  startButtonLabel,
-  deletingServer,
-  loadLogs,
-  sendConsoleCommand,
-  openModBrowser,
-  openModpackBrowser,
-  handleRemoveMod,
-  handleUpdateMod,
-  handleInstallMod,
-  handleInstallModpack,
-  createBackupAction,
-  requestRestoreBackup,
-  requestDeleteBackup,
-  openDeleteServerModal,
-  handleSaveSettings,
-  resetSettings,
-  enterFileEntry,
-  goUpDirectory,
-  openFileBrowser,
-  goToConsole,
-  goToFiles,
-  goToSettings,
-  goToMods,
-  handleStart,
-  handleStop,
-  handleRestart
 })
 </script>
 
@@ -1042,158 +123,158 @@ provideServerContext({
     <AppSidebar />
     <div class="server-layout__main">
       <AppTopbar
-        :server-status="serverStatus"
-        :status-label="statusLabel"
-        :action-state="actionState"
-        :start-locked="startLocked"
-        :start-button-label="startButtonLabel"
-        @start="handleStart"
-        @stop="handleStop"
-        @restart="handleRestart"
+        :server-status="store.serverStatus"
+        :status-label="store.statusLabel"
+        :action-state="store.actionState"
+        :start-locked="store.startLocked"
+        :start-button-label="store.startButtonLabel"
+        @start="store.handleStart"
+        @stop="store.handleStop"
+        @restart="store.handleRestart"
       />
       <main class="server-layout__content">
-        <div v-if="serverLoading && !server" class="server-layout__loading">Loading server data…</div>
-        <div v-else-if="!server" class="server-layout__loading">Unable to find this server.</div>
+        <div v-if="store.serverLoading && !store.server" class="server-layout__loading">Loading server data…</div>
+        <div v-else-if="!store.server" class="server-layout__loading">Unable to find this server.</div>
         <router-view v-else />
       </main>
     </div>
 
     <!-- Modals (hosted at layout level so they survive route changes) -->
     <ModBrowserModal
-      :show="showModBrowser"
-      :mc-version="server?.version || serverStatus.version"
-      :loader="(server?.loader || serverStatus.loader).toLowerCase()"
-      @close="showModBrowser = false"
-      @install="handleInstallMod"
+      :show="store.showModBrowser"
+      :mc-version="store.server?.version || store.serverStatus.version"
+      :loader="(store.server?.loader || store.serverStatus.loader).toLowerCase()"
+      @close="store.showModBrowser = false"
+      @install="store.handleInstallMod"
     />
 
     <ModpackBrowserModal
-      :show="showModpackBrowser"
-      :mc-version="server?.version || serverStatus.version"
-      :loader="(server?.loader || serverStatus.loader).toLowerCase()"
-      @close="showModpackBrowser = false"
-      @install="handleInstallModpack"
+      :show="store.showModpackBrowser"
+      :mc-version="store.server?.version || store.serverStatus.version"
+      :loader="(store.server?.loader || store.serverStatus.loader).toLowerCase()"
+      @close="store.showModpackBrowser = false"
+      @install="store.handleInstallModpack"
     />
 
     <ConfirmModal
-      :show="showModpackInstallConfirmModal"
-      :title="modpackInstalling ? 'Installing Modpack...' : 'Confirm Modpack Replace'"
-      :message="pendingModpackInstall
-        ? (modpackInstalling
-            ? (modpackProgressLabel || 'Preparing...')
-            : `Install ${pendingModpackInstall.title} on this server?`)
+      :show="store.showModpackInstallConfirmModal"
+      :title="store.modpackInstalling ? 'Installing Modpack...' : 'Confirm Modpack Replace'"
+      :message="store.pendingModpackInstall
+        ? (store.modpackInstalling
+            ? (store.modpackProgressLabel || 'Preparing...')
+            : `Install ${store.pendingModpackInstall.title} on this server?`)
         : ''"
-      :description="modpackInstalling
+      :description="store.modpackInstalling
         ? ''
         : 'Pack-managed folders (mods, config, defaultconfigs, kubejs, scripts) will be replaced. World data, logs and backups stay intact. Server settings may be overwritten if the pack includes them. If some files are unavailable you will be asked whether to continue.'"
-      :type="modpackInstalling ? 'info' : 'warning'"
+      :type="store.modpackInstalling ? 'info' : 'warning'"
       confirm-text="Install"
       cancel-text="Cancel"
       loading-text="Installing..."
-      :loading="modpackInstalling"
-      @confirm="confirmModpackInstall"
-      @cancel="cancelModpackInstallConfirmation"
-      @close="cancelModpackInstallConfirmation"
+      :loading="store.modpackInstalling"
+      @confirm="store.confirmModpackInstall"
+      @cancel="store.cancelModpackInstallConfirmation"
+      @close="store.cancelModpackInstallConfirmation"
     >
       <template #extra>
-        <div v-if="modpackInstalling" class="install-progress">
+        <div v-if="store.modpackInstalling" class="install-progress">
           <div class="install-progress__track">
-            <div class="install-progress__fill" :style="{ width: modpackProgressPercent + '%' }"></div>
+            <div class="install-progress__fill" :style="{ width: store.modpackProgressPercent + '%' }"></div>
           </div>
-          <p v-if="modpackProgress?.detail" class="install-progress__detail">{{ modpackProgress.detail }}</p>
+          <p v-if="store.modpackProgress?.detail" class="install-progress__detail">{{ store.modpackProgress.detail }}</p>
         </div>
         <label v-else class="confirm-checkbox">
-          <input type="checkbox" v-model="modpackCreateBackup">
+          <input type="checkbox" v-model="store.modpackCreateBackup">
           <span>Create backup before installing</span>
         </label>
       </template>
     </ConfirmModal>
 
     <ConfirmModal
-      :show="showMissingModsConfirmModal"
+      :show="store.showMissingModsConfirmModal"
       title="Missing Modpack Files"
-      :message="missingModsReport.length ? `${missingModsReport.length} files could not be downloaded.` : ''"
-      :description="formatMissingModsDescription(missingModsReport)"
+      :message="store.missingModsReport.length ? `${store.missingModsReport.length} files could not be downloaded.` : ''"
+      :description="store.missingModsDescriptionText"
       type="warning"
       confirm-text="Install Anyway"
       cancel-text="Cancel"
-      :loading="modpackInstalling"
-      @confirm="confirmInstallWithMissingMods"
-      @cancel="cancelMissingModsConfirmation"
-      @close="cancelMissingModsConfirmation"
+      :loading="store.modpackInstalling"
+      @confirm="store.confirmInstallWithMissingMods"
+      @cancel="store.cancelMissingModsConfirmation"
+      @close="store.cancelMissingModsConfirmation"
     />
 
     <ModSideDecisionModal
-      :show="showUncertainModsModal"
-      :mods="uncertainModsReport"
-      :mc-version="server?.version || serverStatus.version"
-      :loader="(server?.loader || serverStatus.loader).toLowerCase()"
-      :loading="modpackInstalling"
-      @confirm="confirmUncertainModsDecision"
-      @cancel="cancelUncertainModsDecision"
-      @close="cancelUncertainModsDecision"
+      :show="store.showUncertainModsModal"
+      :mods="store.uncertainModsReport"
+      :mc-version="store.server?.version || store.serverStatus.version"
+      :loader="(store.server?.loader || store.serverStatus.loader).toLowerCase()"
+      :loading="store.modpackInstalling"
+      @confirm="store.confirmUncertainModsDecision"
+      @cancel="store.cancelUncertainModsDecision"
+      @close="store.cancelUncertainModsDecision"
     />
 
     <ConfirmModal
-      :show="showConfirmModal"
-      :title="confirmModalData.title"
-      :message="confirmModalData.message"
-      :description="confirmModalData.description"
-      :type="confirmModalData.type"
-      :confirm-text="confirmModalData.confirmText"
-      :cancel-text="confirmModalData.cancelText"
-      @confirm="confirmRemoveMod"
-      @cancel="cancelRemoveMod"
-      @close="cancelRemoveMod"
+      :show="store.showConfirmModal"
+      :title="store.confirmModalData.title"
+      :message="store.confirmModalData.message"
+      :description="store.confirmModalData.description"
+      :type="store.confirmModalData.type"
+      :confirm-text="store.confirmModalData.confirmText"
+      :cancel-text="store.confirmModalData.cancelText"
+      @confirm="store.confirmRemoveMod"
+      @cancel="store.cancelRemoveMod"
+      @close="store.cancelRemoveMod"
     />
 
     <ConfirmModal
-      :show="showBackupRestoreModal"
+      :show="store.showBackupRestoreModal"
       title="Restore Backup"
-      :message="backupToRestore ? `Restore ${backupToRestore.name}?` : ''"
+      :message="store.backupToRestore ? `Restore ${store.backupToRestore.name}?` : ''"
       description="Restoring will overwrite the current world and configs. Make sure the server is stopped."
       type="warning"
       confirm-text="Restore"
       cancel-text="Cancel"
-      :loading="restoringBackup"
-      @confirm="confirmRestoreBackup"
-      @cancel="cancelRestoreBackup"
-      @close="cancelRestoreBackup"
+      :loading="store.restoringBackup"
+      @confirm="store.confirmRestoreBackup"
+      @cancel="store.cancelRestoreBackup"
+      @close="store.cancelRestoreBackup"
     />
 
     <ConfirmModal
-      :show="showBackupDeleteModal"
+      :show="store.showBackupDeleteModal"
       title="Delete Backup"
-      :message="backupToDelete ? `Delete ${backupToDelete.name}?` : ''"
+      :message="store.backupToDelete ? `Delete ${store.backupToDelete.name}?` : ''"
       description="This backup will be permanently deleted. This action cannot be undone."
       type="danger"
       confirm-text="Delete"
       cancel-text="Cancel"
-      :loading="deletingBackup"
-      @confirm="confirmDeleteBackup"
-      @cancel="cancelDeleteBackup"
-      @close="cancelDeleteBackup"
+      :loading="store.deletingBackup"
+      @confirm="store.confirmDeleteBackup"
+      @cancel="store.cancelDeleteBackup"
+      @close="store.cancelDeleteBackup"
     />
 
     <ConfirmModal
-      :show="showDeleteServerModal"
+      :show="store.showDeleteServerModal"
       title="Delete Server"
       message="Delete this server permanently?"
       description="All server files and backups will be deleted. This cannot be undone."
       type="danger"
       confirm-text="Delete"
       cancel-text="Cancel"
-      :loading="deletingServer"
-      @confirm="confirmDeleteServer"
-      @cancel="cancelDeleteServer"
-      @close="cancelDeleteServer"
+      :loading="store.deletingServer"
+      @confirm="store.confirmDeleteServer"
+      @cancel="store.cancelDeleteServer"
+      @close="store.cancelDeleteServer"
     />
 
     <JavaInstallModal
-      :show="showJavaModal"
-      :mc-version="server?.version || ''"
-      @close="showJavaModal = false"
-      @java-installed="handleJavaInstalled"
+      :show="store.showJavaModal"
+      :mc-version="store.server?.version || ''"
+      @close="store.showJavaModal = false"
+      @java-installed="store.handleJavaInstalled"
     />
   </div>
 </template>
