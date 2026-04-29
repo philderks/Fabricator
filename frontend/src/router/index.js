@@ -6,7 +6,6 @@ import ServerConsolePage from '../views/server/ServerConsolePage.vue'
 import ServerModsPage from '../views/server/ServerModsPage.vue'
 import ServerFilesPage from '../views/server/ServerFilesPage.vue'
 import ServerSettingsPage from '../views/server/ServerSettingsPage.vue'
-import DesignSystem from '../views/DesignSystem.vue'
 
 const routes = [
   {
@@ -25,11 +24,6 @@ const routes = [
       { path: 'files',    name: 'ServerFiles',    component: ServerFilesPage },
       { path: 'settings', name: 'ServerSettings', component: ServerSettingsPage }
     ]
-  },
-  {
-    path: '/design-system',
-    name: 'DesignSystem',
-    component: DesignSystem
   }
 ]
 
