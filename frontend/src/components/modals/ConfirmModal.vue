@@ -63,7 +63,7 @@ export default {
     },
     message: {
       type: String,
-      required: true
+      default: ''
     },
     description: {
       type: String,
