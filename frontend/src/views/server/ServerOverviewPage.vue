@@ -84,6 +84,27 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
             </li>
           </ul>
         </Panel>
+
+        <Panel title="Quick actions">
+          <div class="overview-page__qa-grid">
+            <button type="button" class="overview-page__qa" :disabled="store.backupLoading" @click="store.createBackupAction">
+              <span class="overview-page__qa-title">{{ store.backupLoading ? 'Creating…' : 'Backup' }}</span>
+              <span class="overview-page__qa-sub">Create snapshot</span>
+            </button>
+            <button type="button" class="overview-page__qa" @click="store.goToConsole">
+              <span class="overview-page__qa-title">Console</span>
+              <span class="overview-page__qa-sub">View logs</span>
+            </button>
+            <button type="button" class="overview-page__qa" @click="store.goToSettings">
+              <span class="overview-page__qa-title">Properties</span>
+              <span class="overview-page__qa-sub">server.properties</span>
+            </button>
+            <button type="button" class="overview-page__qa" @click="store.goToSettings">
+              <span class="overview-page__qa-title">World</span>
+              <span class="overview-page__qa-sub">World config</span>
+            </button>
+          </div>
+        </Panel>
       </div>
     </section>
   </div>
@@ -239,5 +260,51 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
   color: var(--text-disabled);
   flex-shrink: 0;
   margin-left: var(--space-3);
+}
+
+.overview-page__qa-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+
+.overview-page__qa {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.overview-page__qa:hover:not(:disabled) {
+  border-color: var(--text-disabled);
+}
+
+.overview-page__qa:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.overview-page__qa:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.overview-page__qa-title {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.overview-page__qa-sub {
+  font-size: var(--text-xs);
+  color: var(--text-disabled);
 }
 </style>
