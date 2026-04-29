@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { installMod, installModpack, getModpackInstallProgress } from '../api/modrinth'
 import {
   getServer,
+  getServers,
   getInstalledMods,
   removeMod,
   getServerLogs,
@@ -55,6 +56,7 @@ export const useServerStore = defineStore('server', () => {
   // call-ordering changes. Layout owns route → store synchronization.
   const currentServerId = ref(null)
   const currentRouteName = ref(null)
+  const serversList = ref([])
 
   const server = ref(null)
   const serverLoading = ref(true)
@@ -277,6 +279,17 @@ export const useServerStore = defineStore('server', () => {
 
   // ---------- Actions ----------
 
+  async function loadServers() {
+    try {
+      const list = await getServers()
+      if (Array.isArray(list)) {
+        serversList.value = list
+      }
+    } catch {
+      // Failure-safe: keep last-known-good state. Switcher pseudo-entry handles empty list.
+    }
+  }
+
   async function loadServer(options = {}) {
     const { silent = false } = options
     if (!silent) serverLoading.value = true
@@ -496,6 +509,7 @@ export const useServerStore = defineStore('server', () => {
     try {
       await deleteServer(currentServerId.value)
       toast.success('Server deleted', 'Servers')
+      await loadServers()
       router.push({ name: 'Servers' })
     } catch (error) {
       console.error('Failed to delete server:', error)
@@ -750,6 +764,7 @@ export const useServerStore = defineStore('server', () => {
       const updated = await updateServerSettings(currentServerId.value, settings)
       server.value = updated
       serverSettings.value = defaultSettings(updated)
+      await loadServers()
       toast.success('Settings saved successfully', 'Settings Updated')
     } catch (error) {
       console.error('Failed to save settings:', error)
@@ -813,6 +828,7 @@ export const useServerStore = defineStore('server', () => {
     // State
     currentServerId,
     currentRouteName,
+    serversList,
     server,
     serverLoading,
     modsLoading,
@@ -872,6 +888,7 @@ export const useServerStore = defineStore('server', () => {
     missingModsDescriptionText,
     hasFileChanges,
     // Actions
+    loadServers,
     loadServer,
     loadMods,
     loadLogs,

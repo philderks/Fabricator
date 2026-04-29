@@ -1,18 +1,18 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getServers } from '../../api/servers'
+import { useServerStore } from '../../stores/server'
 
 const route = useRoute()
 const router = useRouter()
+const store = useServerStore()
 
-const servers = ref([])
 const open = ref(false)
 
 const currentId = computed(() => route.params.id)
 
 const currentServer = computed(() => {
-  const found = servers.value.find((s) => s.id === currentId.value)
+  const found = store.serversList.find((s) => s.id === currentId.value)
   if (found) {
     return found
   }
@@ -21,7 +21,7 @@ const currentServer = computed(() => {
 })
 
 const otherServers = computed(() =>
-  servers.value.filter((s) => s.id !== currentId.value)
+  store.serversList.filter((s) => s.id !== currentId.value)
 )
 
 // runtime.status takes precedence over the persisted top-level status,
@@ -46,17 +46,15 @@ const metaText = (s) => {
   return parts.join(' · ')
 }
 
-const loadServers = async () => {
-  try {
-    // getServers() returns a bare Array<Server> — no wrapper object.
-    servers.value = await getServers()
-  } catch {
-    // Network failure — keep empty list; UI falls back to currentServer pseudo-entry.
-    servers.value = []
+const toggle = () => {
+  if (!open.value) {
+    // Refresh the list when opening the dropdown — covers status changes,
+    // creates from /, etc. Don't await: open immediately, list updates
+    // reactively when fetch returns.
+    store.loadServers()
   }
+  open.value = !open.value
 }
-
-const toggle = () => { open.value = !open.value }
 const close = () => { open.value = false }
 
 const switchTo = (id) => {
@@ -78,7 +76,7 @@ const handleDocumentClick = (event) => {
 }
 
 onMounted(() => {
-  loadServers()
+  store.loadServers()
   document.addEventListener('click', handleDocumentClick)
 })
 
