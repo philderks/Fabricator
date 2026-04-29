@@ -260,7 +260,7 @@ export default {
 
 .version-list__label {
   font-size: var(--text-xs);
-  color: var(--text-tertiary);
+  color: var(--text-muted);
   margin-bottom: var(--space-2);
 }
 

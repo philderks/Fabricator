@@ -411,30 +411,6 @@ export default {
       return parts.join(' · ')
     },
 
-    formatVersions(versions, highlightVersion = null) {
-      if (!versions || !versions.length) return 'N/A'
-
-      const sorted = [...versions].sort((a, b) => {
-        const partsA = a.split('.').map((n) => parseInt(n, 10) || 0)
-        const partsB = b.split('.').map((n) => parseInt(n, 10) || 0)
-        for (let i = 0; i < Math.max(partsA.length, partsB.length); i += 1) {
-          const diff = (partsB[i] || 0) - (partsA[i] || 0)
-          if (diff !== 0) return diff
-        }
-        return 0
-      })
-
-      if (highlightVersion && versions.includes(highlightVersion)) {
-        const others = sorted.length - 1
-        if (others === 0) return highlightVersion
-        return `${highlightVersion} (+${others} more)`
-      }
-
-      if (sorted.length === 1) return sorted[0]
-      if (sorted.length === 2) return `${sorted[0]}, ${sorted[1]}`
-      return `${sorted[0]} (+${sorted.length - 1} more)`
-    },
-
     getCompatibilityStatus(mod) {
       const versions = this.getVersionList(mod)
       const serverVersion = this.mcVersion
@@ -483,11 +459,6 @@ export default {
         return mod.versions
       }
       return []
-    },
-
-    hasVersionInfo(mod) {
-      const versions = this.getVersionList(mod)
-      return Array.isArray(versions) && versions.length > 0
     },
 
     modSupportsLoader(mod, loader) {
@@ -545,7 +516,7 @@ export default {
   left: var(--space-4);
   top: 50%;
   transform: translateY(-50%);
-  color: var(--text-tertiary);
+  color: var(--text-muted);
 }
 
 .search-bar input {
@@ -655,7 +626,7 @@ export default {
 }
 
 .results-grid::-webkit-scrollbar-thumb:hover {
-  background: var(--text-tertiary);
+  background: var(--text-muted);
 }
 
 .mod-browser-empty {
