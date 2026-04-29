@@ -297,6 +297,8 @@ onUnmounted(() => {
 
 .server-layout__content {
   flex: 1;
+  display: flex;
+  flex-direction: column;
   padding: var(--space-5);
   overflow-y: auto;
 }
