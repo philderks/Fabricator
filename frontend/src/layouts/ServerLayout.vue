@@ -101,15 +101,11 @@ watch(() => store.modpackInstalling, (installing) => {
 // ---------- Lifecycle ----------
 
 onMounted(async () => {
+  // Console / files initial-load conditions are handled by the route.name
+  // immediate-watcher above (lines 67-78). Keep onMounted focused on global
+  // initial fetch + status polling.
   await store.refreshAll()
   startServerStatusPolling()
-  if (route.name === 'ServerConsole') {
-    await store.loadLogs()
-    startLogPolling()
-  }
-  if (route.name === 'ServerFiles') {
-    store.openFileBrowser()
-  }
 })
 
 onUnmounted(() => {
