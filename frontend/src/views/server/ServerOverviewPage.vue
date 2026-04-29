@@ -17,6 +17,10 @@ const cpuDisplay = computed(() => {
   const cpu = store.server?.runtime?.cpu
   return typeof cpu === 'number' ? `${cpu}%` : '—'
 })
+const recentLogLines = computed(() => {
+  const lines = store.logs.stdout || []
+  return lines.slice(-4)
+})
 </script>
 
 <template>
@@ -49,6 +53,18 @@ const cpuDisplay = computed(() => {
             <div class="overview-page__perf-meta">
               <span>{{ ramPercent }}%</span>
               <span>CPU {{ cpuDisplay }}</span>
+            </div>
+          </div>
+        </Panel>
+
+        <Panel title="Recent logs">
+          <template #action>
+            <a class="overview-page__panel-link" @click.prevent="store.goToConsole">Console →</a>
+          </template>
+          <div class="overview-page__logs">
+            <div v-if="!recentLogLines.length" class="overview-page__empty">No logs yet.</div>
+            <div v-else v-for="(line, i) in recentLogLines" :key="i" class="overview-page__log-line">
+              {{ line }}
             </div>
           </div>
         </Panel>
@@ -139,5 +155,38 @@ const cpuDisplay = computed(() => {
   justify-content: space-between;
   font-size: var(--text-xs);
   color: var(--text-disabled);
+}
+
+.overview-page__panel-link {
+  font-size: var(--text-xs);
+  color: var(--primary);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.overview-page__panel-link:hover {
+  text-decoration: underline;
+}
+
+.overview-page__logs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-disabled);
+}
+
+.overview-page__log-line {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.overview-page__empty {
+  color: var(--text-disabled);
+  font-size: var(--text-sm);
+  font-family: var(--font-sans);
+  padding: var(--space-2) 0;
 }
 </style>
