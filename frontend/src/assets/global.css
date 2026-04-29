@@ -106,7 +106,6 @@ body {
   gap: 0.75rem;
 }
 
-.brand-icon,
 .brand-logo {
   width: 2rem;
   height: 2rem;
@@ -165,15 +164,6 @@ body {
   background: var(--primary-dark);
 }
 
-.btn-success {
-  background: var(--success);
-  color: white;
-}
-
-.btn-success:hover {
-  background: var(--success-dark);
-}
-
 .btn-danger {
   background: var(--danger);
   color: white;
@@ -190,17 +180,6 @@ body {
 
 .btn-secondary:hover {
   background: var(--secondary-hover);
-}
-
-.btn-outline {
-  background: transparent;
-  color: var(--text-secondary);
-  border: 1px solid var(--border-color);
-}
-
-.btn-outline:hover {
-  color: var(--text-primary);
-  border-color: var(--primary);
 }
 
 .btn:disabled {
@@ -223,28 +202,6 @@ body {
 
 @keyframes btn-spin {
   to { transform: rotate(360deg); }
-}
-
-.btn-text {
-  background: transparent;
-  border: none;
-  color: var(--primary);
-  font-size: 0.875rem;
-  font-weight: 500;
-  cursor: pointer;
-  padding: 0.25rem 0.5rem;
-}
-
-.btn-text:hover {
-  color: var(--primary-dark);
-}
-
-.btn-text.danger {
-  color: var(--danger);
-}
-
-.btn-text.danger:hover {
-  color: var(--danger-dark);
 }
 
 /* Shared States */
@@ -284,28 +241,6 @@ body {
   font-size: 1rem;
   color: var(--text-muted);
   margin: 0;
-}
-
-/* Cards */
-.card {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  padding: 1.5rem;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1.5rem;
-}
-
-.card-header h3 {
-  margin: 0;
-  font-size: 1.125rem;
-  font-weight: 600;
-  color: var(--text-primary);
 }
 
 /* Main Content */
@@ -364,65 +299,6 @@ textarea::placeholder {
   color: var(--text-disabled);
 }
 
-/* Tabs */
-.tabs {
-  display: flex;
-  gap: 0.5rem;
-  margin-bottom: 2rem;
-  border-bottom: 1px solid var(--border-color);
-  padding-bottom: 0;
-}
-
-.tab {
-  padding: 0.75rem 1.5rem;
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
-  font-weight: 500;
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  transition: all 0.2s;
-}
-
-.tab:hover {
-  color: var(--text-secondary);
-}
-
-.tab.active {
-  color: var(--primary);
-  border-bottom-color: var(--primary);
-}
-
-/* Grids */
-.grid {
-  display: grid;
-  gap: 1.5rem;
-}
-
-.stats-row {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 1.5rem;
-}
-
-.two-col {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1.5rem;
-}
-
-.three-col {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1.5rem;
-}
-
-.four-col {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 1.5rem;
-}
-
 /* Form Elements */
 .form-group {
   display: flex;
@@ -463,14 +339,6 @@ textarea::placeholder {
   gap: 1rem;
 }
 
-.form-actions {
-  display: flex;
-  gap: 1rem;
-  justify-content: flex-end;
-  padding-top: 1rem;
-  border-top: 1px solid var(--border-color);
-}
-
 .checkbox-label {
   display: flex;
   align-items: center;
@@ -492,12 +360,6 @@ textarea::placeholder {
 }
 
 /* Server Settings */
-.settings-tab {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 2rem;
-}
-
 .settings-form {
   display: flex;
   flex-direction: column;
@@ -521,26 +383,6 @@ textarea::placeholder {
   margin: 0;
 }
 
-.readonly-field {
-  position: relative;
-}
-
-.readonly-input {
-  background: var(--bg-tertiary) !important;
-  cursor: not-allowed;
-  color: var(--text-muted);
-}
-
-.readonly-badge {
-  position: absolute;
-  top: 50%;
-  right: 0.75rem;
-  transform: translateY(-50%);
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--text-muted);
-}
-
 .mode-toggle {
   display: flex;
   justify-content: space-between;
@@ -552,112 +394,6 @@ textarea::placeholder {
   gap: 1rem;
 }
 
-.mode-label {
-  margin: 0;
-  font-size: 0.85rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-muted);
-}
-
-.mode-description {
-  margin: 0.15rem 0 0;
-  color: var(--text-secondary);
-  font-size: 0.95rem;
-}
-
-.mode-button {
-  padding: 0.65rem 1.25rem;
-  border-radius: 999px;
-  border: 1px solid var(--border-color);
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.mode-button.active {
-  background: var(--primary);
-  border-color: var(--primary);
-  color: #fff;
-}
-
-.toggle-label,
-.group-label {
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-
-.label-stack,
-.toggle-pair {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-/* Notice Boxes */
-.warning-notice,
-.info-notice {
-  display: flex;
-  gap: 12px;
-  padding: 12px 16px;
-  border-radius: 8px;
-  font-size: 0.875rem;
-  line-height: 1.5;
-}
-
-.warning-notice {
-  background: color-mix(in oklch, var(--warning) 12%, transparent);
-  border: 1px solid color-mix(in oklch, var(--warning) 35%, transparent);
-  color: var(--warning);
-}
-
-.warning-notice svg {
-  color: var(--warning);
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-
-.warning-notice strong {
-  font-weight: 600;
-}
-
-.info-notice {
-  background: color-mix(in oklch, var(--primary) 12%, transparent);
-  border: 1px solid color-mix(in oklch, var(--primary) 35%, transparent);
-  color: var(--primary);
-}
-
-.info-notice svg {
-  color: var(--primary);
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-
-.info-notice strong {
-  font-weight: 600;
-}
-
-/* Utilities */
-.text-muted {
-  color: var(--text-muted);
-}
-
-.text-primary {
-  color: var(--text-primary);
-}
-
-.text-success {
-  color: var(--success);
-}
-
-.text-danger {
-  color: var(--danger);
-}
-
 /* Responsive */
 @media (max-width: 1024px) {
   .header-content {
@@ -666,13 +402,6 @@ textarea::placeholder {
 
   .content {
     padding: 1.5rem;
-  }
-
-  .stats-row,
-  .two-col,
-  .three-col,
-  .four-col {
-    grid-template-columns: repeat(2, 1fr);
   }
 }
 
@@ -693,26 +422,14 @@ textarea::placeholder {
     padding: 1rem;
   }
 
-  .nav,
-  .tabs {
+  .nav {
     overflow-x: auto;
     width: 100%;
-  }
-
-  .stats-row,
-  .two-col,
-  .three-col,
-  .four-col {
-    grid-template-columns: 1fr;
   }
 
   .form-row,
   .form-checkboxes {
     grid-template-columns: 1fr;
-  }
-
-  .settings-tab {
-    padding: 1rem;
   }
 
   .settings-section {
