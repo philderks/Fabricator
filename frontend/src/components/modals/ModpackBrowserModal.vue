@@ -30,14 +30,14 @@
             @keyup.enter="imp.performSearch()"
           >
         </div>
-        <button
-          type="button"
-          class="btn btn-secondary"
+        <AppButton
+          variant="ghost"
+          size="md"
           :disabled="imp.loading.value || !imp.searchQuery.value.trim()"
           @click="imp.performSearch()"
         >
           {{ imp.loading.value ? 'Searching...' : 'Search' }}
-        </button>
+        </AppButton>
       </div>
 
       <div v-else class="search-row">
@@ -49,62 +49,70 @@
             @keyup.enter="imp.resolveByLink()"
           >
         </div>
-        <button
-          type="button"
-          class="btn btn-secondary"
+        <AppButton
+          variant="ghost"
+          size="md"
           :disabled="imp.resolving.value || !imp.modpackLink.value.trim()"
           @click="imp.resolveByLink()"
         >
           {{ imp.resolving.value ? 'Resolving...' : 'Resolve' }}
-        </button>
+        </AppButton>
       </div>
 
       <p v-if="imp.errorMessage.value" class="error-text">{{ imp.errorMessage.value }}</p>
     </div>
 
-    <div v-if="imp.loading.value" class="empty-state">
+    <div v-if="imp.loading.value" class="loading-state">
       <div class="spinner"></div>
       <p>Searching modpacks...</p>
     </div>
 
     <div v-else-if="imp.searchResults.value.length" class="results-grid">
-      <button
+      <SearchResultCard
         v-for="pack in imp.searchResults.value"
-        :key="pack.project_id"
-        type="button"
-        class="modpack-card"
-        :class="{
-          selected: imp.selectedModpack.value && imp.selectedModpack.value.id === (pack.project_id || pack.id),
-        }"
+        :key="pack.project_id || pack.id"
+        :icon-url="pack.icon_url || pack.iconUrl || null"
+        :title="pack.title || pack.name || pack.slug"
+        :description="truncate(pack.description, 120)"
+        :meta="formatModpackMeta(pack)"
+        :selected="imp.selectedModpack.value && imp.selectedModpack.value.id === (pack.project_id || pack.id)"
         @click="handleSelectPack(pack)"
       >
-        <img
-          :src="pack.icon_url || pack.iconUrl || 'https://via.placeholder.com/80?text=Pack'"
-          :alt="pack.title || pack.name"
-          class="modpack-icon"
+        <AppButton
+          variant="primary"
+          size="sm"
+          @click.stop="handleInstallPack(pack)"
         >
-        <div class="modpack-info">
-          <h3>{{ pack.title || pack.name || pack.slug }}</h3>
-          <p>{{ truncate(pack.description, 120) }}</p>
-          <span class="meta">{{ formatDownloads(pack.downloads || 0) }} downloads</span>
-        </div>
-      </button>
+          Install
+        </AppButton>
+      </SearchResultCard>
     </div>
 
-    <div v-else class="empty-state">
-      <p v-if="importMethod === 'search'">Search for modpacks compatible with {{ mcVersion }}.</p>
-      <p v-else>Paste a Modrinth modpack link or slug to resolve it.</p>
+    <div v-else class="modpack-browser-empty">
+      <svg class="modpack-browser-empty__icon" width="64" height="64" viewBox="0 0 24 24" fill="none">
+        <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="2"/>
+        <path d="M9 9H15M9 13H13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      <h3 class="modpack-browser-empty__heading" v-if="importMethod === 'search'">Search for modpacks</h3>
+      <h3 class="modpack-browser-empty__heading" v-else>Resolve a modpack link</h3>
+      <p class="modpack-browser-empty__body" v-if="importMethod === 'search'">
+        Search for modpacks compatible with {{ mcVersion }}.
+      </p>
+      <p class="modpack-browser-empty__body" v-else>
+        Paste a Modrinth modpack link or slug to resolve it.
+      </p>
     </div>
 
     <template #footer>
-      <button class="btn btn-secondary" @click="$emit('close')">Close</button>
-      <button
-        class="btn btn-primary"
+      <AppButton variant="ghost" size="md" @click="$emit('close')">Close</AppButton>
+      <AppButton
+        variant="primary"
+        size="md"
         :disabled="!imp.selectedModpack.value"
         @click="confirmInstall"
       >
         Install Selected Modpack
-      </button>
+      </AppButton>
     </template>
   </BaseModal>
 </template>
@@ -112,6 +120,8 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import BaseModal from './BaseModal.vue'
+import SearchResultCard from '../ui/SearchResultCard.vue'
+import AppButton from '../ui/AppButton.vue'
 import { useModpackImport, formatDownloads } from '../../composables/useModpackImport'
 
 const props = defineProps({
@@ -145,6 +155,11 @@ function handleSelectPack(pack) {
   imp.selectPack(pack)
 }
 
+function handleInstallPack(pack) {
+  imp.selectPack(pack)
+  confirmInstall()
+}
+
 function confirmInstall() {
   if (!imp.selectedModpack.value) {
     return
@@ -163,45 +178,62 @@ function truncate(text, length = 100) {
   }
   return text.length > length ? `${text.slice(0, length)}...` : text
 }
+
+function formatNumber(num) {
+  if (!num) return '0'
+  if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M'
+  if (num >= 1000) return (num / 1000).toFixed(1) + 'K'
+  return num.toString()
+}
+
+function formatModpackMeta(pack) {
+  const parts = []
+  if (pack.downloads) parts.push(`${formatNumber(pack.downloads)} downloads`)
+  if (pack.categories && pack.categories.length) {
+    parts.push(pack.categories.slice(0, 3).join(', '))
+  }
+  return parts.join(' · ')
+}
 </script>
 
 <style scoped>
 .search-section {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
 }
 
 .filter-chip {
   align-self: flex-start;
-  padding: 0.3rem 0.6rem;
-  border-radius: 999px;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-pill);
   border: 1px solid var(--border-color);
   color: var(--text-secondary);
-  font-size: 0.78rem;
+  font-size: var(--text-xs);
   background: color-mix(in oklch, var(--primary) 8%, transparent);
 }
 
 .import-method {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 
 .choice-pill {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: var(--space-1);
   border: 1px solid var(--border-color);
-  border-radius: 999px;
-  padding: 0.35rem 0.7rem;
-  font-size: 0.85rem;
+  border-radius: var(--radius-pill);
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+  cursor: pointer;
 }
 
 .search-row {
   display: flex;
-  gap: 0.75rem;
+  gap: var(--space-3);
 }
 
 .search-bar {
@@ -210,97 +242,105 @@ function truncate(text, length = 100) {
 
 .search-bar input {
   width: 100%;
-  padding: 0.7rem 0.9rem;
-  border-radius: 10px;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
   border: 1px solid var(--border-color);
   background: var(--bg-primary);
   color: var(--text-primary);
+  font-size: var(--text-sm);
+  transition: border-color 0.15s ease;
 }
 
-.results-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 0.75rem;
-}
-
-.modpack-card {
-  display: flex;
-  gap: 0.75rem;
-  align-items: start;
-  width: 100%;
-  text-align: left;
-  padding: 0.8rem;
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  background: var(--bg-primary);
-  cursor: pointer;
-}
-
-.modpack-card:hover {
-  border-color: color-mix(in oklch, var(--primary) 35%, var(--border-color));
-}
-
-.modpack-card.selected {
+.search-bar input:focus {
+  outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 2px color-mix(in oklch, var(--primary) 18%, transparent);
 }
 
-
-.modpack-icon {
-  width: 56px;
-  height: 56px;
-  border-radius: 10px;
-  object-fit: cover;
-  border: 1px solid var(--border-color);
-}
-
-.modpack-info h3 {
-  margin: 0;
-  font-size: 0.95rem;
-  color: var(--text-primary);
-}
-
-.modpack-info p {
-  margin: 0.3rem 0;
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-8) 0;
   color: var(--text-muted);
-  font-size: 0.82rem;
+  font-size: var(--text-sm);
 }
-
-.meta {
-  color: var(--text-secondary);
-  font-size: 0.78rem;
-}
-
-.empty-state {
-  min-height: 120px;
-  display: grid;
-  place-items: center;
-  color: var(--text-muted);
-  text-align: center;
-}
-
-.error-text {
-  margin: 0;
-  color: var(--danger, #d14343);
-  font-size: 0.875rem;
-}
-
 
 .spinner {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  border: 2px solid color-mix(in oklch, var(--primary) 25%, transparent);
+  width: 36px;
+  height: 36px;
+  border: 3px solid var(--border-color);
   border-top-color: var(--primary);
-  animation: spin 0.8s linear infinite;
+  border-radius: 50%;
+  animation: modpack-browser-spin 0.8s linear infinite;
 }
 
-@keyframes spin {
+@keyframes modpack-browser-spin {
   to {
     transform: rotate(360deg);
   }
 }
 
+.results-grid {
+  display: grid;
+  gap: var(--space-3);
+  max-height: 500px;
+  overflow-y: auto;
+  padding: var(--space-1);
+}
+
+.results-grid::-webkit-scrollbar {
+  width: 8px;
+}
+
+.results-grid::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+  border-radius: var(--radius-sm);
+}
+
+.results-grid::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+.results-grid::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+.modpack-browser-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-10) 0;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.modpack-browser-empty__icon {
+  color: var(--text-disabled);
+}
+
+.modpack-browser-empty__heading {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text-secondary);
+  line-height: var(--leading-tight);
+}
+
+.modpack-browser-empty__body {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  line-height: var(--leading-normal);
+}
+
+.error-text {
+  margin: 0;
+  color: var(--danger);
+  font-size: var(--text-sm);
+}
 
 @media (max-width: 768px) {
   .search-row {
