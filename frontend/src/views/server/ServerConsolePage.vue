@@ -50,15 +50,14 @@ const onSubmit = (event) => {
 <template>
   <div class="console-page">
     <div class="console-page__bar">
-      <div class="console-page__filters" role="tablist" aria-label="Log level filter">
+      <div class="console-page__filters" role="group" aria-label="Log level filter">
         <button
           v-for="level in ['ALL','INFO','WARN','ERROR','DEBUG']"
           :key="level"
           type="button"
-          role="tab"
           class="console-page__filter"
           :class="[`console-page__filter--${level.toLowerCase()}`, { 'is-active': activeFilter === level }]"
-          :aria-selected="activeFilter === level"
+          :aria-pressed="activeFilter === level"
           @click="setFilter(level)"
         >{{ level }}</button>
       </div>
@@ -167,7 +166,7 @@ const onSubmit = (event) => {
   color: var(--text-primary);
 }
 
-.console-page__filter--info.is-active   { color: #60a5fa; }
+.console-page__filter--info.is-active   { color: var(--info, #60a5fa); }
 .console-page__filter--warn.is-active   { color: var(--warning); }
 .console-page__filter--error.is-active  { color: var(--danger); }
 .console-page__filter--debug.is-active  { color: var(--primary); }
