@@ -48,7 +48,7 @@ const formatBytes = (bytes) => ctx.formatFileSize(bytes)
         <template v-else>No mods installed yet. Use "Browse mods" to add one.</template>
       </div>
       <ul v-else class="mods-page__list">
-        <li v-for="mod in ctx.filteredMods.value" :key="mod.path || mod.name" class="mods-page__item">
+        <li v-for="mod in ctx.filteredMods.value" :key="mod.path" class="mods-page__item">
           <div class="mods-page__item-info">
             <span class="mods-page__item-name">{{ mod.name }}</span>
             <span class="mods-page__item-meta">
@@ -180,5 +180,10 @@ const formatBytes = (bytes) => ctx.formatFileSize(bytes)
 .mods-page__remove:hover {
   color: var(--danger);
   border-color: var(--danger);
+}
+
+.mods-page__remove:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 </style>
