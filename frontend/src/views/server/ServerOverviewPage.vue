@@ -18,7 +18,7 @@ const onModSearch = (value) => { ctx.modSearch.value = value }
     :filtered-mods="ctx.filteredMods.value"
     :ram-metrics="ctx.ramMetrics.value"
     :recent-activity="ctx.recentActivity.value"
-    :install-loading="ctx.installLoading.value || ctx.modpackInstalling.value"
+    :install-loading="ctx.isInstalling.value"
     :backup-loading="ctx.backupLoading.value"
     :backups="ctx.backups.value"
     :format-backup-time="ctx.formatBackupTime"

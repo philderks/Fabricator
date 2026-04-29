@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ModBrowserModal from '../components/modals/ModBrowserModal.vue'
 import ModpackBrowserModal from '../components/modals/ModpackBrowserModal.vue'
@@ -268,6 +268,7 @@ const createBackupAction = async () => {
     await createBackup(serverId.value)
     toast.success('Backup created successfully', 'Backups')
     await loadBackups()
+    // On success, navigate to wherever the backups list lives. Currently the Files page; revisit if backups get their own route.
     goToFiles()
   } catch (error) {
     console.error('Failed to create backup:', error)
@@ -496,6 +497,8 @@ const filteredMods = computed(() => {
 })
 
 const activeModpack = computed(() => server.value?.modpack || null)
+
+const isInstalling = computed(() => installLoading.value || modpackInstalling.value)
 
 const playersDisplay = computed(() => {
   const online = serverStatus.value.players.online
@@ -984,6 +987,7 @@ provideServerContext({
   filteredMods,
   installLoading,
   modpackInstalling,
+  isInstalling,
   modpackProgress,
   modpackProgressLabel,
   modpackProgressPercent,

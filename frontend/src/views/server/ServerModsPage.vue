@@ -26,7 +26,7 @@ const formatBytes = (bytes) => ctx.formatFileSize(bytes)
         <AppButton variant="ghost" @click="ctx.openModpackBrowser">Browse modpacks</AppButton>
         <AppButton
           variant="primary"
-          :loading="ctx.installLoading.value || ctx.modpackInstalling.value"
+          :loading="ctx.isInstalling.value"
           @click="ctx.openModBrowser"
         >
           Browse mods
