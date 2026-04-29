@@ -18,7 +18,18 @@ const store = useServerStore()
 // is fragile under HMR). The layout owns this sync. Both watchers use
 // immediate: true so the store has the right values before any action runs.
 watch(() => route.params.id, (id) => { store.currentServerId = id }, { immediate: true })
-watch(() => route.name,      (name) => { store.currentRouteName = name }, { immediate: true })
+watch(() => route.name, (name) => {
+  store.currentRouteName = name
+  if (name === 'ServerConsole') {
+    store.loadLogs()
+    startLogPolling()
+  } else {
+    stopLogPolling()
+  }
+  if (name === 'ServerFiles' && !store.fileBrowser.entries.length && !store.fileBrowser.loading) {
+    store.openFileBrowser()
+  }
+}, { immediate: true })
 
 // ---------- Polling (owned by layout per Phase 3 architecture) ----------
 
@@ -61,7 +72,7 @@ function stopModpackProgressPolling() {
     clearInterval(modpackProgressIntervalId)
     modpackProgressIntervalId = null
   }
-  store.modpackProgress = null
+  store.clearModpackProgress()
 }
 
 // ---------- Watches ----------
@@ -77,18 +88,6 @@ watch(() => store.currentServerId, async (newId, oldId) => {
     startLogPolling()
   }
   startServerStatusPolling()
-})
-
-watch(() => route.name, (name) => {
-  if (name === 'ServerConsole') {
-    store.loadLogs()
-    startLogPolling()
-  } else {
-    stopLogPolling()
-  }
-  if (name === 'ServerFiles' && !store.fileBrowser.entries.length && !store.fileBrowser.loading) {
-    store.openFileBrowser()
-  }
 })
 
 // Drive modpack-progress polling from the store's installing flag.

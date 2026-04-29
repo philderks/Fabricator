@@ -504,6 +504,10 @@ export const useServerStore = defineStore('server', () => {
     }
   }
 
+  function clearModpackProgress() {
+    modpackProgress.value = null
+  }
+
   async function runModpackInstall(modpackData) {
     if (!modpackData) return
     const isRetry = Boolean(modpackData.allowMissing || modpackData.modSideOverrides)
@@ -851,6 +855,7 @@ export const useServerStore = defineStore('server', () => {
     handleInstallModpack,
     cancelModpackInstallConfirmation,
     fetchModpackProgress,
+    clearModpackProgress,
     runModpackInstall,
     confirmModpackInstall,
     cancelMissingModsConfirmation,
