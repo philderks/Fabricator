@@ -17,7 +17,9 @@ import {
   getBackups,
   restoreBackup,
   deleteBackup,
-  deleteServer
+  deleteServer,
+  getServerFile,
+  saveServerFile
 } from '../api/servers'
 import { useToast } from '../composables/useToast'
 
@@ -30,6 +32,17 @@ const MODPACK_STAGE_LABELS = {
   installing_files: 'Downloading mods...',
   extracting_overrides: 'Extracting override files...',
   done: 'Finishing up...'
+}
+
+const TEXT_FILE_EXTENSIONS = new Set([
+  'txt', 'json', 'properties', 'yml', 'yaml', 'toml', 'cfg', 'conf', 'log', 'md'
+])
+
+function isTextFile(path) {
+  if (!path || typeof path !== 'string') return false
+  const segments = path.toLowerCase().split('.')
+  const extension = segments.pop() || ''
+  return TEXT_FILE_EXTENSIONS.has(extension)
 }
 
 export const useServerStore = defineStore('server', () => {
@@ -66,6 +79,7 @@ export const useServerStore = defineStore('server', () => {
   const backups = ref([])
   const backupLoading = ref(false)
   const fileBrowser = ref({ currentPath: '', entries: [], loading: false, error: null })
+  const fileEditor = ref({ path: null, content: '', originalContent: '', loading: false, saving: false, error: null })
   const backupToRestore = ref(null)
   const showBackupRestoreModal = ref(false)
   const restoringBackup = ref(false)
@@ -256,6 +270,11 @@ export const useServerStore = defineStore('server', () => {
   // so the template binding stays reactive when missingModsReport changes.
   const missingModsDescriptionText = computed(() => formatMissingModsDescription(missingModsReport.value))
 
+  const hasFileChanges = computed(() => {
+    if (!fileEditor.value.path) return false
+    return fileEditor.value.content !== fileEditor.value.originalContent
+  })
+
   // ---------- Actions ----------
 
   async function loadServer(options = {}) {
@@ -423,6 +442,43 @@ export const useServerStore = defineStore('server', () => {
     const parts = fileBrowser.value.currentPath.split('/').filter(Boolean)
     parts.pop()
     openFileBrowser(parts.join('/'))
+  }
+
+  async function openFile(path) {
+    if (!isTextFile(path)) {
+      toast.error('Only supported text files can be edited', 'Files')
+      return
+    }
+    fileEditor.value = { path, content: '', originalContent: '', loading: true, saving: false, error: null }
+    try {
+      const file = await getServerFile(currentServerId.value, path)
+      fileEditor.value = { path: file.path, content: file.content, originalContent: file.content, loading: false, saving: false, error: null }
+    } catch (error) {
+      const message = error?.message || 'Unable to open file'
+      fileEditor.value = { path: null, content: '', originalContent: '', loading: false, saving: false, error: message }
+      toast.error(message, 'Files')
+    }
+  }
+
+  async function saveFile() {
+    if (!fileEditor.value.path || fileEditor.value.saving) return
+    fileEditor.value.saving = true
+    fileEditor.value.error = null
+    try {
+      await saveServerFile(currentServerId.value, fileEditor.value.path, fileEditor.value.content)
+      fileEditor.value.originalContent = fileEditor.value.content
+      toast.success('File saved', 'Files')
+    } catch (error) {
+      const message = error?.message || 'Failed to save file'
+      fileEditor.value.error = message
+      toast.error(message, 'Files')
+    } finally {
+      fileEditor.value.saving = false
+    }
+  }
+
+  function closeFile() {
+    fileEditor.value = { path: null, content: '', originalContent: '', loading: false, saving: false, error: null }
   }
 
   function openModBrowser() { showModBrowser.value = true }
@@ -715,6 +771,7 @@ export const useServerStore = defineStore('server', () => {
     logs.value = { stdout: [], stderr: [], running: false }
     backups.value = []
     fileBrowser.value = { currentPath: '', entries: [], loading: false, error: null }
+    fileEditor.value = { path: null, content: '', originalContent: '', loading: false, saving: false, error: null }
     modSearch.value = ''
     modToRemove.value = null
     backupToRestore.value = null
@@ -779,6 +836,7 @@ export const useServerStore = defineStore('server', () => {
     backups,
     backupLoading,
     fileBrowser,
+    fileEditor,
     backupToRestore,
     showBackupRestoreModal,
     restoringBackup,
@@ -812,6 +870,7 @@ export const useServerStore = defineStore('server', () => {
     isInstalling,
     canSendCommand,
     missingModsDescriptionText,
+    hasFileChanges,
     // Actions
     loadServer,
     loadMods,
@@ -828,6 +887,9 @@ export const useServerStore = defineStore('server', () => {
     openFileBrowser,
     enterFileEntry,
     goUpDirectory,
+    openFile,
+    saveFile,
+    closeFile,
     openModBrowser,
     openModpackBrowser,
     openDeleteServerModal,

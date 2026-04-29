@@ -1,11 +1,37 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import AppButton from '../../components/ui/AppButton.vue'
 import Panel from '../../components/ui/Panel.vue'
 import { formatFileSize } from '../../utils/format'
 import { useServerStore } from '../../stores/server'
 
 const store = useServerStore()
+
+const editorRef = ref(null)
+
+const confirmDiscardChanges = () => {
+  if (!store.hasFileChanges) return true
+  if (typeof window === 'undefined') return true
+  return window.confirm('Discard unsaved changes?')
+}
+
+const onFileClick = async (entry) => {
+  if (!confirmDiscardChanges()) return
+  await store.openFile(entry.relativePath || entry.name)
+  // Scroll the editor into view after Vue paints it.
+  await nextTick()
+  if (editorRef.value) {
+    const el = editorRef.value.$el || editorRef.value
+    if (el && typeof el.scrollIntoView === 'function') {
+      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }
+  }
+}
+
+const onCloseEditor = () => {
+  if (!confirmDiscardChanges()) return
+  store.closeFile()
+}
 
 const breadcrumbs = computed(() => {
   const path = store.fileBrowser.currentPath || ''
@@ -86,19 +112,59 @@ const canGoUp = computed(() => Boolean(store.fileBrowser.currentPath))
                 </svg>
                 <span>{{ entry.name }}</span>
               </button>
-              <span v-else class="files-page__name-static">
+              <button
+                v-else
+                type="button"
+                class="files-page__name-btn"
+                @click="onFileClick(entry)"
+              >
                 <svg class="files-page__icon" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
                   <path d="M3 1.5A0.5 0.5 0 013.5 1H8l3 3v8.5a0.5 0.5 0 01-0.5 0.5h-7A0.5 0.5 0 013 12.5v-11z" />
                   <path d="M8 1v3h3" />
                 </svg>
                 <span>{{ entry.name }}</span>
-              </span>
+              </button>
             </td>
             <td class="files-page__td-size">{{ entry.isDir ? '—' : formatFileSize(entry.size) }}</td>
             <td class="files-page__td-modified">{{ formatModified(entry.modifiedAt) }}</td>
           </tr>
         </tbody>
       </table>
+    </Panel>
+
+    <Panel
+      v-if="store.fileEditor.path || store.fileEditor.loading"
+      ref="editorRef"
+      :title="store.fileEditor.path || 'Loading…'"
+    >
+      <template #action>
+        <div class="files-page__editor-actions">
+          <AppButton
+            variant="ghost"
+            size="sm"
+            :disabled="store.fileEditor.saving"
+            @click="onCloseEditor"
+          >Close</AppButton>
+          <AppButton
+            variant="primary"
+            size="sm"
+            :loading="store.fileEditor.saving"
+            :disabled="store.fileEditor.loading || !store.hasFileChanges"
+            @click="store.saveFile"
+          >Save</AppButton>
+        </div>
+      </template>
+
+      <div v-if="store.fileEditor.loading" class="files-page__state">Loading file…</div>
+      <div v-else>
+        <textarea
+          v-model="store.fileEditor.content"
+          class="files-page__editor-textarea"
+          :disabled="store.fileEditor.saving"
+          spellcheck="false"
+        ></textarea>
+        <p v-if="store.fileEditor.error" class="files-page__editor-error">{{ store.fileEditor.error }}</p>
+      </div>
     </Panel>
   </div>
 </template>
@@ -212,8 +278,7 @@ const canGoUp = computed(() => Boolean(store.fileBrowser.currentPath))
   white-space: nowrap;
 }
 
-.files-page__name-btn,
-.files-page__name-static {
+.files-page__name-btn {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
@@ -245,5 +310,40 @@ const canGoUp = computed(() => Boolean(store.fileBrowser.currentPath))
 
 .files-page__row:not(.is-dir) .files-page__icon {
   color: var(--text-disabled);
+}
+
+.files-page__editor-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.files-page__editor-textarea {
+  width: 100%;
+  min-height: 320px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  padding: var(--space-3);
+  resize: vertical;
+}
+
+.files-page__editor-textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.files-page__editor-textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.files-page__editor-error {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-xs);
+  color: var(--danger);
 }
 </style>
