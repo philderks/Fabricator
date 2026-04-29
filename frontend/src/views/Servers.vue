@@ -187,16 +187,6 @@ const pillStatus = (status) => {
   return allowed.includes(status) ? status : 'stopped'
 }
 
-const pillLabel = (status) => {
-  switch (status) {
-    case 'running':    return 'Running'
-    case 'pending':    return 'Pending'
-    case 'installing': return 'Installing'
-    case 'failed':     return 'Failed'
-    case 'stopped':
-    default:           return 'Stopped'
-  }
-}
 
 // Drives the colour of the update banner status label (action slot).
 const updateStateClass = computed(() => {
@@ -341,7 +331,7 @@ onUnmounted(() => {
           <div class="server-card__main">
             <div class="server-card__head">
               <h3 class="server-card__name">{{ server.name }}</h3>
-              <StatusPill :status="pillStatus(server.status)" :label="pillLabel(server.status)" />
+              <StatusPill :status="pillStatus(server.status)" />
             </div>
             <dl class="server-card__meta">
               <div class="server-card__cell">
@@ -554,7 +544,7 @@ onUnmounted(() => {
   font-family: inherit;
   color: inherit;
   cursor: pointer;
-  transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .server-card:hover {
