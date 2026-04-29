@@ -26,7 +26,7 @@ const otherServers = computed(() =>
 
 // runtime.status takes precedence over the persisted top-level status,
 // matching the pattern in Servers.vue: `runtime.status || server.status`.
-const statusOf = (s) => s?.runtime?.status ?? s?.status ?? 'unknown'
+const statusOf = (s) => s?.runtime?.status || s?.status || 'unknown'
 
 const dotColor = (s) => {
   switch (statusOf(s)) {
@@ -112,6 +112,7 @@ onBeforeUnmount(() => {
         class="server-switcher__item server-switcher__item--active"
         role="option"
         :aria-selected="true"
+        @click="close"
       >
         <span class="server-switcher__dot server-switcher__dot--small" :style="{ background: dotColor(currentServer) }"></span>
         {{ currentServer.name }}
