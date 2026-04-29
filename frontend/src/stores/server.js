@@ -174,7 +174,9 @@ export const useServerStore = defineStore('server', () => {
   const formatMissingModsDescription = (missingFiles = []) => {
     if (!Array.isArray(missingFiles) || !missingFiles.length) return ''
     const preview = missingFiles.slice(0, 8).map((i) => `- ${i.path}: ${i.reason}`).join('\n')
-    const remaining = missingFiles.length - preview.split('\n').length
+    // Count items, not preview-string lines — a `reason` containing `\n` would otherwise
+    // inflate the line count and underreport `remaining`.
+    const remaining = Math.max(0, missingFiles.length - 8)
     const suffix = remaining > 0 ? `\n...and ${remaining} more.` : ''
     return `The following files could not be downloaded:\n${preview}${suffix}\n\nInstall anyway without these files?`
   }
