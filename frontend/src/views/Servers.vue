@@ -223,13 +223,8 @@ onUnmounted(() => {
 <template>
   <div class="servers-page">
     <div class="servers-page__header">
-      <div>
-        <h2 class="servers-page__title">Server Overview</h2>
-        <p class="servers-page__subtitle">Manage your Minecraft servers</p>
-      </div>
-      <AppButton variant="primary" size="md" @click="showCreateModal = true">
-        + New Server
-      </AppButton>
+      <h2 class="servers-page__title">Server Overview</h2>
+      <p class="servers-page__subtitle">Manage your Minecraft servers</p>
     </div>
 
     <div class="servers-page__stats">
@@ -384,8 +379,8 @@ onUnmounted(() => {
 
 .servers-page__header {
   display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
+  flex-direction: column;
+  gap: var(--space-1);
 }
 
 .servers-page__title {
@@ -653,9 +648,7 @@ onUnmounted(() => {
   }
 
   .servers-page__header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: var(--space-3);
+    gap: var(--space-2);
   }
 
   .servers-page__stats {
