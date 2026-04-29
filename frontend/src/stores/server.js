@@ -704,7 +704,7 @@ export const useServerStore = defineStore('server', () => {
 
   async function performServerAction(action, fn, successMessage) {
     if (actionState.value[action]) return
-    actionState.value = { ...actionState.value, [action]: true }
+    actionState.value[action] = true
     try {
       const result = await fn(currentServerId.value)
       if (result.success) {
@@ -721,7 +721,7 @@ export const useServerStore = defineStore('server', () => {
         toast.error(error.message || `Failed to ${action} server`, 'Server Error')
       }
     } finally {
-      actionState.value = { ...actionState.value, [action]: false }
+      actionState.value[action] = false
       await loadServer()
       if (action === 'stop') {
         logs.value = { stdout: [], stderr: [], running: false }
