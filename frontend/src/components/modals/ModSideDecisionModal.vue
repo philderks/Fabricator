@@ -395,8 +395,8 @@ watch(() => props.mods, () => {
 }
 
 .toggle-btn.active {
-  background: color-mix(in oklch, var(--primary) 18%, transparent);
-  color: var(--text-primary);
+  background: var(--primary);
+  color: #ffffff;
 }
 
 .api-error {
