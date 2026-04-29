@@ -35,7 +35,7 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
 
     <Panel v-if="store.activeModpack" title="Active modpack">
       <div class="overview-page__modpack">
-        <span class="overview-page__modpack-name">{{ store.activeModpack.title || store.activeModpack.projectId }}</span>
+        <span class="overview-page__modpack-name">{{ store.activeModpack.name || store.activeModpack.projectId }}</span>
         <span class="overview-page__modpack-version">{{ store.activeModpack.version }}</span>
       </div>
     </Panel>

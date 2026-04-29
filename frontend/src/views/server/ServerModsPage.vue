@@ -36,7 +36,7 @@ const showEmpty = computed(() => !store.modsLoading && store.filteredMods.length
 
     <Panel v-if="store.activeModpack" title="Active modpack">
       <div class="mods-page__modpack">
-        <span class="mods-page__modpack-name">{{ store.activeModpack.title || store.activeModpack.projectId }}</span>
+        <span class="mods-page__modpack-name">{{ store.activeModpack.name || store.activeModpack.projectId }}</span>
         <span class="mods-page__modpack-version">{{ store.activeModpack.version }}</span>
       </div>
     </Panel>
