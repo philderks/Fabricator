@@ -563,7 +563,7 @@ const onReset = () => {
 
     <Panel v-if="showAdvanced" title="Networking & Connectivity">
       <div class="settings-page__grid settings-page__grid--three">
-        <label class="settings-page__field">
+        <div class="settings-page__field">
           <span class="settings-page__label">Server Status Broadcast</span>
           <label
             class="settings-page__toggle settings-page__toggle--inline"
@@ -584,7 +584,7 @@ const onReset = () => {
             :disabled="statusIntervalDisabled"
           />
           <span class="settings-page__hint">Seconds between status heartbeats</span>
-        </label>
+        </div>
         <label class="settings-page__field">
           <span class="settings-page__label">Rate Limit (packets/second)</span>
           <input
@@ -606,7 +606,7 @@ const onReset = () => {
           />
         </label>
 
-        <label class="settings-page__field">
+        <div class="settings-page__field">
           <span class="settings-page__label">Query Port</span>
           <label
             class="settings-page__toggle settings-page__toggle--inline"
@@ -627,8 +627,8 @@ const onReset = () => {
             v-model.number="store.serverSettings.queryPort"
             :disabled="queryDisabled"
           />
-        </label>
-        <label class="settings-page__field">
+        </div>
+        <div class="settings-page__field">
           <span class="settings-page__label">RCON Port</span>
           <label
             class="settings-page__toggle settings-page__toggle--inline"
@@ -649,7 +649,7 @@ const onReset = () => {
             v-model.number="store.serverSettings.rconPort"
             :disabled="rconDisabled"
           />
-        </label>
+        </div>
         <label class="settings-page__field">
           <span class="settings-page__label">RCON Password</span>
           <input
