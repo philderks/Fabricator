@@ -50,7 +50,6 @@ export const useServerStore = defineStore('server', () => {
   const installedMods = ref([])
   const modSearch = ref('')
   const logs = ref({ stdout: [], stderr: [], running: false })
-  const recentActivity = ref([])
   const serverSettings = ref(null)
   const showModBrowser = ref(false)
   const showJavaModal = ref(false)
@@ -162,11 +161,6 @@ export const useServerStore = defineStore('server', () => {
     const remaining = missingFiles.length - preview.split('\n').length
     const suffix = remaining > 0 ? `\n...and ${remaining} more.` : ''
     return `The following files could not be downloaded:\n${preview}${suffix}\n\nInstall anyway without these files?`
-  }
-
-  const logActivity = (entry) => {
-    recentActivity.value.unshift({ ...entry, time: new Date().toLocaleTimeString() })
-    if (recentActivity.value.length > 20) recentActivity.value.pop()
   }
 
   // ---------- Computeds (getters) ----------
@@ -467,7 +461,6 @@ export const useServerStore = defineStore('server', () => {
       })
       showModBrowser.value = false
       toast.success(`${modData.modTitle} installed successfully!`, 'Mod Installed')
-      logActivity({ type: 'mod_install', mod: modData.modTitle })
       await loadMods()
     } catch (error) {
       console.error('Install failed:', error)
@@ -537,7 +530,6 @@ export const useServerStore = defineStore('server', () => {
       const backupNote = result?.backup_file ? ` Backup: ${result.backup_file}.` : ''
       toast.success(`${modpackData.title} installed successfully.${cleanedNote}${missingNote}${backupNote}`, 'Modpack Installed')
       if (result?.java_warning) toast.warning(result.java_warning.message, 'Java Version Mismatch')
-      logActivity({ type: 'modpack_install', modpack: modpackData.title })
       await Promise.all([loadServer({ silent: true }), loadMods()])
     } catch (error) {
       const uncertainMods = error?.data?.uncertain_mod_files
@@ -623,7 +615,6 @@ export const useServerStore = defineStore('server', () => {
     try {
       await removeMod(currentServerId.value, modToRemove.value.filename || modToRemove.value.name)
       toast.success(`${modToRemove.value.name} removed`, 'Mod Removed')
-      logActivity({ type: 'mod_remove', mod: modToRemove.value.name })
       await loadMods()
     } catch (error) {
       console.error('Failed to remove mod:', error)
@@ -646,7 +637,6 @@ export const useServerStore = defineStore('server', () => {
       const result = await fn(currentServerId.value)
       if (result.success) {
         toast.success(successMessage, 'Server Updated')
-        logActivity({ type: `server_${action}` })
       } else {
         toast.error(result.message || 'Operation failed', 'Server Error')
       }
@@ -705,7 +695,6 @@ export const useServerStore = defineStore('server', () => {
       server.value = updated
       serverSettings.value = defaultSettings(updated)
       toast.success('Settings saved successfully', 'Settings Updated')
-      logActivity({ type: 'settings_update' })
     } catch (error) {
       console.error('Failed to save settings:', error)
       toast.error(error.message || 'Failed to save settings', 'Error')
@@ -724,7 +713,6 @@ export const useServerStore = defineStore('server', () => {
     serverSettings.value = null
     installedMods.value = []
     logs.value = { stdout: [], stderr: [], running: false }
-    recentActivity.value = []
     backups.value = []
     fileBrowser.value = { currentPath: '', entries: [], loading: false, error: null }
     modSearch.value = ''
@@ -775,7 +763,6 @@ export const useServerStore = defineStore('server', () => {
     installedMods,
     modSearch,
     logs,
-    recentActivity,
     serverSettings,
     showModBrowser,
     showJavaModal,
