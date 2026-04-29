@@ -13,24 +13,6 @@ import { useServerStore } from '../stores/server'
 const route = useRoute()
 const store = useServerStore()
 
-// ---------- Route → store synchronization ----------
-// The store deliberately does NOT call useRoute() (setup-store route context
-// is fragile under HMR). The layout owns this sync. Both watchers use
-// immediate: true so the store has the right values before any action runs.
-watch(() => route.params.id, (id) => { store.currentServerId = id }, { immediate: true })
-watch(() => route.name, (name) => {
-  store.currentRouteName = name
-  if (name === 'ServerConsole') {
-    store.loadLogs()
-    startLogPolling()
-  } else {
-    stopLogPolling()
-  }
-  if (name === 'ServerFiles' && !store.fileBrowser.entries.length && !store.fileBrowser.loading) {
-    store.openFileBrowser()
-  }
-}, { immediate: true })
-
 // ---------- Polling (owned by layout per Phase 3 architecture) ----------
 
 let logsIntervalId = null
@@ -74,6 +56,26 @@ function stopModpackProgressPolling() {
   }
   store.clearModpackProgress()
 }
+
+// ---------- Route → store synchronization ----------
+// The store deliberately does NOT call useRoute() (setup-store route context
+// is fragile under HMR). The layout owns this sync. Both watchers use
+// immediate: true so the store has the right values before any action runs.
+// These run after the polling declarations so the merged route.name watcher
+// can call startLogPolling/stopLogPolling without hitting the TDZ.
+watch(() => route.params.id, (id) => { store.currentServerId = id }, { immediate: true })
+watch(() => route.name, (name) => {
+  store.currentRouteName = name
+  if (name === 'ServerConsole') {
+    store.loadLogs()
+    startLogPolling()
+  } else {
+    stopLogPolling()
+  }
+  if (name === 'ServerFiles' && !store.fileBrowser.entries.length && !store.fileBrowser.loading) {
+    store.openFileBrowser()
+  }
+}, { immediate: true })
 
 // ---------- Watches ----------
 
