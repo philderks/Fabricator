@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import ServerSwitcher from './ServerSwitcher.vue'
+import { version as appVersion } from '../../../package.json'
 
 const route = useRoute()
 const serverId = computed(() => route.params.id)
@@ -67,14 +68,8 @@ const navItems = [
       </router-link>
     </nav>
 
-    <div class="app-sidebar__account">
-      <button type="button" class="app-sidebar__account-btn" disabled>
-        <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
-          <circle cx="7.5" cy="5" r="2.5"/>
-          <path d="M2 13c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/>
-        </svg>
-        <span>Account</span>
-      </button>
+    <div class="app-sidebar__footer">
+      <span class="app-sidebar__version">Fabricator v{{ appVersion }}</span>
     </div>
   </aside>
 </template>
@@ -143,23 +138,15 @@ const navItems = [
   flex-shrink: 0;
 }
 
-.app-sidebar__account {
-  padding: var(--space-2);
+.app-sidebar__footer {
+  padding: var(--space-3);
   border-top: 1px solid var(--border-color);
 }
 
-.app-sidebar__account-btn {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  width: 100%;
-  padding: 7px var(--space-3);
-  border: none;
-  background: transparent;
-  border-radius: var(--radius-sm);
+.app-sidebar__version {
+  font-size: var(--text-xs);
   color: var(--text-disabled);
-  font-size: var(--text-sm);
-  font-family: inherit;
-  cursor: not-allowed;
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
 }
 </style>
