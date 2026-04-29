@@ -1,26 +1,27 @@
 <template>
-  <BaseModal 
-    :show="show" 
-    :title="title" 
+  <BaseModal
+    :show="show"
+    :title="title"
     size="small"
     @close="handleCancel"
   >
     <div class="confirm-content">
-      <div v-if="icon" class="confirm-icon" :class="`confirm-icon-${type}`">
-        <svg v-if="type === 'danger'" width="48" height="48" viewBox="0 0 24 24" fill="none">
-          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
-          <path d="M12 8V12M12 16H12.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      <div v-if="icon" class="confirm-icon" :class="`confirm-icon--${type}`">
+        <svg v-if="type === 'danger'" width="44" height="44" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.6"/>
+          <path d="M12 8V12M12 16H12.01" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
         </svg>
-        <svg v-else-if="type === 'warning'" width="48" height="48" viewBox="0 0 24 24" fill="none">
-          <path d="M12 2L2 20H22L12 2Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-          <path d="M12 10V14M12 18H12.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        <svg v-else-if="type === 'warning'" width="44" height="44" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 2L2 20H22L12 2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+          <path d="M12 10V14M12 18H12.01" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
         </svg>
-        <svg v-else width="48" height="48" viewBox="0 0 24 24" fill="none">
-          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
-          <path d="M12 8V12M12 16H12.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        <svg v-else width="44" height="44" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.6"/>
+          <path d="M12 7h.01" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          <path d="M12 11v5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
         </svg>
       </div>
-      <p class="confirm-message">{{ message }}</p>
+      <p v-if="message" class="confirm-message">{{ message }}</p>
       <p v-if="description" class="confirm-description">{{ description }}</p>
       <div v-if="$slots.extra" class="confirm-extra">
         <slot name="extra" />
@@ -28,29 +29,31 @@
     </div>
 
     <template #footer>
-      <button class="btn btn-secondary" @click="handleCancel" :disabled="loading">
+      <AppButton variant="ghost" size="md" :disabled="loading" @click="handleCancel">
         {{ cancelText }}
-      </button>
-      <button 
-        class="btn"
-        :class="confirmButtonClass"
-        @click="handleConfirm"
+      </AppButton>
+      <AppButton
+        :variant="confirmButtonVariant"
+        size="md"
         :disabled="loading"
+        :loading="loading"
+        @click="handleConfirm"
       >
-        <span v-if="loading" class="btn-loading"></span>
         {{ loading ? loadingText : confirmText }}
-      </button>
+      </AppButton>
     </template>
   </BaseModal>
 </template>
 
 <script>
 import BaseModal from './BaseModal.vue';
+import AppButton from '../ui/AppButton.vue';
 
 export default {
   name: 'ConfirmModal',
   components: {
-    BaseModal
+    BaseModal,
+    AppButton
   },
   props: {
     show: {
@@ -97,10 +100,10 @@ export default {
   },
   emits: ['confirm', 'cancel', 'close'],
   computed: {
-    confirmButtonClass() {
-      if (this.type === 'danger') return 'btn-danger';
-      if (this.type === 'warning') return 'btn-warning';
-      return 'btn-primary';
+    confirmButtonVariant() {
+      if (this.type === 'danger') return 'danger';
+      if (this.type === 'warning') return 'warning';
+      return 'primary';
     }
   },
   methods: {
@@ -122,55 +125,54 @@ export default {
 <style scoped>
 .confirm-content {
   text-align: center;
-  padding: 12px 0;
+  padding: var(--space-3) 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .confirm-icon {
-  margin: 0 auto 20px;
-  width: 48px;
-  height: 48px;
+  width: 44px;
+  height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
+  margin-bottom: var(--space-2);
 }
 
-.confirm-icon-info {
-  color: var(--primary);
-}
-
-.confirm-icon-warning {
-  color: var(--warning);
-}
-
-.confirm-icon-danger {
-  color: var(--danger);
-}
+.confirm-icon--info    { color: var(--primary); }
+.confirm-icon--warning { color: var(--warning); }
+.confirm-icon--danger  { color: var(--danger); }
 
 .confirm-message {
-  font-size: 1.125rem;
-  font-weight: 500;
+  font-size: var(--text-md);
+  font-weight: 600;
   color: var(--text-primary);
-  margin: 0 0 8px 0;
+  margin: 0;
+  line-height: var(--leading-tight);
 }
 
 .confirm-description {
-  font-size: 0.9375rem;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
   margin: 0;
-  line-height: 1.5;
+  line-height: var(--leading-normal);
+  max-width: 36em;
 }
 
 .confirm-extra {
-  margin-top: 16px;
+  margin-top: var(--space-3);
   text-align: left;
+  width: 100%;
 }
 
 :deep(.confirm-checkbox) {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   cursor: pointer;
-  font-size: 0.9375rem;
+  font-size: var(--text-sm);
   color: var(--text-primary);
 }
 
@@ -184,14 +186,5 @@ export default {
 :deep(.confirm-checkbox) input[type="checkbox"]:disabled {
   cursor: not-allowed;
   opacity: 0.5;
-}
-
-.btn-warning {
-  background: var(--warning);
-  color: var(--bg-primary);
-}
-
-.btn-warning:hover:not(:disabled) {
-  background: #d97706;
 }
 </style>
