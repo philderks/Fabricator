@@ -1,37 +1,38 @@
 <script setup>
 import ServerOverviewTab from '../../components/server/ServerOverviewTab.vue'
-import { useServerContext } from '../../composables/useServerContext'
+import { formatBackupTime } from '../../utils/format'
+import { useServerStore } from '../../stores/server'
 
-const ctx = useServerContext()
+const store = useServerStore()
 
-const onModSearch = (value) => { ctx.modSearch.value = value }
+const onModSearch = (value) => { store.modSearch = value }
 </script>
 
 <template>
   <ServerOverviewTab
-    :server-status="ctx.serverStatus.value"
-    :players-display="ctx.playersDisplay.value"
-    :installed-mods="ctx.installedMods.value"
-    :active-modpack="ctx.activeModpack.value"
-    :mod-search="ctx.modSearch.value"
-    :mods-loading="ctx.modsLoading.value"
-    :filtered-mods="ctx.filteredMods.value"
-    :ram-metrics="ctx.ramMetrics.value"
-    :recent-activity="ctx.recentActivity.value"
-    :install-loading="ctx.isInstalling.value"
-    :backup-loading="ctx.backupLoading.value"
-    :backups="ctx.backups.value"
-    :format-backup-time="ctx.formatBackupTime"
+    :server-status="store.serverStatus"
+    :players-display="store.playersDisplay"
+    :installed-mods="store.installedMods"
+    :active-modpack="store.activeModpack"
+    :mod-search="store.modSearch"
+    :mods-loading="store.modsLoading"
+    :filtered-mods="store.filteredMods"
+    :ram-metrics="store.ramMetrics"
+    :recent-activity="store.recentActivity"
+    :install-loading="store.isInstalling"
+    :backup-loading="store.backupLoading"
+    :backups="store.backups"
+    :format-backup-time="formatBackupTime"
     @update:mod-search="onModSearch"
-    @browse-mods="ctx.openModBrowser"
-    @browse-modpacks="ctx.openModpackBrowser"
-    @remove-mod="ctx.handleRemoveMod"
-    @update-mod="ctx.handleUpdateMod"
-    @create-backup="ctx.createBackupAction"
-    @open-console="ctx.goToConsole"
-    @open-files="ctx.goToFiles"
-    @scroll-settings="ctx.goToSettings"
-    @request-restore-backup="ctx.requestRestoreBackup"
-    @request-delete-backup="ctx.requestDeleteBackup"
+    @browse-mods="store.openModBrowser"
+    @browse-modpacks="store.openModpackBrowser"
+    @remove-mod="store.handleRemoveMod"
+    @update-mod="store.handleUpdateMod"
+    @create-backup="store.createBackupAction"
+    @open-console="store.goToConsole"
+    @open-files="store.goToFiles"
+    @scroll-settings="store.goToSettings"
+    @request-restore-backup="store.requestRestoreBackup"
+    @request-delete-backup="store.requestDeleteBackup"
   />
 </template>

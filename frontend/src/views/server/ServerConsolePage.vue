@@ -1,23 +1,23 @@
 <script setup>
 import ServerConsoleTab from '../../components/server/ServerConsoleTab.vue'
-import { useServerContext } from '../../composables/useServerContext'
+import { useServerStore } from '../../stores/server'
 
-const ctx = useServerContext()
+const store = useServerStore()
 
-const onConsoleCommand = (value) => { ctx.consoleCommand.value = value }
+const onConsoleCommand = (value) => { store.consoleCommand = value }
 </script>
 
 <template>
   <ServerConsoleTab
-    :server-status="ctx.serverStatus.value"
-    :status-label="ctx.statusLabel.value"
-    :logs="ctx.logs.value"
-    :logs-loading="ctx.logsLoading.value"
-    :console-command="ctx.consoleCommand.value"
-    :can-send-command="ctx.canSendCommand.value"
-    :command-sending="ctx.commandSending.value"
+    :server-status="store.serverStatus"
+    :status-label="store.statusLabel"
+    :logs="store.logs"
+    :logs-loading="store.logsLoading"
+    :console-command="store.consoleCommand"
+    :can-send-command="store.canSendCommand"
+    :command-sending="store.commandSending"
     @update:console-command="onConsoleCommand"
-    @refresh-logs="ctx.loadLogs"
-    @send-command="ctx.sendConsoleCommand"
+    @refresh-logs="store.loadLogs"
+    @send-command="store.sendConsoleCommand"
   />
 </template>

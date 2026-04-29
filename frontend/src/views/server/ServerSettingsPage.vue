@@ -1,28 +1,28 @@
 <script setup>
 import ServerSettingsTab from '../../components/server/ServerSettingsTab.vue'
 import AppButton from '../../components/ui/AppButton.vue'
-import { useServerContext } from '../../composables/useServerContext'
+import { useServerStore } from '../../stores/server'
 
-const ctx = useServerContext()
+const store = useServerStore()
 </script>
 
 <template>
   <div class="settings-page">
     <ServerSettingsTab
-      v-if="ctx.serverSettings.value"
-      :settings="ctx.serverSettings.value"
-      :server-version="ctx.serverStatus.value.version"
-      :server-loader="ctx.serverStatus.value.loader"
-      :can-edit="ctx.canEditSettings.value"
-      @save="ctx.handleSaveSettings"
-      @reset="ctx.resetSettings"
+      v-if="store.serverSettings"
+      :settings="store.serverSettings"
+      :server-version="store.serverStatus.version"
+      :server-loader="store.serverStatus.loader"
+      :can-edit="store.canEditSettings"
+      @save="store.handleSaveSettings"
+      @reset="store.resetSettings"
     />
 
     <div class="settings-page__danger-zone">
       <h3 class="settings-page__danger-title">Danger zone</h3>
       <p class="settings-page__danger-text">Deleting a server removes its files and backups. This cannot be undone.</p>
-      <AppButton variant="danger" :loading="ctx.deletingServer.value" @click="ctx.openDeleteServerModal">
-        {{ ctx.deletingServer.value ? 'Deleting…' : 'Delete server' }}
+      <AppButton variant="danger" :loading="store.deletingServer" @click="store.openDeleteServerModal">
+        {{ store.deletingServer ? 'Deleting…' : 'Delete server' }}
       </AppButton>
     </div>
   </div>

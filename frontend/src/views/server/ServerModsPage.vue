@@ -2,14 +2,14 @@
 import { computed } from 'vue'
 import AppButton from '../../components/ui/AppButton.vue'
 import Panel from '../../components/ui/Panel.vue'
-import { useServerContext } from '../../composables/useServerContext'
+import { formatFileSize } from '../../utils/format'
+import { useServerStore } from '../../stores/server'
 
-const ctx = useServerContext()
+const store = useServerStore()
 
-const onSearch = (event) => { ctx.modSearch.value = event.target.value }
+const onSearch = (event) => { store.modSearch = event.target.value }
 
-const showEmpty = computed(() => !ctx.modsLoading.value && ctx.filteredMods.value.length === 0)
-const formatBytes = (bytes) => ctx.formatFileSize(bytes)
+const showEmpty = computed(() => !store.modsLoading && store.filteredMods.length === 0)
 </script>
 
 <template>
@@ -19,46 +19,46 @@ const formatBytes = (bytes) => ctx.formatFileSize(bytes)
         type="search"
         class="mods-page__search"
         placeholder="Search installed mods…"
-        :value="ctx.modSearch.value"
+        :value="store.modSearch"
         @input="onSearch"
       />
       <div class="mods-page__actions">
-        <AppButton variant="ghost" @click="ctx.openModpackBrowser">Browse modpacks</AppButton>
+        <AppButton variant="ghost" @click="store.openModpackBrowser">Browse modpacks</AppButton>
         <AppButton
           variant="primary"
-          :loading="ctx.isInstalling.value"
-          @click="ctx.openModBrowser"
+          :loading="store.isInstalling"
+          @click="store.openModBrowser"
         >
           Browse mods
         </AppButton>
       </div>
     </div>
 
-    <Panel v-if="ctx.activeModpack.value" title="Active modpack">
+    <Panel v-if="store.activeModpack" title="Active modpack">
       <div class="mods-page__modpack">
-        <span class="mods-page__modpack-name">{{ ctx.activeModpack.value.title || ctx.activeModpack.value.projectId }}</span>
-        <span class="mods-page__modpack-version">{{ ctx.activeModpack.value.version }}</span>
+        <span class="mods-page__modpack-name">{{ store.activeModpack.title || store.activeModpack.projectId }}</span>
+        <span class="mods-page__modpack-version">{{ store.activeModpack.version }}</span>
       </div>
     </Panel>
 
     <Panel title="Installed mods" :padded="false">
-      <div v-if="ctx.modsLoading.value" class="mods-page__state">Loading mods…</div>
+      <div v-if="store.modsLoading" class="mods-page__state">Loading mods…</div>
       <div v-else-if="showEmpty" class="mods-page__state">
-        <template v-if="ctx.modSearch.value">No mods match "{{ ctx.modSearch.value }}".</template>
+        <template v-if="store.modSearch">No mods match "{{ store.modSearch }}".</template>
         <template v-else>No mods installed yet. Use "Browse mods" to add one.</template>
       </div>
       <ul v-else class="mods-page__list">
-        <li v-for="mod in ctx.filteredMods.value" :key="mod.path" class="mods-page__item">
+        <li v-for="mod in store.filteredMods" :key="mod.path" class="mods-page__item">
           <div class="mods-page__item-info">
             <span class="mods-page__item-name">{{ mod.name }}</span>
             <span class="mods-page__item-meta">
-              {{ mod.version }}<template v-if="mod.size"> · {{ formatBytes(mod.size) }}</template>
+              {{ mod.version }}<template v-if="mod.size"> · {{ formatFileSize(mod.size) }}</template>
             </span>
           </div>
           <button
             type="button"
             class="mods-page__remove"
-            @click="ctx.handleRemoveMod(mod)"
+            @click="store.handleRemoveMod(mod)"
           >
             Remove
           </button>

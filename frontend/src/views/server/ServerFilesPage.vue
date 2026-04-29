@@ -1,19 +1,20 @@
 <script setup>
 import ServerFilesTab from '../../components/server/ServerFilesTab.vue'
-import { useServerContext } from '../../composables/useServerContext'
+import { formatFileSize } from '../../utils/format'
+import { useServerStore } from '../../stores/server'
 
-const ctx = useServerContext()
+const store = useServerStore()
 
-const onRefresh = () => ctx.openFileBrowser(ctx.fileBrowser.value.currentPath)
+const onRefresh = () => store.openFileBrowser(store.fileBrowser.currentPath)
 </script>
 
 <template>
   <ServerFilesTab
-    :server-id="ctx.serverId.value"
-    :file-browser="ctx.fileBrowser.value"
-    :format-file-size="ctx.formatFileSize"
-    @go-up="ctx.goUpDirectory"
+    :server-id="store.currentServerId"
+    :file-browser="store.fileBrowser"
+    :format-file-size="formatFileSize"
+    @go-up="store.goUpDirectory"
     @refresh="onRefresh"
-    @enter-entry="ctx.enterFileEntry"
+    @enter-entry="store.enterFileEntry"
   />
 </template>
