@@ -220,7 +220,7 @@ export default {
   font-size: var(--text-base);
   font-weight: 600;
   margin: 0;
-  line-height: var(--leading-snug);
+  line-height: var(--leading-tight);
 }
 
 .status-description {
@@ -272,7 +272,7 @@ export default {
 
 .chip {
   padding: var(--space-1) var(--space-3);
-  border-radius: var(--radius-full);
+  border-radius: var(--radius-pill);
   border: 1px solid var(--border-color);
   font-size: var(--text-xs);
   color: var(--text-secondary);
@@ -297,10 +297,5 @@ export default {
 
 .chip--highlight {
   box-shadow: 0 0 0 1px color-mix(in oklch, var(--primary) 40%, transparent);
-}
-
-button[disabled] {
-  opacity: 0.7;
-  cursor: not-allowed;
 }
 </style>
