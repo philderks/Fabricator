@@ -379,34 +379,36 @@
 
       <!-- Advanced Settings -->
       <Panel title="Advanced">
-        
 
-        
         <div class="form-row">
-          <div class="form-group">
-            <label for="memory">Memory Allocation (GB)</label>
-            <input 
-              id="memory"
-              v-model.number="formData.memory" 
-              type="number" 
-              min="1"
-              max="32"
-              step="0.5"
-              placeholder="4"
-            >
-          </div>
+          <FormField label="Memory Allocation (GB)">
+            <template #default="{ id, describedBy }">
+              <input
+                :id="id"
+                v-model.number="formData.memory"
+                type="number"
+                min="1"
+                max="32"
+                step="0.5"
+                placeholder="4"
+                :aria-describedby="describedBy"
+              >
+            </template>
+          </FormField>
 
-          <div class="form-group">
-            <label for="simulation-distance">Simulation Distance</label>
-            <input 
-              id="simulation-distance"
-              v-model.number="formData.simulationDistance" 
-              type="number" 
-              min="3"
-              max="32"
-              placeholder="10"
-            >
-          </div>
+          <FormField label="Simulation Distance">
+            <template #default="{ id, describedBy }">
+              <input
+                :id="id"
+                v-model.number="formData.simulationDistance"
+                type="number"
+                min="3"
+                max="32"
+                placeholder="10"
+                :aria-describedby="describedBy"
+              >
+            </template>
+          </FormField>
         </div>
 
         <div class="form-checkboxes">
@@ -428,17 +430,18 @@
           </label>
         </div>
 
-        <div class="form-group">
-          <label for="motd">MOTD (Message of the Day)</label>
-          <textarea 
-            id="motd"
-            v-model="formData.motd" 
-            rows="2"
-            placeholder="A Minecraft Server"
-            maxlength="59"
-          ></textarea>
-          <span class="form-hint">{{ formData.motd.length }}/59 characters</span>
-        </div>
+        <FormField label="MOTD (Message of the Day)" :hint="`${formData.motd.length}/59 characters`">
+          <template #default="{ id, describedBy }">
+            <textarea
+              :id="id"
+              v-model="formData.motd"
+              rows="2"
+              placeholder="A Minecraft Server"
+              maxlength="59"
+              :aria-describedby="describedBy"
+            ></textarea>
+          </template>
+        </FormField>
       </Panel>
 
       <!-- EULA Agreement -->
