@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import AppButton from '../../components/ui/AppButton.vue'
 import Panel from '../../components/ui/Panel.vue'
+import ToggleRow from '../../components/ui/ToggleRow.vue'
 import { useServerStore } from '../../stores/server'
 
 const store = useServerStore()
@@ -258,87 +259,45 @@ const onReset = () => {
       </div>
 
       <div class="settings-page__toggles">
-        <label
+        <ToggleRow
           v-if="showAdvanced"
-          class="settings-page__toggle"
-          :class="{ 'settings-page__toggle--disabled': !store.canEditSettings }"
-        >
-          <input
-            type="checkbox"
-            v-model="store.serverSettings.forceGamemode"
-            :disabled="!store.canEditSettings"
-          />
-          <span>Force Gamemode</span>
-        </label>
-        <label
+          v-model="store.serverSettings.forceGamemode"
+          label="Force Gamemode"
+          :disabled="!store.canEditSettings"
+        />
+        <ToggleRow
           v-if="showAdvanced"
-          class="settings-page__toggle"
-          :class="{ 'settings-page__toggle--disabled': !store.canEditSettings }"
-        >
-          <input
-            type="checkbox"
-            v-model="store.serverSettings.hardcore"
-            :disabled="!store.canEditSettings"
-          />
-          <span>Hardcore</span>
-        </label>
-        <label
+          v-model="store.serverSettings.hardcore"
+          label="Hardcore"
+          :disabled="!store.canEditSettings"
+        />
+        <ToggleRow
           v-if="showAdvanced"
-          class="settings-page__toggle"
-          :class="{ 'settings-page__toggle--disabled': !store.canEditSettings }"
-        >
-          <input
-            type="checkbox"
-            v-model="store.serverSettings.allowFlight"
-            :disabled="!store.canEditSettings"
-          />
-          <span>Allow Flight</span>
-        </label>
-        <label
-          class="settings-page__toggle"
-          :class="{ 'settings-page__toggle--disabled': !store.canEditSettings }"
-        >
-          <input
-            type="checkbox"
-            v-model="store.serverSettings.pvp"
-            :disabled="!store.canEditSettings"
-          />
-          <span>Enable PvP</span>
-        </label>
-        <label
-          class="settings-page__toggle"
-          :class="{ 'settings-page__toggle--disabled': !store.canEditSettings }"
-        >
-          <input
-            type="checkbox"
-            v-model="store.serverSettings.whitelist"
-            :disabled="!store.canEditSettings"
-          />
-          <span>Enable Whitelist</span>
-        </label>
-        <label
+          v-model="store.serverSettings.allowFlight"
+          label="Allow Flight"
+          :disabled="!store.canEditSettings"
+        />
+        <ToggleRow
+          v-model="store.serverSettings.pvp"
+          label="Enable PvP"
+          :disabled="!store.canEditSettings"
+        />
+        <ToggleRow
+          v-model="store.serverSettings.whitelist"
+          label="Enable Whitelist"
+          :disabled="!store.canEditSettings"
+        />
+        <ToggleRow
           v-if="showAdvanced"
-          class="settings-page__toggle"
-          :class="{ 'settings-page__toggle--disabled': !store.canEditSettings }"
-        >
-          <input
-            type="checkbox"
-            v-model="store.serverSettings.enforceWhitelist"
-            :disabled="!store.canEditSettings"
-          />
-          <span>Enforce Whitelist</span>
-        </label>
-        <label
-          class="settings-page__toggle"
-          :class="{ 'settings-page__toggle--disabled': !store.canEditSettings }"
-        >
-          <input
-            type="checkbox"
-            v-model="store.serverSettings.commandBlocks"
-            :disabled="!store.canEditSettings"
-          />
-          <span>Enable Command Blocks</span>
-        </label>
+          v-model="store.serverSettings.enforceWhitelist"
+          label="Enforce Whitelist"
+          :disabled="!store.canEditSettings"
+        />
+        <ToggleRow
+          v-model="store.serverSettings.commandBlocks"
+          label="Enable Command Blocks"
+          :disabled="!store.canEditSettings"
+        />
       </div>
     </Panel>
 
