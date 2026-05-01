@@ -248,54 +248,59 @@
 
       <!-- Gameplay Settings -->
       <Panel title="Gameplay">
-        
-        <div class="form-row">
-          <div class="form-group">
-            <label for="max-players">Max Players</label>
-            <input 
-              id="max-players"
-              v-model.number="formData.maxPlayers" 
-              type="number" 
-              min="1"
-              max="1000"
-              placeholder="20"
-            >
-          </div>
 
-          <div class="form-group">
-            <label for="difficulty">Difficulty</label>
-            <select id="difficulty" v-model="formData.difficulty">
-              <option value="peaceful">Peaceful</option>
-              <option value="easy">Easy</option>
-              <option value="normal">Normal</option>
-              <option value="hard">Hard</option>
-            </select>
-          </div>
+        <div class="form-row">
+          <FormField label="Max Players">
+            <template #default="{ id, describedBy }">
+              <input
+                :id="id"
+                v-model.number="formData.maxPlayers"
+                type="number"
+                min="1"
+                max="1000"
+                placeholder="20"
+                :aria-describedby="describedBy"
+              >
+            </template>
+          </FormField>
+
+          <FormField label="Difficulty">
+            <template #default="{ id, describedBy }">
+              <select :id="id" v-model="formData.difficulty" :aria-describedby="describedBy">
+                <option value="peaceful">Peaceful</option>
+                <option value="easy">Easy</option>
+                <option value="normal">Normal</option>
+                <option value="hard">Hard</option>
+              </select>
+            </template>
+          </FormField>
         </div>
 
         <div class="form-row">
-          <div class="form-group">
-            <label for="gamemode">Default Gamemode</label>
-            <select id="gamemode" v-model="formData.gamemode">
-              <option value="survival">Survival</option>
-              <option value="creative">Creative</option>
-              <option value="adventure">Adventure</option>
-              <option value="spectator">Spectator</option>
-            </select>
-          </div>
+          <FormField label="Default Gamemode">
+            <template #default="{ id, describedBy }">
+              <select :id="id" v-model="formData.gamemode" :aria-describedby="describedBy">
+                <option value="survival">Survival</option>
+                <option value="creative">Creative</option>
+                <option value="adventure">Adventure</option>
+                <option value="spectator">Spectator</option>
+              </select>
+            </template>
+          </FormField>
 
-          <div class="form-group">
-            <label for="view-distance">View Distance</label>
-            <input 
-              id="view-distance"
-              v-model.number="formData.viewDistance" 
-              type="number" 
-              min="3"
-              max="32"
-              placeholder="10"
-            >
-            <span class="form-hint">3-32 chunks</span>
-          </div>
+          <FormField label="View Distance" hint="3-32 chunks">
+            <template #default="{ id, describedBy }">
+              <input
+                :id="id"
+                v-model.number="formData.viewDistance"
+                type="number"
+                min="3"
+                max="32"
+                placeholder="10"
+                :aria-describedby="describedBy"
+              >
+            </template>
+          </FormField>
         </div>
       </Panel>
 
