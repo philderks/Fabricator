@@ -393,50 +393,26 @@ const onReset = () => {
       </div>
 
       <div class="settings-page__toggles">
-        <label
-          class="settings-page__toggle"
-          :class="{ 'settings-page__toggle--disabled': !store.canEditSettings }"
-        >
-          <input
-            type="checkbox"
-            v-model="store.serverSettings.generateStructures"
-            :disabled="!store.canEditSettings"
-          />
-          <span>Generate Structures</span>
-        </label>
-        <label
-          class="settings-page__toggle"
-          :class="{ 'settings-page__toggle--disabled': !store.canEditSettings }"
-        >
-          <input
-            type="checkbox"
-            v-model="store.serverSettings.spawnAnimals"
-            :disabled="!store.canEditSettings"
-          />
-          <span>Spawn Animals</span>
-        </label>
-        <label
-          class="settings-page__toggle"
-          :class="{ 'settings-page__toggle--disabled': !store.canEditSettings }"
-        >
-          <input
-            type="checkbox"
-            v-model="store.serverSettings.spawnMonsters"
-            :disabled="!store.canEditSettings"
-          />
-          <span>Spawn Monsters</span>
-        </label>
-        <label
-          class="settings-page__toggle"
-          :class="{ 'settings-page__toggle--disabled': !store.canEditSettings }"
-        >
-          <input
-            type="checkbox"
-            v-model="store.serverSettings.spawnNpcs"
-            :disabled="!store.canEditSettings"
-          />
-          <span>Spawn NPCs</span>
-        </label>
+        <ToggleRow
+          v-model="store.serverSettings.generateStructures"
+          label="Generate Structures"
+          :disabled="!store.canEditSettings"
+        />
+        <ToggleRow
+          v-model="store.serverSettings.spawnAnimals"
+          label="Spawn Animals"
+          :disabled="!store.canEditSettings"
+        />
+        <ToggleRow
+          v-model="store.serverSettings.spawnMonsters"
+          label="Spawn Monsters"
+          :disabled="!store.canEditSettings"
+        />
+        <ToggleRow
+          v-model="store.serverSettings.spawnNpcs"
+          label="Spawn NPCs"
+          :disabled="!store.canEditSettings"
+        />
       </div>
     </Panel>
 
