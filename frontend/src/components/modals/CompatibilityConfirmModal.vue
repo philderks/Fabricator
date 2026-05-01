@@ -217,7 +217,7 @@ export default {
 }
 
 .status-title {
-  font-size: var(--text-base);
+  font-size: var(--text-md);
   font-weight: 600;
   margin: 0;
   line-height: var(--leading-tight);
