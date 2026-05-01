@@ -31,7 +31,6 @@ body {
 
   /* Status */
   --success: #22c55e;
-  --success-dark: #16a34a;
   --warning: #fbbf24;
   --warning-dark: #f59e0b;
   --danger: #ef4444;
@@ -40,7 +39,6 @@ body {
   /* Brand */
   --primary: #f97316;
   --primary-dark: #ea6d0e;
-  --secondary: #1a1a1a;
   --secondary-hover: #252525;
 
   /* Spacing scale (4px base) */
