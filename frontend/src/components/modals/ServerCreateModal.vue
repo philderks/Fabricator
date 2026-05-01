@@ -306,53 +306,56 @@
 
       <!-- World Settings -->
       <Panel title="World">
-        
 
-        
-        <div class="form-group">
-          <label for="level-name">World Name</label>
-          <input 
-            id="level-name"
-            v-model="formData.levelName" 
-            type="text" 
-            placeholder="world"
-          >
-          <span class="form-hint">Folder name for world files</span>
-        </div>
+        <FormField label="World Name" hint="Folder name for world files">
+          <template #default="{ id, describedBy }">
+            <input
+              :id="id"
+              v-model="formData.levelName"
+              type="text"
+              placeholder="world"
+              :aria-describedby="describedBy"
+            >
+          </template>
+        </FormField>
 
         <div class="form-row">
-          <div class="form-group">
-            <label for="level-type">World Type</label>
-            <select id="level-type" v-model="formData.levelType">
-              <option value="default">Default</option>
-              <option value="flat">Flat</option>
-              <option value="large_biomes">Large Biomes</option>
-              <option value="amplified">Amplified</option>
-            </select>
-          </div>
+          <FormField label="World Type">
+            <template #default="{ id, describedBy }">
+              <select :id="id" v-model="formData.levelType" :aria-describedby="describedBy">
+                <option value="default">Default</option>
+                <option value="flat">Flat</option>
+                <option value="large_biomes">Large Biomes</option>
+                <option value="amplified">Amplified</option>
+              </select>
+            </template>
+          </FormField>
 
-          <div class="form-group">
-            <label for="seed">Seed</label>
-            <input 
-              id="seed"
-              v-model="formData.seed" 
-              type="text" 
-              placeholder="Leave empty for random"
+          <FormField label="Seed">
+            <template #default="{ id, describedBy }">
+              <input
+                :id="id"
+                v-model="formData.seed"
+                type="text"
+                placeholder="Leave empty for random"
+                :aria-describedby="describedBy"
+              >
+            </template>
+          </FormField>
+        </div>
+
+        <FormField label="Java Executable Path (Optional)" hint="Use a specific Java runtime for this server.">
+          <template #default="{ id, describedBy }">
+            <input
+              :id="id"
+              v-model.trim="formData.javaPath"
+              @blur="refreshJavaRequirement"
+              type="text"
+              placeholder="java or /path/to/java"
+              :aria-describedby="describedBy"
             >
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label for="java-path">Java Executable Path (Optional)</label>
-          <input
-            id="java-path"
-            v-model.trim="formData.javaPath"
-            @blur="refreshJavaRequirement"
-            type="text"
-            placeholder="java or /path/to/java"
-          >
-          <span class="form-hint">Use a specific Java runtime for this server.</span>
-        </div>
+          </template>
+        </FormField>
 
         <div class="form-checkboxes">
           <label class="checkbox-label">
