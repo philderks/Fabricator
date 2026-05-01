@@ -145,14 +145,17 @@
 
           <div v-if="formData.modpackImportMethod === 'link'" class="form-row modpack-input-row">
             <div class="form-group modpack-grow">
-              <label for="modpack-link">Modpack URL or Slug</label>
-              <input
-                id="modpack-link"
-                v-model="modpackLinkInput"
-                type="text"
-                placeholder="https://modrinth.com/modpack/your-pack"
-              >
-              <span class="form-hint">Supports Modrinth links, slugs, or project IDs.</span>
+              <FormField label="Modpack URL or Slug" hint="Supports Modrinth links, slugs, or project IDs.">
+                <template #default="{ id, describedBy }">
+                  <input
+                    :id="id"
+                    v-model="modpackLinkInput"
+                    type="text"
+                    placeholder="https://modrinth.com/modpack/your-pack"
+                    :aria-describedby="describedBy"
+                  >
+                </template>
+              </FormField>
             </div>
             <div class="form-group modpack-action">
               <label>&nbsp;</label>
@@ -171,13 +174,17 @@
           <div v-else>
             <div class="form-row modpack-input-row">
               <div class="form-group modpack-grow">
-                <label for="modpack-search">Search Modpacks</label>
-                <input
-                  id="modpack-search"
-                  v-model="modpackSearchQuery"
-                  type="text"
-                  placeholder="All of Fabric, Better Minecraft, ..."
-                >
+                <FormField label="Search Modpacks">
+                  <template #default="{ id, describedBy }">
+                    <input
+                      :id="id"
+                      v-model="modpackSearchQuery"
+                      type="text"
+                      placeholder="All of Fabric, Better Minecraft, ..."
+                      :aria-describedby="describedBy"
+                    >
+                  </template>
+                </FormField>
               </div>
               <div class="form-group modpack-action">
                 <label>&nbsp;</label>
