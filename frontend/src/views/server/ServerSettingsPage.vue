@@ -762,28 +762,16 @@ const onReset = () => {
       </div>
 
       <div class="settings-page__toggles">
-        <label
-          class="settings-page__toggle"
-          :class="{ 'settings-page__toggle--disabled': !store.canEditSettings }"
-        >
-          <input
-            type="checkbox"
-            v-model="store.serverSettings.enableCodeOfConduct"
-            :disabled="!store.canEditSettings"
-          />
-          <span>Enable Code of Conduct</span>
-        </label>
-        <label
-          class="settings-page__toggle"
-          :class="{ 'settings-page__toggle--disabled': !store.canEditSettings }"
-        >
-          <input
-            type="checkbox"
-            v-model="store.serverSettings.enableJmxMonitoring"
-            :disabled="!store.canEditSettings"
-          />
-          <span>Enable JMX Monitoring</span>
-        </label>
+        <ToggleRow
+          v-model="store.serverSettings.enableCodeOfConduct"
+          label="Enable Code of Conduct"
+          :disabled="!store.canEditSettings"
+        />
+        <ToggleRow
+          v-model="store.serverSettings.enableJmxMonitoring"
+          label="Enable JMX Monitoring"
+          :disabled="!store.canEditSettings"
+        />
       </div>
     </Panel>
 
