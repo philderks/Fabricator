@@ -591,94 +591,46 @@ const onReset = () => {
       </div>
 
       <div class="settings-page__toggles">
-        <label
-          class="settings-page__toggle"
-          :class="{ 'settings-page__toggle--disabled': !store.canEditSettings }"
-        >
-          <input
-            type="checkbox"
-            v-model="store.serverSettings.onlineMode"
-            :disabled="!store.canEditSettings"
-          />
-          <span>Online Mode (Mojang Auth)</span>
-        </label>
-        <label
-          class="settings-page__toggle"
-          :class="{ 'settings-page__toggle--disabled': !store.canEditSettings }"
-        >
-          <input
-            type="checkbox"
-            v-model="store.serverSettings.enforceSecureProfile"
-            :disabled="!store.canEditSettings"
-          />
-          <span>Enforce Secure Profiles</span>
-        </label>
-        <label
-          class="settings-page__toggle"
-          :class="{ 'settings-page__toggle--disabled': !store.canEditSettings }"
-        >
-          <input
-            type="checkbox"
-            v-model="store.serverSettings.hideOnlinePlayers"
-            :disabled="!store.canEditSettings"
-          />
-          <span>Hide Player Count</span>
-        </label>
-        <label
-          class="settings-page__toggle"
-          :class="{ 'settings-page__toggle--disabled': !store.canEditSettings }"
-        >
-          <input
-            type="checkbox"
-            v-model="store.serverSettings.preventProxyConnections"
-            :disabled="!store.canEditSettings"
-          />
-          <span>Prevent Proxy Connections</span>
-        </label>
-        <label
-          class="settings-page__toggle"
-          :class="{ 'settings-page__toggle--disabled': !store.canEditSettings }"
-        >
-          <input
-            type="checkbox"
-            v-model="store.serverSettings.logIps"
-            :disabled="!store.canEditSettings"
-          />
-          <span>Log Player IPs</span>
-        </label>
-        <label
-          class="settings-page__toggle"
-          :class="{ 'settings-page__toggle--disabled': !store.canEditSettings }"
-        >
-          <input
-            type="checkbox"
-            v-model="store.serverSettings.acceptsTransfers"
-            :disabled="!store.canEditSettings"
-          />
-          <span>Accept Transfers From Proxy</span>
-        </label>
-        <label
-          class="settings-page__toggle"
-          :class="{ 'settings-page__toggle--disabled': !store.canEditSettings }"
-        >
-          <input
-            type="checkbox"
-            v-model="store.serverSettings.useNativeTransport"
-            :disabled="!store.canEditSettings"
-          />
-          <span>Use Native Transport</span>
-        </label>
-        <label
-          class="settings-page__toggle"
-          :class="{ 'settings-page__toggle--disabled': !store.canEditSettings }"
-        >
-          <input
-            type="checkbox"
-            v-model="store.serverSettings.syncChunkWrites"
-            :disabled="!store.canEditSettings"
-          />
-          <span>Sync Chunk Writes</span>
-        </label>
+        <ToggleRow
+          v-model="store.serverSettings.onlineMode"
+          label="Online Mode (Mojang Auth)"
+          :disabled="!store.canEditSettings"
+        />
+        <ToggleRow
+          v-model="store.serverSettings.enforceSecureProfile"
+          label="Enforce Secure Profiles"
+          :disabled="!store.canEditSettings"
+        />
+        <ToggleRow
+          v-model="store.serverSettings.hideOnlinePlayers"
+          label="Hide Player Count"
+          :disabled="!store.canEditSettings"
+        />
+        <ToggleRow
+          v-model="store.serverSettings.preventProxyConnections"
+          label="Prevent Proxy Connections"
+          :disabled="!store.canEditSettings"
+        />
+        <ToggleRow
+          v-model="store.serverSettings.logIps"
+          label="Log Player IPs"
+          :disabled="!store.canEditSettings"
+        />
+        <ToggleRow
+          v-model="store.serverSettings.acceptsTransfers"
+          label="Accept Transfers From Proxy"
+          :disabled="!store.canEditSettings"
+        />
+        <ToggleRow
+          v-model="store.serverSettings.useNativeTransport"
+          label="Use Native Transport"
+          :disabled="!store.canEditSettings"
+        />
+        <ToggleRow
+          v-model="store.serverSettings.syncChunkWrites"
+          label="Sync Chunk Writes"
+          :disabled="!store.canEditSettings"
+        />
       </div>
     </Panel>
 
