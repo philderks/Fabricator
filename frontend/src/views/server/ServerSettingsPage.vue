@@ -461,17 +461,11 @@ const onReset = () => {
       </div>
 
       <div class="settings-page__toggles">
-        <label
-          class="settings-page__toggle"
-          :class="{ 'settings-page__toggle--disabled': !store.canEditSettings }"
-        >
-          <input
-            type="checkbox"
-            v-model="store.serverSettings.requireResourcePack"
-            :disabled="!store.canEditSettings"
-          />
-          <span>Require Players to Accept Pack</span>
-        </label>
+        <ToggleRow
+          v-model="store.serverSettings.requireResourcePack"
+          label="Require Players to Accept Pack"
+          :disabled="!store.canEditSettings"
+        />
       </div>
 
       <div class="settings-page__grid">
