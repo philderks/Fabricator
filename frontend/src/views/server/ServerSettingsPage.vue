@@ -786,11 +786,10 @@ const onReset = () => {
       </div>
     </Panel>
 
-    <div class="settings-page__footer">
+    <footer class="settings-page__footer" aria-label="Settings actions">
       <div class="settings-page__footer-inner">
         <AppButton
           variant="ghost"
-          size="md"
           :disabled="!isDirty || !store.canEditSettings"
           @click="onReset"
         >
@@ -798,14 +797,13 @@ const onReset = () => {
         </AppButton>
         <AppButton
           variant="primary"
-          size="md"
           :disabled="!isDirty || !store.canEditSettings"
           @click="onSave"
         >
           Save Changes
         </AppButton>
       </div>
-    </div>
+    </footer>
   </div>
   <div v-else class="settings-page__loading">Loading settings…</div>
 </template>
@@ -816,6 +814,7 @@ const onReset = () => {
   flex-direction: column;
   gap: var(--space-4);
   max-width: 880px;
+  padding-bottom: 80px;
 }
 
 .settings-page__loading {
@@ -1024,13 +1023,14 @@ const onReset = () => {
 }
 
 .settings-page__footer {
-  position: sticky;
+  position: fixed;
   bottom: 0;
+  left: var(--sidebar-width);
+  right: 0;
   background: var(--bg-primary);
   border-top: 1px solid var(--border-color);
-  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.3);
-  margin-top: var(--space-6);
-  padding: var(--space-4) 0;
+  box-shadow: var(--shadow-up);
+  padding: var(--space-4) var(--space-5);
   z-index: 10;
 }
 
