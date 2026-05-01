@@ -1032,8 +1032,8 @@ const onReset = () => {
 
 .settings-page__toggles {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
+  flex-direction: column;
+  gap: 0;
   margin-top: var(--space-3);
 }
 
