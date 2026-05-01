@@ -76,8 +76,8 @@ const navItems = [
 
 <style scoped>
 .app-sidebar {
-  width: 216px;
-  min-width: 216px;
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
   background: var(--bg-secondary);
   border-right: 1px solid var(--border-color);
   display: flex;

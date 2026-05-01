@@ -68,10 +68,19 @@ body {
   --leading-tight: 1.2;
   --leading-normal: 1.5;
 
-  /* Shadows */
+  /* Shadows
+   * Size-based tokens (sm/md/lg) cast downward (positive Y offset).
+   * Direction-based tokens are added for upward-casting elements
+   * (sticky footers, dropdown menus that open downward, etc.) that can't
+   * reuse the size scale without CSS direction tricks. Magnitude aligned
+   * with --shadow-md (12px blur, 0.4 alpha). */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.5);
+  --shadow-up: 0 -4px 12px rgba(0, 0, 0, 0.4);
+
+  /* Layout */
+  --sidebar-width: 216px;
 }
 
 /* Input Fields */
