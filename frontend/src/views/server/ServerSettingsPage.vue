@@ -481,46 +481,58 @@ const onReset = () => {
 
     <Panel v-if="showAdvanced" title="Resources & Packs">
       <div class="settings-page__grid">
-        <label class="settings-page__field">
-          <span class="settings-page__label">Resource Pack URL</span>
-          <input
-            class="settings-page__input"
-            type="url"
-            placeholder="https://example.com/resource.zip"
-            v-model="store.serverSettings.resourcePack"
-            :disabled="!store.canEditSettings"
-          />
-        </label>
-        <label class="settings-page__field">
-          <span class="settings-page__label">Resource Pack SHA-1</span>
-          <input
-            class="settings-page__input"
-            type="text"
-            placeholder="40 character hash"
-            v-model="store.serverSettings.resourcePackSha1"
-            :disabled="!store.canEditSettings"
-          />
-        </label>
+        <FormField label="Resource Pack URL">
+          <template #default="{ id, describedBy }">
+            <input
+              :id="id"
+              class="settings-page__input"
+              type="url"
+              placeholder="https://example.com/resource.zip"
+              v-model="store.serverSettings.resourcePack"
+              :disabled="!store.canEditSettings"
+              :aria-describedby="describedBy"
+            />
+          </template>
+        </FormField>
+        <FormField label="Resource Pack SHA-1">
+          <template #default="{ id, describedBy }">
+            <input
+              :id="id"
+              class="settings-page__input"
+              type="text"
+              placeholder="40 character hash"
+              v-model="store.serverSettings.resourcePackSha1"
+              :disabled="!store.canEditSettings"
+              :aria-describedby="describedBy"
+            />
+          </template>
+        </FormField>
 
-        <label class="settings-page__field">
-          <span class="settings-page__label">Resource Pack ID</span>
-          <input
-            class="settings-page__input"
-            type="text"
-            v-model="store.serverSettings.resourcePackId"
-            :disabled="!store.canEditSettings"
-          />
-        </label>
-        <label class="settings-page__field">
-          <span class="settings-page__label">Resource Pack Prompt</span>
-          <input
-            class="settings-page__input"
-            type="text"
-            placeholder="Displayed when joining"
-            v-model="store.serverSettings.resourcePackPrompt"
-            :disabled="!store.canEditSettings"
-          />
-        </label>
+        <FormField label="Resource Pack ID">
+          <template #default="{ id, describedBy }">
+            <input
+              :id="id"
+              class="settings-page__input"
+              type="text"
+              v-model="store.serverSettings.resourcePackId"
+              :disabled="!store.canEditSettings"
+              :aria-describedby="describedBy"
+            />
+          </template>
+        </FormField>
+        <FormField label="Resource Pack Prompt">
+          <template #default="{ id, describedBy }">
+            <input
+              :id="id"
+              class="settings-page__input"
+              type="text"
+              placeholder="Displayed when joining"
+              v-model="store.serverSettings.resourcePackPrompt"
+              :disabled="!store.canEditSettings"
+              :aria-describedby="describedBy"
+            />
+          </template>
+        </FormField>
       </div>
 
       <div class="settings-page__toggles">
@@ -532,24 +544,29 @@ const onReset = () => {
       </div>
 
       <div class="settings-page__grid">
-        <label class="settings-page__field">
-          <span class="settings-page__label">Enabled Data Packs</span>
-          <textarea
-            class="settings-page__input settings-page__textarea"
-            placeholder="vanilla"
-            v-model="store.serverSettings.initialEnabledPacks"
-            :disabled="!store.canEditSettings"
-          ></textarea>
-          <span class="settings-page__hint">Comma separated identifiers</span>
-        </label>
-        <label class="settings-page__field">
-          <span class="settings-page__label">Disabled Data Packs</span>
-          <textarea
-            class="settings-page__input settings-page__textarea"
-            v-model="store.serverSettings.initialDisabledPacks"
-            :disabled="!store.canEditSettings"
-          ></textarea>
-        </label>
+        <FormField label="Enabled Data Packs" hint="Comma separated identifiers">
+          <template #default="{ id, describedBy }">
+            <textarea
+              :id="id"
+              class="settings-page__input settings-page__textarea"
+              placeholder="vanilla"
+              v-model="store.serverSettings.initialEnabledPacks"
+              :disabled="!store.canEditSettings"
+              :aria-describedby="describedBy"
+            ></textarea>
+          </template>
+        </FormField>
+        <FormField label="Disabled Data Packs">
+          <template #default="{ id, describedBy }">
+            <textarea
+              :id="id"
+              class="settings-page__input settings-page__textarea"
+              v-model="store.serverSettings.initialDisabledPacks"
+              :disabled="!store.canEditSettings"
+              :aria-describedby="describedBy"
+            ></textarea>
+          </template>
+        </FormField>
       </div>
     </Panel>
 
