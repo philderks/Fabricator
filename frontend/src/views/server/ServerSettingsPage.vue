@@ -7,6 +7,8 @@ import { useServerStore } from '../../stores/server'
 
 const store = useServerStore()
 
+const isDirty = computed(() => store.isDirtySettings)
+
 const showAdvanced = ref(false)
 
 const motdCharacters = computed(() => store.serverSettings?.motd?.length ?? 0)
@@ -775,11 +777,6 @@ const onReset = () => {
       </div>
     </Panel>
 
-    <div class="settings-page__footer">
-      <AppButton variant="ghost" @click="onReset" :disabled="!store.canEditSettings">Reset</AppButton>
-      <AppButton variant="primary" @click="onSave" :disabled="!store.canEditSettings">Save changes</AppButton>
-    </div>
-
     <Panel title="Danger zone">
       <div class="settings-page__danger">
         <p class="settings-page__danger-text">Deleting a server removes its files and backups. This cannot be undone.</p>
@@ -788,6 +785,27 @@ const onReset = () => {
         </AppButton>
       </div>
     </Panel>
+
+    <div class="settings-page__footer">
+      <div class="settings-page__footer-inner">
+        <AppButton
+          variant="ghost"
+          size="md"
+          :disabled="!isDirty || !store.canEditSettings"
+          @click="onReset"
+        >
+          Reset
+        </AppButton>
+        <AppButton
+          variant="primary"
+          size="md"
+          :disabled="!isDirty || !store.canEditSettings"
+          @click="onSave"
+        >
+          Save Changes
+        </AppButton>
+      </div>
+    </div>
   </div>
   <div v-else class="settings-page__loading">Loading settings…</div>
 </template>
@@ -1006,10 +1024,20 @@ const onReset = () => {
 }
 
 .settings-page__footer {
+  position: sticky;
+  bottom: 0;
+  background: var(--bg-primary);
+  border-top: 1px solid var(--border-color);
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.3);
+  margin-top: var(--space-6);
+  padding: var(--space-4) 0;
+  z-index: 10;
+}
+
+.settings-page__footer-inner {
   display: flex;
   justify-content: flex-end;
   gap: var(--space-3);
-  padding-top: var(--space-3);
 }
 
 .settings-page__danger {

@@ -279,6 +279,15 @@ export const useServerStore = defineStore('server', () => {
     return fileEditor.value.content !== fileEditor.value.originalContent
   })
 
+  const isDirtySettings = computed(() => {
+    if (!server.value || !serverSettings.value) return false
+    const baseline = defaultSettings(server.value)
+    for (const key of Object.keys(baseline)) {
+      if (baseline[key] !== serverSettings.value[key]) return true
+    }
+    return false
+  })
+
   // ---------- Actions ----------
 
   async function loadServers() {
@@ -889,6 +898,7 @@ export const useServerStore = defineStore('server', () => {
     canSendCommand,
     missingModsDescriptionText,
     hasFileChanges,
+    isDirtySettings,
     // Actions
     loadServers,
     loadServer,
