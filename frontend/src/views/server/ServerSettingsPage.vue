@@ -844,25 +844,31 @@ const onReset = () => {
           </label>
         </div>
 
-        <label class="settings-page__field">
-          <span class="settings-page__label">Text Filtering Config</span>
-          <textarea
-            class="settings-page__input settings-page__textarea"
-            placeholder="{}"
-            v-model="store.serverSettings.textFilteringConfig"
-            :disabled="!store.canEditSettings"
-          ></textarea>
-        </label>
-        <label class="settings-page__field">
-          <span class="settings-page__label">Text Filtering Version</span>
-          <input
-            class="settings-page__input"
-            type="number"
-            min="0"
-            v-model.number="store.serverSettings.textFilteringVersion"
-            :disabled="!store.canEditSettings"
-          />
-        </label>
+        <FormField label="Text Filtering Config">
+          <template #default="{ id, describedBy }">
+            <textarea
+              :id="id"
+              class="settings-page__input settings-page__textarea"
+              placeholder="{}"
+              v-model="store.serverSettings.textFilteringConfig"
+              :disabled="!store.canEditSettings"
+              :aria-describedby="describedBy"
+            ></textarea>
+          </template>
+        </FormField>
+        <FormField label="Text Filtering Version">
+          <template #default="{ id, describedBy }">
+            <input
+              :id="id"
+              class="settings-page__input"
+              type="number"
+              min="0"
+              v-model.number="store.serverSettings.textFilteringVersion"
+              :disabled="!store.canEditSettings"
+              :aria-describedby="describedBy"
+            />
+          </template>
+        </FormField>
       </div>
 
       <div class="settings-page__toggles">
