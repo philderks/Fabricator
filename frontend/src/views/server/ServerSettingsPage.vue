@@ -735,65 +735,80 @@ const onReset = () => {
       </div>
 
       <div class="settings-page__grid settings-page__grid--three">
-        <label class="settings-page__field">
-          <span class="settings-page__label">Memory Allocation (GB)</span>
-          <input
-            class="settings-page__input"
-            type="number"
-            min="1"
-            max="64"
-            step="0.5"
-            v-model.number="store.serverSettings.memory"
-            :disabled="!store.canEditSettings"
-          />
-        </label>
-        <label class="settings-page__field">
-          <span class="settings-page__label">View Distance (chunks)</span>
-          <input
-            class="settings-page__input"
-            type="number"
-            min="3"
-            max="32"
-            v-model.number="store.serverSettings.viewDistance"
-            :disabled="!store.canEditSettings"
-          />
-        </label>
-        <label class="settings-page__field">
-          <span class="settings-page__label">Simulation Distance (chunks)</span>
-          <input
-            class="settings-page__input"
-            type="number"
-            min="3"
-            max="32"
-            v-model.number="store.serverSettings.simulationDistance"
-            :disabled="!store.canEditSettings"
-          />
-        </label>
-
-        <template v-if="showAdvanced">
-          <label class="settings-page__field">
-            <span class="settings-page__label">Max Tick Time (ms)</span>
+        <FormField label="Memory Allocation (GB)">
+          <template #default="{ id, describedBy }">
             <input
+              :id="id"
               class="settings-page__input"
               type="number"
-              min="1000"
-              v-model.number="store.serverSettings.maxTickTime"
+              min="1"
+              max="64"
+              step="0.5"
+              v-model.number="store.serverSettings.memory"
               :disabled="!store.canEditSettings"
+              :aria-describedby="describedBy"
             />
-          </label>
-          <label class="settings-page__field">
-            <span class="settings-page__label">Region File Compression</span>
-            <select
-              class="settings-page__select"
-              v-model="store.serverSettings.regionFileCompression"
+          </template>
+        </FormField>
+        <FormField label="View Distance (chunks)">
+          <template #default="{ id, describedBy }">
+            <input
+              :id="id"
+              class="settings-page__input"
+              type="number"
+              min="3"
+              max="32"
+              v-model.number="store.serverSettings.viewDistance"
               :disabled="!store.canEditSettings"
-            >
-              <option value="deflate">Deflate</option>
-              <option value="gzip">Gzip</option>
-              <option value="lz4">LZ4</option>
-              <option value="zstd">Zstd</option>
-            </select>
-          </label>
+              :aria-describedby="describedBy"
+            />
+          </template>
+        </FormField>
+        <FormField label="Simulation Distance (chunks)">
+          <template #default="{ id, describedBy }">
+            <input
+              :id="id"
+              class="settings-page__input"
+              type="number"
+              min="3"
+              max="32"
+              v-model.number="store.serverSettings.simulationDistance"
+              :disabled="!store.canEditSettings"
+              :aria-describedby="describedBy"
+            />
+          </template>
+        </FormField>
+
+        <template v-if="showAdvanced">
+          <FormField label="Max Tick Time (ms)">
+            <template #default="{ id, describedBy }">
+              <input
+                :id="id"
+                class="settings-page__input"
+                type="number"
+                min="1000"
+                v-model.number="store.serverSettings.maxTickTime"
+                :disabled="!store.canEditSettings"
+                :aria-describedby="describedBy"
+              />
+            </template>
+          </FormField>
+          <FormField label="Region File Compression">
+            <template #default="{ id, describedBy }">
+              <select
+                :id="id"
+                class="settings-page__select"
+                v-model="store.serverSettings.regionFileCompression"
+                :disabled="!store.canEditSettings"
+                :aria-describedby="describedBy"
+              >
+                <option value="deflate">Deflate</option>
+                <option value="gzip">Gzip</option>
+                <option value="lz4">LZ4</option>
+                <option value="zstd">Zstd</option>
+              </select>
+            </template>
+          </FormField>
         </template>
       </div>
     </Panel>
