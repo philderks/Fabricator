@@ -8,16 +8,18 @@
     <form @submit.prevent="handleCreate" class="settings-form">
       <!-- Basic Settings -->
       <Panel title="Basic Settings">
-        <div class="form-group">
-          <label for="server-name">Server Name</label>
-          <input
-            id="server-name"
-            v-model="formData.name"
-            type="text"
-            placeholder="My Minecraft Server"
-            required
-          >
-        </div>
+        <FormField label="Server Name">
+          <template #default="{ id, describedBy }">
+            <input
+              :id="id"
+              v-model="formData.name"
+              type="text"
+              placeholder="My Minecraft Server"
+              :aria-describedby="describedBy"
+              required
+            >
+          </template>
+        </FormField>
 
         <div class="form-row">
           <div class="form-group">
@@ -51,48 +53,52 @@
             <span v-if="javaRequirementWarning" class="form-hint warning-hint">{{ javaRequirementWarning }}</span>
           </div>
 
-          <div class="form-group">
-            <label for="mod-loader">Mod Loader</label>
-            <select
-              id="mod-loader"
-              v-model="formData.loader"
-              required
-            >
-              <option
-                v-for="loaderOption in loaderOptions"
-                :key="loaderOption.value"
-                :value="loaderOption.value"
+          <FormField label="Mod Loader">
+            <template #default="{ id, describedBy }">
+              <select
+                :id="id"
+                v-model="formData.loader"
+                :aria-describedby="describedBy"
+                required
               >
-                {{ loaderOption.label }}
-              </option>
-            </select>
-          </div>
+                <option
+                  v-for="loaderOption in loaderOptions"
+                  :key="loaderOption.value"
+                  :value="loaderOption.value"
+                >
+                  {{ loaderOption.label }}
+                </option>
+              </select>
+            </template>
+          </FormField>
         </div>
 
         <div class="form-row">
-          <div class="form-group">
-            <label for="server-port">Server Port</label>
-            <input
-              id="server-port"
-              v-model.number="formData.port"
-              type="number"
-              min="1024"
-              max="65535"
-              placeholder="25565"
-            >
-            <span class="form-hint">Default: 25565</span>
-          </div>
+          <FormField label="Server Port" hint="Default: 25565">
+            <template #default="{ id, describedBy }">
+              <input
+                :id="id"
+                v-model.number="formData.port"
+                type="number"
+                min="1024"
+                max="65535"
+                placeholder="25565"
+                :aria-describedby="describedBy"
+              >
+            </template>
+          </FormField>
 
-          <div class="form-group">
-            <label for="install-path">Installation Path</label>
-            <input
-              id="install-path"
-              v-model="formData.installPath"
-              type="text"
-              placeholder="Leave empty for auto-generated path"
-            >
-            <span class="form-hint">Where server files will be stored</span>
-          </div>
+          <FormField label="Installation Path" hint="Where server files will be stored">
+            <template #default="{ id, describedBy }">
+              <input
+                :id="id"
+                v-model="formData.installPath"
+                type="text"
+                placeholder="Leave empty for auto-generated path"
+                :aria-describedby="describedBy"
+              >
+            </template>
+          </FormField>
         </div>
       </Panel>
 
@@ -480,6 +486,7 @@ import BaseModal from './BaseModal.vue'
 import JavaInstallModal from './JavaInstallModal.vue'
 import Panel from '../ui/Panel.vue'
 import AppButton from '../ui/AppButton.vue'
+import FormField from '../ui/FormField.vue'
 import { createServer, installServer, getFabricGameVersions, getJavaStatus } from '../../api/servers'
 import ModSideDecisionModal from './ModSideDecisionModal.vue'
 import { installModpack, resolveProjectVersion } from '../../api/modrinth'
@@ -493,7 +500,8 @@ export default {
     JavaInstallModal,
     ModSideDecisionModal,
     Panel,
-    AppButton
+    AppButton,
+    FormField
   },
   props: {
     show: {
