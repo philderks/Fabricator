@@ -192,91 +192,111 @@ const onReset = () => {
 
     <Panel title="Gameplay">
       <div class="settings-page__grid">
-        <label class="settings-page__field">
-          <span class="settings-page__label">Difficulty</span>
-          <select
-            class="settings-page__select"
-            v-model="store.serverSettings.difficulty"
-            :disabled="!store.canEditSettings"
-          >
-            <option value="peaceful">Peaceful</option>
-            <option value="easy">Easy</option>
-            <option value="normal">Normal</option>
-            <option value="hard">Hard</option>
-          </select>
-        </label>
-        <label class="settings-page__field">
-          <span class="settings-page__label">Default Gamemode</span>
-          <select
-            class="settings-page__select"
-            v-model="store.serverSettings.gamemode"
-            :disabled="!store.canEditSettings"
-          >
-            <option value="survival">Survival</option>
-            <option value="creative">Creative</option>
-            <option value="adventure">Adventure</option>
-            <option value="spectator">Spectator</option>
-          </select>
-        </label>
+        <FormField label="Difficulty">
+          <template #default="{ id, describedBy }">
+            <select
+              :id="id"
+              class="settings-page__select"
+              v-model="store.serverSettings.difficulty"
+              :disabled="!store.canEditSettings"
+              :aria-describedby="describedBy"
+            >
+              <option value="peaceful">Peaceful</option>
+              <option value="easy">Easy</option>
+              <option value="normal">Normal</option>
+              <option value="hard">Hard</option>
+            </select>
+          </template>
+        </FormField>
+        <FormField label="Default Gamemode">
+          <template #default="{ id, describedBy }">
+            <select
+              :id="id"
+              class="settings-page__select"
+              v-model="store.serverSettings.gamemode"
+              :disabled="!store.canEditSettings"
+              :aria-describedby="describedBy"
+            >
+              <option value="survival">Survival</option>
+              <option value="creative">Creative</option>
+              <option value="adventure">Adventure</option>
+              <option value="spectator">Spectator</option>
+            </select>
+          </template>
+        </FormField>
 
-        <label class="settings-page__field">
-          <span class="settings-page__label">Spawn Protection (blocks)</span>
-          <input
-            class="settings-page__input"
-            type="number"
-            min="0"
-            max="128"
-            v-model.number="store.serverSettings.spawnProtection"
-            :disabled="!store.canEditSettings"
-          />
-        </label>
-        <label class="settings-page__field">
-          <span class="settings-page__label">Idle Timeout (minutes)</span>
-          <input
-            class="settings-page__input"
-            type="number"
-            min="0"
-            max="10080"
-            v-model.number="store.serverSettings.playerIdleTimeout"
-            :disabled="!store.canEditSettings"
-          />
-          <span class="settings-page__hint">0 disables idle kick</span>
-        </label>
-
-        <template v-if="showAdvanced">
-          <label class="settings-page__field">
-            <span class="settings-page__label">Pause When Empty (seconds)</span>
+        <FormField label="Spawn Protection (blocks)">
+          <template #default="{ id, describedBy }">
             <input
+              :id="id"
               class="settings-page__input"
               type="number"
               min="0"
-              max="3600"
-              v-model.number="store.serverSettings.pauseWhenEmptySeconds"
+              max="128"
+              v-model.number="store.serverSettings.spawnProtection"
               :disabled="!store.canEditSettings"
+              :aria-describedby="describedBy"
             />
-          </label>
-          <label class="settings-page__field">
-            <span class="settings-page__label">Function Permission Level</span>
+          </template>
+        </FormField>
+        <FormField label="Idle Timeout (minutes)" hint="0 disables idle kick">
+          <template #default="{ id, describedBy }">
             <input
+              :id="id"
               class="settings-page__input"
               type="number"
-              min="1"
-              max="4"
-              v-model.number="store.serverSettings.functionPermissionLevel"
+              min="0"
+              max="10080"
+              v-model.number="store.serverSettings.playerIdleTimeout"
               :disabled="!store.canEditSettings"
+              :aria-describedby="describedBy"
             />
-          </label>
-          <label class="settings-page__field">
-            <span class="settings-page__label">Operator Permission Level</span>
-            <input
-              class="settings-page__input"
-              type="number"
-              min="1"
-              max="4"
-              v-model.number="store.serverSettings.opPermissionLevel"
-              :disabled="!store.canEditSettings"
-            />
-          </label>
+          </template>
+        </FormField>
+
+        <template v-if="showAdvanced">
+          <FormField label="Pause When Empty (seconds)">
+            <template #default="{ id, describedBy }">
+              <input
+                :id="id"
+                class="settings-page__input"
+                type="number"
+                min="0"
+                max="3600"
+                v-model.number="store.serverSettings.pauseWhenEmptySeconds"
+                :disabled="!store.canEditSettings"
+                :aria-describedby="describedBy"
+              />
+            </template>
+          </FormField>
+          <FormField label="Function Permission Level">
+            <template #default="{ id, describedBy }">
+              <input
+                :id="id"
+                class="settings-page__input"
+                type="number"
+                min="1"
+                max="4"
+                v-model.number="store.serverSettings.functionPermissionLevel"
+                :disabled="!store.canEditSettings"
+                :aria-describedby="describedBy"
+              />
+            </template>
+          </FormField>
+          <FormField label="Operator Permission Level">
+            <template #default="{ id, describedBy }">
+              <input
+                :id="id"
+                class="settings-page__input"
+                type="number"
+                min="1"
+                max="4"
+                v-model.number="store.serverSettings.opPermissionLevel"
+                :disabled="!store.canEditSettings"
+                :aria-describedby="describedBy"
+              />
+            </template>
+          </FormField>
         </template>
       </div>
 
