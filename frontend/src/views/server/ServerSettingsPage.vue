@@ -594,26 +594,32 @@ const onReset = () => {
           />
           <span class="settings-page__hint">Seconds between status heartbeats</span>
         </div>
-        <label class="settings-page__field">
-          <span class="settings-page__label">Rate Limit (packets/second)</span>
-          <input
-            class="settings-page__input"
-            type="number"
-            min="0"
-            v-model.number="store.serverSettings.rateLimit"
-            :disabled="!store.canEditSettings"
-          />
-        </label>
-        <label class="settings-page__field">
-          <span class="settings-page__label">Compression Threshold (bytes)</span>
-          <input
-            class="settings-page__input"
-            type="number"
-            min="-1"
-            v-model.number="store.serverSettings.networkCompressionThreshold"
-            :disabled="!store.canEditSettings"
-          />
-        </label>
+        <FormField label="Rate Limit (packets/second)">
+          <template #default="{ id, describedBy }">
+            <input
+              :id="id"
+              class="settings-page__input"
+              type="number"
+              min="0"
+              v-model.number="store.serverSettings.rateLimit"
+              :disabled="!store.canEditSettings"
+              :aria-describedby="describedBy"
+            />
+          </template>
+        </FormField>
+        <FormField label="Compression Threshold (bytes)">
+          <template #default="{ id, describedBy }">
+            <input
+              :id="id"
+              class="settings-page__input"
+              type="number"
+              min="-1"
+              v-model.number="store.serverSettings.networkCompressionThreshold"
+              :disabled="!store.canEditSettings"
+              :aria-describedby="describedBy"
+            />
+          </template>
+        </FormField>
 
         <div class="settings-page__field">
           <span class="settings-page__label">Query Port</span>
@@ -659,15 +665,18 @@ const onReset = () => {
             :disabled="rconDisabled"
           />
         </div>
-        <label class="settings-page__field">
-          <span class="settings-page__label">RCON Password</span>
-          <input
-            class="settings-page__input"
-            type="password"
-            v-model="store.serverSettings.rconPassword"
-            :disabled="rconDisabled"
-          />
-        </label>
+        <FormField label="RCON Password">
+          <template #default="{ id, describedBy }">
+            <input
+              :id="id"
+              class="settings-page__input"
+              type="password"
+              v-model="store.serverSettings.rconPassword"
+              :disabled="rconDisabled"
+              :aria-describedby="describedBy"
+            />
+          </template>
+        </FormField>
       </div>
 
       <div class="settings-page__toggles">
