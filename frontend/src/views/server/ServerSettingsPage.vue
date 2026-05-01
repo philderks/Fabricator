@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import AppButton from '../../components/ui/AppButton.vue'
+import FormField from '../../components/ui/FormField.vue'
 import Panel from '../../components/ui/Panel.vue'
 import ToggleRow from '../../components/ui/ToggleRow.vue'
 import { useServerStore } from '../../stores/server'
@@ -72,101 +73,120 @@ const onReset = () => {
 
     <Panel title="Server Identity">
       <div class="settings-page__grid">
-        <label class="settings-page__field">
-          <span class="settings-page__label">Server Name</span>
-          <input
-            class="settings-page__input"
-            type="text"
-            placeholder="My Minecraft Server"
-            v-model="store.serverSettings.name"
-            :disabled="!store.canEditSettings"
-          />
-        </label>
-        <label class="settings-page__field">
-          <span class="settings-page__label">Bug Report URL</span>
-          <input
-            class="settings-page__input"
-            type="url"
-            placeholder="https://example.com/issues"
-            v-model="store.serverSettings.bugReportLink"
-            :disabled="!store.canEditSettings"
-          />
-          <span class="settings-page__hint">Shown in support commands</span>
-        </label>
-
-        <label class="settings-page__field">
-          <span class="settings-page__label">Message of the Day</span>
-          <input
-            class="settings-page__input"
-            type="text"
-            maxlength="59"
-            placeholder="Welcome to Fabricator"
-            v-model="store.serverSettings.motd"
-            :disabled="!store.canEditSettings"
-          />
-          <span class="settings-page__hint">{{ motdCharacters }}/59 characters</span>
-        </label>
-        <label class="settings-page__field">
-          <span class="settings-page__label">Server Port</span>
-          <input
-            class="settings-page__input"
-            type="number"
-            min="1024"
-            max="65535"
-            v-model.number="store.serverSettings.port"
-            :disabled="!store.canEditSettings"
-          />
-          <span class="settings-page__hint">Default 25565</span>
-        </label>
-
-        <label class="settings-page__field">
-          <span class="settings-page__label">Bind Address (optional)</span>
-          <input
-            class="settings-page__input"
-            type="text"
-            placeholder="0.0.0.0"
-            v-model="store.serverSettings.serverIp"
-            :disabled="!store.canEditSettings"
-          />
-        </label>
-        <label class="settings-page__field">
-          <span class="settings-page__label">Max Players</span>
-          <input
-            class="settings-page__input"
-            type="number"
-            min="1"
-            max="1000"
-            v-model.number="store.serverSettings.maxPlayers"
-            :disabled="!store.canEditSettings"
-          />
-        </label>
-
-        <label class="settings-page__field">
-          <span class="settings-page__label">Running Version</span>
-          <div class="settings-page__readonly">
+        <FormField label="Server Name">
+          <template #default="{ id, describedBy }">
             <input
+              :id="id"
               class="settings-page__input"
               type="text"
-              :value="store.serverStatus.version"
-              disabled
+              placeholder="My Minecraft Server"
+              v-model="store.serverSettings.name"
+              :disabled="!store.canEditSettings"
+              :aria-describedby="describedBy"
             />
-            <span class="settings-page__readonly-badge">Read-only</span>
-          </div>
-          <span class="settings-page__hint">Version changes require reinstall</span>
-        </label>
-        <label class="settings-page__field">
-          <span class="settings-page__label">Mod Loader</span>
-          <div class="settings-page__readonly">
+          </template>
+        </FormField>
+        <FormField label="Bug Report URL" hint="Shown in support commands">
+          <template #default="{ id, describedBy }">
             <input
+              :id="id"
+              class="settings-page__input"
+              type="url"
+              placeholder="https://example.com/issues"
+              v-model="store.serverSettings.bugReportLink"
+              :disabled="!store.canEditSettings"
+              :aria-describedby="describedBy"
+            />
+          </template>
+        </FormField>
+
+        <FormField label="Message of the Day" :hint="`${motdCharacters}/59 characters`">
+          <template #default="{ id, describedBy }">
+            <input
+              :id="id"
               class="settings-page__input"
               type="text"
-              :value="store.serverStatus.loader"
-              disabled
+              maxlength="59"
+              placeholder="Welcome to Fabricator"
+              v-model="store.serverSettings.motd"
+              :disabled="!store.canEditSettings"
+              :aria-describedby="describedBy"
             />
-            <span class="settings-page__readonly-badge">Read-only</span>
-          </div>
-          <span class="settings-page__hint">Loader changes require reinstall</span>
-        </label>
+          </template>
+        </FormField>
+        <FormField label="Server Port" hint="Default 25565">
+          <template #default="{ id, describedBy }">
+            <input
+              :id="id"
+              class="settings-page__input"
+              type="number"
+              min="1024"
+              max="65535"
+              v-model.number="store.serverSettings.port"
+              :disabled="!store.canEditSettings"
+              :aria-describedby="describedBy"
+            />
+          </template>
+        </FormField>
+
+        <FormField label="Bind Address (optional)">
+          <template #default="{ id, describedBy }">
+            <input
+              :id="id"
+              class="settings-page__input"
+              type="text"
+              placeholder="0.0.0.0"
+              v-model="store.serverSettings.serverIp"
+              :disabled="!store.canEditSettings"
+              :aria-describedby="describedBy"
+            />
+          </template>
+        </FormField>
+        <FormField label="Max Players">
+          <template #default="{ id, describedBy }">
+            <input
+              :id="id"
+              class="settings-page__input"
+              type="number"
+              min="1"
+              max="1000"
+              v-model.number="store.serverSettings.maxPlayers"
+              :disabled="!store.canEditSettings"
+              :aria-describedby="describedBy"
+            />
+          </template>
+        </FormField>
+
+        <FormField label="Running Version" hint="Version changes require reinstall">
+          <template #default="{ id, describedBy }">
+            <div class="settings-page__readonly">
+              <input
+                :id="id"
+                class="settings-page__input"
+                type="text"
+                :value="store.serverStatus.version"
+                readonly
+                :aria-describedby="describedBy"
+              />
+              <span class="settings-page__readonly-badge">Read-only</span>
+            </div>
+          </template>
+        </FormField>
+        <FormField label="Mod Loader" hint="Loader changes require reinstall">
+          <template #default="{ id, describedBy }">
+            <div class="settings-page__readonly">
+              <input
+                :id="id"
+                class="settings-page__input"
+                type="text"
+                :value="store.serverStatus.loader"
+                readonly
+                :aria-describedby="describedBy"
+              />
+              <span class="settings-page__readonly-badge">Read-only</span>
+            </div>
+          </template>
+        </FormField>
       </div>
     </Panel>
 
