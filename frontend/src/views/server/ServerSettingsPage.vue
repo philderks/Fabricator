@@ -356,81 +356,102 @@ const onReset = () => {
       </div>
 
       <div class="settings-page__grid">
-        <label class="settings-page__field">
-          <span class="settings-page__label">World Folder Name</span>
-          <input
-            class="settings-page__input"
-            type="text"
-            v-model="store.serverSettings.levelName"
-            :disabled="!store.canEditSettings"
-          />
-        </label>
-        <label class="settings-page__field">
-          <span class="settings-page__label">World Type</span>
-          <select
-            class="settings-page__select"
-            v-model="store.serverSettings.levelType"
-            :disabled="!store.canEditSettings"
-          >
-            <option value="default">Default</option>
-            <option value="flat">Flat</option>
-            <option value="large_biomes">Large Biomes</option>
-            <option value="amplified">Amplified</option>
-          </select>
-        </label>
+        <FormField label="World Folder Name">
+          <template #default="{ id, describedBy }">
+            <input
+              :id="id"
+              class="settings-page__input"
+              type="text"
+              v-model="store.serverSettings.levelName"
+              :disabled="!store.canEditSettings"
+              :aria-describedby="describedBy"
+            />
+          </template>
+        </FormField>
+        <FormField label="World Type">
+          <template #default="{ id, describedBy }">
+            <select
+              :id="id"
+              class="settings-page__select"
+              v-model="store.serverSettings.levelType"
+              :disabled="!store.canEditSettings"
+              :aria-describedby="describedBy"
+            >
+              <option value="default">Default</option>
+              <option value="flat">Flat</option>
+              <option value="large_biomes">Large Biomes</option>
+              <option value="amplified">Amplified</option>
+            </select>
+          </template>
+        </FormField>
 
-        <label class="settings-page__field">
-          <span class="settings-page__label">Seed</span>
-          <input
-            class="settings-page__input"
-            type="text"
-            placeholder="Leave empty for random"
-            v-model="store.serverSettings.seed"
-            :disabled="!store.canEditSettings"
-          />
-        </label>
-        <label v-if="showAdvanced" class="settings-page__field">
-          <span class="settings-page__label">Generator Settings (JSON)</span>
-          <textarea
-            class="settings-page__input settings-page__textarea"
-            placeholder="{}"
-            v-model="store.serverSettings.generatorSettings"
-            :disabled="!store.canEditSettings"
-          ></textarea>
-        </label>
+        <FormField label="Seed">
+          <template #default="{ id, describedBy }">
+            <input
+              :id="id"
+              class="settings-page__input"
+              type="text"
+              placeholder="Leave empty for random"
+              v-model="store.serverSettings.seed"
+              :disabled="!store.canEditSettings"
+              :aria-describedby="describedBy"
+            />
+          </template>
+        </FormField>
+        <FormField v-if="showAdvanced" label="Generator Settings (JSON)">
+          <template #default="{ id, describedBy }">
+            <textarea
+              :id="id"
+              class="settings-page__input settings-page__textarea"
+              placeholder="{}"
+              v-model="store.serverSettings.generatorSettings"
+              :disabled="!store.canEditSettings"
+              :aria-describedby="describedBy"
+            ></textarea>
+          </template>
+        </FormField>
 
         <template v-if="showAdvanced">
-          <label class="settings-page__field">
-            <span class="settings-page__label">Max World Size</span>
-            <input
-              class="settings-page__input"
-              type="number"
-              min="1000"
-              v-model.number="store.serverSettings.maxWorldSize"
-              :disabled="!store.canEditSettings"
-            />
-          </label>
-          <label class="settings-page__field">
-            <span class="settings-page__label">Entity Broadcast Range (%)</span>
-            <input
-              class="settings-page__input"
-              type="number"
-              min="10"
-              max="500"
-              v-model.number="store.serverSettings.entityBroadcastRangePercentage"
-              :disabled="!store.canEditSettings"
-            />
-          </label>
-          <label class="settings-page__field">
-            <span class="settings-page__label">Max Chained Neighbor Updates</span>
-            <input
-              class="settings-page__input"
-              type="number"
-              min="1000"
-              v-model.number="store.serverSettings.maxChainedNeighborUpdates"
-              :disabled="!store.canEditSettings"
-            />
-          </label>
+          <FormField label="Max World Size">
+            <template #default="{ id, describedBy }">
+              <input
+                :id="id"
+                class="settings-page__input"
+                type="number"
+                min="1000"
+                v-model.number="store.serverSettings.maxWorldSize"
+                :disabled="!store.canEditSettings"
+                :aria-describedby="describedBy"
+              />
+            </template>
+          </FormField>
+          <FormField label="Entity Broadcast Range (%)">
+            <template #default="{ id, describedBy }">
+              <input
+                :id="id"
+                class="settings-page__input"
+                type="number"
+                min="10"
+                max="500"
+                v-model.number="store.serverSettings.entityBroadcastRangePercentage"
+                :disabled="!store.canEditSettings"
+                :aria-describedby="describedBy"
+              />
+            </template>
+          </FormField>
+          <FormField label="Max Chained Neighbor Updates">
+            <template #default="{ id, describedBy }">
+              <input
+                :id="id"
+                class="settings-page__input"
+                type="number"
+                min="1000"
+                v-model.number="store.serverSettings.maxChainedNeighborUpdates"
+                :disabled="!store.canEditSettings"
+                :aria-describedby="describedBy"
+              />
+            </template>
+          </FormField>
         </template>
       </div>
 
