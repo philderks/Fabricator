@@ -19,14 +19,14 @@ const navItems = [
 <template>
   <aside class="app-sidebar">
     <div class="app-sidebar__logo">
-      <svg width="24" height="24" viewBox="0 0 28 28" fill="none" aria-hidden="true">
-        <rect x="4" y="6"  width="20" height="4" rx="2" fill="var(--primary)" opacity="0.25"/>
-        <rect x="4" y="6"  width="13" height="4" rx="2" fill="var(--primary)"/>
-        <rect x="4" y="13" width="20" height="4" rx="2" fill="var(--primary)" opacity="0.25"/>
-        <rect x="4" y="13" width="17" height="4" rx="2" fill="var(--primary)"/>
-        <rect x="4" y="20" width="20" height="4" rx="2" fill="var(--primary)" opacity="0.25"/>
-        <rect x="4" y="20" width="9"  height="4" rx="2" fill="var(--primary)"/>
-      </svg>
+      <img
+        class="app-sidebar__logo-img"
+        src="/favicon.svg"
+        alt=""
+        width="24"
+        height="24"
+        aria-hidden="true"
+      />
       <span class="app-sidebar__brand">Fabricator</span>
     </div>
 
@@ -90,6 +90,11 @@ const navItems = [
   gap: var(--space-2);
   padding: var(--space-4) var(--space-3);
   border-bottom: 1px solid var(--border-color);
+}
+
+.app-sidebar__logo-img {
+  flex-shrink: 0;
+  display: block;
 }
 
 .app-sidebar__brand {
