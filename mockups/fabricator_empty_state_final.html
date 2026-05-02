@@ -1,0 +1,139 @@
+
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0a0a0a; }
+  .app { display: flex; height: 600px; background: #0f0f0f; border-radius: 12px; overflow: hidden; font-family: 'Inter', 'DM Sans', sans-serif; border: 1px solid #1e1e1e; }
+
+  /* SIDEBAR — matching your actual implementation */
+  .sidebar { width: 216px; min-width: 216px; background: #141414; border-right: 1px solid #1e1e1e; display: flex; flex-direction: column; }
+
+  .sidebar-logo { padding: 16px 14px 14px; display: flex; align-items: center; gap: 9px; border-bottom: 1px solid #1e1e1e; }
+  .logo-text { font-size: 15px; font-weight: 600; color: #f1f1f1; letter-spacing: -0.3px; }
+
+  .no-server-chip { margin: 10px 8px 4px; background: #181818; border: 1px dashed #272727; border-radius: 8px; padding: 8px 10px; display: flex; align-items: center; gap: 8px; cursor: pointer; transition: border-color 0.15s; }
+  .no-server-chip:hover { border-color: #f97316; }
+  .no-server-chip:hover .nsc-label { color: #f97316; }
+  .nsc-label { font-size: 13px; color: #333; font-weight: 500; }
+
+  .nav-section { padding: 8px 8px 4px; flex: 1; }
+  .nav-item { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 7px; color: #2a2a2a; font-size: 13px; user-select: none; }
+  .ni { width: 15px; height: 15px; flex-shrink: 0; }
+
+  .sidebar-bottom { padding: 8px; border-top: 1px solid #1e1e1e; display: flex; flex-direction: column; gap: 2px; }
+  .nav-item-bottom { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 7px; color: #333; font-size: 13px; cursor: pointer; }
+  .nav-item-bottom:hover { background: #1a1a1a; color: #777; }
+
+  .version-label { padding: 4px 10px; font-size: 11px; color: #272727; }
+
+  /* UPDATE PILL — subtle, tucked in bottom */
+  .update-pill { margin: 0 8px 2px; display: flex; align-items: center; gap: 6px; padding: 5px 9px; border-radius: 6px; background: #181818; border: 1px solid #1e1e1e; cursor: pointer; }
+  .update-pill:hover { border-color: #2a2a2a; }
+  .update-dot { width: 5px; height: 5px; border-radius: 50%; background: #22c55e; flex-shrink: 0; }
+  .update-text { font-size: 11px; color: #3a3a3a; flex: 1; }
+  .update-ver { font-size: 10px; color: #2e2e2e; }
+
+  /* MAIN */
+  .main { flex: 1; display: flex; flex-direction: column; background: #0f0f0f; position: relative; }
+
+  /* TOPBAR */
+  .topbar { display: flex; align-items: center; justify-content: space-between; padding: 0 24px; height: 52px; border-bottom: 1px solid #161616; flex-shrink: 0; }
+  .topbar-logo { font-size: 14px; font-weight: 500; color: #2a2a2a; }
+
+  /* CENTERED EMPTY STATE */
+  .empty-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; }
+
+  .hero-icon { margin-bottom: 24px; }
+
+  .empty-title { font-size: 18px; font-weight: 600; color: #c8c8c8; letter-spacing: -0.3px; margin-bottom: 6px; }
+  .empty-sub { font-size: 13px; color: #3a3a3a; margin-bottom: 24px; }
+
+  .btn-create { display: inline-flex; align-items: center; gap: 7px; background: #f97316; color: #fff; border: none; border-radius: 8px; padding: 9px 20px; font-size: 13px; font-weight: 500; cursor: pointer; letter-spacing: -0.1px; transition: opacity 0.15s; }
+  .btn-create:hover { opacity: 0.88; }
+
+  /* TABS — second state preview */
+  .tabs-preview { position: absolute; bottom: 0; left: 0; right: 0; display: flex; justify-content: center; gap: 4px; padding: 12px; border-top: 1px solid #131313; }
+  .tab-pill { padding: 5px 10px; border-radius: 5px; font-size: 11px; color: #252525; background: transparent; cursor: default; }
+</style>
+
+<div class="app">
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    <div class="sidebar-logo">
+      <svg width="26" height="26" viewBox="0 0 28 28" fill="none">
+        <rect x="4" y="6" width="20" height="4" rx="2" fill="#f97316" opacity="0.18"/>
+        <rect x="4" y="6" width="13" height="4" rx="2" fill="#f97316" opacity="0.55"/>
+        <rect x="4" y="13" width="20" height="4" rx="2" fill="#f97316" opacity="0.18"/>
+        <rect x="4" y="13" width="17" height="4" rx="2" fill="#f97316" opacity="0.55"/>
+        <rect x="4" y="20" width="20" height="4" rx="2" fill="#f97316" opacity="0.18"/>
+        <rect x="4" y="20" width="9" height="4" rx="2" fill="#f97316" opacity="0.55"/>
+      </svg>
+      <span class="logo-text">Fabricator</span>
+    </div>
+
+    <div class="no-server-chip">
+      <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="#333" stroke-width="1.5"><path d="M5.5 1v9M1 5.5h9"/></svg>
+      <span class="nsc-label">No servers yet</span>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-item">
+        <svg class="ni" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.5" y="1.5" width="4.5" height="4.5" rx="1"/><rect x="9" y="1.5" width="4.5" height="4.5" rx="1"/><rect x="1.5" y="9" width="4.5" height="4.5" rx="1"/><rect x="9" y="9" width="4.5" height="4.5" rx="1"/></svg>
+        Overview
+      </div>
+      <div class="nav-item">
+        <svg class="ni" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1" y="2" width="13" height="11" rx="1.5"/><path d="M4 5.5l2.5 2L4 9.5"/><path d="M8 9.5h3"/></svg>
+        Console
+      </div>
+      <div class="nav-item">
+        <svg class="ni" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M7.5 1L13 4.5v6L7.5 14 2 10.5v-6L7.5 1z"/><path d="M7.5 1v13M2 4.5l5.5 3.5 5.5-3.5"/></svg>
+        Mods
+      </div>
+      <div class="nav-item">
+        <svg class="ni" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 3.5A1.5 1.5 0 013.5 2h3l1.5 2H12a1.5 1.5 0 011.5 1.5v7A1.5 1.5 0 0112 14H3.5A1.5 1.5 0 012 12.5v-9z"/></svg>
+        Files
+      </div>
+      <div class="nav-item">
+        <svg class="ni" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="7.5" cy="7.5" r="2"/><path d="M7.5 1v1.5M7.5 12.5V14M1 7.5h1.5M12.5 7.5H14M3 3l1 1M11 11l1 1M11 3l-1 1M3 12l1-1" stroke-linecap="round"/></svg>
+        Settings
+      </div>
+    </div>
+
+    <div class="sidebar-bottom">
+      <!-- Update status — subtle pill -->
+      <div class="update-pill">
+        <div class="update-dot"></div>
+        <span class="update-text">Up to date</span>
+        <span class="update-ver">v0.2.0</span>
+      </div>
+      <div class="nav-item-bottom">
+        <svg class="ni" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="7.5" cy="5" r="2.5"/><path d="M2 13c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/></svg>
+        Account
+      </div>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div class="main">
+    <div class="empty-wrap">
+      <div class="hero-icon">
+        <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+          <!-- Fabricator logo mark, large -->
+          <rect x="7" y="10" width="34" height="6.5" rx="3.25" fill="#f97316" opacity="0.12"/>
+          <rect x="7" y="10" width="20" height="6.5" rx="3.25" fill="#f97316" opacity="0.45"/>
+          <rect x="7" y="20.75" width="34" height="6.5" rx="3.25" fill="#f97316" opacity="0.12"/>
+          <rect x="7" y="20.75" width="27" height="6.5" rx="3.25" fill="#f97316" opacity="0.45"/>
+          <rect x="7" y="31.5" width="34" height="6.5" rx="3.25" fill="#f97316" opacity="0.12"/>
+          <rect x="7" y="31.5" width="14" height="6.5" rx="3.25" fill="#f97316" opacity="0.45"/>
+        </svg>
+      </div>
+
+      <div class="empty-title">No servers yet</div>
+      <div class="empty-sub">Create your first Fabric server to get started.</div>
+
+      <button class="btn-create">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 1v10M1 6h10"/></svg>
+        Create server
+      </button>
+    </div>
+  </div>
+</div>

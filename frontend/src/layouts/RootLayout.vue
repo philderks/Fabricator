@@ -1,21 +1,13 @@
 <script setup>
-import { provide, ref } from 'vue'
-import RootTopbar from '../components/layout/RootTopbar.vue'
+import AppSidebar from '../components/layout/AppSidebar.vue'
 
-// Single writable ref provided down to consumers. RootTopbar flips it open
-// from the topbar button; Servers.vue (the only child this layout serves)
-// binds it to `<ServerCreateModal :show="...">` and writes false on close.
-const showCreateModal = ref(false)
-provide('showCreateModal', showCreateModal)
-
-const handleAddServer = () => {
-  showCreateModal.value = true
-}
+// `showCreateModal` is provided at the App.vue level so the create-server
+// modal works from any layout/route (e.g. ServerSwitcher's "Add server").
 </script>
 
 <template>
   <div class="root-layout">
-    <RootTopbar @add-server="handleAddServer" />
+    <AppSidebar />
     <main class="root-layout__content">
       <router-view />
     </main>
@@ -25,7 +17,6 @@ const handleAddServer = () => {
 <style scoped>
 .root-layout {
   display: flex;
-  flex-direction: column;
   min-height: 100vh;
   background: var(--bg-primary);
   color: var(--text-primary);
@@ -35,6 +26,7 @@ const handleAddServer = () => {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-width: 0;
   overflow-y: auto;
 }
 </style>

@@ -1,11 +1,12 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useServerStore } from '../../stores/server'
 
 const route = useRoute()
 const router = useRouter()
 const store = useServerStore()
+const showCreateModal = inject('showCreateModal', ref(false))
 
 const open = ref(false)
 
@@ -66,7 +67,9 @@ const switchTo = (id) => {
 
 const goToAddServer = () => {
   close()
-  router.push({ name: 'Servers' })
+  // Modal is mounted at App.vue and provided as `showCreateModal`, so this
+  // works from any layout (no need to route to "/" first).
+  showCreateModal.value = true
 }
 
 const handleDocumentClick = (event) => {
