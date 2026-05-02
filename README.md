@@ -1,164 +1,157 @@
+<div align="center">
+
+<img src="frontend/public/favicon.svg" alt="Fabricator Logo" width="92" height="92" />
+
 # Fabricator
 
-A minimal Flask + Vue 3 project for managing a personal Minecraft server.
+**Self-hosted web dashboard for managing Fabric-based Minecraft servers.**
 
-## Project Structure
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/philderks/Fabricator?style=flat-square)](https://github.com/philderks/Fabricator/stargazers)
+[![Platform](https://img.shields.io/badge/platform-Linux-lightgrey?style=flat-square)](https://github.com/philderks/Fabricator)
 
-```
-Fabricator/
-├── run.py                  # Application entry point (Werkzeug server + optional tray)
-├── requirements.txt        # Python dependencies
-├── .gitignore             # Git ignore rules
-├── backend/               # Flask backend package
-│   ├── core/              # App factory and configuration
-│   ├── server/            # Server management routes, storage, installer
-│   ├── modrinth/          # Modrinth API client and routes
-│   ├── system/            # Self-update routes and service
-│   └── utils/             # Cross-platform helpers
-├── frontend/              # Vue 3 frontend application
-│   ├── src/
-│   │   ├── main.js        # Vue app entry point
-│   │   ├── App.vue        # Root component
-│   │   └── components/    # Vue components
-│   ├── index.html         # HTML entry point
-│   ├── vite.config.js     # Vite configuration (includes API proxy)
-│   └── package.json       # Node.js dependencies
-└── README.md              # This file
-```
+[fabricator.derks.dev](https://fabricator.derks.dev/)
+
+</div>
+
+---
+
+<!-- SCREENSHOT ─────────────────────────────────────────────────────────────
+     Replace the img tag below with a GIF or PNG of the dashboard.
+     Recommended: 1280×800 screen recording of the Overview page.
+     Loop it: server start → logs ticking → mod install.
+     Upload to /assets/ in the repo and update the path below.
+─────────────────────────────────────────────────────────────────────────── -->
+<div align="center">
+  <img width="2560" height="1282" alt="image" src="https://github.com/user-attachments/assets/78f797c8-f1ac-4e33-87c9-a3d79b207c4a" />
+</div>
+
+
+---
 
 ## Features
 
-- **Flask Backend**: Lightweight REST API server with CORS support
-- **Vue 3 Frontend**: Modern Vue 3 with Composition API
-- **Vite Build Tool**: Fast development server with HMR
-- **API Proxy**: Vite dev server proxies `/api/*` requests to Flask backend
-- **Example Endpoint**: `/api/status` returns server status in JSON format
+| | Feature | Status |
+|---|---|---|
+| 📦 | **Mod Management** — install, remove, and browse Fabric mods | ✅ Available |
+| 📋 | **Logs & Monitoring** — live log stream, TPS and RAM graphs | ✅ Available |
+| 💾 | **Backups & Restore** — manual snapshots, restore from any backup | ✅ Available |
+| 🖥️ | **Multiple Servers** — manage several instances from one dashboard | ✅ Available |
+| 🔄 | **One-Click Server Updates** | 🔧 Coming soon |
+| ⌨️ | **CLI** (`fabricator` command) | 🔧 Coming soon |
 
-## Development Setup
+---
 
-### Prerequisites
+## Quick Start
 
-- Python 3.11+
-- Node.js 18 or higher
-- npm or yarn
+### One-line installer
 
-### Backend Setup
+Supports Debian/Ubuntu, Arch, Fedora/RHEL.
 
-1. Install Python dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-2. Run the server:
-   ```bash
-   python run.py
-   ```
-
-   The API will be available at `http://localhost:5000`
-
-   **Note:** By default, Flask runs in debug mode for development. To run in production mode, set the environment variable:
-   ```bash
-   FLASK_ENV=production python run.py
-   ```
-   To run without the system tray icon (e.g., on a headless server):
-   ```bash
-   FABRICATOR_NO_TRAY=1 python run.py
-   ```
-
-### Frontend Setup
-
-1. Navigate to the frontend directory:
-   ```bash
-   cd frontend
-   ```
-
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-3. Run the development server:
-   ```bash
-   npm run dev
-   ```
-
-   The frontend will be available at `http://localhost:3000`
-
-### Running Both Servers
-
-You need to run both servers simultaneously in separate terminal windows:
-
-**Terminal 1 (Backend):**
 ```bash
-python run.py
+curl -fsSL https://raw.githubusercontent.com/philderks/Fabricator/main/tools/install.sh | bash
 ```
 
-**Terminal 2 (Frontend):**
-```bash
-cd frontend
-npm run dev
-```
+Then open `http://localhost:5000`.
 
-Then open your browser to `http://localhost:3000` to see the application.
+For remote access, set up a reverse proxy or use a [playit.gg](https://playit.gg) tunnel — Fabricator binds to `localhost` only by default.
 
-## Production Build
-
-### Build Frontend
+<details>
+<summary>Manual installation</summary>
 
 ```bash
+# Clone
+git clone https://github.com/philderks/Fabricator.git
+cd Fabricator
+
+# Backend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# Frontend
 cd frontend
+npm install
 npm run build
+cd ..
+
+# Start
+python3 run.py
 ```
 
-This creates an optimized production build in `frontend/dist/`
+</details>
 
-### Preview Production Build
+---
+
+## Requirements
+
+| | Requirement |
+|---|---|
+| OS | Linux — Debian/Ubuntu, Arch, or Fedora/RHEL |
+| Java | 17+ (for the Minecraft server process) |
+| Python | 3.10+ |
+| Node.js | 20.x (build step only) |
+
+> Windows is not supported yet.
+
+---
+
+## Configuration
+
+The installer writes config to `/etc/fabricator/fabricator.env` (readable by the `fabricator` user, mode `0640`).
+
+```env
+# Port Fabricator listens on (default: 5000, localhost only)
+PORT=5000
+
+# Root directory for server instances
+SERVERS_DIR=/var/lib/fabricator/servers
+```
+
+After editing, restart the service:
 
 ```bash
-cd frontend
-npm run preview
+sudo systemctl restart fabricator
 ```
 
-## API Endpoints
+<details>
+<summary>Filesystem layout</summary>
 
-### `GET /api/status`
-
-Returns the current status of the Minecraft server.
-
-**Response:**
-```json
-{
-  "status": "offline",
-  "message": "Minecraft server manager is ready",
-  "version": "1.0.0"
-}
+```
+/opt/fabricator/app              # Application code (owned root:root)
+/opt/fabricator/venv             # Python virtualenv (owned fabricator)
+/var/lib/fabricator              # Server data and backups
+/etc/fabricator/fabricator.env   # Config (root:fabricator, 0640)
+/etc/systemd/system/fabricator.service
 ```
 
-### `GET /api/health`
+</details>
 
-Health check endpoint.
+---
 
-**Response:**
-```json
-{
-  "healthy": true
-}
-```
+## Roadmap
 
-## Expanding the Project
+| Status | Feature |
+|---|---|
+| ✅ Done | Mod management |
+| ✅ Done | Logs & monitoring |
+| ✅ Done | Backups & restore |
+| ✅ Done | Multiple server instances |
+| 🔧 In progress | CLI (`fabricator` command) |
+| 📋 Planned | One-click server updates |
+| 📋 Planned | Additional loader support |
+| 📋 Planned | Windows support |
 
-This is a minimal scaffold ready to be expanded. Here are some ideas:
+---
 
-1. **Add server control endpoints**: Start, stop, restart the Minecraft server
-2. **Server properties management**: Edit server.properties file
-3. **Player management**: Whitelist, ban, op players
-4. **Log viewing**: Stream and display server logs
-5. **Backup management**: Create and restore server backups
-6. **Resource monitoring**: CPU, memory, disk usage
-7. **Authentication**: Add user login and session management
+## Contributing
 
-## Technologies Used
+Bug reports and pull requests are welcome. For larger changes, open an issue first.
 
-- **Backend**: Flask 3.0, Flask-CORS
-- **Frontend**: Vue 3, Vite 5
-- **Language**: Python 3, JavaScript (ES6+)
+The frontend is Vue 3 + Vite (`/frontend`). The backend is Flask (`run.py`). Both run independently without the installer for local development.
+
+---
+
+## License
+
+[GPL-3.0](LICENSE)
