@@ -54,7 +54,7 @@
 
       <!-- downloading -->
       <template v-else-if="state === 'downloading'">
-        <div class="java-icon">
+        <div class="java-icon primary">
           <svg width="52" height="52" viewBox="0 0 24 24" fill="none">
             <path d="M12 3v12M12 15l-4-4M12 15l4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
             <path d="M3 20h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
@@ -123,37 +123,36 @@
 
     <template #footer>
       <template v-if="state === 'checking'">
-        <button class="btn btn-secondary" @click="handleClose">Cancel</button>
+        <AppButton variant="ghost" size="md" @click="handleClose">Cancel</AppButton>
       </template>
 
       <template v-else-if="state === 'needs_java'">
-        <button class="btn btn-secondary" @click="handleClose">Cancel</button>
-        <button
-          class="btn btn-primary"
+        <AppButton variant="ghost" size="md" @click="handleClose">Cancel</AppButton>
+        <AppButton
+          variant="primary"
+          size="md"
           :disabled="!canDownload"
           @click="startDownload"
-        >
-          Download Java {{ effectiveMajor }}
-        </button>
+        >Download Java {{ effectiveMajor }}</AppButton>
       </template>
 
       <template v-else-if="state === 'downloading' || state === 'installing'">
-        <button class="btn btn-secondary" disabled>Working...</button>
+        <AppButton variant="ghost" size="md" :loading="true">Working...</AppButton>
       </template>
 
       <template v-else-if="state === 'confirming_install'">
-        <button class="btn btn-secondary" @click="handleClose">Cancel</button>
-        <button class="btn btn-primary" @click="confirmInstall">Install</button>
+        <AppButton variant="ghost" size="md" @click="handleClose">Cancel</AppButton>
+        <AppButton variant="primary" size="md" @click="confirmInstall">Install</AppButton>
       </template>
 
       <template v-else-if="state === 'done'">
-        <button class="btn btn-secondary" @click="handleClose">Close</button>
-        <button class="btn btn-primary" @click="finishAndStart">Start Server</button>
+        <AppButton variant="ghost" size="md" @click="handleClose">Close</AppButton>
+        <AppButton variant="primary" size="md" @click="finishAndStart">Start Server</AppButton>
       </template>
 
       <template v-else-if="state === 'error'">
-        <button class="btn btn-secondary" @click="handleClose">Close</button>
-        <button class="btn btn-primary" @click="resetToNeedsJava">Try Again</button>
+        <AppButton variant="ghost" size="md" @click="handleClose">Close</AppButton>
+        <AppButton variant="primary" size="md" @click="resetToNeedsJava">Try Again</AppButton>
       </template>
     </template>
   </BaseModal>
@@ -162,6 +161,7 @@
 <script setup>
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import BaseModal from './BaseModal.vue'
+import AppButton from '../ui/AppButton.vue'
 import { getJavaStatus, installJava, getJavaInstallProgress } from '../../api/servers'
 
 const props = defineProps({
@@ -393,65 +393,69 @@ onBeforeUnmount(clearPoll)
   display: flex;
   flex-direction: column;
   align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
   text-align: center;
-  gap: 16px;
-  padding: 8px 0;
 }
 
 .java-icon {
-  color: var(--warning, #f59e0b);
+  width: 52px;
+  height: 52px;
+  color: var(--warning);
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .java-icon.success {
-  color: var(--primary, #22c55e);
+  color: var(--success);
+}
+
+.java-icon.primary {
+  color: var(--primary);
 }
 
 .java-icon.error {
-  color: var(--danger, #ef4444);
+  color: var(--danger);
 }
 
 .java-heading {
-  font-size: 1.125rem;
+  font-size: var(--text-md);
   font-weight: 600;
   color: var(--text-primary);
   margin: 0;
+  line-height: var(--leading-tight);
 }
 
 .java-subtext {
-  font-size: 0.9375rem;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
   margin: 0;
-  line-height: 1.6;
+  line-height: var(--leading-normal);
+  max-width: 36em;
 }
 
 .java-error-message {
-  color: var(--danger, #ef4444);
+  color: var(--danger);
   word-break: break-word;
 }
 
 .java-platform {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 8px 16px;
-  font-size: 0.875rem;
+  justify-content: space-between;
   width: 100%;
-  justify-content: center;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
 }
 
 .platform-label {
-  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .platform-value {
-  color: var(--text-primary);
-  font-weight: 500;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
   max-width: 260px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -459,62 +463,56 @@ onBeforeUnmount(clearPoll)
 }
 
 .java-notice {
-  font-size: 0.8125rem;
-  color: var(--text-secondary);
-  background: var(--bg-primary);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
-  border-radius: 6px;
-  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
   width: 100%;
-  line-height: 1.5;
+  text-align: left;
 }
 
 .java-error {
-  font-size: 0.8125rem;
-  color: var(--danger, #ef4444);
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  padding: 8px 12px;
+  font-size: var(--text-xs);
+  color: var(--danger);
+  background: color-mix(in oklch, var(--danger) 12%, transparent);
+  border: 1px solid color-mix(in oklch, var(--danger) 28%, transparent);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
   width: 100%;
-  line-height: 1.5;
+  text-align: left;
 }
 
 .java-spinner {
   width: 36px;
   height: 36px;
-  border-radius: 50%;
   border: 3px solid var(--border-color);
-  border-top-color: var(--primary, #22c55e);
-  animation: java-spin 0.8s linear infinite;
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: java-modal-spin 0.8s linear infinite;
 }
 
-@keyframes java-spin {
+@keyframes java-modal-spin {
   to { transform: rotate(360deg); }
 }
 
 .install-progress {
-  margin-top: 4px;
   width: 100%;
+  margin-top: var(--space-2);
 }
 
 .install-progress__track {
   height: 6px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   background: var(--border-color);
   overflow: hidden;
 }
 
 .install-progress__fill {
   height: 100%;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   background: var(--primary);
   transition: width 0.3s ease;
-}
-
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
 }
 </style>

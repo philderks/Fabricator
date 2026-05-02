@@ -8,6 +8,12 @@ export default defineConfig({
   server: {
     host: true, // Listen on all addresses for dev container
     port: 3000,
+    watch: {
+      // WSL2's inotify misses many file change events; polling is more reliable
+      // in the dev container even though it costs a bit of CPU.
+      usePolling: true,
+      interval: 300
+    },
     proxy: {
       '/api': {
         target: 'http://localhost:5000',
