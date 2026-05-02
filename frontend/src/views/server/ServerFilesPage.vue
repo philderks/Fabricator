@@ -1,0 +1,349 @@
+<script setup>
+import { computed, nextTick, ref } from 'vue'
+import AppButton from '../../components/ui/AppButton.vue'
+import Panel from '../../components/ui/Panel.vue'
+import { formatFileSize } from '../../utils/format'
+import { useServerStore } from '../../stores/server'
+
+const store = useServerStore()
+
+const editorRef = ref(null)
+
+const confirmDiscardChanges = () => {
+  if (!store.hasFileChanges) return true
+  if (typeof window === 'undefined') return true
+  return window.confirm('Discard unsaved changes?')
+}
+
+const onFileClick = async (entry) => {
+  if (!confirmDiscardChanges()) return
+  await store.openFile(entry.relativePath || entry.name)
+  // Scroll the editor into view after Vue paints it.
+  await nextTick()
+  if (editorRef.value) {
+    const el = editorRef.value.$el || editorRef.value
+    if (el && typeof el.scrollIntoView === 'function') {
+      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }
+  }
+}
+
+const onCloseEditor = () => {
+  if (!confirmDiscardChanges()) return
+  store.closeFile()
+}
+
+const breadcrumbs = computed(() => {
+  const path = store.fileBrowser.currentPath || ''
+  const parts = path.split('/').filter(Boolean)
+  const crumbs = [{ label: 'server', path: '' }]
+  let acc = ''
+  for (const p of parts) {
+    acc = acc ? `${acc}/${p}` : p
+    crumbs.push({ label: p, path: acc })
+  }
+  return crumbs
+})
+
+const formatModified = (iso) => {
+  if (!iso) return '—'
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return '—'
+  return date.toLocaleString()
+}
+
+const onCrumbClick = (crumb) => {
+  if (crumb.path === store.fileBrowser.currentPath) return
+  store.openFileBrowser(crumb.path)
+}
+
+const onRefresh = () => store.openFileBrowser(store.fileBrowser.currentPath)
+const canGoUp = computed(() => Boolean(store.fileBrowser.currentPath))
+</script>
+
+<template>
+  <div class="files-page">
+    <div class="files-page__toolbar">
+      <AppButton variant="ghost" size="sm" :disabled="!canGoUp" @click="store.goUpDirectory">↑ Up</AppButton>
+      <nav class="files-page__crumbs" aria-label="Path">
+        <template v-for="(crumb, i) in breadcrumbs" :key="i">
+          <button
+            type="button"
+            class="files-page__crumb"
+            :class="{ 'is-current': i === breadcrumbs.length - 1 }"
+            :disabled="i === breadcrumbs.length - 1"
+            @click="onCrumbClick(crumb)"
+          >{{ crumb.label }}</button>
+          <span v-if="i < breadcrumbs.length - 1" class="files-page__crumb-sep">/</span>
+        </template>
+      </nav>
+      <AppButton variant="ghost" size="sm" :loading="store.fileBrowser.loading" @click="onRefresh">Refresh</AppButton>
+    </div>
+
+    <Panel :padded="false">
+      <div v-if="store.fileBrowser.loading" class="files-page__state">Loading…</div>
+      <div v-else-if="store.fileBrowser.error" class="files-page__state files-page__state--error">{{ store.fileBrowser.error }}</div>
+      <div v-else-if="!store.fileBrowser.entries.length" class="files-page__state">This folder is empty.</div>
+      <table v-else class="files-page__table">
+        <thead>
+          <tr>
+            <th class="files-page__th-name">Name</th>
+            <th class="files-page__th-size">Size</th>
+            <th class="files-page__th-modified">Modified</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            v-for="entry in store.fileBrowser.entries"
+            :key="entry.relativePath || entry.name"
+            class="files-page__row"
+            :class="{ 'is-dir': entry.isDir }"
+            @dblclick="store.enterFileEntry(entry)"
+          >
+            <td class="files-page__td-name">
+              <button
+                v-if="entry.isDir"
+                type="button"
+                class="files-page__name-btn"
+                @click="store.enterFileEntry(entry)"
+              >
+                <svg class="files-page__icon" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+                  <path d="M2 3.5A1.5 1.5 0 013.5 2h2.5l1.5 2H11a1.5 1.5 0 011.5 1.5v6A1.5 1.5 0 0111 13H3.5A1.5 1.5 0 012 11.5v-8z" />
+                </svg>
+                <span>{{ entry.name }}</span>
+              </button>
+              <button
+                v-else
+                type="button"
+                class="files-page__name-btn"
+                @click="onFileClick(entry)"
+              >
+                <svg class="files-page__icon" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+                  <path d="M3 1.5A0.5 0.5 0 013.5 1H8l3 3v8.5a0.5 0.5 0 01-0.5 0.5h-7A0.5 0.5 0 013 12.5v-11z" />
+                  <path d="M8 1v3h3" />
+                </svg>
+                <span>{{ entry.name }}</span>
+              </button>
+            </td>
+            <td class="files-page__td-size">{{ entry.isDir ? '—' : formatFileSize(entry.size) }}</td>
+            <td class="files-page__td-modified">{{ formatModified(entry.modifiedAt) }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </Panel>
+
+    <Panel
+      v-if="store.fileEditor.path || store.fileEditor.loading"
+      ref="editorRef"
+      :title="store.fileEditor.path || 'Loading…'"
+    >
+      <template #action>
+        <div class="files-page__editor-actions">
+          <AppButton
+            variant="ghost"
+            size="sm"
+            :disabled="store.fileEditor.saving"
+            @click="onCloseEditor"
+          >Close</AppButton>
+          <AppButton
+            variant="primary"
+            size="sm"
+            :loading="store.fileEditor.saving"
+            :disabled="store.fileEditor.loading || !store.hasFileChanges"
+            @click="store.saveFile"
+          >Save</AppButton>
+        </div>
+      </template>
+
+      <div v-if="store.fileEditor.loading" class="files-page__state">Loading file…</div>
+      <div v-else>
+        <textarea
+          v-model="store.fileEditor.content"
+          class="files-page__editor-textarea"
+          :disabled="store.fileEditor.saving"
+          spellcheck="false"
+        ></textarea>
+        <p v-if="store.fileEditor.error" class="files-page__editor-error">{{ store.fileEditor.error }}</p>
+      </div>
+    </Panel>
+  </div>
+</template>
+
+<style scoped>
+.files-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.files-page__toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.files-page__crumbs {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.files-page__crumb {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.files-page__crumb:hover:not(.is-current) {
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+}
+
+.files-page__crumb.is-current {
+  color: var(--text-primary);
+  cursor: default;
+}
+
+.files-page__crumb-sep {
+  color: var(--text-disabled);
+}
+
+.files-page__state {
+  padding: var(--space-5) var(--space-4);
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.files-page__state--error {
+  color: var(--danger);
+}
+
+.files-page__table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.files-page__table thead th {
+  text-align: left;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-disabled);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.files-page__th-size,
+.files-page__th-modified {
+  width: 160px;
+}
+
+.files-page__row {
+  border-bottom: 1px solid var(--border-color);
+  transition: background 0.15s ease;
+}
+
+.files-page__row:last-child {
+  border-bottom: none;
+}
+
+.files-page__row:hover {
+  background: var(--bg-tertiary);
+}
+
+.files-page__row td {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  vertical-align: middle;
+}
+
+.files-page__td-size,
+.files-page__td-modified {
+  color: var(--text-disabled);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.files-page__name-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: transparent;
+  border: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  padding: 0;
+}
+
+.files-page__name-btn {
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.files-page__name-btn:hover {
+  color: var(--text-primary);
+}
+
+.files-page__name-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.files-page__row.is-dir .files-page__icon {
+  color: var(--primary);
+}
+
+.files-page__row:not(.is-dir) .files-page__icon {
+  color: var(--text-disabled);
+}
+
+.files-page__editor-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.files-page__editor-textarea {
+  width: 100%;
+  min-height: 320px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  padding: var(--space-3);
+  resize: vertical;
+}
+
+.files-page__editor-textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.files-page__editor-textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.files-page__editor-error {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-xs);
+  color: var(--danger);
+}
+</style>

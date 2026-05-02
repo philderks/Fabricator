@@ -45,26 +45,28 @@
     </div>
 
     <template #footer>
-      <button class="btn btn-secondary" @click="$emit('cancel')">
+      <AppButton variant="ghost" size="md" @click="$emit('cancel')">
         Abbrechen
-      </button>
-      <button
-        class="btn btn-danger"
+      </AppButton>
+      <AppButton
+        :variant="installButtonVariant"
+        size="md"
         :disabled="!selectedVersion && !serverVersion && !versionsToShow.length"
         @click="confirmSelection"
       >
         Version installieren
-      </button>
+      </AppButton>
     </template>
   </BaseModal>
 </template>
 
 <script>
 import BaseModal from './BaseModal.vue'
+import AppButton from '../ui/AppButton.vue'
 
 export default {
   name: 'CompatibilityConfirmModal',
-  components: { BaseModal },
+  components: { BaseModal, AppButton },
   props: {
     show: {
       type: Boolean,
@@ -109,6 +111,16 @@ export default {
           return 'status-banner--danger'
         default:
           return 'status-banner--unknown'
+      }
+    },
+    installButtonVariant() {
+      switch (this.status) {
+        case 'full':
+          return 'primary'
+        case 'likely':
+          return 'warning'
+        default:
+          return 'danger'
       }
     },
     statusTitle() {
@@ -192,10 +204,11 @@ export default {
 <style scoped>
 .status-banner {
   display: flex;
-  gap: 12px;
-  padding: 12px 16px;
-  border-radius: 10px;
-  margin-bottom: 16px;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  margin-bottom: var(--space-4);
   align-items: center;
 }
 
@@ -204,59 +217,64 @@ export default {
 }
 
 .status-title {
-  font-size: 1rem;
+  font-size: var(--text-md);
   font-weight: 600;
   margin: 0;
+  line-height: var(--leading-tight);
 }
 
 .status-description {
-  margin: 4px 0 0;
-  font-size: 0.875rem;
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
 }
 
 .status-banner--full {
-  background: color-mix(in oklch, var(--success) 20%, transparent);
+  background: color-mix(in oklch, var(--success) 12%, transparent);
+  border-color: color-mix(in oklch, var(--success) 28%, transparent);
   color: var(--success);
 }
 
 .status-banner--likely {
-  background: color-mix(in oklch, var(--warning) 20%, transparent);
+  background: color-mix(in oklch, var(--warning) 12%, transparent);
+  border-color: color-mix(in oklch, var(--warning) 28%, transparent);
   color: var(--warning);
 }
 
 .status-banner--danger,
 .status-banner--unknown {
-  background: color-mix(in oklch, var(--danger) 15%, transparent);
+  background: color-mix(in oklch, var(--danger) 12%, transparent);
+  border-color: color-mix(in oklch, var(--danger) 28%, transparent);
   color: var(--danger);
 }
 
 .modal-text {
-  font-size: 0.9rem;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
-  line-height: 1.4;
+  line-height: var(--leading-normal);
 }
 
 .version-list {
-  margin-top: 16px;
+  margin-top: var(--space-4);
 }
 
 .version-list__label {
-  font-size: 0.85rem;
-  color: var(--text-tertiary);
-  margin-bottom: 8px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin-bottom: var(--space-2);
 }
 
 .version-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .chip {
-  padding: 6px 12px;
-  border-radius: 999px;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
   border: 1px solid var(--border-color);
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
   background: transparent;
   cursor: default;
@@ -272,17 +290,12 @@ export default {
 }
 
 .chip--selected {
-  background: color-mix(in oklch, var(--primary) 20%, transparent);
-  border-color: var(--primary);
+  background: color-mix(in oklch, var(--primary) 12%, transparent);
+  border-color: color-mix(in oklch, var(--primary) 28%, transparent);
   color: var(--primary);
 }
 
 .chip--highlight {
   box-shadow: 0 0 0 1px color-mix(in oklch, var(--primary) 40%, transparent);
-}
-
-button[disabled] {
-  opacity: 0.7;
-  cursor: not-allowed;
 }
 </style>

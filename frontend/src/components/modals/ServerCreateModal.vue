@@ -7,19 +7,19 @@
   >
     <form @submit.prevent="handleCreate" class="settings-form">
       <!-- Basic Settings -->
-      <section class="settings-section">
-        <h3 class="section-title">Basic Settings</h3>
-        
-        <div class="form-group">
-          <label for="server-name">Server Name</label>
-          <input 
-            id="server-name"
-            v-model="formData.name" 
-            type="text" 
-            placeholder="My Minecraft Server"
-            required
-          >
-        </div>
+      <Panel title="Basic Settings">
+        <FormField label="Server Name">
+          <template #default="{ id, describedBy }">
+            <input
+              :id="id"
+              v-model="formData.name"
+              type="text"
+              placeholder="My Minecraft Server"
+              :aria-describedby="describedBy"
+              required
+            >
+          </template>
+        </FormField>
 
         <div class="form-row">
           <div class="form-group">
@@ -30,7 +30,7 @@
                 <span>Show snapshots</span>
               </label>
             </div>
-            <select 
+            <select
               id="minecraft-version"
               v-model="formData.version"
               @change="handleVersionChange"
@@ -41,8 +41,8 @@
               <option v-else-if="!versionsLoading && !filteredGameVersions.length" disabled value="">
                 No versions available
               </option>
-              <option 
-                v-for="version in filteredGameVersions" 
+              <option
+                v-for="version in filteredGameVersions"
                 :key="version.version"
                 :value="version.version"
               >
@@ -53,54 +53,57 @@
             <span v-if="javaRequirementWarning" class="form-hint warning-hint">{{ javaRequirementWarning }}</span>
           </div>
 
-          <div class="form-group">
-            <label for="mod-loader">Mod Loader</label>
-            <select 
-              id="mod-loader"
-              v-model="formData.loader"
-              required
-            >
-              <option 
-                v-for="loaderOption in loaderOptions" 
-                :key="loaderOption.value"
-                :value="loaderOption.value"
+          <FormField label="Mod Loader">
+            <template #default="{ id, describedBy }">
+              <select
+                :id="id"
+                v-model="formData.loader"
+                :aria-describedby="describedBy"
+                required
               >
-                {{ loaderOption.label }}
-              </option>
-            </select>
-          </div>
+                <option
+                  v-for="loaderOption in loaderOptions"
+                  :key="loaderOption.value"
+                  :value="loaderOption.value"
+                >
+                  {{ loaderOption.label }}
+                </option>
+              </select>
+            </template>
+          </FormField>
         </div>
 
         <div class="form-row">
-          <div class="form-group">
-            <label for="server-port">Server Port</label>
-            <input 
-              id="server-port"
-              v-model.number="formData.port" 
-              type="number" 
-              min="1024"
-              max="65535"
-              placeholder="25565"
-            >
-            <span class="form-hint">Default: 25565</span>
-          </div>
+          <FormField label="Server Port" hint="Default: 25565">
+            <template #default="{ id, describedBy }">
+              <input
+                :id="id"
+                v-model.number="formData.port"
+                type="number"
+                min="1024"
+                max="65535"
+                placeholder="25565"
+                :aria-describedby="describedBy"
+              >
+            </template>
+          </FormField>
 
-          <div class="form-group">
-            <label for="install-path">Installation Path</label>
-            <input 
-              id="install-path"
-              v-model="formData.installPath" 
-              type="text" 
-              placeholder="Leave empty for auto-generated path"
-            >
-            <span class="form-hint">Where server files will be stored</span>
-          </div>
+          <FormField label="Installation Path" hint="Where server files will be stored">
+            <template #default="{ id, describedBy }">
+              <input
+                :id="id"
+                v-model="formData.installPath"
+                type="text"
+                placeholder="Leave empty for auto-generated path"
+                :aria-describedby="describedBy"
+              >
+            </template>
+          </FormField>
         </div>
-      </section>
+      </Panel>
 
       <!-- Modpack Setup -->
-      <section class="settings-section">
-        <h3 class="section-title">Modpack Setup</h3>
+      <Panel title="Modpack Setup">
 
         <div class="mode-toggle" role="tablist" aria-label="Server setup mode">
           <button
@@ -142,49 +145,58 @@
 
           <div v-if="formData.modpackImportMethod === 'link'" class="form-row modpack-input-row">
             <div class="form-group modpack-grow">
-              <label for="modpack-link">Modpack URL or Slug</label>
-              <input
-                id="modpack-link"
-                v-model="modpackLinkInput"
-                type="text"
-                placeholder="https://modrinth.com/modpack/your-pack"
-              >
-              <span class="form-hint">Supports Modrinth links, slugs, or project IDs.</span>
+              <FormField label="Modpack URL or Slug" hint="Supports Modrinth links, slugs, or project IDs.">
+                <template #default="{ id, describedBy }">
+                  <input
+                    :id="id"
+                    v-model="modpackLinkInput"
+                    type="text"
+                    placeholder="https://modrinth.com/modpack/your-pack"
+                    :aria-describedby="describedBy"
+                  >
+                </template>
+              </FormField>
             </div>
             <div class="form-group modpack-action">
               <label>&nbsp;</label>
-              <button
-                type="button"
-                class="btn btn-secondary"
-                @click="resolveModpackByLink"
+              <AppButton
+                variant="ghost"
+                size="md"
                 :disabled="modpackLookupLoading || !modpackLinkInput.trim()"
+                :loading="modpackLookupLoading"
+                @click="resolveModpackByLink"
               >
-                {{ modpackLookupLoading ? 'Resolving...' : 'Resolve' }}
-              </button>
+                {{ modpackLookupLoading ? 'Resolving' : 'Resolve' }}
+              </AppButton>
             </div>
           </div>
 
           <div v-else>
             <div class="form-row modpack-input-row">
               <div class="form-group modpack-grow">
-                <label for="modpack-search">Search Modpacks</label>
-                <input
-                  id="modpack-search"
-                  v-model="modpackSearchQuery"
-                  type="text"
-                  placeholder="All of Fabric, Better Minecraft, ..."
-                >
+                <FormField label="Search Modpacks">
+                  <template #default="{ id, describedBy }">
+                    <input
+                      :id="id"
+                      v-model="modpackSearchQuery"
+                      type="text"
+                      placeholder="All of Fabric, Better Minecraft, ..."
+                      :aria-describedby="describedBy"
+                    >
+                  </template>
+                </FormField>
               </div>
               <div class="form-group modpack-action">
                 <label>&nbsp;</label>
-                <button
-                  type="button"
-                  class="btn btn-secondary"
-                  @click="searchForModpacks"
+                <AppButton
+                  variant="ghost"
+                  size="md"
                   :disabled="modpackSearchLoading || !modpackSearchQuery.trim()"
+                  :loading="modpackSearchLoading"
+                  @click="searchForModpacks"
                 >
-                  {{ modpackSearchLoading ? 'Searching...' : 'Search' }}
-                </button>
+                  {{ modpackSearchLoading ? 'Searching' : 'Search' }}
+                </AppButton>
               </div>
             </div>
 
@@ -226,118 +238,124 @@
               <strong>{{ selectedModpack.title }}</strong>
               <p>{{ selectedModpack.description || 'No description provided.' }}</p>
             </div>
-            <button type="button" class="btn btn-secondary" @click="clearSelectedModpack">
+            <AppButton variant="ghost" size="sm" @click="clearSelectedModpack">
               Clear
-            </button>
+            </AppButton>
           </div>
 
         </div>
-      </section>
+      </Panel>
 
       <!-- Gameplay Settings -->
-      <section class="settings-section">
-        <h3 class="section-title">Gameplay</h3>
-        
-        <div class="form-row">
-          <div class="form-group">
-            <label for="max-players">Max Players</label>
-            <input 
-              id="max-players"
-              v-model.number="formData.maxPlayers" 
-              type="number" 
-              min="1"
-              max="1000"
-              placeholder="20"
-            >
-          </div>
+      <Panel title="Gameplay">
 
-          <div class="form-group">
-            <label for="difficulty">Difficulty</label>
-            <select id="difficulty" v-model="formData.difficulty">
-              <option value="peaceful">Peaceful</option>
-              <option value="easy">Easy</option>
-              <option value="normal">Normal</option>
-              <option value="hard">Hard</option>
-            </select>
-          </div>
+        <div class="form-row">
+          <FormField label="Max Players">
+            <template #default="{ id, describedBy }">
+              <input
+                :id="id"
+                v-model.number="formData.maxPlayers"
+                type="number"
+                min="1"
+                max="1000"
+                placeholder="20"
+                :aria-describedby="describedBy"
+              >
+            </template>
+          </FormField>
+
+          <FormField label="Difficulty">
+            <template #default="{ id, describedBy }">
+              <select :id="id" v-model="formData.difficulty" :aria-describedby="describedBy">
+                <option value="peaceful">Peaceful</option>
+                <option value="easy">Easy</option>
+                <option value="normal">Normal</option>
+                <option value="hard">Hard</option>
+              </select>
+            </template>
+          </FormField>
         </div>
 
         <div class="form-row">
-          <div class="form-group">
-            <label for="gamemode">Default Gamemode</label>
-            <select id="gamemode" v-model="formData.gamemode">
-              <option value="survival">Survival</option>
-              <option value="creative">Creative</option>
-              <option value="adventure">Adventure</option>
-              <option value="spectator">Spectator</option>
-            </select>
-          </div>
+          <FormField label="Default Gamemode">
+            <template #default="{ id, describedBy }">
+              <select :id="id" v-model="formData.gamemode" :aria-describedby="describedBy">
+                <option value="survival">Survival</option>
+                <option value="creative">Creative</option>
+                <option value="adventure">Adventure</option>
+                <option value="spectator">Spectator</option>
+              </select>
+            </template>
+          </FormField>
 
-          <div class="form-group">
-            <label for="view-distance">View Distance</label>
-            <input 
-              id="view-distance"
-              v-model.number="formData.viewDistance" 
-              type="number" 
-              min="3"
-              max="32"
-              placeholder="10"
-            >
-            <span class="form-hint">3-32 chunks</span>
-          </div>
+          <FormField label="View Distance" hint="3-32 chunks">
+            <template #default="{ id, describedBy }">
+              <input
+                :id="id"
+                v-model.number="formData.viewDistance"
+                type="number"
+                min="3"
+                max="32"
+                placeholder="10"
+                :aria-describedby="describedBy"
+              >
+            </template>
+          </FormField>
         </div>
-      </section>
+      </Panel>
 
       <!-- World Settings -->
-      <section class="settings-section">
-        <h3 class="section-title">World</h3>
-        
+      <Panel title="World">
 
-        
-        <div class="form-group">
-          <label for="level-name">World Name</label>
-          <input 
-            id="level-name"
-            v-model="formData.levelName" 
-            type="text" 
-            placeholder="world"
-          >
-          <span class="form-hint">Folder name for world files</span>
-        </div>
+        <FormField label="World Name" hint="Folder name for world files">
+          <template #default="{ id, describedBy }">
+            <input
+              :id="id"
+              v-model="formData.levelName"
+              type="text"
+              placeholder="world"
+              :aria-describedby="describedBy"
+            >
+          </template>
+        </FormField>
 
         <div class="form-row">
-          <div class="form-group">
-            <label for="level-type">World Type</label>
-            <select id="level-type" v-model="formData.levelType">
-              <option value="default">Default</option>
-              <option value="flat">Flat</option>
-              <option value="large_biomes">Large Biomes</option>
-              <option value="amplified">Amplified</option>
-            </select>
-          </div>
+          <FormField label="World Type">
+            <template #default="{ id, describedBy }">
+              <select :id="id" v-model="formData.levelType" :aria-describedby="describedBy">
+                <option value="default">Default</option>
+                <option value="flat">Flat</option>
+                <option value="large_biomes">Large Biomes</option>
+                <option value="amplified">Amplified</option>
+              </select>
+            </template>
+          </FormField>
 
-          <div class="form-group">
-            <label for="seed">Seed</label>
-            <input 
-              id="seed"
-              v-model="formData.seed" 
-              type="text" 
-              placeholder="Leave empty for random"
+          <FormField label="Seed">
+            <template #default="{ id, describedBy }">
+              <input
+                :id="id"
+                v-model="formData.seed"
+                type="text"
+                placeholder="Leave empty for random"
+                :aria-describedby="describedBy"
+              >
+            </template>
+          </FormField>
+        </div>
+
+        <FormField label="Java Executable Path (Optional)" hint="Use a specific Java runtime for this server.">
+          <template #default="{ id, describedBy }">
+            <input
+              :id="id"
+              v-model.trim="formData.javaPath"
+              @blur="refreshJavaRequirement"
+              type="text"
+              placeholder="java or /path/to/java"
+              :aria-describedby="describedBy"
             >
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label for="java-path">Java Executable Path (Optional)</label>
-          <input
-            id="java-path"
-            v-model.trim="formData.javaPath"
-            @blur="refreshJavaRequirement"
-            type="text"
-            placeholder="java or /path/to/java"
-          >
-          <span class="form-hint">Use a specific Java runtime for this server.</span>
-        </div>
+          </template>
+        </FormField>
 
         <div class="form-checkboxes">
           <label class="checkbox-label">
@@ -357,39 +375,40 @@
             <span>Spawn NPCs</span>
           </label>
         </div>
-      </section>
+      </Panel>
 
       <!-- Advanced Settings -->
-      <section class="settings-section">
-        <h3 class="section-title">Advanced</h3>
-        
+      <Panel title="Advanced">
 
-        
         <div class="form-row">
-          <div class="form-group">
-            <label for="memory">Memory Allocation (GB)</label>
-            <input 
-              id="memory"
-              v-model.number="formData.memory" 
-              type="number" 
-              min="1"
-              max="32"
-              step="0.5"
-              placeholder="4"
-            >
-          </div>
+          <FormField label="Memory Allocation (GB)">
+            <template #default="{ id, describedBy }">
+              <input
+                :id="id"
+                v-model.number="formData.memory"
+                type="number"
+                min="1"
+                max="32"
+                step="0.5"
+                placeholder="4"
+                :aria-describedby="describedBy"
+              >
+            </template>
+          </FormField>
 
-          <div class="form-group">
-            <label for="simulation-distance">Simulation Distance</label>
-            <input 
-              id="simulation-distance"
-              v-model.number="formData.simulationDistance" 
-              type="number" 
-              min="3"
-              max="32"
-              placeholder="10"
-            >
-          </div>
+          <FormField label="Simulation Distance">
+            <template #default="{ id, describedBy }">
+              <input
+                :id="id"
+                v-model.number="formData.simulationDistance"
+                type="number"
+                min="3"
+                max="32"
+                placeholder="10"
+                :aria-describedby="describedBy"
+              >
+            </template>
+          </FormField>
         </div>
 
         <div class="form-checkboxes">
@@ -411,55 +430,52 @@
           </label>
         </div>
 
-        <div class="form-group">
-          <label for="motd">MOTD (Message of the Day)</label>
-          <textarea 
-            id="motd"
-            v-model="formData.motd" 
-            rows="2"
-            placeholder="A Minecraft Server"
-            maxlength="59"
-          ></textarea>
-          <span class="form-hint">{{ formData.motd.length }}/59 characters</span>
-        </div>
-      </section>
+        <FormField label="MOTD (Message of the Day)" :hint="`${formData.motd.length}/59 characters`">
+          <template #default="{ id, describedBy }">
+            <textarea
+              :id="id"
+              v-model="formData.motd"
+              rows="2"
+              placeholder="A Minecraft Server"
+              maxlength="59"
+              :aria-describedby="describedBy"
+            ></textarea>
+          </template>
+        </FormField>
+      </Panel>
 
       <!-- EULA Agreement -->
-      <section class="eula-section">
-        <div class="eula-box">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-            <path d="M9 12L11 14L15 10M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          <div class="eula-content">
-            <label class="eula-label">
-              <input 
-                type="checkbox" 
-                v-model="formData.acceptEula"
-                required
-              >
-              <span>
-                I agree to the 
-                <a href="https://www.minecraft.net/en-us/eula" target="_blank" rel="noopener noreferrer">
-                  Minecraft EULA
-                </a>
-              </span>
-            </label>
-            <p class="eula-notice">
+      <Panel title="Minecraft EULA">
+        <label class="create-eula">
+          <input type="checkbox" v-model="formData.acceptEula" required>
+          <div class="create-eula__body">
+            <span class="create-eula__primary">
+              I agree to the
+              <a href="https://www.minecraft.net/en-us/eula" target="_blank" rel="noopener noreferrer">
+                Minecraft EULA
+              </a>
+            </span>
+            <p class="create-eula__notice">
               By creating a server, you must accept Mojang's End User License Agreement. This is required to run a Minecraft server.
             </p>
           </div>
-        </div>
-      </section>
+        </label>
+      </Panel>
     </form>
 
     <template #footer>
-      <button type="button" class="btn btn-secondary" @click="handleClose" :disabled="creating">
+      <AppButton variant="ghost" size="md" :disabled="creating" @click="handleClose">
         Cancel
-      </button>
-      <button type="button" class="btn btn-primary" @click="handleCreate" :disabled="creating || !formData.acceptEula">
-        <span v-if="creating" class="btn-loading"></span>
-        {{ creating ? 'Creating...' : 'Create Server' }}
-      </button>
+      </AppButton>
+      <AppButton
+        variant="primary"
+        size="md"
+        :disabled="creating || !formData.acceptEula"
+        :loading="creating"
+        @click="handleCreate"
+      >
+        {{ creating ? 'Creating' : 'Create Server' }}
+      </AppButton>
     </template>
   </BaseModal>
 
@@ -486,6 +502,9 @@
 <script>
 import BaseModal from './BaseModal.vue'
 import JavaInstallModal from './JavaInstallModal.vue'
+import Panel from '../ui/Panel.vue'
+import AppButton from '../ui/AppButton.vue'
+import FormField from '../ui/FormField.vue'
 import { createServer, installServer, getFabricGameVersions, getJavaStatus } from '../../api/servers'
 import ModSideDecisionModal from './ModSideDecisionModal.vue'
 import { installModpack, resolveProjectVersion } from '../../api/modrinth'
@@ -497,7 +516,10 @@ export default {
   components: {
     BaseModal,
     JavaInstallModal,
-    ModSideDecisionModal
+    ModSideDecisionModal,
+    Panel,
+    AppButton,
+    FormField
   },
   props: {
     show: {
@@ -997,20 +1019,25 @@ export default {
 </script>
 
 <style scoped>
-/* Modal-specific styles only */
+/* Form layout — wraps the Panel stack */
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
 
 .version-label-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 
 .snapshot-toggle {
   display: flex;
   align-items: center;
-  gap: 0.375rem;
-  font-size: 0.8125rem;
+  gap: 6px;
+  font-size: var(--text-xs);
   font-weight: 400;
   color: var(--text-muted);
   cursor: pointer;
@@ -1022,84 +1049,77 @@ export default {
   width: auto;
   margin: 0;
   cursor: pointer;
-  accent-color: var(--accent, #6366f1);
-}
-.settings-form {
-  display: flex;
-  flex-direction: column;
-  gap: 2rem;
-}
-
-.settings-section {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.section-title {
-  font-size: 1.125rem;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin: 0 0 0.5rem 0;
-  padding-bottom: 0.5rem;
-  border-bottom: 1px solid var(--border-color);
+  accent-color: var(--primary);
 }
 
 .warning-hint {
-  color: var(--warning, #f59e0b);
+  color: var(--warning);
 }
 
+/* Mode toggle (Custom Server / Import Modpack) */
 .mode-toggle {
   display: inline-flex;
   align-items: center;
-  padding: 0.25rem;
-  border-radius: 999px;
+  padding: 3px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--border-color);
-  background: color-mix(in oklch, var(--bg-secondary) 88%, transparent);
-  gap: 0.25rem;
+  background: var(--bg-tertiary);
+  gap: 2px;
 }
 
 .mode-toggle-btn {
   border: none;
   background: transparent;
-  color: var(--text-secondary);
-  padding: 0.5rem 0.9rem;
-  border-radius: 999px;
+  color: var(--text-muted);
+  padding: 6px 14px;
+  border-radius: var(--radius-pill);
   cursor: pointer;
   font-weight: 600;
-  font-size: 0.85rem;
+  font-size: var(--text-xs);
+  font-family: inherit;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.mode-toggle-btn:hover:not(.active) {
+  color: var(--text-secondary);
 }
 
 .mode-toggle-btn.active {
-  background: color-mix(in oklch, var(--primary) 15%, transparent);
-  color: var(--text-primary);
+  background: var(--primary);
+  color: white;
 }
 
+/* Modpack subform */
 .modpack-panel {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  padding: 1rem;
+  gap: var(--space-4);
+  padding: var(--space-4);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
-  background: color-mix(in oklch, var(--bg-tertiary) 75%, transparent);
+  border-radius: var(--radius-md);
+  background: var(--bg-tertiary);
 }
 
 .inline-choice {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 
 .choice-pill {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--space-2);
   border: 1px solid var(--border-color);
-  border-radius: 999px;
-  padding: 0.4rem 0.75rem;
+  border-radius: var(--radius-pill);
+  padding: 6px var(--space-3);
   cursor: pointer;
-  font-size: 0.875rem;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.choice-pill input[type="radio"] {
+  accent-color: var(--primary);
 }
 
 .modpack-input-row {
@@ -1116,26 +1136,28 @@ export default {
 
 .modpack-results {
   display: grid;
-  gap: 0.75rem;
+  gap: var(--space-3);
 }
 
 .modpack-result {
   width: 100%;
   text-align: left;
   border: 1px solid var(--border-color);
-  border-radius: 10px;
-  padding: 0.75rem;
-  background: var(--bg-primary);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  background: var(--bg-secondary);
   color: var(--text-primary);
   cursor: pointer;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 1rem;
+  gap: var(--space-4);
+  font-family: inherit;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
 
 .modpack-result:hover {
-  border-color: color-mix(in oklch, var(--primary) 35%, var(--border-color));
+  border-color: var(--border-hover);
 }
 
 .modpack-result.selected {
@@ -1146,14 +1168,19 @@ export default {
 .modpack-result-header {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: var(--space-3);
   min-width: 0;
 }
 
+.modpack-result-header strong {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+
 .modpack-result-header p {
-  margin: 0.15rem 0 0;
+  margin: 2px 0 0;
   color: var(--text-muted);
-  font-size: 0.8125rem;
+  font-size: var(--text-xs);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -1161,48 +1188,104 @@ export default {
 }
 
 .modpack-meta {
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   white-space: nowrap;
 }
 
 .modpack-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
   object-fit: cover;
   border: 1px solid var(--border-color);
+  flex-shrink: 0;
 }
 
 .modpack-error {
   margin: 0;
-  color: var(--danger, #d14343);
-  font-size: 0.875rem;
+  color: var(--danger);
+  font-size: var(--text-xs);
 }
 
 .modpack-selected {
   display: flex;
   justify-content: space-between;
-  gap: 1rem;
+  gap: var(--space-4);
   align-items: start;
-  padding: 0.85rem 1rem;
-  border-radius: 10px;
-  background: color-mix(in oklch, var(--success, #22a06b) 12%, transparent);
-  border: 1px solid color-mix(in oklch, var(--success, #22a06b) 28%, transparent);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklch, var(--success) 12%, transparent);
+  border: 1px solid color-mix(in oklch, var(--success) 28%, transparent);
 }
 
 .modpack-selected p {
-  margin: 0.2rem 0 0;
+  margin: 2px 0 0;
   color: var(--text-secondary);
-  font-size: 0.8125rem;
+  font-size: var(--text-xs);
+}
+
+.modpack-selected strong {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
 }
 
 .selected-label {
   margin: 0;
   color: var(--text-muted);
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
+}
+
+/* EULA panel */
+.create-eula {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  cursor: pointer;
+}
+
+.create-eula input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  cursor: pointer;
+  accent-color: var(--primary);
+  flex-shrink: 0;
+}
+
+.create-eula__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.create-eula__primary {
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  user-select: none;
+  line-height: var(--leading-normal);
+}
+
+.create-eula__primary a {
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 600;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.15s;
+}
+
+.create-eula__primary a:hover {
+  border-bottom-color: var(--primary);
+}
+
+.create-eula__notice {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: var(--leading-normal);
 }
 
 @media (max-width: 900px) {
@@ -1224,73 +1307,66 @@ export default {
   }
 }
 
-/* EULA Section */
-.eula-section {
-  margin-top: 2rem;
-  padding-top: 2rem;
-  border-top: 2px solid var(--border-color);
-}
-
-.eula-box {
+/* Scope-migrated from global.css in Phase 7 Task 7
+   (sole remaining caller after FormField migration). */
+.form-group {
   display: flex;
-  gap: 1rem;
-  padding: 1.5rem;
-  background: color-mix(in oklch, var(--primary) 5%, transparent);
-  border: 2px solid color-mix(in oklch, var(--primary) 20%, transparent);
-  border-radius: 12px;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
-.eula-box svg {
-  color: var(--primary);
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-
-.eula-content {
-  flex: 1;
-}
-
-.eula-label {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.75rem;
-  font-size: 0.9375rem;
+.form-group label {
+  font-size: 0.875rem;
+  font-weight: 500;
   color: var(--text-primary);
-  cursor: pointer;
-  margin-bottom: 0.75rem;
 }
 
-.eula-label input[type="checkbox"] {
-  width: 20px;
-  height: 20px;
-  margin-top: 2px;
-  cursor: pointer;
-  accent-color: var(--primary);
-  flex-shrink: 0;
+.form-group input,
+.form-group select {
+  width: 100%;
 }
 
-.eula-label span {
-  user-select: none;
-  line-height: 1.5;
-}
-
-.eula-label a {
-  color: var(--primary);
-  text-decoration: none;
-  font-weight: 600;
-  border-bottom: 1px solid transparent;
-  transition: border-color 0.2s;
-}
-
-.eula-label a:hover {
-  border-bottom-color: var(--primary);
-}
-
-.eula-notice {
-  margin: 0;
+.form-hint {
   font-size: 0.8125rem;
   color: var(--text-muted);
-  line-height: 1.5;
-  padding-left: 2rem;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+}
+
+.form-checkboxes {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: var(--primary);
+}
+
+.checkbox-label span {
+  user-select: none;
+}
+
+@media (max-width: 768px) {
+  .form-row,
+  .form-checkboxes {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

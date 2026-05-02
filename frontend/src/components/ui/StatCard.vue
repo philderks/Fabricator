@@ -8,6 +8,15 @@ defineProps({
     type: [String, Number],
     required: true
   },
+  unit: {
+    type: String,
+    default: ''
+  },
+  accent: {
+    type: String,
+    default: 'default',
+    validator: (v) => ['default', 'success', 'primary', 'warning', 'danger'].includes(v)
+  },
   highlight: {
     type: Boolean,
     default: false
@@ -17,8 +26,11 @@ defineProps({
 
 <template>
   <div class="stat-card">
-    <div class="stat-label">{{ label }}</div>
-    <div class="stat-value" :class="{ highlight }">{{ value }}</div>
+    <div class="stat-card__label">{{ label }}</div>
+    <div class="stat-card__value" :class="[`stat-card__value--${highlight ? 'success' : accent}`]">
+      <span>{{ value }}</span>
+      <span v-if="unit" class="stat-card__unit">{{ unit }}</span>
+    </div>
   </div>
 </template>
 
@@ -26,24 +38,37 @@ defineProps({
 .stat-card {
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
-  padding: 1.5rem;
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
 }
 
-.stat-label {
-  color: var(--text-muted);
-  font-size: 0.875rem;
-  font-weight: 500;
-  margin-bottom: 0.5rem;
+.stat-card__label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-disabled);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: var(--space-2);
 }
 
-.stat-value {
-  font-size: 2.25rem;
-  font-weight: 700;
+.stat-card__value {
+  font-size: 22px;
+  font-weight: 600;
   color: var(--text-primary);
+  letter-spacing: -0.5px;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1);
 }
 
-.stat-value.highlight {
-  color: var(--success);
+.stat-card__value--success { color: var(--success); }
+.stat-card__value--primary { color: var(--primary); }
+.stat-card__value--warning { color: var(--warning); }
+.stat-card__value--danger  { color: var(--danger); }
+
+.stat-card__unit {
+  font-size: var(--text-sm);
+  color: var(--text-disabled);
+  font-weight: 400;
 }
 </style>
