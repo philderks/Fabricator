@@ -186,10 +186,12 @@ onUnmounted(() => {
 .app-sidebar {
   width: var(--sidebar-width);
   min-width: var(--sidebar-width);
+  min-height: 0;
   background: var(--bg-secondary);
   border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
 }
 
 .app-sidebar__logo {

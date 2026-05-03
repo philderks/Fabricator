@@ -280,6 +280,9 @@ onUnmounted(() => {
 .server-layout {
   display: flex;
   min-height: 100vh;
+  /* Fixed viewport height so nested flex (console terminal) can shrink and scroll
+     instead of growing the document when log content is tall. */
+  height: 100vh;
   background: var(--bg-primary);
   color: var(--text-primary);
 }
@@ -289,12 +292,14 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
 }
 
 .server-layout__content {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-height: 0;
   padding: var(--space-5);
   overflow-y: auto;
 }
