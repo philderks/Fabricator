@@ -1,0 +1,59 @@
+# .github/workflows/release.yml
+
+name: Build & Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Assemble tarball
+        run: |
+          VERSION="${{ github.event.release.tag_name }}"
+          STAGING="staging/fabricator"
+
+          mkdir -p "$STAGING/frontend"
+
+          # Backend
+          rsync -a --exclude='__pycache__/' --exclude='*.pyc' \
+            backend/ "$STAGING/backend/"
+
+          # Root entrypoint + deps
+          cp run.py requirements.txt "$STAGING/"
+
+          # Pre-built frontend
+          cp -r frontend/dist "$STAGING/frontend/dist"
+
+          # Version marker
+          echo "$VERSION" > "$STAGING/.fabricator_version"
+
+          tar -czf "fabricator-${VERSION}.tar.gz" -C staging fabricator
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: fabricator-${{ github.event.release.tag_name }}.tar.gz
+          fail_on_unmatched_files: true
