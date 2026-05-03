@@ -11,29 +11,11 @@ from typing import Any, Dict, Optional
 from urllib import error, request
 import json
 
+from backend.core.version import get_app_version
+
 
 def _project_root() -> Path:
     return Path(__file__).resolve().parents[2]
-
-
-def _app_root() -> Path:
-    return Path.cwd()
-
-
-def _resolve_version_file() -> Path:
-    cwd_version = _app_root() / ".fabricator_version"
-    if cwd_version.exists():
-        return cwd_version
-    return _project_root() / ".fabricator_version"
-
-
-def _read_version(version_file: Path) -> str:
-    if not version_file.exists():
-        return "unknown"
-    try:
-        return version_file.read_text(encoding='utf-8').strip() or "unknown"
-    except OSError:
-        return "unknown"
 
 
 def _fetch_latest_tag(repo: str) -> Optional[str]:
@@ -113,8 +95,7 @@ class UpdateService:
                 self._last_finished_at = time.time()
 
     def get_status(self) -> Dict[str, Any]:
-        version_file = _resolve_version_file()
-        current_version = _read_version(version_file)
+        current_version = get_app_version()
         latest = _fetch_latest_tag(self._repo)
         with self._state_lock:
             return {

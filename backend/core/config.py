@@ -46,9 +46,6 @@ class Config:
     each get_config() call reflects current env state.
     """
 
-    # Static, non-env attributes.
-    API_VERSION = "1.0.0"
-
     # Directory that `backend/core/config.py` is two levels under the repo
     # root. Falls back to sys._MEIPASS for PyInstaller builds.
     PROJECT_ROOT = os.path.dirname(

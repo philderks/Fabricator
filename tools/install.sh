@@ -21,7 +21,6 @@ main() {
     FABRICATOR_REPO="${FABRICATOR_REPO:-${GITHUB_OWNER}/${GITHUB_REPO}}"
     FABRICATOR_BRANCH="${FABRICATOR_BRANCH:-main}"
     FABRICATOR_VERSION="${FABRICATOR_VERSION:-latest}"  # latest | main | v1.2.3
-    APP_SUBDIR="${APP_SUBDIR:-}"                        # e.g. "backend" if run.py lives there
     MODE="${FABRICATOR_MODE:-install}"                  # install | update
     SERVER_INDEX_FILE="${SERVER_INDEX_FILE:-${DATA_DIR}/servers.json}"
     ENV_FILE="/etc/fabricator/fabricator.env"
@@ -109,61 +108,18 @@ main() {
 
     case "$PACKAGETYPE" in
         apt)
-            # Install a modern Java baseline. Individual servers can still use
-            # a custom Java path when newer versions (e.g. Java 25) are needed.
-            DEPS="python3 python3-venv python3-pip openjdk-21-jre curl ca-certificates grep sed tar rsync"
+            # Java is managed per-server via the in-app Java manager (see /api/java).
+            DEPS="python3 python3-venv python3-pip curl ca-certificates grep sed tar rsync"
             $SUDO apt-get update </dev/null
             $SUDO apt-get install -y $DEPS </dev/null
-            # Node.js 18+ required for Vue/Vite frontend; use NodeSource on Debian/Ubuntu
-            node_ver="$(node -v 2>/dev/null | sed 's/v//' | cut -d. -f1 || true)"
-            if [ -z "$node_ver" ] || [ "$node_ver" -lt 18 ]; then
-                info "Installing Node.js 20.x from NodeSource..."
-                # Download the setup script to a temp file instead of piping directly
-                # to bash. This lets the script be inspected before execution and
-                # prints a checksum the operator can verify against a known-good value.
-                SETUP_SCRIPT="$(mktemp)"
-                curl -fsSL https://deb.nodesource.com/setup_20.x -o "$SETUP_SCRIPT"
-                info "NodeSource setup script SHA256: $(sha256sum "$SETUP_SCRIPT" | cut -d' ' -f1)"
-                if [ -n "$SUDO" ]; then
-                    $SUDO -E bash "$SETUP_SCRIPT"
-                else
-                    bash "$SETUP_SCRIPT"
-                fi
-                rm -f "$SETUP_SCRIPT"
-                $SUDO apt-get install -y nodejs </dev/null
-            fi
             ;;
         pacman)
-            DEPS="python python-pip jre-openjdk curl ca-certificates grep sed tar rsync"
+            DEPS="python python-pip curl ca-certificates grep sed tar rsync"
             $SUDO pacman -Sy --noconfirm $DEPS </dev/null
-            node_ver="$(node -v 2>/dev/null | sed 's/v//' | cut -d. -f1 || true)"
-            if [ -z "$node_ver" ] || [ "$node_ver" -lt 18 ]; then
-                info "Installing nodejs and npm (>= 18 required for Vue/Vite)..."
-                $SUDO pacman -S --noconfirm nodejs npm </dev/null
-            fi
-            node_ver="$(node -v 2>/dev/null | sed 's/v//' | cut -d. -f1 || true)"
-            if [ -n "$node_ver" ] && [ "$node_ver" -lt 18 ]; then
-                warn "Node.js $node_ver is below the required v18+. The frontend build may fail."
-                warn "Consider installing a newer version via nvm or your package manager."
-            fi
             ;;
         dnf)
-            DEPS="python3 python3-pip java-21-openjdk curl ca-certificates grep sed tar rsync"
+            DEPS="python3 python3-pip curl ca-certificates grep sed tar rsync"
             $SUDO dnf install -y $DEPS </dev/null
-            node_ver="$(node -v 2>/dev/null | sed 's/v//' | cut -d. -f1 || true)"
-            if [ -z "$node_ver" ] || [ "$node_ver" -lt 18 ]; then
-                info "Installing Node.js 20.x from NodeSource (>= 18 required for Vue/Vite)..."
-                SETUP_SCRIPT="$(mktemp)"
-                curl -fsSL https://rpm.nodesource.com/setup_20.x -o "$SETUP_SCRIPT"
-                info "NodeSource setup script SHA256: $(sha256sum "$SETUP_SCRIPT" | cut -d' ' -f1)"
-                if [ -n "$SUDO" ]; then
-                    $SUDO -E bash "$SETUP_SCRIPT"
-                else
-                    bash "$SETUP_SCRIPT"
-                fi
-                rm -f "$SETUP_SCRIPT"
-                $SUDO dnf install -y nodejs </dev/null
-            fi
             ;;
         *)
             error "internal error: unknown PACKAGETYPE: $PACKAGETYPE"
@@ -190,8 +146,8 @@ main() {
         fi
     }
 
-    # 3) Download Fabricator sources
-    info "Downloading Fabricator from GitHub..."
+    # 3) Download Fabricator release asset
+    info "Downloading Fabricator from GitHub Releases..."
     TMP_DIR="$(mktemp -d)"
     cleanup() { rm -rf "$TMP_DIR"; }
     trap cleanup EXIT
@@ -202,58 +158,29 @@ main() {
         | sed -E 's/.*"tag_name":[[:space:]]*"([^"]+)".*/\1/'
     }
 
-    download_tarball() {
-      local kind="$1"   # "tags" or "heads"
-      local ref="$2"    # tag or branch
-      local url="https://github.com/${FABRICATOR_REPO}/archive/refs/${kind}/${ref}.tar.gz"
-
-      info "Fetching: $url"
-      curl -fsSL "$url" -o "$TMP_DIR/fabricator.tar.gz"
-      tar -xzf "$TMP_DIR/fabricator.tar.gz" -C "$TMP_DIR"
-    }
-
-    TAG=""
-    if [[ "$FABRICATOR_VERSION" == "main" ]]; then
-      download_tarball "heads" "$FABRICATOR_BRANCH"
-    else
-      if [[ "$FABRICATOR_VERSION" == "latest" ]]; then
-        TAG="$(get_latest_tag || true)"
-      else
-        TAG="$FABRICATOR_VERSION"
-      fi
-
+    if [[ "$FABRICATOR_VERSION" == "latest" ]]; then
+      TAG="$(get_latest_tag || true)"
       if [[ -z "$TAG" ]]; then
-        warn "WARNING: Could not determine latest release tag (GitHub API may be rate-limited or blocked)."
-        warn "Falling back to cloning branch: ${FABRICATOR_BRANCH}"
-        if ! command -v git >/dev/null 2>&1; then
-          error "git is required for fallback clone but was not found."
-        fi
-        git clone --depth 1 --branch "$FABRICATOR_BRANCH" \
-          "https://github.com/${FABRICATOR_REPO}.git" \
-          "$TMP_DIR/Fabricator-${FABRICATOR_BRANCH}"
-      else
-        info "Latest release tag: $TAG"
-        download_tarball "tags" "$TAG"
+        error "Could not determine latest release tag. GitHub API may be rate-limited. Re-run with: FABRICATOR_VERSION=vX.Y.Z"
       fi
+      info "Latest release: $TAG"
+    elif [[ "$FABRICATOR_VERSION" == "main" ]]; then
+      error "FABRICATOR_VERSION=main is no longer supported. Specify a version tag, e.g. FABRICATOR_VERSION=v0.3.0"
+    else
+      TAG="$FABRICATOR_VERSION"
+      info "Using specified version: $TAG"
     fi
 
-    SRC_DIR="$(find "$TMP_DIR" -maxdepth 1 -type d -name 'Fabricator-*' | head -n1)"
-    if [[ -z "${SRC_DIR:-}" || ! -d "$SRC_DIR" ]]; then
-      error "ERROR: Could not locate extracted Fabricator sources."
-    fi
+    ASSET_URL="https://github.com/${FABRICATOR_REPO}/releases/download/${TAG}/fabricator-${TAG}.tar.gz"
+    info "Fetching: $ASSET_URL"
+    curl -fsSL "$ASSET_URL" -o "$TMP_DIR/fabricator.tar.gz"
+    tar -xzf "$TMP_DIR/fabricator.tar.gz" -C "$TMP_DIR"
 
-    info "Source extracted to: $SRC_DIR"
-
-    # Select app subdirectory if needed
-    APP_SRC_DIR="$SRC_DIR"
-    if [[ -n "$APP_SUBDIR" ]]; then
-      APP_SRC_DIR="$SRC_DIR/$APP_SUBDIR"
-    fi
-
+    APP_SRC_DIR="$TMP_DIR/fabricator"
     if [[ ! -d "$APP_SRC_DIR" ]]; then
-      warn "ERROR: App source directory not found: $APP_SRC_DIR"
-      error "Hint: set APP_SUBDIR (e.g. APP_SUBDIR=backend) if your run.py is not at repo root."
+      error "Could not locate extracted Fabricator sources. Expected: $APP_SRC_DIR"
     fi
+    info "Source extracted to: $APP_SRC_DIR"
 
     backup_update_state() {
         local timestamp backup_dir
@@ -319,14 +246,6 @@ main() {
         info "No requirements.txt found in $APP_DIR, skipping pip install."
     fi
 
-    # 4b) Build frontend (Vue/Vite)
-    if [ -d "$APP_DIR/frontend" ] && [ -f "$APP_DIR/frontend/package.json" ]; then
-        info "Building frontend..."
-        run_as_service_user sh -c "cd \"$APP_DIR/frontend\" && npm ci && npm run build" </dev/null
-    else
-        info "No frontend folder found, skipping frontend build."
-    fi
-
     # Config
     info "Creating config directory /etc/fabricator..."
     $SUDO mkdir -p /etc/fabricator
@@ -388,6 +307,9 @@ EOF
     info "'$SERVICE_USER' group so you have write access to server directories:"
     info "  sudo usermod -aG $SERVICE_USER \$USER"
     info "Then log out and back in for the group change to take effect."
+    echo ""
+    info "Java is not installed system-wide. Install JREs per server through the"
+    info "Fabricator UI"
 }
 
 main "$@"
