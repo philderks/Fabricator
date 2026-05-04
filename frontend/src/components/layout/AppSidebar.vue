@@ -55,7 +55,7 @@ const updateLabel = computed(() => {
 
 const updateVersionLabel = computed(() => {
   const v = updateState.value.currentVersion || appVersion
-  return v ? `v${v}` : ''
+  return v ? String(v) : ''
 })
 
 const runUpdate = async () => {
