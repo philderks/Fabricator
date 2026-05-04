@@ -310,6 +310,35 @@ EOF
     echo ""
     info "Java is not installed system-wide. Install JREs per server through the"
     info "Fabricator UI"
+    echo ""
+
+    # Dashboard bind address + port (from env; defaults match new installs)
+    local DASH_HOST="0.0.0.0" DASH_PORT="5000" _hv _pv URL_HOST=""
+    if [ -f "$ENV_FILE" ]; then
+        _hv="$($SUDO grep -E '^[[:space:]]*HOST=' "$ENV_FILE" 2>/dev/null | tail -n1 | sed -E 's/^[[:space:]]*HOST=//; s/#.*//; s/[[:space:]]+$//; s/^[\"'\'']//; s/[\"'\'']$//')"
+        _pv="$($SUDO grep -E '^[[:space:]]*PORT=' "$ENV_FILE" 2>/dev/null | tail -n1 | sed -E 's/^[[:space:]]*PORT=//; s/#.*//; s/[[:space:]]+$//; s/^[\"'\'']//; s/[\"'\'']$//')"
+        [[ -n "$_hv" ]] && DASH_HOST="$_hv"
+        [[ -n "$_pv" ]] && DASH_PORT="$_pv"
+    fi
+    if [[ "$DASH_HOST" == "0.0.0.0" ]] || [[ "$DASH_HOST" == "*" ]] || [[ -z "$DASH_HOST" ]]; then
+        URL_HOST="$(hostname -I 2>/dev/null | awk '{print $1}')"
+        if [[ -z "$URL_HOST" ]]; then
+            URL_HOST="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit }}')"
+        fi
+        info "Dashboard bind: 0.0.0.0 (all interfaces), port: $DASH_PORT"
+        if [[ -n "$URL_HOST" ]]; then
+            info "Open in a browser: http://${URL_HOST}:${DASH_PORT}/"
+        else
+            info "Open in a browser: http://<this-host-ip>:${DASH_PORT}/"
+        fi
+    elif [[ "$DASH_HOST" == "127.0.0.1" ]] || [[ "$DASH_HOST" == "localhost" ]]; then
+        info "Dashboard address: $DASH_HOST, port: $DASH_PORT"
+        info "Open in a browser: http://127.0.0.1:${DASH_PORT}/"
+    else
+        URL_HOST="$DASH_HOST"
+        info "Dashboard address: $DASH_HOST, port: $DASH_PORT"
+        info "Open in a browser: http://${URL_HOST}:${DASH_PORT}/"
+    fi
 }
 
 main "$@"
