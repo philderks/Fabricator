@@ -53,7 +53,7 @@ export const useServerStore = defineStore('server', () => {
   // ---------- State ----------
   // Pushed by ServerLayout via watchers with immediate: true. We do NOT call
   // useRoute() here — setup-store route context is fragile under HMR and
-  // call-ordering changes. Layout owns route → store synchronization.
+  // call-ordering changes. Layout owns route-to-store synchronization.
   const currentServerId = ref(null)
   const currentRouteName = ref(null)
   const serversList = ref([])

@@ -62,7 +62,7 @@ function stopModpackProgressPolling() {
   store.clearModpackProgress()
 }
 
-// ---------- Route → store synchronization ----------
+// ---------- Route-to-store synchronization ----------
 // The store deliberately does NOT call useRoute() (setup-store route context
 // is fragile under HMR). The layout owns this sync. Both watchers use
 // immediate: true so the store has the right values before any action runs.

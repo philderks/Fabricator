@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import StatCard from '../../components/ui/StatCard.vue'
 import Panel from '../../components/ui/Panel.vue'
+import IconArrowRight from '../../components/ui/IconArrowRight.vue'
 import { useServerStore } from '../../stores/server'
 
 const store = useServerStore()
@@ -62,7 +63,10 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
 
         <Panel title="Recent logs">
           <template #action>
-            <a class="overview-page__panel-link" @click.prevent="store.goToConsole">Console →</a>
+            <a class="overview-page__panel-link" @click.prevent="store.goToConsole">
+              Console
+              <IconArrowRight />
+            </a>
           </template>
           <div class="overview-page__logs">
             <div v-if="!recentLogLines.length" class="overview-page__empty">No logs yet.</div>
@@ -76,7 +80,10 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
       <div class="overview-page__col">
         <Panel title="Installed mods">
           <template #action>
-            <a class="overview-page__panel-link" @click.prevent="store.goToMods">Manage →</a>
+            <a class="overview-page__panel-link" @click.prevent="store.goToMods">
+              Manage
+              <IconArrowRight />
+            </a>
           </template>
           <div v-if="!modPreview.length" class="overview-page__empty">No mods installed.</div>
           <ul v-else class="overview-page__mods">
@@ -206,6 +213,9 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
 }
 
 .overview-page__panel-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28em;
   font-size: var(--text-xs);
   color: var(--primary);
   cursor: pointer;
