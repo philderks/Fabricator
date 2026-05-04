@@ -89,7 +89,7 @@ export default {
       this.isExiting = true
       setTimeout(() => {
         this.$emit('close')
-      }, 300) // Match animation duration
+      }, 220) // Match animation duration
     }
   }
 }
@@ -105,15 +105,14 @@ export default {
   padding: 1rem;
   background: var(--bg-secondary);
   border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.05);
-  animation: toast-enter 0.3s ease-out;
-  transition: all 0.3s ease;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  transition: opacity 0.22s ease, transform 0.22s ease;
 }
 
 .toast.toast-exit {
-  animation: toast-exit 0.3s ease-in;
+  animation: toast-exit 0.22s ease-in;
   opacity: 0;
-  transform: translateX(100%);
+  transform: translateY(-0.75rem);
 }
 
 .toast-icon {
@@ -175,25 +174,14 @@ export default {
   color: var(--text-primary);
 }
 
-@keyframes toast-enter {
-  from {
-    opacity: 0;
-    transform: translateX(100%);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
 @keyframes toast-exit {
   from {
     opacity: 1;
-    transform: translateX(0);
+    transform: translateY(0);
   }
   to {
     opacity: 0;
-    transform: translateX(100%);
+    transform: translateY(-0.75rem);
   }
 }
 </style>

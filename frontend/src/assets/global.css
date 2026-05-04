@@ -81,6 +81,8 @@ body {
 
   /* Layout */
   --sidebar-width: 216px;
+  /* Top bar and sidebar logo row share one height so the chrome lines up */
+  --app-chrome-header-height: 57px;
 }
 
 /* Input Fields */
