@@ -19,8 +19,13 @@ let logsIntervalId = null
 let serverStatusIntervalId = null
 let modpackProgressIntervalId = null
 
+/** Routes that show live-ish console output; keep logs polling like the console page. */
+function shouldPollLogs(routeName) {
+  return routeName === 'ServerConsole' || routeName === 'ServerOverview'
+}
+
 function startLogPolling() {
-  if (logsIntervalId || route.name !== 'ServerConsole') return
+  if (logsIntervalId || !shouldPollLogs(route.name)) return
   logsIntervalId = setInterval(() => store.loadLogs(), 4000)
 }
 
@@ -66,7 +71,7 @@ function stopModpackProgressPolling() {
 watch(() => route.params.id, (id) => { store.currentServerId = id }, { immediate: true })
 watch(() => route.name, (name) => {
   store.currentRouteName = name
-  if (name === 'ServerConsole') {
+  if (shouldPollLogs(name)) {
     store.loadLogs()
     startLogPolling()
   } else {
@@ -85,7 +90,7 @@ watch(() => store.currentServerId, async (newId, oldId) => {
   stopServerStatusPolling()
   store.resetState()
   await store.refreshAll()
-  if (route.name === 'ServerConsole') {
+  if (shouldPollLogs(route.name)) {
     await store.loadLogs()
     startLogPolling()
   }
@@ -299,8 +304,10 @@ onUnmounted(() => {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
   padding: var(--space-5);
+  overflow-x: hidden;
   overflow-y: auto;
 }
 

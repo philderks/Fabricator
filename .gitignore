@@ -72,3 +72,4 @@ build/
 
 # Java
 java/
+.claude/settings.local.json

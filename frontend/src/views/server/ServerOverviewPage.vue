@@ -6,6 +6,8 @@ import { useServerStore } from '../../stores/server'
 
 const store = useServerStore()
 
+const RECENT_LOG_PREVIEW_LINES = 16
+
 const ramUsedDisplay = computed(() => store.ramMetrics.used.toFixed(1))
 const ramTotalDisplay = computed(() => store.ramMetrics.total.toFixed(1))
 const ramPercent = computed(() => {
@@ -19,7 +21,7 @@ const cpuDisplay = computed(() => {
 })
 const recentLogLines = computed(() => {
   const lines = store.logs.stdout || []
-  return lines.slice(-4)
+  return lines.slice(-RECENT_LOG_PREVIEW_LINES)
 })
 const modPreview = computed(() => store.installedMods.slice(0, 4))
 </script>
@@ -115,12 +117,16 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .overview-page__stats {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-3);
+  min-width: 0;
 }
 
 .overview-page__modpack {
@@ -142,14 +148,19 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
 
 .overview-page__row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: var(--space-3);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .overview-page__col {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .overview-page__perf {
@@ -209,12 +220,19 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
+  width: 100%;
+  min-height: 14rem;
+  max-height: 22rem;
+  overflow-x: hidden;
+  overflow-y: auto;
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--text-disabled);
 }
 
 .overview-page__log-line {
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
