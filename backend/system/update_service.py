@@ -18,18 +18,33 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+_TAG_CACHE_TTL = 15 * 60  # seconds
+_tag_cache: Dict[str, Any] = {"tag": None, "fetched_at": 0.0}
+_tag_cache_lock = threading.Lock()
+
+
 def _fetch_latest_tag(repo: str) -> Optional[str]:
+    with _tag_cache_lock:
+        if time.time() - _tag_cache["fetched_at"] < _TAG_CACHE_TTL:
+            return _tag_cache["tag"]
+
     url = f"https://api.github.com/repos/{repo}/releases/latest"
     req = request.Request(url, headers={"Accept": "application/vnd.github+json"})
+    tag: Optional[str] = None
     try:
         with request.urlopen(req, timeout=10) as response:
             payload = json.loads(response.read().decode("utf-8"))
-            tag = payload.get("tag_name")
-            if isinstance(tag, str) and tag:
-                return tag
+            value = payload.get("tag_name")
+            if isinstance(value, str) and value:
+                tag = value
     except (error.URLError, error.HTTPError, TimeoutError, OSError, json.JSONDecodeError):
-        return None
-    return None
+        pass
+
+    with _tag_cache_lock:
+        _tag_cache["tag"] = tag
+        _tag_cache["fetched_at"] = time.time()
+
+    return tag
 
 
 class UpdateService:
