@@ -25,7 +25,24 @@
           <option :value="selectedLoader">{{ loaderLabel }}</option>
         </select>
 
-        <select v-model="selectedVersion" @change="performSearch">
+        <select v-model="sortBy" @change="performSearch">
+          <option value="relevance">Relevance</option>
+          <option value="downloads">Downloads</option>
+          <option value="updated">Updated</option>
+          <option value="newest">Newest</option>
+        </select>
+
+        <button
+          type="button"
+          class="filter-version-toggle"
+          @click="toggleVersionFilter"
+        >
+          {{ versionFilterExpanded ? 'Hide version filter' : 'Version filter' }}
+        </button>
+      </div>
+
+      <div v-if="versionFilterExpanded" class="filters filters--extra">
+        <select v-model="selectedVersion" class="filters__version-select" @change="performSearch">
           <option value="">All Versions</option>
           <option :value="mcVersion" v-if="mcVersion">{{ mcVersion }} (Server)</option>
           <option
@@ -35,13 +52,6 @@
           >
             {{ version }}
           </option>
-        </select>
-
-        <select v-model="sortBy" @change="performSearch">
-          <option value="relevance">Relevance</option>
-          <option value="downloads">Downloads</option>
-          <option value="updated">Updated</option>
-          <option value="newest">Newest</option>
         </select>
       </div>
 
@@ -75,12 +85,13 @@
         @click="selectMod(mod)"
       >
         <AppButton
-          :variant="getInstallButtonVariant(mod)"
+          :variant="isModInstalled(mod) ? 'ghost' : getInstallButtonVariant(mod)"
           size="sm"
-          :title="getInstallButtonTitle(mod)"
+          :disabled="isModInstalled(mod)"
+          :title="isModInstalled(mod) ? 'This mod is already in your mods folder' : getInstallButtonTitle(mod)"
           @click.stop="installMod(mod)"
         >
-          Install
+          {{ isModInstalled(mod) ? 'Installed' : 'Install' }}
         </AppButton>
       </SearchResultCard>
     </div>
@@ -130,6 +141,8 @@ import CompatibilityConfirmModal from './CompatibilityConfirmModal.vue'
 import SearchResultCard from '../ui/SearchResultCard.vue'
 import AppButton from '../ui/AppButton.vue'
 import { searchMods, getGameVersions, getModVersions } from '../../api/modrinth'
+import { useServerStore } from '../../stores/server'
+import { installedJarMatchesBrowseHit } from '../../utils/modrinthJarMatch'
 
 export default {
   name: 'ModBrowserModal',
@@ -168,11 +181,21 @@ export default {
       pendingCompatibilityStatus: 'unknown',
       showCompatibilityModal: false,
       pendingCompatibilityVersions: [],
-      modVersionCache: {}
+      modVersionCache: {},
+      versionFilterExpanded: false
     };
   },
   computed: {
+    effectiveSearchVersion() {
+      if (!this.versionFilterExpanded) {
+        return this.mcVersion || ''
+      }
+      return this.selectedVersion
+    },
     versionMismatch() {
+      if (!this.versionFilterExpanded) {
+        return false
+      }
       return Boolean(
         this.selectedVersion &&
         this.mcVersion &&
@@ -197,6 +220,21 @@ export default {
     }
   },
   methods: {
+    isModInstalled(mod) {
+      const store = useServerStore()
+      return store.installedMods.some((file) =>
+        installedJarMatchesBrowseHit(file.filename || file.name, mod)
+      )
+    },
+    toggleVersionFilter() {
+      this.versionFilterExpanded = !this.versionFilterExpanded
+      if (!this.versionFilterExpanded) {
+        this.selectedVersion = this.mcVersion || ''
+        if (this.searchQuery.trim()) {
+          this.performSearch()
+        }
+      }
+    },
     async loadVersions() {
       try {
         const versions = await getGameVersions()
@@ -322,7 +360,7 @@ export default {
       try {
         const data = await searchMods({
           query: this.searchQuery,
-          version: this.selectedVersion,
+          version: this.effectiveSearchVersion,
           loader: this.selectedLoader,
           sort: this.sortBy,
           limit: 20
@@ -339,6 +377,9 @@ export default {
     },
 
     async installMod(mod) {
+      if (this.isModInstalled(mod)) {
+        return
+      }
       const status = this.getCompatibilityStatus(mod)
 
       if (status !== 'full') {
@@ -481,6 +522,7 @@ export default {
         // Reset on close
         this.searchQuery = '';
         this.results = [];
+        this.versionFilterExpanded = false;
         this.cancelCompatibilityInstall()
       }
 
@@ -538,6 +580,34 @@ export default {
 .filters {
   display: flex;
   gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.filters--extra {
+  margin-top: var(--space-3);
+}
+
+.filters--extra .filters__version-select {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+
+.filter-version-toggle {
+  flex: 1;
+  min-width: 8rem;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-primary);
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.filter-version-toggle:hover {
+  border-color: var(--primary);
+  color: var(--text-secondary);
 }
 
 .filters select {

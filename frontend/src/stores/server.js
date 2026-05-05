@@ -540,7 +540,6 @@ export const useServerStore = defineStore('server', () => {
         loader: modData.loader,
         server_id: currentServerId.value
       })
-      showModBrowser.value = false
       toast.success(`${modData.modTitle} installed successfully!`, 'Mod Installed')
       await loadMods()
     } catch (error) {
