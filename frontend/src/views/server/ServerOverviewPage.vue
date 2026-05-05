@@ -2,9 +2,12 @@
 import { computed } from 'vue'
 import StatCard from '../../components/ui/StatCard.vue'
 import Panel from '../../components/ui/Panel.vue'
+import IconArrowRight from '../../components/ui/IconArrowRight.vue'
 import { useServerStore } from '../../stores/server'
 
 const store = useServerStore()
+
+const RECENT_LOG_PREVIEW_LINES = 16
 
 const ramUsedDisplay = computed(() => store.ramMetrics.used.toFixed(1))
 const ramTotalDisplay = computed(() => store.ramMetrics.total.toFixed(1))
@@ -19,7 +22,7 @@ const cpuDisplay = computed(() => {
 })
 const recentLogLines = computed(() => {
   const lines = store.logs.stdout || []
-  return lines.slice(-4)
+  return lines.slice(-RECENT_LOG_PREVIEW_LINES)
 })
 const modPreview = computed(() => store.installedMods.slice(0, 4))
 </script>
@@ -60,7 +63,10 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
 
         <Panel title="Recent logs">
           <template #action>
-            <a class="overview-page__panel-link" @click.prevent="store.goToConsole">Console →</a>
+            <a class="overview-page__panel-link" @click.prevent="store.goToConsole">
+              Console
+              <IconArrowRight />
+            </a>
           </template>
           <div class="overview-page__logs">
             <div v-if="!recentLogLines.length" class="overview-page__empty">No logs yet.</div>
@@ -74,7 +80,10 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
       <div class="overview-page__col">
         <Panel title="Installed mods">
           <template #action>
-            <a class="overview-page__panel-link" @click.prevent="store.goToMods">Manage →</a>
+            <a class="overview-page__panel-link" @click.prevent="store.goToMods">
+              Manage
+              <IconArrowRight />
+            </a>
           </template>
           <div v-if="!modPreview.length" class="overview-page__empty">No mods installed.</div>
           <ul v-else class="overview-page__mods">
@@ -115,12 +124,16 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .overview-page__stats {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-3);
+  min-width: 0;
 }
 
 .overview-page__modpack {
@@ -142,14 +155,19 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
 
 .overview-page__row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: var(--space-3);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .overview-page__col {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .overview-page__perf {
@@ -195,6 +213,9 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
 }
 
 .overview-page__panel-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28em;
   font-size: var(--text-xs);
   color: var(--primary);
   cursor: pointer;
@@ -209,12 +230,19 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
+  width: 100%;
+  min-height: 14rem;
+  max-height: 22rem;
+  overflow-x: hidden;
+  overflow-y: auto;
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--text-disabled);
 }
 
 .overview-page__log-line {
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

@@ -100,7 +100,7 @@ const isRunning = computed(() => props.serverStatus.status === 'running')
 
 <style scoped>
 .app-topbar {
-  height: 52px;
+  height: var(--app-chrome-header-height);
   display: flex;
   align-items: center;
   justify-content: space-between;

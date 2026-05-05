@@ -32,6 +32,8 @@ defineProps({
   border-radius: var(--radius-md);
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .panel__header {
@@ -57,6 +59,7 @@ defineProps({
 
 .panel__body {
   padding: var(--space-4);
+  min-width: 0;
 }
 
 .panel__body--flush {

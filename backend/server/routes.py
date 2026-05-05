@@ -555,6 +555,39 @@ def delete_server_mod(server_id, filename):
     return jsonify({'success': True, 'message': f'{target.name} removed'})
 
 
+@server_bp.route('/servers/<server_id>/mods', methods=['DELETE'])
+def bulk_delete_server_mods(server_id):
+    server = storage.get_server(server_id)
+    if not server:
+        return jsonify({'error': 'Server not found'}), 404
+
+    data = request.get_json(silent=True) or {}
+    filenames = data.get('filenames', [])
+    if not isinstance(filenames, list) or not filenames:
+        return jsonify({'error': 'filenames must be a non-empty list'}), 400
+
+    try:
+        mods_path = _registry().resolve_mods_path(server)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    deleted = []
+    errors = []
+    for filename in filenames:
+        try:
+            target = _ensure_child_path(mods_path, filename)
+        except ValueError as exc:
+            errors.append({'filename': filename, 'error': str(exc)})
+            continue
+        if not target.exists() or not target.is_file():
+            errors.append({'filename': filename, 'error': 'File not found'})
+            continue
+        _unlink_with_retry(target)
+        deleted.append(filename)
+
+    return jsonify({'success': True, 'deleted': deleted, 'errors': errors})
+
+
 @server_bp.route('/servers/<server_id>/backups', methods=['GET'])
 def list_server_backups(server_id):
     server = storage.get_server(server_id)

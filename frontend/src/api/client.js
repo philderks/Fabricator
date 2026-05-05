@@ -129,8 +129,9 @@ export function put(endpoint, data = {}) {
 /**
  * DELETE request helper
  */
-export function del(endpoint) {
+export function del(endpoint, data) {
   return apiRequest(endpoint, {
-    method: 'DELETE'
+    method: 'DELETE',
+    ...(data !== undefined ? { body: JSON.stringify(data) } : {})
   })
 }

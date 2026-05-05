@@ -55,7 +55,7 @@ const updateLabel = computed(() => {
 
 const updateVersionLabel = computed(() => {
   const v = updateState.value.currentVersion || appVersion
-  return v ? `v${v}` : ''
+  return v ? String(v) : ''
 })
 
 const runUpdate = async () => {
@@ -153,8 +153,8 @@ onUnmounted(() => {
             <path d="M2 3.5A1.5 1.5 0 013.5 2h3l1.5 2H12a1.5 1.5 0 011.5 1.5v7A1.5 1.5 0 0112 14H3.5A1.5 1.5 0 012 12.5v-9z"/>
           </template>
           <template v-else-if="item.icon === 'settings'">
-            <circle cx="7.5" cy="7.5" r="2"/>
-            <path d="M7.5 1v1.5M7.5 12.5V14M1 7.5h1.5M12.5 7.5H14M3 3l1 1M11 11l1 1M11 3l-1 1M3 12l1-1" stroke-linecap="round"/>
+            <path d="M11.5 8.9L13.4 8.9L13.4 6.2L11.5 6.1L10.7 4.8L11.6 3.1L9.3 1.8L8.2 3.4L6.8 3.4L5.8 1.8L3.4 3.1L4.3 4.8L3.6 6.1L1.7 6.2L1.7 8.9L3.6 8.9L4.3 10.2L3.4 11.9L5.8 13.2L6.8 11.6L8.2 11.6L9.3 13.2L11.6 11.9L10.7 10.2Z"/>
+            <circle cx="7.5" cy="7.5" r="2.2"/>
           </template>
         </svg>
         <span>{{ item.label }}</span>
@@ -198,8 +198,10 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  height: var(--app-chrome-header-height);
   padding: var(--space-4) var(--space-3);
   border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
 }
 
 .app-sidebar__logo-img {
