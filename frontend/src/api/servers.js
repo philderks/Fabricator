@@ -167,6 +167,16 @@ export async function removeMod(serverId, modName) {
 }
 
 /**
+ * Remove multiple mods from the server in one request
+ * @param {string|number} serverId - Server ID
+ * @param {string[]} filenames - Array of mod filenames to remove
+ * @returns {Promise<Object>} Bulk removal result with deleted/errors arrays
+ */
+export async function bulkRemoveMods(serverId, filenames) {
+  return del(`/api/servers/${serverId}/mods`, { filenames })
+}
+
+/**
  * Create a server backup
  * @param {string|number} serverId - Server ID
  * @returns {Promise<Object>} Backup creation result

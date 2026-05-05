@@ -7,6 +7,7 @@ import {
   getServers,
   getInstalledMods,
   removeMod,
+  bulkRemoveMods,
   getServerLogs,
   startServer,
   stopServer,
@@ -73,6 +74,8 @@ export const useServerStore = defineStore('server', () => {
   const showConfirmModal = ref(false)
   const confirmModalData = ref({})
   const modToRemove = ref(null)
+  const selectedModPaths = ref(new Set())
+  const bulkDeleting = ref(false)
   const installLoading = ref(false)
   const modpackInstalling = ref(false)
   const actionState = ref({ start: false, stop: false, restart: false })
@@ -239,6 +242,13 @@ export const useServerStore = defineStore('server', () => {
     if (!modSearch.value) return installedMods.value
     return installedMods.value.filter((m) => m.name.toLowerCase().includes(modSearch.value.toLowerCase()))
   })
+
+  const selectedCount = computed(() => selectedModPaths.value.size)
+
+  const allFilteredSelected = computed(() =>
+    filteredMods.value.length > 0 &&
+    filteredMods.value.every((m) => selectedModPaths.value.has(m.path))
+  )
 
   const playersDisplay = computed(() => {
     const o = serverStatus.value.players.online
@@ -692,6 +702,10 @@ export const useServerStore = defineStore('server', () => {
 
   async function confirmRemoveMod() {
     if (!modToRemove.value) return
+    if (modToRemove.value === '__bulk__') {
+      await confirmBulkRemoveMods()
+      return
+    }
     try {
       await removeMod(currentServerId.value, modToRemove.value.filename || modToRemove.value.name)
       toast.success(`${modToRemove.value.name} removed`, 'Mod Removed')
@@ -707,7 +721,76 @@ export const useServerStore = defineStore('server', () => {
 
   function cancelRemoveMod() {
     showConfirmModal.value = false
+    if (modToRemove.value === '__bulk__') {
+      selectedModPaths.value = new Set()
+    }
     modToRemove.value = null
+  }
+
+  function toggleModSelection(mod) {
+    const next = new Set(selectedModPaths.value)
+    if (next.has(mod.path)) {
+      next.delete(mod.path)
+    } else {
+      next.add(mod.path)
+    }
+    selectedModPaths.value = next
+  }
+
+  function toggleSelectAllMods() {
+    if (allFilteredSelected.value) {
+      const next = new Set(selectedModPaths.value)
+      filteredMods.value.forEach((m) => next.delete(m.path))
+      selectedModPaths.value = next
+    } else {
+      const next = new Set(selectedModPaths.value)
+      filteredMods.value.forEach((m) => next.add(m.path))
+      selectedModPaths.value = next
+    }
+  }
+
+  function clearModSelection() {
+    selectedModPaths.value = new Set()
+  }
+
+  function handleBulkRemoveMods() {
+    if (selectedCount.value === 0) return
+    const n = selectedCount.value
+    confirmModalData.value = {
+      title: 'Remove Mods',
+      message: `Remove ${n} selected mod${n === 1 ? '' : 's'}?`,
+      description: 'This will permanently delete the selected mod files from the server. This action cannot be undone.',
+      type: 'danger',
+      confirmText: `Remove ${n} mod${n === 1 ? '' : 's'}`,
+      cancelText: 'Cancel'
+    }
+    modToRemove.value = '__bulk__'
+    showConfirmModal.value = true
+  }
+
+  async function confirmBulkRemoveMods() {
+    const paths = new Set(selectedModPaths.value)
+    const mods = installedMods.value.filter((m) => paths.has(m.path))
+    const filenames = mods.map((m) => m.filename || m.name)
+    if (!filenames.length) {
+      showConfirmModal.value = false
+      modToRemove.value = null
+      return
+    }
+    bulkDeleting.value = true
+    try {
+      await bulkRemoveMods(currentServerId.value, filenames)
+      toast.success(`${filenames.length} mod${filenames.length === 1 ? '' : 's'} removed`, 'Mods Removed')
+      selectedModPaths.value = new Set()
+      await loadMods()
+    } catch (error) {
+      console.error('Failed to bulk remove mods:', error)
+      toast.error('Failed to remove selected mods', 'Error')
+    } finally {
+      bulkDeleting.value = false
+      showConfirmModal.value = false
+      modToRemove.value = null
+    }
   }
 
   async function performServerAction(action, fn, successMessage) {
@@ -799,6 +882,8 @@ export const useServerStore = defineStore('server', () => {
     fileEditor.value = { path: null, content: '', originalContent: '', loading: false, saving: false, error: null }
     modSearch.value = ''
     modToRemove.value = null
+    selectedModPaths.value = new Set()
+    bulkDeleting.value = false
     backupToRestore.value = null
     backupToDelete.value = null
     serverLoading.value = true
@@ -854,6 +939,8 @@ export const useServerStore = defineStore('server', () => {
     showConfirmModal,
     confirmModalData,
     modToRemove,
+    selectedModPaths,
+    bulkDeleting,
     installLoading,
     modpackInstalling,
     actionState,
@@ -888,6 +975,8 @@ export const useServerStore = defineStore('server', () => {
     canEditSettings,
     ramMetrics,
     filteredMods,
+    selectedCount,
+    allFilteredSelected,
     playersDisplay,
     statusLabel,
     startLocked,
@@ -942,6 +1031,10 @@ export const useServerStore = defineStore('server', () => {
     handleRemoveMod,
     confirmRemoveMod,
     cancelRemoveMod,
+    toggleModSelection,
+    toggleSelectAllMods,
+    clearModSelection,
+    handleBulkRemoveMods,
     handleStart,
     handleStop,
     handleRestart,
