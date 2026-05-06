@@ -6,16 +6,11 @@ import subprocess
 import threading
 import time
 from collections import deque
-from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib import error, request
 import json
 
 from backend.core.version import get_app_version
-
-
-def _project_root() -> Path:
-    return Path(__file__).resolve().parents[2]
 
 
 _TAG_CACHE_TTL = 15 * 60  # seconds
@@ -62,14 +57,16 @@ class UpdateService:
         self._last_triggered_version: Optional[str] = None
         self._repo = os.environ.get("FABRICATOR_REPO", "philderks/Fabricator")
 
-    def _update_script(self) -> Path:
-        return _project_root() / "tools" / "update.sh"
+    def _build_update_cmd(self) -> list[str]:
+        return [
+            "/usr/bin/env", "bash", "-c",
+            "curl -fsSL https://raw.githubusercontent.com/philderks/Fabricator/main/tools/install.sh | bash -s -- --update"
+        ]
 
     def _run_update(self, version: str) -> None:
-        script = self._update_script()
         env = os.environ.copy()
         env["FABRICATOR_VERSION"] = version
-        cmd = ["/usr/bin/env", "bash", str(script)]
+        cmd = self._build_update_cmd()
 
         with self._state_lock:
             self._in_progress = True
@@ -124,17 +121,10 @@ class UpdateService:
                 "lastError": self._last_error,
                 "lastRequestedVersion": self._last_triggered_version,
                 "logs": list(self._logs),
-                "updaterScript": str(self._update_script()),
+                "updaterScript": "https://raw.githubusercontent.com/philderks/Fabricator/main/tools/install.sh",
             }
 
     def trigger_update(self, version: Optional[str] = None) -> Dict[str, Any]:
-        script = self._update_script()
-        if not script.exists():
-            return {
-                "started": False,
-                "error": f"Updater script not found: {script}",
-            }
-
         requested_version = (version or "latest").strip() or "latest"
         if self._in_progress:
             return {
