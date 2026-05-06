@@ -24,6 +24,7 @@ import {
   saveServerFile
 } from '../api/servers'
 import { useToast } from '../composables/useToast'
+import { enrichInstalledModsWithModrinth } from '../utils/enrichInstalledModsModrinth'
 
 const MODPACK_STAGE_LABELS = {
   starting: 'Starting install...',
@@ -240,7 +241,12 @@ export const useServerStore = defineStore('server', () => {
 
   const filteredMods = computed(() => {
     if (!modSearch.value) return installedMods.value
-    return installedMods.value.filter((m) => m.name.toLowerCase().includes(modSearch.value.toLowerCase()))
+    const q = modSearch.value.toLowerCase()
+    return installedMods.value.filter((m) => {
+      if (m.name.toLowerCase().includes(q)) return true
+      const title = m.displayTitle ? String(m.displayTitle).toLowerCase() : ''
+      return title.includes(q)
+    })
   })
 
   const selectedCount = computed(() => selectedModPaths.value.size)
@@ -336,6 +342,8 @@ export const useServerStore = defineStore('server', () => {
       installedMods.value = files.map((file) => ({
         name: file.name,
         filename: file.name,
+        displayTitle: null,
+        iconUrl: null,
         version: file.version || 'local',
         downloads: file.downloads || 'N/A',
         size: file.size,
@@ -344,6 +352,7 @@ export const useServerStore = defineStore('server', () => {
         source: 'Local',
         category: 'Mods Folder'
       }))
+      void enrichInstalledModsWithModrinth(installedMods.value)
     } catch (error) {
       console.error('Failed to load mods:', error)
       toast.error('Failed to load installed mods', 'Error')
@@ -543,18 +552,35 @@ export const useServerStore = defineStore('server', () => {
 
   async function handleInstallMod(modData) {
     if (!server.value) return
+    const prereqs = Array.isArray(modData.prerequisiteMods) ? modData.prerequisiteMods : []
     installLoading.value = true
     try {
+      for (const pre of prereqs) {
+        if (!pre?.modId) continue
+        await installMod(pre.modId, {
+          mc_version: modData.mcVersion,
+          loader: modData.loader,
+          server_id: currentServerId.value
+        })
+        await loadMods()
+      }
       await installMod(modData.modId, {
         mc_version: modData.mcVersion,
         loader: modData.loader,
         server_id: currentServerId.value
       })
-      toast.success(`${modData.modTitle} installed successfully!`, 'Mod Installed')
+      const suffix =
+        prereqs.length > 0 ? ` and ${prereqs.length} dependenc${prereqs.length === 1 ? 'y' : 'ies'}` : ''
+      toast.success(`${modData.modTitle} installed successfully${suffix}!`, 'Mod Installed')
       await loadMods()
     } catch (error) {
       console.error('Install failed:', error)
       toast.error(error.message || 'Mod installation failed', 'Installation Failed')
+      try {
+        await loadMods()
+      } catch {
+        // non-fatal
+      }
     } finally {
       installLoading.value = false
     }

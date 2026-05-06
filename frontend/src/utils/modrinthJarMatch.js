@@ -16,10 +16,22 @@ function jarNameMatchesModrinthProjectId(jarName, projectIdOrSlug) {
   return nFlat === `${idCompact}.jar` || nFlat.startsWith(`${idCompact}-`)
 }
 
-export function installedJarMatchesBrowseHit(jarName, mod) {
-  if (!mod) return false
+/**
+ * @param {string} jarName
+ * @param {{ id?: string, slug?: string } | null} projectRef - Modrinth project id and/or slug
+ */
+export function installedJarMatchesProjectRef(jarName, projectRef) {
+  if (!projectRef) return false
   const ids = [...new Set(
-    [mod.slug, mod.project_id].filter(Boolean).map((s) => String(s).toLowerCase())
+    [projectRef.slug, projectRef.id].filter(Boolean).map((s) => String(s).toLowerCase())
   )]
   return ids.some((id) => jarNameMatchesModrinthProjectId(jarName, id))
+}
+
+export function installedJarMatchesBrowseHit(jarName, mod) {
+  if (!mod) return false
+  return installedJarMatchesProjectRef(jarName, {
+    id: mod.project_id,
+    slug: mod.slug
+  })
 }

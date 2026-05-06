@@ -133,22 +133,39 @@
     @cancel="cancelCompatibilityInstall"
     @close="cancelCompatibilityInstall"
   />
+
+  <ModDependencyModal
+    :show="showDependencyModal"
+    :main-mod-title="pendingDependencyModTitle"
+    :missing-deps="pendingMissingDeps"
+    @cancel="cancelDependencyInstall"
+    @install-main-only="onDependencyInstallMainOnly"
+    @install-with-deps="onDependencyInstallWithDeps"
+  />
 </template>
 
 <script>
 import BaseModal from './BaseModal.vue'
 import CompatibilityConfirmModal from './CompatibilityConfirmModal.vue'
+import ModDependencyModal from './ModDependencyModal.vue'
 import SearchResultCard from '../ui/SearchResultCard.vue'
 import AppButton from '../ui/AppButton.vue'
-import { searchMods, getGameVersions, getModVersions } from '../../api/modrinth'
+import {
+  searchMods,
+  getGameVersions,
+  getModVersions,
+  resolveProjectVersion,
+  getModDetails
+} from '../../api/modrinth'
 import { useServerStore } from '../../stores/server'
-import { installedJarMatchesBrowseHit } from '../../utils/modrinthJarMatch'
+import { installedJarMatchesBrowseHit, installedJarMatchesProjectRef } from '../../utils/modrinthJarMatch'
 
 export default {
   name: 'ModBrowserModal',
   components: {
     BaseModal,
     CompatibilityConfirmModal,
+    ModDependencyModal,
     SearchResultCard,
     AppButton
   },
@@ -182,10 +199,18 @@ export default {
       showCompatibilityModal: false,
       pendingCompatibilityVersions: [],
       modVersionCache: {},
-      versionFilterExpanded: false
+      versionFilterExpanded: false,
+      showDependencyModal: false,
+      pendingDependencyContext: null
     };
   },
   computed: {
+    pendingDependencyModTitle() {
+      return this.pendingDependencyContext?.mod?.title || ''
+    },
+    pendingMissingDeps() {
+      return this.pendingDependencyContext?.missing || []
+    },
     effectiveSearchVersion() {
       if (!this.versionFilterExpanded) {
         return this.mcVersion || ''
@@ -391,30 +416,92 @@ export default {
         return
       }
 
-      this.performInstall(mod)
+      await this.prepareInstall(mod)
     },
 
-    performInstall(mod, versionOverride = null) {
+    /** Resolves the Modrinth version used for install and warns when required dependencies are missing. */
+    async prepareInstall(mod, versionOverride = null) {
       const preferredVersion = versionOverride || this.mcVersion
-      this.$emit('install', {
+      const loader = (this.loader || 'fabric').toLowerCase()
+      try {
+        const resolved = await resolveProjectVersion(mod.project_id, {
+          mc_version: preferredVersion,
+          loader
+        })
+        const version = resolved?.version
+        if (!version || !Array.isArray(version.dependencies)) {
+          this.performInstall(mod, versionOverride)
+          return
+        }
+
+        const required = version.dependencies.filter(
+          (d) => d && d.dependency_type === 'required' && d.project_id
+        )
+        const store = useServerStore()
+        const missingMap = new Map()
+        for (const dep of required) {
+          const pid = dep.project_id
+          let details
+          try {
+            details = await getModDetails(pid)
+          } catch {
+            details = { id: pid, slug: pid, title: pid }
+          }
+          const ref = {
+            id: details.id || pid,
+            slug: details.slug
+          }
+          const installed = store.installedMods.some((file) =>
+            installedJarMatchesProjectRef(file.filename || file.name, ref)
+          )
+          if (!installed) {
+            const key = details.id || pid
+            if (!missingMap.has(key)) {
+              missingMap.set(key, {
+                modId: details.id || pid,
+                modTitle: details.title || details.slug || String(pid)
+              })
+            }
+          }
+        }
+        const missing = [...missingMap.values()]
+        if (missing.length > 0) {
+          this.pendingDependencyContext = { mod, mcVersion: preferredVersion, missing }
+          this.showDependencyModal = true
+          return
+        }
+      } catch (e) {
+        console.warn('Dependency check skipped:', e)
+      }
+      this.performInstall(mod, versionOverride)
+    },
+
+    performInstall(mod, versionOverride = null, prerequisiteMods = null) {
+      const preferredVersion = versionOverride || this.mcVersion
+      const payload = {
         modId: mod.project_id,
         modTitle: mod.title,
         mcVersion: preferredVersion,
         loader: (this.loader || 'fabric').toLowerCase()
-      })
+      }
+      if (Array.isArray(prerequisiteMods) && prerequisiteMods.length > 0) {
+        payload.prerequisiteMods = prerequisiteMods
+      }
+      this.$emit('install', payload)
     },
 
-    confirmCompatibilityInstall(selectedVersion = null) {
+    async confirmCompatibilityInstall(selectedVersion = null) {
       if (!this.pendingMod) {
         this.cancelCompatibilityInstall()
         return
       }
 
-      this.performInstall(this.pendingMod, selectedVersion)
+      const mod = this.pendingMod
       this.pendingMod = null
       this.pendingCompatibilityVersions = []
       this.pendingCompatibilityStatus = 'unknown'
       this.showCompatibilityModal = false
+      await this.prepareInstall(mod, selectedVersion)
     },
 
     cancelCompatibilityInstall() {
@@ -422,6 +509,25 @@ export default {
       this.pendingCompatibilityVersions = []
       this.pendingCompatibilityStatus = 'unknown'
       this.showCompatibilityModal = false
+    },
+
+    cancelDependencyInstall() {
+      this.showDependencyModal = false
+      this.pendingDependencyContext = null
+    },
+
+    onDependencyInstallMainOnly() {
+      const ctx = this.pendingDependencyContext
+      this.cancelDependencyInstall()
+      if (!ctx?.mod) return
+      this.performInstall(ctx.mod, ctx.mcVersion)
+    },
+
+    onDependencyInstallWithDeps() {
+      const ctx = this.pendingDependencyContext
+      this.cancelDependencyInstall()
+      if (!ctx?.mod) return
+      this.performInstall(ctx.mod, ctx.mcVersion, ctx.missing)
     },
 
     selectMod(mod) {
@@ -524,6 +630,7 @@ export default {
         this.results = [];
         this.versionFilterExpanded = false;
         this.cancelCompatibilityInstall()
+        this.cancelDependencyInstall()
       }
 
       this.selectedLoader = (this.loader || 'fabric').toLowerCase()

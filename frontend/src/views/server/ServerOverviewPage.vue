@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import StatCard from '../../components/ui/StatCard.vue'
 import Panel from '../../components/ui/Panel.vue'
 import IconArrowRight from '../../components/ui/IconArrowRight.vue'
+import { installedModDisplayName, installedModInitial } from '../../utils/installedModDisplay'
 import { useServerStore } from '../../stores/server'
 
 const store = useServerStore()
@@ -88,7 +89,18 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
           <div v-if="!modPreview.length" class="overview-page__empty">No mods installed.</div>
           <ul v-else class="overview-page__mods">
             <li v-for="mod in modPreview" :key="mod.path" class="overview-page__mod">
-              <span class="overview-page__mod-name">{{ mod.name }}</span>
+              <div class="overview-page__mod-main">
+                <div class="overview-page__mod-icon" aria-hidden="true">
+                  <img
+                    v-if="mod.iconUrl"
+                    class="overview-page__mod-icon-img"
+                    :src="mod.iconUrl"
+                    alt=""
+                  />
+                  <span v-else class="overview-page__mod-icon-letter">{{ installedModInitial(mod) }}</span>
+                </div>
+                <span class="overview-page__mod-name">{{ installedModDisplayName(mod) }}</span>
+              </div>
               <span class="overview-page__mod-version">{{ mod.version }}</span>
             </li>
           </ul>
@@ -267,6 +279,7 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--space-2);
   padding: var(--space-2) 0;
   border-bottom: 1px solid var(--border-color);
 }
@@ -275,9 +288,44 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
   border-bottom: none;
 }
 
+.overview-page__mod-main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  flex: 1;
+}
+
+.overview-page__mod-icon {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-tertiary);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.overview-page__mod-icon-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.overview-page__mod-icon-letter {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
 .overview-page__mod-name {
   font-size: var(--text-sm);
-  color: var(--text-secondary);
+  font-weight: 600;
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

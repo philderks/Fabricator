@@ -22,6 +22,9 @@ const navItems = [
 ]
 
 // ---------- Update polling (relocated from Servers.vue) ----------
+const POLL_INTERVAL_IDLE = 15 * 60 * 1000   // 15 min — avoid hammering GitHub API
+const POLL_INTERVAL_ACTIVE = 4_000           // 4 s while an update is running
+
 const updateState = ref({
   inProgress: false,
   currentVersion: appVersion,
@@ -41,6 +44,15 @@ const loadUpdateState = async () => {
     // poll failure would be noisy.
     console.error('Failed to load update status:', error)
   }
+}
+
+const scheduleNextPoll = () => {
+  if (updateStatusIntervalId) clearInterval(updateStatusIntervalId)
+  const interval = updateState.value.inProgress ? POLL_INTERVAL_ACTIVE : POLL_INTERVAL_IDLE
+  updateStatusIntervalId = setInterval(async () => {
+    await loadUpdateState()
+    scheduleNextPoll()
+  }, interval)
 }
 
 const updateAvailable = computed(() =>
@@ -71,6 +83,7 @@ const runUpdate = async () => {
     if (result.started) {
       toast.success('Update started in background', 'Fabricator Update')
       await loadUpdateState()
+      scheduleNextPoll()
     } else {
       toast.error(result.error || 'Unable to start update', 'Fabricator Update')
     }
@@ -82,9 +95,9 @@ const runUpdate = async () => {
   }
 }
 
-onMounted(() => {
-  loadUpdateState()
-  updateStatusIntervalId = setInterval(loadUpdateState, 4000)
+onMounted(async () => {
+  await loadUpdateState()
+  scheduleNextPoll()
 })
 
 onUnmounted(() => {

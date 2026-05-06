@@ -3,14 +3,10 @@ import { computed } from 'vue'
 import AppButton from '../../components/ui/AppButton.vue'
 import Panel from '../../components/ui/Panel.vue'
 import { formatFileSize } from '../../utils/format'
+import { installedModDisplayName, installedModInitial } from '../../utils/installedModDisplay'
 import { useServerStore } from '../../stores/server'
 
 const store = useServerStore()
-
-const initialOf = (name) => {
-  if (!name) return '?'
-  return name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 1).toUpperCase() || '?'
-}
 
 const onSearch = (event) => { store.modSearch = event.target.value }
 
@@ -89,7 +85,7 @@ const showEmpty = computed(() => !store.modsLoading && store.filteredMods.length
           class="mods-page__item"
           :class="{ 'mods-page__item--selected': store.selectedModPaths.has(mod.path) }"
         >
-          <label class="mods-page__item-checkbox-label" :aria-label="`Select ${mod.name}`">
+          <label class="mods-page__item-checkbox-label" :aria-label="`Select ${installedModDisplayName(mod)}`">
             <input
               type="checkbox"
               class="mods-page__checkbox"
@@ -97,10 +93,18 @@ const showEmpty = computed(() => !store.modsLoading && store.filteredMods.length
               @change="store.toggleModSelection(mod)"
             />
           </label>
-          <div class="mods-page__icon" aria-hidden="true">{{ initialOf(mod.name) }}</div>
+          <div class="mods-page__icon" aria-hidden="true">
+            <img
+              v-if="mod.iconUrl"
+              class="mods-page__icon-img"
+              :src="mod.iconUrl"
+              alt=""
+            />
+            <span v-else class="mods-page__icon-letter">{{ installedModInitial(mod) }}</span>
+          </div>
           <div class="mods-page__item-info">
             <div class="mods-page__item-name-row">
-              <span class="mods-page__item-name">{{ mod.name }}</span>
+              <span class="mods-page__item-name">{{ installedModDisplayName(mod) }}</span>
               <span class="mods-page__item-version">{{ mod.version }}</span>
             </div>
             <span class="mods-page__item-meta">
@@ -276,7 +280,8 @@ const showEmpty = computed(() => !store.modsLoading && store.filteredMods.length
 
 .mods-page__item-name {
   font-size: var(--text-sm);
-  color: var(--text-secondary);
+  font-weight: 600;
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -288,8 +293,8 @@ const showEmpty = computed(() => !store.modsLoading && store.filteredMods.length
 }
 
 .mods-page__icon {
-  width: 32px;
-  height: 32px;
+  width: 44px;
+  height: 44px;
   flex-shrink: 0;
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
@@ -297,10 +302,21 @@ const showEmpty = computed(() => !store.modsLoading && store.filteredMods.length
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
+}
+
+.mods-page__icon-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.mods-page__icon-letter {
   font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--primary);
+  font-size: var(--text-md);
+  font-weight: 700;
+  color: var(--text-muted);
 }
 
 .mods-page__item-name-row {
