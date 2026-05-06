@@ -31,6 +31,10 @@ main() {
     elif [[ "${1:-}" == "--install" ]]; then
         MODE="install"
         shift
+    elif [ -f "$APP_DIR/.fabricator_version" ]; then
+        MODE="update"
+    else
+        MODE="install"
     fi
 
     case "$MODE" in
