@@ -543,18 +543,35 @@ export const useServerStore = defineStore('server', () => {
 
   async function handleInstallMod(modData) {
     if (!server.value) return
+    const prereqs = Array.isArray(modData.prerequisiteMods) ? modData.prerequisiteMods : []
     installLoading.value = true
     try {
+      for (const pre of prereqs) {
+        if (!pre?.modId) continue
+        await installMod(pre.modId, {
+          mc_version: modData.mcVersion,
+          loader: modData.loader,
+          server_id: currentServerId.value
+        })
+        await loadMods()
+      }
       await installMod(modData.modId, {
         mc_version: modData.mcVersion,
         loader: modData.loader,
         server_id: currentServerId.value
       })
-      toast.success(`${modData.modTitle} installed successfully!`, 'Mod Installed')
+      const suffix =
+        prereqs.length > 0 ? ` and ${prereqs.length} dependenc${prereqs.length === 1 ? 'y' : 'ies'}` : ''
+      toast.success(`${modData.modTitle} installed successfully${suffix}!`, 'Mod Installed')
       await loadMods()
     } catch (error) {
       console.error('Install failed:', error)
       toast.error(error.message || 'Mod installation failed', 'Installation Failed')
+      try {
+        await loadMods()
+      } catch {
+        // non-fatal
+      }
     } finally {
       installLoading.value = false
     }
