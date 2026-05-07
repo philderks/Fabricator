@@ -18,8 +18,20 @@ def get_base_path() -> str:
 
 
 def setup_paths() -> None:
-    """Ensure the working directory mirrors the executable location."""
-    if getattr(sys, 'frozen', False):
+    """Ensure cwd is a stable, writable location for the bundled exe.
+
+    On Windows the .exe is often launched from Downloads or another transient
+    folder, so we cd into %APPDATA%\\Fabricator instead. On POSIX deployments
+    the install script controls the working directory, so we mirror the
+    executable location as before.
+    """
+    if not getattr(sys, 'frozen', False):
+        return
+    from backend.utils.platform import appdata_dir
+    target = appdata_dir()
+    if target is not None:
+        os.chdir(target)
+    else:
         os.chdir(os.path.dirname(sys.executable))
 
 

@@ -11,6 +11,8 @@ import os
 from typing import List
 from urllib.parse import urlparse
 
+from backend.utils.platform import appdata_dir
+
 
 def _parse_cors_origins(raw: str) -> List[str]:
     """Parse CORS_ORIGINS env as a comma-separated allowlist.
@@ -80,14 +82,24 @@ class Config:
         )
 
     # Sub-classes override these to change defaults without duplicating env
-    # handling.
+    # handling. On Windows we always anchor data under %APPDATA%\Fabricator
+    # so the .exe stays portable and data survives if the user moves it.
     def _default_servers_root(self) -> str:
+        appdata = appdata_dir()
+        if appdata is not None:
+            return str(appdata / "servers")
         return os.path.join(os.getcwd(), "servers")
 
     def _default_servers_file(self) -> str:
+        appdata = appdata_dir()
+        if appdata is not None:
+            return str(appdata / "servers.json")
         return os.path.join(self.PROJECT_ROOT, "servers.json")
 
     def _default_java_root(self) -> str:
+        appdata = appdata_dir()
+        if appdata is not None:
+            return str(appdata / "java")
         return os.path.join(self.PROJECT_ROOT, "java")
 
 
