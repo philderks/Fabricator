@@ -919,7 +919,10 @@ def install_server(server_id):
             )
 
             if result.success:
-                storage.update_server_status(server_id, 'stopped')
+                updates: dict = {'status': 'stopped'}
+                if result.launch is not None:
+                    updates['launch'] = result.launch.to_dict()
+                storage.update_server(server_id, updates)
                 return jsonify({
                     'success': True,
                     'message': result.message,
