@@ -60,10 +60,10 @@ def _registry():
     return get_server_process_registry()
 
 
-@lru_cache(maxsize=1)
-def _fabric_meta_dir():
-    """Lazy, cached accessor for the Fabric meta staging temp dir."""
-    return platform_utils.temp_directory('fabricator-meta')
+@lru_cache(maxsize=8)
+def _loader_meta_dir(loader: str):
+    """Lazy, cached accessor for a per-loader meta staging temp dir."""
+    return platform_utils.temp_directory(f'fabricator-meta-{loader}')
 
 
 def _handle_remove_readonly(func, path, exc_info):
@@ -1270,7 +1270,7 @@ def get_server_metrics(server_id):
 @server_bp.route('/fabric/versions/game', methods=['GET'])
 def get_fabric_game_versions():
     """Get Minecraft versions supported by Fabric."""
-    installer = FabricInstaller(_fabric_meta_dir())
+    installer = FabricInstaller(_loader_meta_dir('fabric'))
     versions = installer.get_minecraft_versions()
     return jsonify(versions)
 
@@ -1279,9 +1279,32 @@ def get_fabric_game_versions():
 def get_fabric_loader_versions():
     """Get available Fabric loader versions."""
     mc_version = request.args.get('mc_version')
-    installer = FabricInstaller(_fabric_meta_dir())
+    installer = FabricInstaller(_loader_meta_dir('fabric'))
     versions = installer.get_available_versions(mc_version)
     return jsonify(versions)
+
+
+@server_bp.route('/loaders/<loader>/versions/game', methods=['GET'])
+def get_loader_game_versions(loader):
+    """Return Minecraft versions supported by ``loader``."""
+    installer = _get_installer(loader, _loader_meta_dir(loader.lower()))
+    if installer is None:
+        return jsonify({'error': f'Unknown loader: {loader}'}), 404
+    return jsonify(installer.get_minecraft_versions())
+
+
+@server_bp.route('/loaders/<loader>/versions/loader', methods=['GET'])
+def get_loader_loader_versions(loader):
+    """Return loader-specific versions for ``loader``.
+
+    Some loaders (e.g. Vanilla) do not have a separate loader version; those
+    return an empty list.
+    """
+    installer = _get_installer(loader, _loader_meta_dir(loader.lower()))
+    if installer is None:
+        return jsonify({'error': f'Unknown loader: {loader}'}), 404
+    mc_version = request.args.get('mc_version')
+    return jsonify(installer.get_available_versions(mc_version))
 
 
 @server_bp.route('/servers/<server_id>/console', methods=['POST'])
