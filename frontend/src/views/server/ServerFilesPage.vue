@@ -59,10 +59,42 @@ const onCrumbClick = (crumb) => {
 
 const onRefresh = () => store.openFileBrowser(store.fileBrowser.currentPath)
 const canGoUp = computed(() => Boolean(store.fileBrowser.currentPath))
+
+const copyState = ref('idle')
+const onCopyPath = async () => {
+  const path = store.fileBrowser.absolutePath
+  if (!path) return
+  try {
+    await navigator.clipboard.writeText(path)
+    copyState.value = 'copied'
+    setTimeout(() => { copyState.value = 'idle' }, 1500)
+  } catch (err) {
+    console.error('Clipboard write failed:', err)
+    copyState.value = 'error'
+    setTimeout(() => { copyState.value = 'idle' }, 1500)
+  }
+}
 </script>
 
 <template>
   <div class="files-page">
+    <div v-if="store.fileBrowser.absolutePath" class="files-page__location">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+        <path d="M2 3.5A1.5 1.5 0 013.5 2h2.5l1.5 2H11a1.5 1.5 0 011.5 1.5v6A1.5 1.5 0 0111 13H3.5A1.5 1.5 0 012 11.5v-8z" />
+      </svg>
+      <code class="files-page__location-path">{{ store.fileBrowser.absolutePath }}</code>
+      <button
+        type="button"
+        class="files-page__location-copy"
+        :class="{ 'is-copied': copyState === 'copied', 'is-error': copyState === 'error' }"
+        :title="copyState === 'copied' ? 'Copied!' : 'Copy path'"
+        @click="onCopyPath"
+      >
+        <span v-if="copyState === 'copied'">Copied</span>
+        <span v-else-if="copyState === 'error'">Failed</span>
+        <span v-else>Copy</span>
+      </button>
+    </div>
     <div class="files-page__toolbar">
       <AppButton variant="ghost" size="sm" :disabled="!canGoUp" @click="store.goUpDirectory">↑ Up</AppButton>
       <nav class="files-page__crumbs" aria-label="Path">
@@ -180,6 +212,58 @@ const canGoUp = computed(() => Boolean(store.fileBrowser.currentPath))
   display: flex;
   align-items: center;
   gap: var(--space-3);
+}
+
+.files-page__location {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.files-page__location-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  background: transparent;
+  padding: 0;
+}
+
+.files-page__location-copy {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-xs);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.files-page__location-copy:hover {
+  background: var(--secondary-hover);
+  color: var(--text-secondary);
+}
+
+.files-page__location-copy.is-copied {
+  color: var(--success);
+  border-color: var(--success);
+}
+
+.files-page__location-copy.is-error {
+  color: var(--danger);
+  border-color: var(--danger);
 }
 
 .files-page__crumbs {
