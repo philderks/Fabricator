@@ -251,6 +251,26 @@ export async function getFabricLoaderVersions(mcVersion) {
 }
 
 /**
+ * Get Minecraft versions supported by a loader.
+ * @param {string} loader - Loader name (e.g. 'fabric', 'vanilla')
+ * @returns {Promise<Array<{version: string, stable: boolean, type?: string}>>}
+ */
+export async function getLoaderGameVersions(loader) {
+  return get(`/api/loaders/${encodeURIComponent(loader)}/versions/game`)
+}
+
+/**
+ * Get loader-specific versions for a Minecraft version.
+ * @param {string} loader - Loader name
+ * @param {string} [mcVersion] - Minecraft version filter
+ * @returns {Promise<Array>} Loader-native version metadata (shape varies by loader)
+ */
+export async function getLoaderVersions(loader, mcVersion) {
+  const params = mcVersion ? { mc_version: mcVersion } : {}
+  return get(`/api/loaders/${encodeURIComponent(loader)}/versions/loader`, params)
+}
+
+/**
  * Get overall system metrics (CPU, memory)
  * @returns {Promise<Object>} System metrics payload
  */
