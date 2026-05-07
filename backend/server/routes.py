@@ -1084,7 +1084,12 @@ def get_java_status():
         required_java = java_manager.required_java_for(mc_version)
 
     try:
-        result = subprocess.run([java_path, '-version'], capture_output=True, text=True)
+        result = subprocess.run(
+            [java_path, '-version'],
+            capture_output=True,
+            text=True,
+            **platform_utils.subprocess_no_window_kwargs(),
+        )
         version_output = (result.stdout or '') + (result.stderr or '')
         installed = result.returncode == 0
         version = None

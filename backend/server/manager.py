@@ -131,10 +131,12 @@ class ServerManager:
     def probe_java(self) -> dict:
         java_exec = self._java_executable()
         try:
-            result = subprocess.run([
-                java_exec,
-                "-version",
-            ], capture_output=True, text=True)
+            result = subprocess.run(
+                [java_exec, "-version"],
+                capture_output=True,
+                text=True,
+                **platform_utils.subprocess_no_window_kwargs(),
+            )
         except FileNotFoundError:
             return {
                 "available": False,
@@ -219,6 +221,7 @@ class ServerManager:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                **platform_utils.subprocess_no_window_kwargs(),
             )
             self._ps_process = None
             self._start_log_streams()

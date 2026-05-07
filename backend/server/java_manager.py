@@ -107,6 +107,7 @@ def _parse_system_java_major() -> Optional[int]:
             ["java", "-version"],
             capture_output=True,
             text=True,
+            **platform_utils.subprocess_no_window_kwargs(),
         )
     except FileNotFoundError:
         return None

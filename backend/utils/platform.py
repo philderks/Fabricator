@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import platform
 import shlex
+import subprocess
 import tempfile
 from functools import lru_cache
 from pathlib import Path
-from typing import List
+from typing import Any, Dict, List
 
 
 @lru_cache(maxsize=1)
@@ -55,6 +56,19 @@ def split_command(command: str) -> List[str]:
     if not command:
         return []
     return shlex.split(command, posix=not is_windows())
+
+
+def subprocess_no_window_kwargs() -> Dict[str, Any]:
+    """Return subprocess kwargs that prevent a child console window on Windows.
+
+    When Fabricator runs as a windowless PyInstaller bundle, child processes
+    (Java server, ``java -version`` probes) would otherwise spawn an empty
+    console window. Spreading these kwargs into ``Popen``/``run`` suppresses it.
+    No-op on POSIX.
+    """
+    if is_windows():
+        return {"creationflags": subprocess.CREATE_NO_WINDOW}
+    return {}
 
 
 def temp_directory(name: str | None = None, ensure_exists: bool = True) -> Path:
