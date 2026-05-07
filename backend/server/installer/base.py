@@ -1,7 +1,7 @@
 """Abstract base class for Minecraft server installers."""
 import os
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import List, Optional, Dict, Any
@@ -20,6 +20,28 @@ class InstallStatus(Enum):
 
 
 @dataclass
+class LaunchSpec:
+    """Normalized launch specification produced by an installer.
+
+    Currently only ``type='jar'`` is used; future loaders that need a
+    generated launcher script or args files will introduce new ``type``
+    values without changing existing consumers.
+    """
+    type: str
+    jar: Optional[str] = None
+    jvm_args: List[str] = field(default_factory=list)
+    program_args: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "type": self.type,
+            "jar": self.jar,
+            "jvm_args": list(self.jvm_args),
+            "program_args": list(self.program_args),
+        }
+
+
+@dataclass
 class InstallResult:
     """Result of an installation attempt."""
     success: bool
@@ -27,15 +49,16 @@ class InstallResult:
     message: str
     server_jar: Optional[Path] = None
     details: Optional[Dict[str, Any]] = None
+    launch: Optional[LaunchSpec] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for JSON serialization."""
         return {
             "success": self.success,
             "status": self.status.value,
             "message": self.message,
             "server_jar": str(self.server_jar) if self.server_jar else None,
-            "details": self.details
+            "details": self.details,
+            "launch": self.launch.to_dict() if self.launch else None,
         }
 
 
@@ -58,22 +81,25 @@ class InstallerBase(ABC):
 
     @abstractmethod
     def get_available_versions(self, mc_version: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Get available loader versions.
-        
-        Args:
-            mc_version: Optional Minecraft version to filter by
-            
-        Returns:
-            List of available versions with metadata
+        """Get loader-native version metadata for ``mc_version``.
+
+        Shape is loader-specific — the frontend treats this payload opaquely
+        per loader. Loaders that do not expose a separate loader version
+        (e.g. Vanilla) must return ``[]``.
         """
         pass
 
     @abstractmethod
     def get_minecraft_versions(self) -> List[Dict[str, Any]]:
-        """Get supported Minecraft versions.
-        
+        """Get supported Minecraft versions in normalized form.
+
         Returns:
-            List of supported Minecraft versions
+            List of dicts with shape:
+                ``{"version": str, "stable": bool, "type": Optional[str]}``
+
+            ``type`` is loader-native (e.g. "release" / "snapshot" for
+            Vanilla, may be omitted by loaders without that distinction).
+            ``stable`` is the only field every consumer can rely on.
         """
         pass
 
