@@ -102,8 +102,8 @@
         </div>
       </Panel>
 
-      <!-- Modpack Setup -->
-      <Panel title="Modpack Setup">
+      <!-- Modpack Setup — vanilla servers have no mod loader, so the Modrinth modpack flow doesn't apply. -->
+      <Panel v-if="formData.loader !== 'vanilla'" title="Modpack Setup">
 
         <div class="mode-toggle" role="tablist" aria-label="Server setup mode">
           <button
@@ -650,6 +650,15 @@ export default {
     'formData.loader'(newLoader, oldLoader) {
       if (newLoader === oldLoader) return
       this.formData.version = ''
+      // Vanilla has no modpack story — flip back to custom and drop any
+      // cached modpack selection so a stale modpack URL/object doesn't
+      // ride along into the create POST and trip a backend 409.
+      if (newLoader === 'vanilla') {
+        this.formData.setupMode = 'custom'
+        if (this.imp?.selectedModpack) {
+          this.imp.selectedModpack.value = null
+        }
+      }
       this.loadGameVersions()
     }
   },
