@@ -549,7 +549,8 @@ export default {
       javaStatus: null,
       javaRequirementWarning: '',
       loaderOptions: [
-        { value: 'fabric', label: 'Fabric (supported)' }
+        { value: 'fabric',  label: 'Fabric' },
+        { value: 'vanilla', label: 'Vanilla' }
       ],
       formData: {
         setupMode: 'custom',
