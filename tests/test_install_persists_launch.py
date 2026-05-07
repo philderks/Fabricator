@@ -79,3 +79,55 @@ def test_install_failure_does_not_write_launch(client, tmp_servers_root):
     from backend.server import storage
     persisted = storage.get_server(server_id)
     assert "launch" not in persisted
+
+
+def test_install_then_command_built_from_persisted_launch(client, tmp_servers_root, monkeypatch):
+    """End-to-end: install writes launch → registry builds command from it.
+
+    Guards the central Phase-0 invariant — that the persisted LaunchSpec is
+    actually what drives the JVM command on next start, not a hardcoded
+    constant elsewhere.
+    """
+    from unittest.mock import patch
+    from backend.server.installer.base import InstallResult, InstallStatus, LaunchSpec
+
+    server = _seed_server(tmp_servers_root)
+    server_id = server["id"]
+
+    fake_result = InstallResult(
+        success=True,
+        status=InstallStatus.COMPLETED,
+        message="ok",
+        details={"mc_version": "1.21.4"},
+        launch=LaunchSpec(
+            type="jar",
+            jar="server.jar",
+            jvm_args=["-Dlog4j2.formatMsgNoLookups=true"],
+            program_args=["nogui"],
+        ),
+    )
+
+    with patch.dict("os.environ", {"FABRICATOR_SKIP_JAVA_CHECK": "1"}), \
+         patch(
+             "backend.server.installer.fabric.FabricInstaller.install_with_config",
+             return_value=fake_result,
+         ):
+        resp = client.post(f"/api/servers/{server_id}/install")
+    assert resp.status_code == 200
+
+    from backend.server import storage
+    from backend.server.registry import get_server_process_registry
+    persisted = storage.get_server(server_id)
+    reg = get_server_process_registry()
+    monkeypatch.setattr(reg, "_resolve_java_exec", lambda s: "/opt/java/bin/java")
+
+    cmd = reg._build_command(persisted)
+    assert cmd == [
+        "/opt/java/bin/java",
+        "-Xms2G",  # memory=2 was set in _seed_server
+        "-Xmx2G",
+        "-Dlog4j2.formatMsgNoLookups=true",
+        "-jar",
+        "server.jar",
+        "nogui",
+    ]
