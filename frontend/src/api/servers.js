@@ -233,24 +233,6 @@ export async function installServer(serverId) {
 }
 
 /**
- * Get Fabric-supported Minecraft versions
- * @returns {Promise<Array>} List of game versions from Fabric Meta
- */
-export async function getFabricGameVersions() {
-  return get('/api/fabric/versions/game')
-}
-
-/**
- * Get Fabric loader versions for a Minecraft version
- * @param {string} mcVersion - Minecraft version filter
- * @returns {Promise<Array>} Loader versions metadata
- */
-export async function getFabricLoaderVersions(mcVersion) {
-  const params = mcVersion ? { mc_version: mcVersion } : {}
-  return get('/api/fabric/versions/loader', params)
-}
-
-/**
  * Get Minecraft versions supported by a loader.
  * @param {string} loader - Loader name (e.g. 'fabric', 'vanilla')
  * @returns {Promise<Array<{version: string, stable: boolean, type?: string}>>}

@@ -12,7 +12,6 @@ from flask import Blueprint, jsonify, request
 from backend.server.registry import get_server_process_registry
 from backend.server import storage
 from backend.server.installer import (
-    FabricInstaller,
     InstallStatus,
     get_installer_for,
     supported_loaders,
@@ -1265,23 +1264,6 @@ def get_server_metrics(server_id):
     }
 
     return jsonify(metrics)
-
-
-@server_bp.route('/fabric/versions/game', methods=['GET'])
-def get_fabric_game_versions():
-    """Get Minecraft versions supported by Fabric."""
-    installer = FabricInstaller(_loader_meta_dir('fabric'))
-    versions = installer.get_minecraft_versions()
-    return jsonify(versions)
-
-
-@server_bp.route('/fabric/versions/loader', methods=['GET'])
-def get_fabric_loader_versions():
-    """Get available Fabric loader versions."""
-    mc_version = request.args.get('mc_version')
-    installer = FabricInstaller(_loader_meta_dir('fabric'))
-    versions = installer.get_available_versions(mc_version)
-    return jsonify(versions)
 
 
 @server_bp.route('/loaders/<loader>/versions/game', methods=['GET'])
