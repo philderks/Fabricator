@@ -4,7 +4,7 @@ import requests
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
-from .base import InstallerBase, InstallResult, InstallStatus, DIR_PERMISSIONS
+from .base import InstallerBase, InstallResult, InstallStatus, LaunchSpec, DIR_PERMISSIONS
 
 
 class FabricInstaller(InstallerBase):
@@ -299,8 +299,14 @@ class FabricInstaller(InstallerBase):
                 "loader_version": loader_version,
                 "installer_version": installer_version,
                 "jar_file": str(jar_path),
-                "install_path": str(self.install_path)
-            }
+                "install_path": str(self.install_path),
+            },
+            launch=LaunchSpec(
+                type="jar",
+                jar="server.jar",
+                jvm_args=[],
+                program_args=["nogui"],
+            ),
         )
 
     def install_with_config(
