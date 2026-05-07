@@ -505,7 +505,7 @@ import JavaInstallModal from './JavaInstallModal.vue'
 import Panel from '../ui/Panel.vue'
 import AppButton from '../ui/AppButton.vue'
 import FormField from '../ui/FormField.vue'
-import { createServer, installServer, getFabricGameVersions, getJavaStatus } from '../../api/servers'
+import { createServer, installServer, getLoaderGameVersions, getJavaStatus } from '../../api/servers'
 import ModSideDecisionModal from './ModSideDecisionModal.vue'
 import { installModpack, resolveProjectVersion } from '../../api/modrinth'
 import { useToast } from '../../composables/useToast'
@@ -645,6 +645,11 @@ export default {
           }
         }
       }
+    },
+    'formData.loader'(newLoader, oldLoader) {
+      if (newLoader === oldLoader) return
+      this.formData.version = ''
+      this.loadGameVersions()
     }
   },
   methods: {
@@ -766,7 +771,8 @@ export default {
     async loadGameVersions() {
       this.versionsLoading = true
       try {
-        const versions = await getFabricGameVersions()
+        const loader = this.formData.loader || 'fabric'
+        const versions = await getLoaderGameVersions(loader)
         this.gameVersions = Array.isArray(versions) ? versions : []
         const stableVersions = this.gameVersions.filter(v => v.stable)
         const preferred = stableVersions[0] || this.gameVersions[0]
@@ -776,7 +782,7 @@ export default {
         }
         await this.refreshJavaRequirement()
       } catch (error) {
-        console.error('Failed to load Fabric game versions:', error)
+        console.error('Failed to load game versions:', error)
         this.toast.error('Could not load Minecraft versions.', 'Version Fetch Failed')
       } finally {
         this.versionsLoading = false
