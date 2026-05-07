@@ -36,3 +36,24 @@ def test_unknown_loader_returns_404(client):
     resp = client.get("/api/loaders/wololo/versions/game")
     assert resp.status_code == 404
     assert "Unknown loader" in resp.get_json()["error"]
+
+
+def test_game_versions_dispatch_to_vanilla(client):
+    fake_versions = [
+        {"version": "1.21.4", "stable": True, "type": "release"},
+    ]
+    with patch(
+        "backend.server.installer.vanilla.VanillaInstaller.get_minecraft_versions",
+        return_value=fake_versions,
+    ):
+        resp = client.get("/api/loaders/vanilla/versions/game")
+
+    assert resp.status_code == 200
+    assert resp.get_json() == fake_versions
+
+
+def test_loader_versions_for_vanilla_is_empty(client):
+    """Vanilla has no separate loader versions — endpoint returns []."""
+    resp = client.get("/api/loaders/vanilla/versions/loader?mc_version=1.21.4")
+    assert resp.status_code == 200
+    assert resp.get_json() == []

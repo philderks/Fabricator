@@ -6,6 +6,7 @@ from pathlib import Path
 from backend.server.installer import (
     LOADER_REGISTRY,
     FabricInstaller,
+    VanillaInstaller,
     get_installer_for,
 )
 
@@ -31,3 +32,13 @@ def test_get_installer_for_unknown_returns_none(tmp_path):
 
 def test_get_installer_for_empty_loader_returns_none(tmp_path):
     assert get_installer_for("", tmp_path) is None
+
+
+def test_registry_contains_vanilla():
+    assert "vanilla" in LOADER_REGISTRY
+    assert LOADER_REGISTRY["vanilla"] is VanillaInstaller
+
+
+def test_get_installer_for_vanilla(tmp_path):
+    inst = get_installer_for("vanilla", tmp_path)
+    assert isinstance(inst, VanillaInstaller)

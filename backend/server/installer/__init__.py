@@ -9,10 +9,12 @@ from .base import (  # noqa: F401
     LaunchSpec,
 )
 from .fabric import FabricInstaller  # noqa: F401
+from .vanilla import VanillaInstaller  # noqa: F401
 
 
 LOADER_REGISTRY: Dict[str, Type[InstallerBase]] = {
     "fabric": FabricInstaller,
+    "vanilla": VanillaInstaller,
 }
 
 
