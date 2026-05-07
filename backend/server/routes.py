@@ -11,7 +11,12 @@ from flask import Blueprint, jsonify, request
 
 from backend.server.registry import get_server_process_registry
 from backend.server import storage
-from backend.server.installer import FabricInstaller, InstallStatus
+from backend.server.installer import (
+    FabricInstaller,
+    InstallStatus,
+    get_installer_for,
+    supported_loaders,
+)
 from backend.server.java_compat import resolve_required_java, skip_java_enforcement
 from backend.server import java_manager
 from backend.server.locks import get_server_lock, try_acquire, discard_lock
@@ -133,10 +138,7 @@ def _ensure_child_path(base: Path, child: str) -> Path:
 
 def _get_installer(loader: str, install_path: Path):
     """Get the appropriate installer for the given loader."""
-    loader = loader.lower()
-    if loader == 'fabric':
-        return FabricInstaller(install_path)
-    return None
+    return get_installer_for(loader, install_path)
 
 
 def _get_install_path(server: dict) -> Path:
@@ -875,11 +877,11 @@ def install_server(server_id):
 
         installer = _get_installer(loader, install_path)
         if not installer:
-            supported_loaders = ['fabric']
+            supported = supported_loaders()
             return jsonify({
                 'error': (
                     f'Unsupported loader: {loader}. '
-                    f'Supported loaders: {", ".join(supported_loaders)}.'
+                    f'Supported loaders: {", ".join(supported)}.'
                 )
             }), 400
 
