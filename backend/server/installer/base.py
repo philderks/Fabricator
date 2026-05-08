@@ -23,14 +23,17 @@ class InstallStatus(Enum):
 class LaunchSpec:
     """Normalized launch specification produced by an installer.
 
-    Currently only ``type='jar'`` is used; future loaders that need a
-    generated launcher script or args files will introduce new ``type``
-    values without changing existing consumers.
+    Supported ``type`` values:
+        - ``"jar"`` — boot via ``-jar <jar>``. Use ``jar`` field.
+        - ``"args_file"`` — boot via ``@<args_file>`` (a Java argument
+          file produced by a third-party installer, e.g. NeoForge).
+          Use ``args_file`` field.
     """
     type: str
     jar: Optional[str] = None
     jvm_args: List[str] = field(default_factory=list)
     program_args: List[str] = field(default_factory=list)
+    args_file: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -38,6 +41,7 @@ class LaunchSpec:
             "jar": self.jar,
             "jvm_args": list(self.jvm_args),
             "program_args": list(self.program_args),
+            "args_file": self.args_file,
         }
 
 

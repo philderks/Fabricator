@@ -55,6 +55,7 @@ def test_install_writes_launch_to_storage(client, tmp_servers_root):
         "jar": "server.jar",
         "jvm_args": [],
         "program_args": ["nogui"],
+        "args_file": None,
     }
 
 

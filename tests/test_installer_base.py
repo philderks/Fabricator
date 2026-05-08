@@ -20,6 +20,7 @@ def test_launch_spec_to_dict_jar_type():
         "jar": "server.jar",
         "jvm_args": [],
         "program_args": ["nogui"],
+        "args_file": None,
     }
 
 
@@ -51,6 +52,7 @@ def test_install_result_to_dict_includes_launch():
         "jar": "server.jar",
         "jvm_args": [],
         "program_args": ["nogui"],
+        "args_file": None,
     }
 
 
@@ -85,3 +87,30 @@ def test_fabric_installer_returns_launch_spec(tmp_path, monkeypatch):
     assert result.launch.jar == "server.jar"
     assert result.launch.program_args == ["nogui"]
     assert result.launch.jvm_args == []
+
+
+def test_launch_spec_to_dict_args_file_type():
+    spec = LaunchSpec(
+        type="args_file",
+        args_file="libraries/net/neoforged/neoforge/21.1.228/unix_args.txt",
+        jvm_args=[],
+        program_args=["nogui"],
+    )
+    assert spec.to_dict() == {
+        "type": "args_file",
+        "jar": None,
+        "jvm_args": [],
+        "program_args": ["nogui"],
+        "args_file": "libraries/net/neoforged/neoforge/21.1.228/unix_args.txt",
+    }
+
+
+def test_launch_spec_to_dict_jar_type_includes_null_args_file():
+    """Existing jar-type specs must include args_file=None in their dict form."""
+    spec = LaunchSpec(
+        type="jar",
+        jar="server.jar",
+        jvm_args=[],
+        program_args=["nogui"],
+    )
+    assert spec.to_dict()["args_file"] is None
