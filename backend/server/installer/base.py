@@ -71,17 +71,47 @@ class InstallerBase(ABC):
 
     def __init__(self, install_path: Path):
         """Initialize installer with target path.
-        
+
         Args:
             install_path: Directory where server will be installed
         """
         self.install_path = Path(install_path)
+        self.java_exec: Optional[str] = None
 
     @property
     @abstractmethod
     def loader_name(self) -> str:
         """Return the name of the mod loader (e.g., 'fabric', 'forge')."""
         pass
+
+    @property
+    def requires_java_for_install(self) -> bool:
+        """Whether this installer needs a usable Java to run.
+
+        Most installers download a pre-built JAR and don't invoke Java
+        themselves; the install completes regardless of Java availability,
+        and Java is only needed at server-start time. Loaders whose
+        installer is itself a Java process (NeoForge, Forge) override
+        this to ``True`` so the install route can short-circuit with a
+        ``java_missing``/``java_too_old`` response before invoking
+        ``install_with_config``.
+        """
+        return False
+
+    def set_java_exec(self, path: Optional[str]) -> None:
+        """Hand over the resolved Java executable path.
+
+        Used by the install route for installers that invoke Java
+        themselves — e.g. NeoForge runs ``java -jar <installer>
+        --installServer`` as a subprocess and must use the same JVM
+        that the runtime path resolves (managed Java install or
+        explicit ``javaPath`` override on the server record).
+
+        Default implementation simply records the path on
+        ``self.java_exec``. Loaders that don't invoke Java during
+        install ignore this attribute.
+        """
+        self.java_exec = path
 
     @abstractmethod
     def get_available_versions(self, mc_version: Optional[str] = None) -> List[Dict[str, Any]]:

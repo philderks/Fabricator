@@ -114,3 +114,35 @@ def test_launch_spec_to_dict_jar_type_includes_null_args_file():
         program_args=["nogui"],
     )
     assert spec.to_dict()["args_file"] is None
+
+
+def test_installer_base_requires_java_for_install_default_false(tmp_path):
+    from backend.server.installer.fabric import FabricInstaller
+    assert FabricInstaller(tmp_path).requires_java_for_install is False
+
+
+def test_vanilla_installer_requires_java_for_install_default_false(tmp_path):
+    from backend.server.installer.vanilla import VanillaInstaller
+    assert VanillaInstaller(tmp_path).requires_java_for_install is False
+
+
+def test_installer_base_java_exec_default_none(tmp_path):
+    from backend.server.installer.fabric import FabricInstaller
+    inst = FabricInstaller(tmp_path)
+    assert inst.java_exec is None
+
+
+def test_installer_base_set_java_exec_records_path(tmp_path):
+    from backend.server.installer.fabric import FabricInstaller
+    inst = FabricInstaller(tmp_path)
+    inst.set_java_exec("/var/lib/fabricator/java/jdk-21/bin/java")
+    assert inst.java_exec == "/var/lib/fabricator/java/jdk-21/bin/java"
+
+
+def test_installer_base_set_java_exec_accepts_none(tmp_path):
+    """Clearing the Java path is supported — unsets any prior value."""
+    from backend.server.installer.fabric import FabricInstaller
+    inst = FabricInstaller(tmp_path)
+    inst.set_java_exec("/path/to/java")
+    inst.set_java_exec(None)
+    assert inst.java_exec is None
