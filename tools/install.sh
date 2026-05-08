@@ -250,6 +250,14 @@ main() {
         info "No requirements.txt found in $APP_DIR, skipping pip install."
     fi
 
+    # 4b) Install CLI entry point
+    if [ -f "$APP_DIR/pyproject.toml" ]; then
+        info "Installing Fabricator CLI entry point..."
+        run_as_service_user "$VENV_DIR/bin/pip" install -e "$APP_DIR" --break-system-packages </dev/null
+        $SUDO ln -sf "$VENV_DIR/bin/fabricator" /usr/local/bin/fabricator
+        info "CLI available as: fabricator"
+    fi
+
     # Config
     info "Creating config directory /etc/fabricator..."
     $SUDO mkdir -p /etc/fabricator

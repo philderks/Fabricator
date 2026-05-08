@@ -1,0 +1,7 @@
+[project]
+name = "fabricator"
+version = "0.0.0"
+requires-python = ">=3.9"
+
+[project.scripts]
+fabricator = "tools.cli:cli"

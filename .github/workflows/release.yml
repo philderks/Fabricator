@@ -42,7 +42,11 @@ jobs:
             backend/ "$STAGING/backend/"
 
           # Root entrypoint + deps
-          cp run.py requirements.txt "$STAGING/"
+          cp run.py requirements.txt pyproject.toml "$STAGING/"
+
+          # CLI + installer
+          rsync -a --exclude='__pycache__/' --exclude='*.pyc' \
+            tools/ "$STAGING/tools/"
 
           # Pre-built frontend
           cp -r frontend/dist "$STAGING/frontend/dist"
