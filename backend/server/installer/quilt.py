@@ -113,17 +113,201 @@ class QuiltInstaller(InstallerBase):
             })
         return out
 
-    # ---------- Install (Task 2 fills in) ----------
+    # ---------- Install ----------
+
+    def _maven_metadata_url(self) -> str:
+        return f"{self.MAVEN_BASE}/{self.INSTALLER_GROUP_PATH}/maven-metadata.xml"
+
+    def _resolve_installer_version(self) -> Optional[str]:
+        """Latest stable quilt-installer version per Maven metadata."""
+        try:
+            response = self.session.get(self._maven_metadata_url(), timeout=15)
+            response.raise_for_status()
+            text = response.text or ""
+        except requests.RequestException as exc:
+            print(f"Failed to fetch Quilt installer maven-metadata: {exc}")
+            return None
+        match = _MAVEN_RELEASE_RE.search(text)
+        if not match:
+            return None
+        return match.group(1).strip() or None
+
+    def _installer_jar_url(self, installer_version: str) -> str:
+        return (
+            f"{self.MAVEN_BASE}/{self.INSTALLER_GROUP_PATH}/"
+            f"{installer_version}/quilt-installer-{installer_version}.jar"
+        )
+
+    def _installer_jar_sha1_url(self, installer_version: str) -> str:
+        return self._installer_jar_url(installer_version) + ".sha1"
+
+    def _fetch_expected_sha1(self, installer_version: str) -> Optional[str]:
+        try:
+            response = self.session.get(
+                self._installer_jar_sha1_url(installer_version), timeout=15
+            )
+            response.raise_for_status()
+            text = (response.text or "").strip().split()[0].lower()
+            return text if len(text) == 40 else None
+        except (requests.RequestException, IndexError):
+            return None
+
+    def _download_installer_jar(
+        self, installer_version: str
+    ) -> "tuple[Optional[Path], Optional[str]]":
+        """Download and SHA1-verify the installer JAR.
+
+        Returns ``(path, None)`` on success or ``(None, error_message)``.
+        """
+        import hashlib
+
+        target = self.install_path / f"quilt-installer-{installer_version}.jar"
+        hasher = hashlib.sha1()
+        try:
+            with self.session.get(
+                self._installer_jar_url(installer_version), stream=True, timeout=300
+            ) as response:
+                response.raise_for_status()
+                with open(target, "wb") as fh:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            fh.write(chunk)
+                            hasher.update(chunk)
+        except requests.RequestException as exc:
+            target.unlink(missing_ok=True)
+            return None, f"Failed to download Quilt installer: {exc}"
+
+        expected_sha1 = self._fetch_expected_sha1(installer_version)
+        if not expected_sha1:
+            print(
+                f"WARNING: Quilt installer SHA1 unavailable for "
+                f"{installer_version} — proceeding without integrity check."
+            )
+        if expected_sha1:
+            actual = hasher.hexdigest().lower()
+            if actual != expected_sha1:
+                target.unlink(missing_ok=True)
+                return None, (
+                    f"SHA1 checksum mismatch for installer JAR: "
+                    f"expected {expected_sha1}, got {actual}"
+                )
+
+        return target, None
 
     def install(
         self,
         mc_version: str,
         loader_version: Optional[str] = None,
     ) -> InstallResult:
+        self._ensure_install_dir()
+
+        installer_version = self._resolve_installer_version()
+        if not installer_version:
+            return InstallResult(
+                success=False,
+                status=InstallStatus.FAILED,
+                message=(
+                    "Could not resolve latest Quilt installer version from Maven "
+                    "metadata. Check network connectivity to maven.quiltmc.org."
+                ),
+                details={"mc_version": mc_version},
+            )
+
+        installer_jar, dl_error = self._download_installer_jar(installer_version)
+        if not installer_jar or not installer_jar.exists():
+            return InstallResult(
+                success=False,
+                status=InstallStatus.FAILED,
+                message=dl_error or "Failed to download Quilt installer JAR.",
+                details={
+                    "mc_version": mc_version,
+                    "installer_version": installer_version,
+                },
+            )
+
+        java_cmd = self.java_exec or "java"
+        try:
+            completed = subprocess.run(
+                [
+                    java_cmd, "-jar", str(installer_jar),
+                    "install", "server", mc_version, "--download-server",
+                ],
+                cwd=str(self.install_path),
+                capture_output=True,
+                text=True,
+                timeout=600,
+                **platform_utils.subprocess_no_window_kwargs(),
+            )
+        except subprocess.TimeoutExpired as exc:
+            return InstallResult(
+                success=False,
+                status=InstallStatus.FAILED,
+                message=f"Quilt installer timed out: {exc}",
+                details={
+                    "mc_version": mc_version,
+                    "installer_version": installer_version,
+                },
+            )
+        except OSError as exc:
+            return InstallResult(
+                success=False,
+                status=InstallStatus.FAILED,
+                message=f"Failed to invoke Quilt installer: {exc}",
+                details={
+                    "mc_version": mc_version,
+                    "installer_version": installer_version,
+                },
+            )
+
+        if completed.returncode != 0:
+            tail = (completed.stderr or completed.stdout or "").strip().splitlines()
+            tail_str = tail[-1] if tail else f"returncode {completed.returncode}"
+            return InstallResult(
+                success=False,
+                status=InstallStatus.FAILED,
+                message=f"Quilt installer failed: {tail_str}",
+                details={
+                    "mc_version": mc_version,
+                    "installer_version": installer_version,
+                    "returncode": completed.returncode,
+                },
+            )
+
+        launch_jar = self.install_path / self.LAUNCH_JAR_NAME
+        if not launch_jar.exists():
+            return InstallResult(
+                success=False,
+                status=InstallStatus.FAILED,
+                message=(
+                    "Quilt installer reported success but the expected "
+                    f"{self.LAUNCH_JAR_NAME} was not produced in the install "
+                    "directory."
+                ),
+                details={
+                    "mc_version": mc_version,
+                    "installer_version": installer_version,
+                },
+            )
+
+        self._write_eula(accepted=True)
+
         return InstallResult(
-            success=False,
-            status=InstallStatus.FAILED,
-            message="QuiltInstaller.install not implemented yet",
+            success=True,
+            status=InstallStatus.COMPLETED,
+            message=f"Quilt installed for MC {mc_version}",
+            server_jar=launch_jar,
+            details={
+                "mc_version": mc_version,
+                "installer_version": installer_version,
+                "launch_jar": str(launch_jar),
+                "install_path": str(self.install_path),
+            },
+            launch=LaunchSpec(
+                type="jar",
+                jar=self.LAUNCH_JAR_NAME,
+                jvm_args=[],
+                program_args=["nogui"],
+            ),
         )
 
     def install_with_config(
@@ -132,4 +316,14 @@ class QuiltInstaller(InstallerBase):
         server_config: Dict[str, Any],
         loader_version: Optional[str] = None,
     ) -> InstallResult:
-        return self.install(mc_version, loader_version)
+        result = self.install(mc_version, loader_version)
+        if not result.success:
+            return result
+
+        properties = self.generate_server_properties(server_config)
+        self._write_server_properties(properties)
+        if result.details:
+            result.details["server_properties"] = str(
+                self.install_path / "server.properties"
+            )
+        return result
