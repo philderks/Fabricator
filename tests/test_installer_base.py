@@ -76,7 +76,7 @@ def test_fabric_installer_returns_launch_spec(tmp_path, monkeypatch):
     fake_jar = tmp_path / "server.jar"
     fake_jar.write_bytes(b"PK\x03\x04")
     monkeypatch.setattr(
-        inst, "_download_server_jar", lambda mc, lv, iv: fake_jar
+        inst, "_download_server_jar", lambda mc, lv, iv, **kw: fake_jar
     )
 
     result = inst.install("1.21.4")

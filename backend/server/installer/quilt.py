@@ -158,7 +158,11 @@ class QuiltInstaller(InstallerBase):
             return None
 
     def _download_installer_jar(
-        self, installer_version: str
+        self,
+        installer_version: str,
+        progress_callback: Optional[
+            "Callable[[str, Dict[str, Any]], None]"
+        ] = None,
     ) -> "tuple[Optional[Path], Optional[str]]":
         """Download and SHA1-verify the installer JAR.
 
@@ -173,15 +177,25 @@ class QuiltInstaller(InstallerBase):
                 self._installer_jar_url(installer_version), stream=True, timeout=300
             ) as response:
                 response.raise_for_status()
+                total_size = int(response.headers.get("Content-Length", 0))
+                downloaded = 0
                 with open(target, "wb") as fh:
-                    for chunk in response.iter_content(chunk_size=8192):
+                    for chunk in response.iter_content(chunk_size=65536):
                         if chunk:
                             fh.write(chunk)
                             hasher.update(chunk)
+                            downloaded += len(chunk)
+                            self._report(
+                                progress_callback,
+                                "downloading_installer",
+                                bytes_done=downloaded,
+                                bytes_total=total_size,
+                            )
         except requests.RequestException as exc:
             target.unlink(missing_ok=True)
             return None, f"Failed to download Quilt installer: {exc}"
 
+        self._report(progress_callback, "verifying")
         expected_sha1 = self._fetch_expected_sha1(installer_version)
         if not expected_sha1:
             print(
@@ -207,26 +221,34 @@ class QuiltInstaller(InstallerBase):
             "Callable[[str, Dict[str, Any]], None]"
         ] = None,
     ) -> InstallResult:
+        self._report(progress_callback, "starting")
         self._ensure_install_dir()
 
+        self._report(progress_callback, "resolving_versions")
         installer_version = self._resolve_installer_version()
         if not installer_version:
+            msg = (
+                "Could not resolve latest Quilt installer version from Maven "
+                "metadata. Check network connectivity to maven.quiltmc.org."
+            )
+            self._report(progress_callback, "failed", error=msg)
             return InstallResult(
                 success=False,
                 status=InstallStatus.FAILED,
-                message=(
-                    "Could not resolve latest Quilt installer version from Maven "
-                    "metadata. Check network connectivity to maven.quiltmc.org."
-                ),
+                message=msg,
                 details={"mc_version": mc_version},
             )
 
-        installer_jar, dl_error = self._download_installer_jar(installer_version)
+        installer_jar, dl_error = self._download_installer_jar(
+            installer_version, progress_callback=progress_callback
+        )
         if not installer_jar or not installer_jar.exists():
+            msg = dl_error or "Failed to download Quilt installer JAR."
+            self._report(progress_callback, "failed", error=msg)
             return InstallResult(
                 success=False,
                 status=InstallStatus.FAILED,
-                message=dl_error or "Failed to download Quilt installer JAR.",
+                message=msg,
                 details={
                     "mc_version": mc_version,
                     "installer_version": installer_version,
@@ -234,6 +256,7 @@ class QuiltInstaller(InstallerBase):
             )
 
         java_cmd = self.java_exec or "java"
+        self._report(progress_callback, "running_installer")
         try:
             completed = subprocess.run(
                 [
@@ -249,20 +272,24 @@ class QuiltInstaller(InstallerBase):
                 **platform_utils.subprocess_no_window_kwargs(),
             )
         except subprocess.TimeoutExpired as exc:
+            msg = f"Quilt installer timed out: {exc}"
+            self._report(progress_callback, "failed", error=msg)
             return InstallResult(
                 success=False,
                 status=InstallStatus.FAILED,
-                message=f"Quilt installer timed out: {exc}",
+                message=msg,
                 details={
                     "mc_version": mc_version,
                     "installer_version": installer_version,
                 },
             )
         except OSError as exc:
+            msg = f"Failed to invoke Quilt installer: {exc}"
+            self._report(progress_callback, "failed", error=msg)
             return InstallResult(
                 success=False,
                 status=InstallStatus.FAILED,
-                message=f"Failed to invoke Quilt installer: {exc}",
+                message=msg,
                 details={
                     "mc_version": mc_version,
                     "installer_version": installer_version,
@@ -272,10 +299,12 @@ class QuiltInstaller(InstallerBase):
         if completed.returncode != 0:
             tail = (completed.stderr or completed.stdout or "").strip().splitlines()
             tail_str = tail[-1] if tail else f"returncode {completed.returncode}"
+            msg = f"Quilt installer failed: {tail_str}"
+            self._report(progress_callback, "failed", error=msg)
             return InstallResult(
                 success=False,
                 status=InstallStatus.FAILED,
-                message=f"Quilt installer failed: {tail_str}",
+                message=msg,
                 details={
                     "mc_version": mc_version,
                     "installer_version": installer_version,
@@ -283,24 +312,29 @@ class QuiltInstaller(InstallerBase):
                 },
             )
 
+        self._report(progress_callback, "detecting_artifacts")
         launch_jar = self.install_path / self.LAUNCH_JAR_NAME
         if not launch_jar.exists():
+            msg = (
+                "Quilt installer reported success but the expected "
+                f"{self.LAUNCH_JAR_NAME} was not produced in the install "
+                "directory."
+            )
+            self._report(progress_callback, "failed", error=msg)
             return InstallResult(
                 success=False,
                 status=InstallStatus.FAILED,
-                message=(
-                    "Quilt installer reported success but the expected "
-                    f"{self.LAUNCH_JAR_NAME} was not produced in the install "
-                    "directory."
-                ),
+                message=msg,
                 details={
                     "mc_version": mc_version,
                     "installer_version": installer_version,
                 },
             )
 
+        self._report(progress_callback, "writing_eula")
         self._write_eula(accepted=True)
 
+        self._report(progress_callback, "done")
         return InstallResult(
             success=True,
             status=InstallStatus.COMPLETED,

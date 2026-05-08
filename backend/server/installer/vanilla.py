@@ -84,7 +84,12 @@ class VanillaInstaller(InstallerBase):
         return response.json()
 
     def _download_server_jar(
-        self, server_url: str, expected_sha1: Optional[str] = None
+        self,
+        server_url: str,
+        expected_sha1: Optional[str] = None,
+        progress_callback: Optional[
+            "Callable[[str, Dict[str, Any]], None]"
+        ] = None,
     ) -> "tuple[Optional[Path], Optional[str]]":
         """Download the vanilla server jar and optionally verify its SHA1.
 
@@ -99,11 +104,20 @@ class VanillaInstaller(InstallerBase):
         try:
             with self.session.get(server_url, stream=True, timeout=300) as response:
                 response.raise_for_status()
+                total_size = int(response.headers.get("Content-Length", 0))
+                downloaded = 0
                 with open(jar_path, "wb") as fh:
-                    for chunk in response.iter_content(chunk_size=8192):
+                    for chunk in response.iter_content(chunk_size=65536):
                         if chunk:
                             fh.write(chunk)
                             hasher.update(chunk)
+                            downloaded += len(chunk)
+                            self._report(
+                                progress_callback,
+                                "downloading_server_jar",
+                                bytes_done=downloaded,
+                                bytes_total=total_size,
+                            )
         except requests.RequestException as exc:
             if jar_path.exists():
                 jar_path.unlink()
@@ -127,62 +141,78 @@ class VanillaInstaller(InstallerBase):
             "Callable[[str, Dict[str, Any]], None]"
         ] = None,
     ) -> InstallResult:
+        self._report(progress_callback, "starting")
         self._ensure_install_dir()
 
+        self._report(progress_callback, "resolving_versions")
         try:
             manifest = self._fetch_manifest()
         except requests.RequestException as exc:
+            msg = f"Could not fetch Mojang manifest: {exc}"
+            self._report(progress_callback, "failed", error=msg)
             return InstallResult(
                 success=False,
                 status=InstallStatus.FAILED,
-                message=f"Could not fetch Mojang manifest: {exc}",
+                message=msg,
             )
 
         entry = self._find_version_entry(mc_version, manifest)
         if not entry:
+            msg = f"Unknown Minecraft version: {mc_version}"
+            self._report(progress_callback, "failed", error=msg)
             return InstallResult(
                 success=False,
                 status=InstallStatus.FAILED,
-                message=f"Unknown Minecraft version: {mc_version}",
+                message=msg,
                 details={"mc_version": mc_version},
             )
 
         try:
             version_meta = self._fetch_version_meta(entry["url"])
         except (requests.RequestException, KeyError) as exc:
+            msg = f"Could not fetch version metadata: {exc}"
+            self._report(progress_callback, "failed", error=msg)
             return InstallResult(
                 success=False,
                 status=InstallStatus.FAILED,
-                message=f"Could not fetch version metadata: {exc}",
+                message=msg,
                 details={"mc_version": mc_version},
             )
 
         server_dl = (version_meta.get("downloads") or {}).get("server") or {}
         server_url = server_dl.get("url")
         if not server_url:
+            msg = (
+                f"Minecraft {mc_version} has no server download "
+                "(versions older than ~1.2.5 are server-less)."
+            )
+            self._report(progress_callback, "failed", error=msg)
             return InstallResult(
                 success=False,
                 status=InstallStatus.FAILED,
-                message=(
-                    f"Minecraft {mc_version} has no server download "
-                    "(versions older than ~1.2.5 are server-less)."
-                ),
+                message=msg,
                 details={"mc_version": mc_version},
             )
 
         jar_path, dl_error = self._download_server_jar(
-            server_url, expected_sha1=server_dl.get("sha1")
+            server_url,
+            expected_sha1=server_dl.get("sha1"),
+            progress_callback=progress_callback,
         )
         if not jar_path or not jar_path.exists():
+            msg = dl_error or "Failed to download vanilla server jar"
+            self._report(progress_callback, "failed", error=msg)
             return InstallResult(
                 success=False,
                 status=InstallStatus.FAILED,
-                message=dl_error or "Failed to download vanilla server jar",
+                message=msg,
                 details={"mc_version": mc_version},
             )
 
+        self._report(progress_callback, "writing_eula")
         self._write_eula(accepted=True)
 
+        self._report(progress_callback, "done")
         return InstallResult(
             success=True,
             status=InstallStatus.COMPLETED,

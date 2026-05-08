@@ -176,7 +176,12 @@ class ForgeInstaller(InstallerBase):
             return None
 
     def _download_installer_jar(
-        self, mc_version: str, build: str
+        self,
+        mc_version: str,
+        build: str,
+        progress_callback: Optional[
+            "Callable[[str, Dict[str, Any]], None]"
+        ] = None,
     ) -> "tuple[Optional[Path], Optional[str]]":
         """Download and SHA1-verify the installer JAR.
 
@@ -191,15 +196,25 @@ class ForgeInstaller(InstallerBase):
                 self._installer_jar_url(mc_version, build), stream=True, timeout=300
             ) as response:
                 response.raise_for_status()
+                total_size = int(response.headers.get("Content-Length", 0))
+                downloaded = 0
                 with open(target, "wb") as fh:
-                    for chunk in response.iter_content(chunk_size=8192):
+                    for chunk in response.iter_content(chunk_size=65536):
                         if chunk:
                             fh.write(chunk)
                             hasher.update(chunk)
+                            downloaded += len(chunk)
+                            self._report(
+                                progress_callback,
+                                "downloading_installer",
+                                bytes_done=downloaded,
+                                bytes_total=total_size,
+                            )
         except requests.RequestException as exc:
             target.unlink(missing_ok=True)
             return None, f"Failed to download Forge installer: {exc}"
 
+        self._report(progress_callback, "verifying")
         expected_sha1 = self._fetch_expected_sha1(mc_version, build)
         if not expected_sha1:
             print(
@@ -265,32 +280,42 @@ class ForgeInstaller(InstallerBase):
             "Callable[[str, Dict[str, Any]], None]"
         ] = None,
     ) -> InstallResult:
+        self._report(progress_callback, "starting")
         self._ensure_install_dir()
 
+        self._report(progress_callback, "resolving_versions")
         promos = self._fetch_promotions()
         if not promos:
+            msg = "Could not fetch Forge promotions list. Check connectivity."
+            self._report(progress_callback, "failed", error=msg)
             return InstallResult(
                 success=False,
                 status=InstallStatus.FAILED,
-                message="Could not fetch Forge promotions list. Check connectivity.",
+                message=msg,
                 details={"mc_version": mc_version},
             )
 
         build = loader_version or self._select_build_version(mc_version, promos)
         if not build:
+            msg = f"No Forge release found for Minecraft {mc_version}."
+            self._report(progress_callback, "failed", error=msg)
             return InstallResult(
                 success=False,
                 status=InstallStatus.FAILED,
-                message=f"No Forge release found for Minecraft {mc_version}.",
+                message=msg,
                 details={"mc_version": mc_version},
             )
 
-        installer_jar, dl_error = self._download_installer_jar(mc_version, build)
+        installer_jar, dl_error = self._download_installer_jar(
+            mc_version, build, progress_callback=progress_callback
+        )
         if not installer_jar or not installer_jar.exists():
+            msg = dl_error or "Failed to download Forge installer JAR."
+            self._report(progress_callback, "failed", error=msg)
             return InstallResult(
                 success=False,
                 status=InstallStatus.FAILED,
-                message=dl_error or "Failed to download Forge installer JAR.",
+                message=msg,
                 details={"mc_version": mc_version, "loader_version": build},
             )
 
@@ -302,6 +327,7 @@ class ForgeInstaller(InstallerBase):
         # writes to cwd by default today, but the explicit path is robust to
         # future changes.
         java_cmd = self.java_exec or "java"
+        self._report(progress_callback, "running_installer")
         try:
             completed = subprocess.run(
                 [
@@ -315,27 +341,33 @@ class ForgeInstaller(InstallerBase):
                 **platform_utils.subprocess_no_window_kwargs(),
             )
         except subprocess.TimeoutExpired as exc:
+            msg = f"Forge installer timed out: {exc}"
+            self._report(progress_callback, "failed", error=msg)
             return InstallResult(
                 success=False,
                 status=InstallStatus.FAILED,
-                message=f"Forge installer timed out: {exc}",
+                message=msg,
                 details={"mc_version": mc_version, "loader_version": build},
             )
         except OSError as exc:
+            msg = f"Failed to invoke Forge installer: {exc}"
+            self._report(progress_callback, "failed", error=msg)
             return InstallResult(
                 success=False,
                 status=InstallStatus.FAILED,
-                message=f"Failed to invoke Forge installer: {exc}",
+                message=msg,
                 details={"mc_version": mc_version, "loader_version": build},
             )
 
         if completed.returncode != 0:
             tail = (completed.stderr or completed.stdout or "").strip().splitlines()
             tail_str = tail[-1] if tail else f"returncode {completed.returncode}"
+            msg = f"Forge installer failed: {tail_str}"
+            self._report(progress_callback, "failed", error=msg)
             return InstallResult(
                 success=False,
                 status=InstallStatus.FAILED,
-                message=f"Forge installer failed: {tail_str}",
+                message=msg,
                 details={
                     "mc_version": mc_version,
                     "loader_version": build,
@@ -343,24 +375,29 @@ class ForgeInstaller(InstallerBase):
                 },
             )
 
+        self._report(progress_callback, "detecting_artifacts")
         launch = self._detect_launch_artifact(mc_version, build)
         if launch is None:
+            msg = (
+                "Forge installer reported success but produced unexpected "
+                "layout. Expected either "
+                f"libraries/net/minecraftforge/forge/{mc_version}-{build}/"
+                "{unix,win}_args.txt (modern) or "
+                f"forge-{mc_version}-{build}[-universal].jar (legacy) in "
+                "install root."
+            )
+            self._report(progress_callback, "failed", error=msg)
             return InstallResult(
                 success=False,
                 status=InstallStatus.FAILED,
-                message=(
-                    "Forge installer reported success but produced unexpected "
-                    "layout. Expected either "
-                    f"libraries/net/minecraftforge/forge/{mc_version}-{build}/"
-                    "{unix,win}_args.txt (modern) or "
-                    f"forge-{mc_version}-{build}[-universal].jar (legacy) in "
-                    "install root."
-                ),
+                message=msg,
                 details={"mc_version": mc_version, "loader_version": build},
             )
 
+        self._report(progress_callback, "writing_eula")
         self._write_eula(accepted=True)
 
+        self._report(progress_callback, "done")
         return InstallResult(
             success=True,
             status=InstallStatus.COMPLETED,

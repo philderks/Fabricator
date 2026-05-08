@@ -113,6 +113,29 @@ class InstallerBase(ABC):
         """
         self.java_exec = path
 
+    def _report(
+        self,
+        callback: Optional["Callable[[str, Dict[str, Any]], None]"],
+        phase: str,
+        **detail: Any,
+    ) -> None:
+        """Emit a progress event to the callback, swallowing all exceptions.
+
+        Progress reporting MUST never crash the install. A misbehaving
+        callback that raises (e.g. because the calling thread shut down
+        the progress store) is silently ignored.
+
+        ``detail`` becomes the second arg of the callback as a dict —
+        bytes_done/bytes_total for download phases, error for ``failed``,
+        empty for phase-only emissions.
+        """
+        if callback is None:
+            return
+        try:
+            callback(phase, dict(detail))
+        except Exception:
+            pass
+
     @abstractmethod
     def get_available_versions(self, mc_version: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get loader-native version metadata for ``mc_version``.

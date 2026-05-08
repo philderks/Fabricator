@@ -219,7 +219,11 @@ class NeoForgeInstaller(InstallerBase):
             return None
 
     def _download_installer_jar(
-        self, loader_version: str
+        self,
+        loader_version: str,
+        progress_callback: Optional[
+            "Callable[[str, Dict[str, Any]], None]"
+        ] = None,
     ) -> "tuple[Optional[Path], Optional[str]]":
         """Download and SHA1-verify the installer JAR.
 
@@ -234,15 +238,25 @@ class NeoForgeInstaller(InstallerBase):
                 self._installer_jar_url(loader_version), stream=True, timeout=300
             ) as response:
                 response.raise_for_status()
+                total_size = int(response.headers.get("Content-Length", 0))
+                downloaded = 0
                 with open(target, "wb") as fh:
-                    for chunk in response.iter_content(chunk_size=8192):
+                    for chunk in response.iter_content(chunk_size=65536):
                         if chunk:
                             fh.write(chunk)
                             hasher.update(chunk)
+                            downloaded += len(chunk)
+                            self._report(
+                                progress_callback,
+                                "downloading_installer",
+                                bytes_done=downloaded,
+                                bytes_total=total_size,
+                            )
         except requests.RequestException as exc:
             target.unlink(missing_ok=True)
             return None, f"Failed to download NeoForge installer: {exc}"
 
+        self._report(progress_callback, "verifying")
         expected_sha1 = self._fetch_expected_sha1(loader_version)
         if not expected_sha1:
             print(
@@ -278,33 +292,43 @@ class NeoForgeInstaller(InstallerBase):
             "Callable[[str, Dict[str, Any]], None]"
         ] = None,
     ) -> InstallResult:
+        self._report(progress_callback, "starting")
         self._ensure_install_dir()
 
         # Resolve loader_version if not pinned.
+        self._report(progress_callback, "resolving_versions")
         if not loader_version:
             raw = self._fetch_maven_versions()
             if not raw:
+                msg = "Could not fetch NeoForge version list from Maven."
+                self._report(progress_callback, "failed", error=msg)
                 return InstallResult(
                     success=False,
                     status=InstallStatus.FAILED,
-                    message="Could not fetch NeoForge version list from Maven.",
+                    message=msg,
                 )
             loader_version = self._select_loader_version(mc_version, raw)
             if not loader_version:
+                msg = f"No NeoForge release found for Minecraft {mc_version}."
+                self._report(progress_callback, "failed", error=msg)
                 return InstallResult(
                     success=False,
                     status=InstallStatus.FAILED,
-                    message=f"No NeoForge release found for Minecraft {mc_version}.",
+                    message=msg,
                     details={"mc_version": mc_version},
                 )
 
         # Download the installer JAR.
-        installer_jar, dl_error = self._download_installer_jar(loader_version)
+        installer_jar, dl_error = self._download_installer_jar(
+            loader_version, progress_callback=progress_callback
+        )
         if not installer_jar or not installer_jar.exists():
+            msg = dl_error or "Failed to download NeoForge installer JAR."
+            self._report(progress_callback, "failed", error=msg)
             return InstallResult(
                 success=False,
                 status=InstallStatus.FAILED,
-                message=dl_error or "Failed to download NeoForge installer JAR.",
+                message=msg,
                 details={"mc_version": mc_version, "loader_version": loader_version},
             )
 
@@ -314,6 +338,7 @@ class NeoForgeInstaller(InstallerBase):
         # subprocess uses Fabricator's managed Java / per-server javaPath
         # override, not whatever ``java`` happens to be first on PATH.
         java_cmd = self.java_exec or "java"
+        self._report(progress_callback, "running_installer")
         try:
             completed = subprocess.run(
                 [java_cmd, "-jar", str(installer_jar), "--installServer"],
@@ -324,27 +349,33 @@ class NeoForgeInstaller(InstallerBase):
                 **platform_utils.subprocess_no_window_kwargs(),
             )
         except subprocess.TimeoutExpired as exc:
+            msg = f"NeoForge installer timed out: {exc}"
+            self._report(progress_callback, "failed", error=msg)
             return InstallResult(
                 success=False,
                 status=InstallStatus.FAILED,
-                message=f"NeoForge installer timed out: {exc}",
+                message=msg,
                 details={"mc_version": mc_version, "loader_version": loader_version},
             )
         except OSError as exc:
+            msg = f"Failed to invoke NeoForge installer: {exc}"
+            self._report(progress_callback, "failed", error=msg)
             return InstallResult(
                 success=False,
                 status=InstallStatus.FAILED,
-                message=f"Failed to invoke NeoForge installer: {exc}",
+                message=msg,
                 details={"mc_version": mc_version, "loader_version": loader_version},
             )
 
         if completed.returncode != 0:
             tail = (completed.stderr or completed.stdout or "").strip().splitlines()
             tail_str = tail[-1] if tail else f"returncode {completed.returncode}"
+            msg = f"NeoForge installer failed: {tail_str}"
+            self._report(progress_callback, "failed", error=msg)
             return InstallResult(
                 success=False,
                 status=InstallStatus.FAILED,
-                message=f"NeoForge installer failed: {tail_str}",
+                message=msg,
                 details={
                     "mc_version": mc_version,
                     "loader_version": loader_version,
@@ -353,23 +384,28 @@ class NeoForgeInstaller(InstallerBase):
             )
 
         # Locate the platform-specific args file.
+        self._report(progress_callback, "detecting_artifacts")
         args_file_path = self._detect_args_file(loader_version)
         if not args_file_path:
+            msg = (
+                "NeoForge installer reported success but the expected "
+                "args_file was not found under "
+                f"libraries/net/neoforged/neoforge/{loader_version}/."
+            )
+            self._report(progress_callback, "failed", error=msg)
             return InstallResult(
                 success=False,
                 status=InstallStatus.FAILED,
-                message=(
-                    "NeoForge installer reported success but the expected "
-                    "args_file was not found under "
-                    f"libraries/net/neoforged/neoforge/{loader_version}/."
-                ),
+                message=msg,
                 details={"mc_version": mc_version, "loader_version": loader_version},
             )
 
         relative_args_file = args_file_path.relative_to(self.install_path).as_posix()
 
+        self._report(progress_callback, "writing_eula")
         self._write_eula(accepted=True)
 
+        self._report(progress_callback, "done")
         return InstallResult(
             success=True,
             status=InstallStatus.COMPLETED,
