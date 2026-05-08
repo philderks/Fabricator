@@ -279,3 +279,147 @@ def test_quilt_install_then_command_built_from_persisted_launch(
         "quilt-server-launch.jar",
         "nogui",
     ]
+
+
+def test_forge_legacy_install_then_command_built_from_persisted_launch(
+    client, tmp_servers_root, monkeypatch
+):
+    """Forge legacy era: install writes jar launch → registry builds command from it.
+
+    Mirrors test_quilt_install_then_command_built_from_persisted_launch — same
+    jar-branch shape, different filename. Covers the legacy era (≤1.16.5
+    where Forge produces a single launcher jar).
+    """
+    from unittest.mock import patch
+    from backend.server.installer.base import InstallResult, InstallStatus, LaunchSpec
+    from backend.server import storage
+
+    server = storage.create_server({
+        "name": "Demo-ForgeLegacy",
+        "version": "1.16.5",
+        "loader": "forge",
+        "port": 25570,
+        "installPath": "demo-forge-legacy",
+        "memory": 4,
+    })
+    server_id = server["id"]
+
+    fake_result = InstallResult(
+        success=True,
+        status=InstallStatus.COMPLETED,
+        message="ok",
+        details={"mc_version": "1.16.5", "loader_version": "36.2.34"},
+        launch=LaunchSpec(
+            type="jar",
+            jar="forge-1.16.5-36.2.34.jar",
+            jvm_args=[],
+            program_args=["nogui"],
+        ),
+    )
+
+    with patch.dict("os.environ", {"FABRICATOR_SKIP_JAVA_CHECK": "1"}), \
+         patch(
+             "backend.server.registry.ServerProcessRegistry.get_java_runtime",
+             return_value={
+                 "available": True, "java_exec": "java",
+                 "major_version": 8, "version_output": "",
+                 "message": "ok", "java_missing": False,
+             },
+         ), \
+         patch(
+             "backend.server.installer.forge.ForgeInstaller.install_with_config",
+             return_value=fake_result,
+         ):
+        resp = client.post(f"/api/servers/{server_id}/install")
+    assert resp.status_code == 200
+
+    from backend.server.registry import get_server_process_registry
+    persisted = storage.get_server(server_id)
+    assert persisted["launch"]["type"] == "jar"
+    assert persisted["launch"]["jar"] == "forge-1.16.5-36.2.34.jar"
+    assert persisted["launch"]["args_file"] is None
+
+    reg = get_server_process_registry()
+    monkeypatch.setattr(reg, "_resolve_java_exec", lambda s: "/opt/java/bin/java")
+
+    cmd = reg._build_command(persisted)
+    assert cmd == [
+        "/opt/java/bin/java",
+        "-Xms4G",
+        "-Xmx4G",
+        "-jar",
+        "forge-1.16.5-36.2.34.jar",
+        "nogui",
+    ]
+
+
+def test_forge_modern_install_then_command_built_from_persisted_launch(
+    client, tmp_servers_root, monkeypatch
+):
+    """Forge modern era: install writes args_file launch → registry builds @argfile command.
+
+    Mirrors test_neoforge_install_then_command_built_from_persisted_args_file
+    — same args_file branch, different libraries path (minecraftforge vs neoforged).
+    """
+    from unittest.mock import patch
+    from backend.server.installer.base import InstallResult, InstallStatus, LaunchSpec
+    from backend.server import storage
+
+    server = storage.create_server({
+        "name": "Demo-ForgeModern",
+        "version": "1.20.1",
+        "loader": "forge",
+        "port": 25571,
+        "installPath": "demo-forge-modern",
+        "memory": 6,
+    })
+    server_id = server["id"]
+
+    fake_result = InstallResult(
+        success=True,
+        status=InstallStatus.COMPLETED,
+        message="ok",
+        details={"mc_version": "1.20.1", "loader_version": "47.4.10"},
+        launch=LaunchSpec(
+            type="args_file",
+            args_file="libraries/net/minecraftforge/forge/1.20.1-47.4.10/unix_args.txt",
+            jvm_args=[],
+            program_args=["nogui"],
+        ),
+    )
+
+    with patch.dict("os.environ", {"FABRICATOR_SKIP_JAVA_CHECK": "1"}), \
+         patch(
+             "backend.server.registry.ServerProcessRegistry.get_java_runtime",
+             return_value={
+                 "available": True, "java_exec": "java",
+                 "major_version": 17, "version_output": "",
+                 "message": "ok", "java_missing": False,
+             },
+         ), \
+         patch(
+             "backend.server.installer.forge.ForgeInstaller.install_with_config",
+             return_value=fake_result,
+         ):
+        resp = client.post(f"/api/servers/{server_id}/install")
+    assert resp.status_code == 200
+
+    from backend.server.registry import get_server_process_registry
+    persisted = storage.get_server(server_id)
+    assert persisted["launch"]["type"] == "args_file"
+    assert persisted["launch"]["args_file"] == (
+        "libraries/net/minecraftforge/forge/1.20.1-47.4.10/unix_args.txt"
+    )
+    assert persisted["launch"]["jar"] is None
+
+    reg = get_server_process_registry()
+    monkeypatch.setattr(reg, "_resolve_java_exec", lambda s: "/opt/java/bin/java")
+
+    cmd = reg._build_command(persisted)
+    assert cmd == [
+        "/opt/java/bin/java",
+        "-Xms6G",
+        "-Xmx6G",
+        "@libraries/net/minecraftforge/forge/1.20.1-47.4.10/unix_args.txt",
+        "nogui",
+    ]
