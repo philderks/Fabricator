@@ -28,6 +28,14 @@ except ImportError:  # pragma: no cover - optional dependency fallback
 
 server_bp = Blueprint('server', __name__, url_prefix='/api')
 
+# Statuses the runtime registry can authoritatively replace. Anything else
+# (pending, installing, starting, stopping, failed) is owned by a route
+# handler that's currently mutating the server — _augment_with_runtime must
+# leave those alone or it silently downgrades 'installing' to 'stopped'
+# while the install subprocess is still running, making the UI think the
+# server is ready to start while the per-server lock is still held.
+_RUNTIME_KNOWN_STATUSES = frozenset({'running', 'stopped'})
+
 
 def _cleanup_stale_statuses() -> None:
     """Reset 'installing'/'starting'/'stopping' records from a previous run.
@@ -99,7 +107,12 @@ def _augment_with_runtime(server: dict) -> dict:
     if runtime:
         augmented['runtime'] = runtime
         runtime_status = runtime.get('status')
-        if runtime_status and runtime_status != server.get('status'):
+        persisted_status = (server.get('status') or '').lower()
+        if (
+            runtime_status
+            and runtime_status != server.get('status')
+            and persisted_status in _RUNTIME_KNOWN_STATUSES
+        ):
             updated = storage.update_server_status(server['id'], runtime_status)
             if updated:
                 augmented = dict(updated)
