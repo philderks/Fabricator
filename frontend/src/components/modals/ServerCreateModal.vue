@@ -552,6 +552,7 @@ export default {
         { value: 'fabric',   label: 'Fabric'   },
         { value: 'quilt',    label: 'Quilt'    },
         { value: 'neoforge', label: 'NeoForge' },
+        { value: 'forge',    label: 'Forge'    },
         { value: 'vanilla',  label: 'Vanilla'  }
       ],
       formData: {
