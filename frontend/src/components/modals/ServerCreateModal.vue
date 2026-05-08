@@ -549,8 +549,9 @@ export default {
       javaStatus: null,
       javaRequirementWarning: '',
       loaderOptions: [
-        { value: 'fabric',  label: 'Fabric' },
-        { value: 'vanilla', label: 'Vanilla' }
+        { value: 'fabric',   label: 'Fabric'   },
+        { value: 'neoforge', label: 'NeoForge' },
+        { value: 'vanilla',  label: 'Vanilla'  }
       ],
       formData: {
         setupMode: 'custom',
