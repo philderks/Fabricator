@@ -67,6 +67,28 @@ class ServerProcessRegistry:
                 *program_args,
             ]
 
+        if launch_type == 'args_file':
+            args_file = launch.get('args_file')
+            if not args_file:
+                raise ValueError(
+                    f"args_file-type launch on server {server.get('id')!r} "
+                    "has no 'args_file' path — corrupted record?"
+                )
+            jvm_args_raw = launch.get('jvm_args')
+            jvm_args = list(jvm_args_raw) if jvm_args_raw is not None else []
+            program_args_raw = launch.get('program_args')
+            program_args = (
+                ['nogui'] if program_args_raw is None else list(program_args_raw)
+            )
+            return [
+                java_exec,
+                f'-Xms{memory}G',
+                f'-Xmx{memory}G',
+                *jvm_args,
+                f'@{args_file}',
+                *program_args,
+            ]
+
         if launch_type is None:
             # Legacy fallback for records created before LaunchSpec landed.
             # Matches the historical hardcoded default exactly.
