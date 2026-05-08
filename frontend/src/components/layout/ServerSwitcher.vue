@@ -25,9 +25,21 @@ const otherServers = computed(() =>
   store.serversList.filter((s) => s.id !== currentId.value)
 )
 
-// runtime.status takes precedence over the persisted top-level status,
-// matching the pattern in Servers.vue: `runtime.status || server.status`.
-const statusOf = (s) => s?.runtime?.status || s?.status || 'unknown'
+// Mirror backend _augment_with_runtime: the runtime registry only knows
+// running/stopped. For in-flight states (pending, installing, starting,
+// stopping, failed) the persisted status is authoritative — without this,
+// a server installing in a background thread would render as "stopped"
+// the moment the modal closes (smoke-test bug, fixed alongside the same
+// change in stores/server.js#pickEffectiveStatus).
+const RUNTIME_KNOWN_STATUSES = new Set(['running', 'stopped'])
+const statusOf = (s) => {
+  const persisted = s?.status
+  const runtime = s?.runtime?.status
+  if (persisted && !RUNTIME_KNOWN_STATUSES.has(persisted)) {
+    return persisted
+  }
+  return runtime || persisted || 'unknown'
+}
 
 const dotColor = (s) => {
   switch (statusOf(s)) {
