@@ -584,6 +584,7 @@ export default {
       installState: null,           // null | 'installing' | 'failed'
       installProgress: null,         // last-seen progress payload from GET /install/progress
       installPollHandle: null,       // setInterval handle; clear on terminal/unmount
+      installPollResolver: null,     // Promise resolve fn so handleInstallClose can release a mid-install await
       installCreatedServerId: null,  // server.id that the install ran against (for retry)
       versionsLoading: false,
       javaRequirementLoading: false,
@@ -902,7 +903,9 @@ export default {
           const initialProgress = await installServer(retryServerId)
           this.installProgress = initialProgress
           const finalProgress = await this.pollInstallProgress(retryServerId)
-          if (finalProgress.phase === 'done') {
+          if (finalProgress.phase === 'aborted') {
+            // User cancelled the retry mid-install via Close.
+          } else if (finalProgress.phase === 'done') {
             this.toast.success('Server installed successfully.', 'Server Installation')
             this.installState = null
             this.installProgress = null
@@ -949,6 +952,11 @@ export default {
      */
     async pollInstallProgress(serverId) {
       return new Promise((resolve) => {
+        // Stash the resolver so handleInstallClose can release this Promise
+        // when the user clicks Close mid-install. Without that escape hatch,
+        // clearInterval stops further ticks but leaves the awaiting handleCreate
+        // hung — its finally never runs, this.creating stays true forever.
+        this.installPollResolver = resolve
         const tick = async () => {
           try {
             const progress = await getServerInstallProgress(serverId)
@@ -958,6 +966,7 @@ export default {
                 clearInterval(this.installPollHandle)
                 this.installPollHandle = null
               }
+              this.installPollResolver = null
               resolve(progress)
             }
           } catch (err) {
@@ -967,6 +976,7 @@ export default {
               clearInterval(this.installPollHandle)
               this.installPollHandle = null
             }
+            this.installPollResolver = null
             resolve({ phase: 'failed', error: err.message || 'Lost contact with backend during install.' })
           }
         }
@@ -992,7 +1002,14 @@ export default {
     },
 
     handleInstallClose() {
-      // Background install continues. Toast informs the user.
+      // Release the awaiting handleCreate Promise so its finally block runs
+      // and `this.creating` flips back to false. resetForm only stops the
+      // polling interval; the Promise itself stays pending without this.
+      // Backend install thread continues — we just stop watching.
+      if (this.installPollResolver) {
+        this.installPollResolver({ phase: 'aborted' })
+        this.installPollResolver = null
+      }
       if (this.installState === 'installing') {
         this.toast.info(
           'Installation continues in the background. The server appears in your list when it\'s ready.',
@@ -1067,7 +1084,11 @@ export default {
 
         const finalProgress = await this.pollInstallProgress(server.id)
 
-        if (finalProgress.phase === 'done') {
+        if (finalProgress.phase === 'aborted') {
+          // User clicked Close during install. Modal already closed and state
+          // already reset by handleInstallClose; backend continues in
+          // background. Nothing else to do — finally clears `creating`.
+        } else if (finalProgress.phase === 'done') {
           // Modpack install (if any) runs AFTER loader install succeeds.
           let modpackInstallError = null
           if (this.formData.setupMode === 'modpack' && this.selectedModpack) {
@@ -1188,6 +1209,7 @@ export default {
       this.installState = null
       this.installProgress = null
       this.installCreatedServerId = null
+      this.installPollResolver = null
       if (this.installPollHandle) {
         clearInterval(this.installPollHandle)
         this.installPollHandle = null
