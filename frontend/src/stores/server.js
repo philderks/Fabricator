@@ -352,6 +352,18 @@ export const useServerStore = defineStore('server', () => {
     try {
       const data = await getServer(currentServerId.value)
       server.value = data
+      // Mirror the freshly augmented record into serversList so the sidebar
+      // dropdown trigger reflects the same status as the detail page header.
+      // ServerLayout polls loadServer every 2.5s; serversList alone is only
+      // refreshed on dropdown-open / mount / delete / save — without this
+      // patch the trigger badge stays "stopped" while the header says
+      // "running" until the user re-opens the dropdown or reloads the page.
+      const listIdx = serversList.value.findIndex((s) => s?.id === data?.id)
+      if (listIdx >= 0) {
+        const next = [...serversList.value]
+        next[listIdx] = data
+        serversList.value = next
+      }
       const mappedSettings = defaultSettings(data)
       if (!serverSettings.value || currentRouteName.value !== 'ServerSettings') {
         serverSettings.value = mappedSettings
