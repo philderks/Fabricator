@@ -11,12 +11,14 @@ from .base import (  # noqa: F401
 from .fabric import FabricInstaller  # noqa: F401
 from .vanilla import VanillaInstaller  # noqa: F401
 from .neoforge import NeoForgeInstaller  # noqa: F401
+from .quilt import QuiltInstaller  # noqa: F401
 
 
 LOADER_REGISTRY: Dict[str, Type[InstallerBase]] = {
     "fabric": FabricInstaller,
     "vanilla": VanillaInstaller,
     "neoforge": NeoForgeInstaller,
+    "quilt": QuiltInstaller,
 }
 
 

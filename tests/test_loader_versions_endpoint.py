@@ -72,3 +72,31 @@ def test_game_versions_dispatch_to_neoforge(client):
 
     assert resp.status_code == 200
     assert resp.get_json() == fake_versions
+
+
+def test_game_versions_dispatch_to_quilt(client):
+    fake_versions = [
+        {"version": "1.21.4", "stable": True, "type": "release"},
+        {"version": "25w03a", "stable": False, "type": "snapshot"},
+    ]
+    with patch(
+        "backend.server.installer.quilt.QuiltInstaller.get_minecraft_versions",
+        return_value=fake_versions,
+    ):
+        resp = client.get("/api/loaders/quilt/versions/game")
+
+    assert resp.status_code == 200
+    assert resp.get_json() == fake_versions
+
+
+def test_loader_versions_dispatch_to_quilt(client):
+    fake = [{"version": "0.27.0", "stable": True, "type": "release"}]
+    with patch(
+        "backend.server.installer.quilt.QuiltInstaller.get_available_versions",
+        return_value=fake,
+    ) as mock:
+        resp = client.get("/api/loaders/quilt/versions/loader?mc_version=1.21.4")
+
+    assert resp.status_code == 200
+    assert resp.get_json() == fake
+    mock.assert_called_once_with("1.21.4")

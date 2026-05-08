@@ -7,6 +7,7 @@ from backend.server.installer import (
     LOADER_REGISTRY,
     FabricInstaller,
     NeoForgeInstaller,
+    QuiltInstaller,
     VanillaInstaller,
     get_installer_for,
 )
@@ -53,3 +54,13 @@ def test_registry_contains_neoforge():
 def test_get_installer_for_neoforge(tmp_path):
     inst = get_installer_for("neoforge", tmp_path)
     assert isinstance(inst, NeoForgeInstaller)
+
+
+def test_registry_contains_quilt():
+    assert "quilt" in LOADER_REGISTRY
+    assert LOADER_REGISTRY["quilt"] is QuiltInstaller
+
+
+def test_get_installer_for_quilt(tmp_path):
+    inst = get_installer_for("quilt", tmp_path)
+    assert isinstance(inst, QuiltInstaller)
