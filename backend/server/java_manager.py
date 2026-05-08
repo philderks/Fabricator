@@ -74,15 +74,13 @@ def java_binary(major: int) -> str:
 
 
 def _managed_base() -> Path:
-    """Return the base directory that holds all managed JDK trees."""
-    if _is_windows():
-        appdata = os.environ.get("APPDATA")
-        if appdata:
-            base = Path(appdata)
-        else:
-            base = Path.home() / "AppData" / "Roaming"
-        return base / "Fabricator" / "java"
+    """Return the base directory that holds all managed JDK trees.
 
+    Resolution order: ``JAVA_ROOT`` env var (via Config) → Config default
+    (which is ``%APPDATA%\\Fabricator\\java`` on Windows, project-relative
+    elsewhere). All Windows path handling lives in Config so env vars work
+    consistently across platforms.
+    """
     config = get_config()
     configured = getattr(config, "JAVA_ROOT", None)
     if configured:
@@ -107,6 +105,7 @@ def _parse_system_java_major() -> Optional[int]:
             ["java", "-version"],
             capture_output=True,
             text=True,
+            **platform_utils.subprocess_no_window_kwargs(),
         )
     except FileNotFoundError:
         return None

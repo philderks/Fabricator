@@ -446,7 +446,11 @@ def browse_server_files(server_id):
     entries.sort(key=lambda entry: (0 if entry['isDir'] else 1, entry['name'].lower()))
 
     current_relative = '' if target_path == base_path else str(target_path.relative_to(base_path))
-    return jsonify({'currentPath': current_relative, 'entries': entries})
+    return jsonify({
+        'currentPath': current_relative,
+        'absolutePath': str(target_path),
+        'entries': entries,
+    })
 
 
 @server_bp.route('/servers/<server_id>/files/content', methods=['GET'])
@@ -1084,7 +1088,12 @@ def get_java_status():
         required_java = java_manager.required_java_for(mc_version)
 
     try:
-        result = subprocess.run([java_path, '-version'], capture_output=True, text=True)
+        result = subprocess.run(
+            [java_path, '-version'],
+            capture_output=True,
+            text=True,
+            **platform_utils.subprocess_no_window_kwargs(),
+        )
         version_output = (result.stdout or '') + (result.stderr or '')
         installed = result.returncode == 0
         version = None

@@ -18,8 +18,20 @@ def get_base_path() -> str:
 
 
 def setup_paths() -> None:
-    """Ensure the working directory mirrors the executable location."""
-    if getattr(sys, 'frozen', False):
+    """Ensure cwd is a stable, writable location for the bundled exe.
+
+    On Windows the .exe is often launched from Downloads or another transient
+    folder, so we cd into %APPDATA%\\Fabricator instead. On POSIX deployments
+    the install script controls the working directory, so we mirror the
+    executable location as before.
+    """
+    if not getattr(sys, 'frozen', False):
+        return
+    from backend.utils.platform import appdata_dir
+    target = appdata_dir()
+    if target is not None:
+        os.chdir(target)
+    else:
         os.chdir(os.path.dirname(sys.executable))
 
 
@@ -57,15 +69,29 @@ def create_tray_icon(port: int, on_quit_callback):
     def on_open_browser(icon, item):  # pylint: disable=unused-argument
         webbrowser.open(f"http://127.0.0.1:{port}")
 
+    def on_open_data_folder(icon, item):  # pylint: disable=unused-argument
+        from backend.utils.platform import appdata_dir
+        target = appdata_dir()
+        if target is None:
+            return
+        try:
+            os.startfile(str(target))  # type: ignore[attr-defined]
+        except OSError as exc:
+            print(f"Could not open data folder: {exc}")
+
     def on_quit(icon, item):  # pylint: disable=unused-argument
         icon.stop()
         on_quit_callback()
 
-    menu = pystray.Menu(
-        pystray.MenuItem('🌐 Open in Browser', on_open_browser, default=True),
-        pystray.Menu.SEPARATOR,
-        pystray.MenuItem('❌ Quit', on_quit),
-    )
+    # "Open Data Folder" is Windows-only because (a) the tray itself is most
+    # commonly used on Windows and (b) appdata_dir() returns None on POSIX.
+    from backend.utils.platform import is_windows
+    menu_items = [pystray.MenuItem('🌐 Open in Browser', on_open_browser, default=True)]
+    if is_windows():
+        menu_items.append(pystray.MenuItem('📂 Open Data Folder', on_open_data_folder))
+    menu_items.append(pystray.Menu.SEPARATOR)
+    menu_items.append(pystray.MenuItem('❌ Quit', on_quit))
+    menu = pystray.Menu(*menu_items)
 
     return pystray.Icon(
         name='Fabricator',
