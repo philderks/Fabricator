@@ -550,6 +550,7 @@ export default {
       javaRequirementWarning: '',
       loaderOptions: [
         { value: 'fabric',   label: 'Fabric'   },
+        { value: 'quilt',    label: 'Quilt'    },
         { value: 'neoforge', label: 'NeoForge' },
         { value: 'vanilla',  label: 'Vanilla'  }
       ],
