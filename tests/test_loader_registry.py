@@ -6,6 +6,7 @@ from pathlib import Path
 from backend.server.installer import (
     LOADER_REGISTRY,
     FabricInstaller,
+    NeoForgeInstaller,
     VanillaInstaller,
     get_installer_for,
 )
@@ -42,3 +43,13 @@ def test_registry_contains_vanilla():
 def test_get_installer_for_vanilla(tmp_path):
     inst = get_installer_for("vanilla", tmp_path)
     assert isinstance(inst, VanillaInstaller)
+
+
+def test_registry_contains_neoforge():
+    assert "neoforge" in LOADER_REGISTRY
+    assert LOADER_REGISTRY["neoforge"] is NeoForgeInstaller
+
+
+def test_get_installer_for_neoforge(tmp_path):
+    inst = get_installer_for("neoforge", tmp_path)
+    assert isinstance(inst, NeoForgeInstaller)

@@ -57,3 +57,18 @@ def test_loader_versions_for_vanilla_is_empty(client):
     resp = client.get("/api/loaders/vanilla/versions/loader?mc_version=1.21.4")
     assert resp.status_code == 200
     assert resp.get_json() == []
+
+
+def test_game_versions_dispatch_to_neoforge(client):
+    fake_versions = [
+        {"version": "1.21.1", "stable": True, "type": "release"},
+        {"version": "1.21.0", "stable": False, "type": "snapshot"},
+    ]
+    with patch(
+        "backend.server.installer.neoforge.NeoForgeInstaller.get_minecraft_versions",
+        return_value=fake_versions,
+    ):
+        resp = client.get("/api/loaders/neoforge/versions/game")
+
+    assert resp.status_code == 200
+    assert resp.get_json() == fake_versions
