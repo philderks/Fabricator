@@ -21,6 +21,8 @@ main() {
     FABRICATOR_REPO="${FABRICATOR_REPO:-${GITHUB_OWNER}/${GITHUB_REPO}}"
     FABRICATOR_BRANCH="${FABRICATOR_BRANCH:-main}"
     FABRICATOR_VERSION="${FABRICATOR_VERSION:-latest}"  # latest | main | v1.2.3
+    # Set to 1 by tools/update.sh for in-dashboard updates only.
+    FABRICATOR_SKIP_OS_PACKAGES="${FABRICATOR_SKIP_OS_PACKAGES:-0}"
     MODE="${FABRICATOR_MODE:-install}"                  # install | update
     SERVER_INDEX_FILE="${SERVER_INDEX_FILE:-${DATA_DIR}/servers.json}"
     ENV_FILE="/etc/fabricator/fabricator.env"
@@ -105,32 +107,51 @@ main() {
         error "Supported so far: Debian/Ubuntu, Arch, Fedora-family."
     fi
 
-    # 2) Install dependencies
-    # NOTE: all package-manager commands redirect stdin from /dev/null so they
-    # cannot consume the piped script when invoked via  curl … | bash
-    info "Installing dependencies for $OS_FAMILY (pkg: $PACKAGETYPE)..."
-
-    case "$PACKAGETYPE" in
-        apt)
-            # Java is managed per-server via the in-app Java manager (see /api/java).
-            DEPS="python3 python3-venv python3-pip curl ca-certificates grep sed tar rsync"
-            $SUDO apt-get update </dev/null
-            $SUDO apt-get install -y $DEPS </dev/null
-            ;;
-        pacman)
-            DEPS="python python-pip curl ca-certificates grep sed tar rsync"
-            $SUDO pacman -Sy --noconfirm $DEPS </dev/null
-            ;;
-        dnf)
-            DEPS="python3 python3-pip curl ca-certificates grep sed tar rsync"
-            $SUDO dnf install -y $DEPS </dev/null
-            ;;
-        *)
-            error "internal error: unknown PACKAGETYPE: $PACKAGETYPE"
+    _skip_os_packages=false
+    case "$FABRICATOR_SKIP_OS_PACKAGES" in
+        1|true|TRUE|yes|YES|on|ON)
+            _skip_os_packages=true
             ;;
     esac
 
-    info "Dependencies installed."
+    if $_skip_os_packages; then
+        if [[ "$MODE" != "update" ]]; then
+            error "FABRICATOR_SKIP_OS_PACKAGES is only valid for --update mode (used by tools/update.sh)."
+        fi
+        info "Skipping OS package install (release-only update)."
+        for _need in curl tar rsync python3 grep sed; do
+            command -v "$_need" >/dev/null 2>&1 ||
+                error "Missing system command '$_need'. Run install.sh --update once as root without FABRICATOR_SKIP_OS_PACKAGES to install deps."
+        done
+        info "Host tools OK; proceeding without apt/pacman/dnf."
+    else
+        # 2) Install dependencies
+        # NOTE: all package-manager commands redirect stdin from /dev/null so they
+        # cannot consume the piped script when invoked via  curl … | bash
+        info "Installing dependencies for $OS_FAMILY (pkg: $PACKAGETYPE)..."
+
+        case "$PACKAGETYPE" in
+            apt)
+                # Java is managed per-server via the in-app Java manager (see /api/java).
+                DEPS="python3 python3-venv python3-pip curl ca-certificates grep sed tar rsync"
+                $SUDO apt-get update </dev/null
+                $SUDO apt-get install -y $DEPS </dev/null
+                ;;
+            pacman)
+                DEPS="python python-pip curl ca-certificates grep sed tar rsync"
+                $SUDO pacman -Sy --noconfirm $DEPS </dev/null
+                ;;
+            dnf)
+                DEPS="python3 python3-pip curl ca-certificates grep sed tar rsync"
+                $SUDO dnf install -y $DEPS </dev/null
+                ;;
+            *)
+                error "internal error: unknown PACKAGETYPE: $PACKAGETYPE"
+                ;;
+        esac
+
+        info "Dependencies installed."
+    fi
 
     # Create service user if missing
     info "Ensuring service user '$SERVICE_USER' exists..."
@@ -306,6 +327,23 @@ CapabilityBoundingSet=
 [Install]
 WantedBy=multi-user.target
 EOF
+
+    # In-app updater runs as $SERVICE_USER; install.sh needs root — grant one NOPASSWD path.
+    UPDATE_BASH="$(command -v bash)"
+    if [[ -z "$UPDATE_BASH" ]]; then
+        error "bash not found; cannot configure self-update."
+    fi
+    SUDO_DROPIN="/etc/sudoers.d/fabricator-self-update"
+    info "Configuring passwordless sudo for dashboard self-update..."
+    $SUDO tee "$SUDO_DROPIN" >/dev/null <<EOF
+# Managed by Fabricator install.sh — do not edit by hand
+${SERVICE_USER} ALL=(root) NOPASSWD: ${UPDATE_BASH} ${APP_DIR}/tools/update.sh, ${UPDATE_BASH} ${APP_DIR}/tools/update.sh *
+EOF
+    $SUDO chmod 0440 "$SUDO_DROPIN"
+    if ! $SUDO visudo -cf "$SUDO_DROPIN" >/dev/null 2>&1; then
+        $SUDO rm -f "$SUDO_DROPIN"
+        error "sudoers drop-in failed validation and was removed. Please report this to Fabricator."
+    fi
 
     info "Reloading systemd and enabling service..."
     $SUDO systemctl daemon-reload

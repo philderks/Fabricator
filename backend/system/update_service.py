@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
+import sys
 import threading
 import time
 from collections import deque
 from typing import Any, Dict, Optional
+from pathlib import Path
 from urllib import error, request
 import json
 
@@ -57,16 +60,40 @@ class UpdateService:
         self._last_triggered_version: Optional[str] = None
         self._repo = os.environ.get("FABRICATOR_REPO", "philderks/Fabricator")
 
-    def _build_update_cmd(self) -> list[str]:
-        return [
-            "/usr/bin/env", "bash", "-c",
-            "curl -fsSL https://raw.githubusercontent.com/philderks/Fabricator/main/tools/install.sh | bash -s -- --update"
-        ]
+    def _build_update_cmd(self, version: str) -> list[str]:
+        """Prefer local tools/update.sh with sudo — matches packaged Linux systemd installs."""
+
+        curl_updater = (
+            "curl -fsSL "
+            "'https://raw.githubusercontent.com/philderks/Fabricator/main/tools/install.sh' "
+            "| bash -s -- --update"
+        )
+
+        update_sh = Path(__file__).resolve().parents[2] / "tools" / "update.sh"
+        linuxish = sys.platform.startswith("linux")
+        sudo_bin = Path("/usr/bin/sudo")
+
+        # Packaged installs run as an unprivileged user and must elevate to run install.sh.
+        if linuxish and update_sh.is_file():
+            bash_bin = Path(shutil.which("bash") or "/bin/bash").resolve()
+            if os.geteuid() == 0:
+                return [str(bash_bin), str(update_sh), version]
+            if sudo_bin.is_file():
+                return [
+                    str(sudo_bin),
+                    "-n",
+                    str(bash_bin),
+                    str(update_sh),
+                    version,
+                ]
+
+        # Dev installs / non-Linux fallback (requires sufficient privileges for the installer).
+        return ["/usr/bin/env", "bash", "-lc", curl_updater]
 
     def _run_update(self, version: str) -> None:
         env = os.environ.copy()
         env["FABRICATOR_VERSION"] = version
-        cmd = self._build_update_cmd()
+        cmd = self._build_update_cmd(version)
 
         with self._state_lock:
             self._in_progress = True

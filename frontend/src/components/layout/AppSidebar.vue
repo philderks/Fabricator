@@ -1,5 +1,5 @@
 <script setup>
-import { computed, inject, onMounted, onUnmounted, ref } from 'vue'
+import { computed, inject, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import ServerSwitcher from './ServerSwitcher.vue'
 import { version as appVersion } from '../../../package.json'
@@ -34,7 +34,32 @@ const updateState = ref({
   lastExitCode: null
 })
 const updateTriggering = ref(false)
+/** 0 idle, 1 armed after trigger, 2 saw inProgress true (avoids toast if job never starts). */
+const updateOutcomeWatch = ref(0)
 let updateStatusIntervalId = null
+
+watch(
+  () => updateState.value.inProgress,
+  (inProg) => {
+    if (updateOutcomeWatch.value === 1 && inProg) {
+      updateOutcomeWatch.value = 2
+    }
+    if (updateOutcomeWatch.value === 2 && !inProg) {
+      updateOutcomeWatch.value = 0
+      const { lastExitCode, lastError } = updateState.value
+      if (lastExitCode === 0) {
+        toast.success(
+          'Update finished. Refresh the page if it does not reload automatically.',
+          'Fabricator Update'
+        )
+      } else {
+        const detail =
+          lastError || (lastExitCode != null ? `Exit code ${lastExitCode}` : 'Update failed')
+        toast.error(detail, 'Fabricator Update')
+      }
+    }
+  }
+)
 
 const loadUpdateState = async () => {
   try {
@@ -81,6 +106,7 @@ const runUpdate = async () => {
   try {
     const result = await triggerUpdate()
     if (result.started) {
+      updateOutcomeWatch.value = 1
       toast.success('Update started in background', 'Fabricator Update')
       await loadUpdateState()
       scheduleNextPoll()
