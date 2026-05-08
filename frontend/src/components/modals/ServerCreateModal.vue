@@ -889,19 +889,34 @@ export default {
       this.showJavaModal = false
       this.pendingJavaRetryServerId = null
       if (retryServerId) {
-        // Server was already created; retry just the install step.
+        // Server was already created on the prior attempt; retry just the
+        // install step. Phase 3c made /install async (returns 202 + initial
+        // progress, real outcome arrives via polling) — mirror handleCreate's
+        // post-202 flow so success/failure surfaces correctly. Without this,
+        // the call silently no-ops because installResult?.success is undefined
+        // on the new 202 body.
+        this.installCreatedServerId = retryServerId
+        this.installState = 'installing'
+        this.installProgress = null
         try {
-          this.toast.info('Re-running server install with Java installed...', 'Installation')
-          const installResult = await installServer(retryServerId)
-          if (installResult?.success) {
+          const initialProgress = await installServer(retryServerId)
+          this.installProgress = initialProgress
+          const finalProgress = await this.pollInstallProgress(retryServerId)
+          if (finalProgress.phase === 'done') {
             this.toast.success('Server installed successfully.', 'Server Installation')
+            this.installState = null
+            this.installProgress = null
           } else {
+            this.installState = 'failed'
+            this.installProgress = finalProgress
             this.toast.error(
-              installResult?.message || 'Installation failed',
-              'Server Installation Failed'
+              finalProgress.error || 'Installation failed',
+              'Server Installation Failed',
             )
           }
         } catch (error) {
+          this.installState = 'failed'
+          this.installProgress = { phase: 'failed', error: error?.message || 'Installation failed' }
           this.toast.error(error?.message || 'Installation failed', 'Server Installation Failed')
         }
       } else {
