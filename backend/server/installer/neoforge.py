@@ -317,7 +317,7 @@ class NeoForgeInstaller(InstallerBase):
                 cwd=str(self.install_path),
                 capture_output=True,
                 text=True,
-                timeout=600,
+                timeout=1800,
                 **platform_utils.subprocess_no_window_kwargs(),
             )
         except subprocess.TimeoutExpired as exc:
