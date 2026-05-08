@@ -13,6 +13,7 @@ from .base import (
     InstallStatus,
     LaunchSpec,
 )
+from backend.utils import platform as platform_utils
 from backend.utils.platform import is_windows
 
 
@@ -243,6 +244,11 @@ class NeoForgeInstaller(InstallerBase):
             return None, f"Failed to download NeoForge installer: {exc}"
 
         expected_sha1 = self._fetch_expected_sha1(loader_version)
+        if not expected_sha1:
+            print(
+                f"WARNING: NeoForge installer SHA1 unavailable for "
+                f"{loader_version} — proceeding without integrity check."
+            )
         if expected_sha1:
             actual = hasher.hexdigest().lower()
             if actual != expected_sha1:
@@ -312,6 +318,7 @@ class NeoForgeInstaller(InstallerBase):
                 capture_output=True,
                 text=True,
                 timeout=600,
+                **platform_utils.subprocess_no_window_kwargs(),
             )
         except subprocess.TimeoutExpired as exc:
             return InstallResult(

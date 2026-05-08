@@ -285,3 +285,40 @@ def test_install_sha1_mismatch_fails(tmp_path, fake_maven_versions, monkeypatch)
     result = inst.install("1.21.1")
     assert result.success is False
     assert "sha1" in result.message.lower()
+
+
+def test_install_subprocess_uses_no_window_kwargs(tmp_path, fake_maven_versions, monkeypatch):
+    """The installer subprocess must opt into platform_utils.subprocess_no_window_kwargs.
+
+    Without this the NeoForge installer flashes a console window on Windows,
+    breaking the convention every other subprocess in the codebase follows.
+    """
+    import subprocess
+    from backend.server.installer.neoforge import NeoForgeInstaller
+    inst = NeoForgeInstaller(tmp_path)
+    _patch_session(inst, maven_response=fake_maven_versions)
+
+    captured_kwargs = {}
+
+    def fake_run(cmd, **kwargs):
+        captured_kwargs.update(kwargs)
+        chosen_version = "21.1.228"
+        target_dir = tmp_path / "libraries" / "net" / "neoforged" / "neoforge" / chosen_version
+        target_dir.mkdir(parents=True, exist_ok=True)
+        (target_dir / "unix_args.txt").write_text("# args\n")
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+    # Sentinel kwargs returned by subprocess_no_window_kwargs — verifies the
+    # NeoForgeInstaller called the helper and merged the result.
+    SENTINEL_KW = {"creationflags": 0x08000000}
+    monkeypatch.setattr(
+        "backend.server.installer.neoforge.platform_utils.subprocess_no_window_kwargs",
+        lambda: SENTINEL_KW,
+    )
+    monkeypatch.setattr("backend.server.installer.neoforge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.neoforge.is_windows", lambda: False)
+
+    result = inst.install("1.21.1")
+    assert result.success is True
+    # The sentinel kwarg must have made it through.
+    assert captured_kwargs.get("creationflags") == 0x08000000
