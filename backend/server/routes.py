@@ -912,6 +912,48 @@ def install_server(server_id):
                     )
                 }), 400
 
+            # Second Java guard — installers that themselves invoke java
+            # need a usable JDK at install time even when the MC-compat
+            # branch above didn't fire (e.g. non-enforceable older MC
+            # version that we still want to allow installing for the user).
+            if installer.requires_java_for_install:
+                runtime = java_check['runtime']
+                detected_java = java_check.get('detected_java')
+                java_missing = bool(runtime.get('java_missing', False))
+                required_java_raw = java_check.get('required_java')
+                required_java = int(required_java_raw) if required_java_raw else None
+                java_too_old = (
+                    detected_java is not None
+                    and required_java is not None
+                    and int(detected_java) < required_java
+                )
+                if java_missing or java_too_old:
+                    storage.update_server_status(server_id, 'stopped')
+                    return jsonify({
+                        'success': False,
+                        'error': (
+                            f'Java is required to install this loader. '
+                            f'Detected: {detected_java if detected_java is not None else "none"}.'
+                        ),
+                        'java_missing': java_missing,
+                        'java_too_old': java_too_old,
+                        'required_java': required_java,
+                        'detected_java': detected_java,
+                        'server_java_target': runtime.get('java_exec'),
+                        'compatibility': compat,
+                        'recommended_install': _build_java_recommendation(
+                            platform_utils.platform_label(),
+                            required_java if required_java else 21
+                        )
+                    }), 400
+
+            # Hand the installer the same Java the runtime path will use.
+            # Default no-op for Fabric/Vanilla (they don't invoke Java);
+            # NeoForge subprocess reads self.java_exec to honour managed Java
+            # and per-server javaPath overrides instead of falling through to
+            # whatever ``java`` happens to be on PATH.
+            installer.set_java_exec(java_check['runtime'].get('java_exec'))
+
             result = installer.install_with_config(
                 mc_version=mc_version,
                 server_config=server
