@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import Callable, List, Optional, Dict, Any
 
 DIR_PERMISSIONS = 0o775
 
@@ -141,14 +141,20 @@ class InstallerBase(ABC):
     def install(
         self,
         mc_version: str,
-        loader_version: Optional[str] = None
+        loader_version: Optional[str] = None,
+        progress_callback: Optional[
+            "Callable[[str, Dict[str, Any]], None]"
+        ] = None,
     ) -> InstallResult:
         """Install the server.
-        
+
         Args:
             mc_version: Minecraft version to install
             loader_version: Optional specific loader version (uses latest if None)
-            
+            progress_callback: Optional ``(phase, detail_dict)`` callback for
+                streaming install progress to a per-server-id store.
+                ``None`` ⇒ silent install (existing call sites keep working).
+
         Returns:
             InstallResult with success status and details
         """

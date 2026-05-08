@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import requests
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from .base import (
     InstallerBase,
@@ -123,6 +123,9 @@ class VanillaInstaller(InstallerBase):
         self,
         mc_version: str,
         loader_version: Optional[str] = None,
+        progress_callback: Optional[
+            "Callable[[str, Dict[str, Any]], None]"
+        ] = None,
     ) -> InstallResult:
         self._ensure_install_dir()
 
@@ -204,8 +207,13 @@ class VanillaInstaller(InstallerBase):
         mc_version: str,
         server_config: Dict[str, Any],
         loader_version: Optional[str] = None,
+        progress_callback: Optional[
+            "Callable[[str, Dict[str, Any]], None]"
+        ] = None,
     ) -> InstallResult:
-        result = self.install(mc_version, loader_version)
+        result = self.install(
+            mc_version, loader_version, progress_callback=progress_callback
+        )
         if not result.success:
             return result
 

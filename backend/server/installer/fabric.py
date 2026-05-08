@@ -2,7 +2,7 @@
 import os
 import requests
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import Callable, List, Optional, Dict, Any
 
 from .base import InstallerBase, InstallResult, InstallStatus, LaunchSpec, DIR_PERMISSIONS
 
@@ -212,7 +212,10 @@ class FabricInstaller(InstallerBase):
         self,
         mc_version: str,
         loader_version: Optional[str] = None,
-        installer_version: Optional[str] = None
+        installer_version: Optional[str] = None,
+        progress_callback: Optional[
+            "Callable[[str, Dict[str, Any]], None]"
+        ] = None,
     ) -> InstallResult:
         """Install a Fabric server.
         
@@ -314,7 +317,10 @@ class FabricInstaller(InstallerBase):
         mc_version: str,
         server_config: Dict[str, Any],
         loader_version: Optional[str] = None,
-        installer_version: Optional[str] = None
+        installer_version: Optional[str] = None,
+        progress_callback: Optional[
+            "Callable[[str, Dict[str, Any]], None]"
+        ] = None,
     ) -> InstallResult:
         """Install a Fabric server with full configuration.
         
@@ -327,7 +333,12 @@ class FabricInstaller(InstallerBase):
             InstallResult with success status and details
         """
         # First do the basic installation
-        result = self.install(mc_version, loader_version, installer_version)
+        result = self.install(
+            mc_version,
+            loader_version,
+            installer_version,
+            progress_callback=progress_callback,
+        )
         
         if not result.success:
             return result
