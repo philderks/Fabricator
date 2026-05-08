@@ -3,7 +3,12 @@
 Pattern: subprocess-driven install, jar-launched runtime.
 
 Install:
-    java -jar quilt-installer-<v>.jar install server <mc_version> --download-server
+    java -jar quilt-installer-<v>.jar install server <mc_version> \
+        --download-server --install-dir=<install_path>
+
+(``--install-dir`` is required: without it the installer creates a ``server/``
+subdirectory and drops everything one level deeper than we expect, making
+``_detect_launch_jar`` miss the file.)
 
 Output (in install_path):
     quilt-server-launch.jar   ← what we boot
@@ -230,7 +235,9 @@ class QuiltInstaller(InstallerBase):
             completed = subprocess.run(
                 [
                     java_cmd, "-jar", str(installer_jar),
-                    "install", "server", mc_version, "--download-server",
+                    "install", "server", mc_version,
+                    "--download-server",
+                    f"--install-dir={self.install_path}",
                 ],
                 cwd=str(self.install_path),
                 capture_output=True,

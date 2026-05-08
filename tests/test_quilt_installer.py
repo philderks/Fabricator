@@ -168,9 +168,13 @@ def test_install_resolves_installer_version_from_maven_metadata(
     jar_arg_index = captured["cmd"].index("-jar") + 1
     installer_path = captured["cmd"][jar_arg_index]
     assert "quilt-installer-0.12.1.jar" in installer_path
-    # Install command form per Quilt docs: install server <mc> --download-server.
+    # Install command MUST pass --install-dir=<install_path>. Without that
+    # flag the Quilt installer creates a `server/` subdirectory and drops
+    # the launcher jar one level deeper than _detect expects.
     assert captured["cmd"][jar_arg_index + 1:] == [
-        "install", "server", "1.21.4", "--download-server"
+        "install", "server", "1.21.4",
+        "--download-server",
+        f"--install-dir={tmp_path}",
     ]
     assert str(captured["cwd"]) == str(tmp_path)
 
