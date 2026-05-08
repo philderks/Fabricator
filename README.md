@@ -10,7 +10,7 @@
 [![Stars](https://img.shields.io/github/stars/philderks/Fabricator?style=flat-square)](https://github.com/philderks/Fabricator/stargazers)
 [![Platform](https://img.shields.io/badge/platform-Linux-lightgrey?style=flat-square)](https://github.com/philderks/Fabricator)
 
-[fabricator.site](https://fabricator.site/)
+[Website](https://fabricator.site/) | [Documentation](https://docs.fabricator.site/)
 
 </div>
 
