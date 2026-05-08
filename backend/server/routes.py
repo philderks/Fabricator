@@ -5,12 +5,14 @@ from pathlib import Path
 import os
 import shutil
 import stat
+import threading
 import zipfile
 
 from flask import Blueprint, jsonify, request
 
 from backend.server.registry import get_server_process_registry
 from backend.server import storage
+from backend.server import install_progress
 from backend.server.installer import (
     InstallStatus,
     get_installer_for,
@@ -865,140 +867,206 @@ def delete_server_route(server_id):
 
 @server_bp.route('/servers/<server_id>/install', methods=['POST'])
 def install_server(server_id):
-    """Install the server (download JAR, configure, etc.)."""
+    """Start the server installation asynchronously.
+
+    Java guards are validated synchronously — failures return 400
+    immediately without spawning a thread. On success the actual install
+    (download + subprocess + persist) runs in a daemon thread that pushes
+    phase + bytes-progress into ``install_progress``. The frontend polls
+    ``GET /api/servers/<id>/install/progress`` until the phase becomes
+    ``done`` or ``failed``.
+    """
     server = storage.get_server(server_id)
     if not server:
         return jsonify({'error': 'Server not found'}), 404
 
-    lock = try_acquire(server_id)
-    if lock is None:
-        return jsonify({'error': 'Another operation is in progress for this server'}), 409
+    # Synchronous validation (fail-fast, no thread spawn).
+    loader = (server.get('loader') or '').strip().lower()
+    if not loader:
+        return jsonify({'error': 'Server has no mod loader configured'}), 400
+    mc_version = server.get('version')
+    if not mc_version:
+        return jsonify({'error': 'Server has no Minecraft version configured'}), 400
+
     try:
-        loader = (server.get('loader') or '').strip().lower()
-        if not loader:
-            return jsonify({'error': 'Server has no mod loader configured'}), 400
-        mc_version = server.get('version')
+        install_path = _registry()._resolve_install_path(server)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
 
-        if not mc_version:
-            return jsonify({'error': 'Server has no Minecraft version configured'}), 400
+    installer = _get_installer(loader, install_path)
+    if not installer:
+        supported = supported_loaders()
+        return jsonify({
+            'error': (
+                f'Unsupported loader: {loader}. '
+                f'Supported loaders: {", ".join(supported)}.'
+            )
+        }), 400
 
-        try:
-            install_path = _registry()._resolve_install_path(server)
-        except ValueError as exc:
-            return jsonify({'error': str(exc)}), 400
+    # Detect contention synchronously: the per-server RLock is owned by
+    # whichever thread currently holds it. ``try_acquire`` returns None if
+    # busy. We immediately release the lock so the worker thread (a
+    # different thread; RLock release is thread-bound) can acquire it
+    # itself in ``_run_install``. Any racing POST in the tiny gap is
+    # caught by the ``install_progress.is_active`` belt-and-braces check
+    # below — once the 'starting' entry exists, racing requests get 409.
+    if install_progress.is_active(server_id):
+        return jsonify({'error': 'Another operation is in progress for this server'}), 409
+    probe = try_acquire(server_id)
+    if probe is None:
+        return jsonify({'error': 'Another operation is in progress for this server'}), 409
+    probe.release()
 
-        installer = _get_installer(loader, install_path)
-        if not installer:
-            supported = supported_loaders()
+    # Java guards (synchronous — fail-fast, return 400).
+    java_check = _server_java_check_payload(server)
+    compat = java_check['compatibility']
+    if java_check['enforceable'] and not java_check['meets_requirement']:
+        required_java = int(java_check['required_java'])
+        detected_java = java_check['detected_java']
+        runtime = java_check['runtime']
+        return jsonify({
+            'success': False,
+            'error': (
+                f'Java {required_java}+ is required for Minecraft {server.get("version")} '
+                f'(detected: {detected_java if detected_java is not None else "unknown"})'
+            ),
+            'java_missing': bool(runtime.get('java_missing', False)),
+            'java_too_old': detected_java is not None,
+            'required_java': required_java,
+            'detected_java': detected_java,
+            'server_java_target': runtime.get('java_exec'),
+            'compatibility': compat,
+            'recommended_install': _build_java_recommendation(
+                platform_utils.platform_label(),
+                required_java
+            )
+        }), 400
+
+    # Second Java guard — installers that themselves invoke java need a
+    # usable JDK at install time even when the MC-compat branch above
+    # didn't fire (e.g. non-enforceable older MC version that we still
+    # want to allow installing for the user).
+    if installer.requires_java_for_install:
+        runtime = java_check['runtime']
+        detected_java = java_check.get('detected_java')
+        java_missing = bool(runtime.get('java_missing', False))
+        required_java_raw = java_check.get('required_java')
+        required_java = int(required_java_raw) if required_java_raw else None
+        java_too_old = (
+            detected_java is not None
+            and required_java is not None
+            and int(detected_java) < required_java
+        )
+        if java_missing or java_too_old:
             return jsonify({
+                'success': False,
                 'error': (
-                    f'Unsupported loader: {loader}. '
-                    f'Supported loaders: {", ".join(supported)}.'
+                    f'Java is required to install this loader. '
+                    f'Detected: {detected_java if detected_java is not None else "none"}.'
+                ),
+                'java_missing': java_missing,
+                'java_too_old': java_too_old,
+                'required_java': required_java,
+                'detected_java': detected_java,
+                'server_java_target': runtime.get('java_exec'),
+                'compatibility': compat,
+                'recommended_install': _build_java_recommendation(
+                    platform_utils.platform_label(),
+                    required_java if required_java else 21
                 )
             }), 400
 
-        storage.update_server_status(server_id, 'installing')
+    # Hand the installer the same Java the runtime path will use.
+    # Default no-op for Fabric/Vanilla (they don't invoke Java);
+    # NeoForge subprocess reads self.java_exec to honour managed Java
+    # and per-server javaPath overrides instead of falling through to
+    # whatever ``java`` happens to be on PATH.
+    installer.set_java_exec(java_check['runtime'].get('java_exec'))
 
+    # Status flip + initial progress entry. Written BEFORE the thread
+    # spawn so the response includes the 'starting' phase and a fast
+    # follow-up GET sees it. The 'starting' entry also serves as the
+    # synchronous busy marker for any racing POST that slips between the
+    # try_acquire/release probe above and the worker's lock acquire.
+    storage.update_server_status(server_id, 'installing')
+    install_progress.update(
+        server_id,
+        phase='starting',
+        server_id=server_id,
+        loader=loader,
+        mc_version=mc_version,
+    )
+
+    # The worker thread acquires + releases the per-server lock itself
+    # because RLock is thread-bound (Python's RLock binds the owning
+    # thread on acquire and only that thread can release). The worker
+    # uses blocking acquire so that any other operation queued in the
+    # tiny race window is serialized rather than racing the install.
+    def _run_install():
+        worker_lock = get_server_lock(server_id)
+        worker_lock.acquire()
         try:
-            java_check = _server_java_check_payload(server)
-            compat = java_check['compatibility']
-            if java_check['enforceable'] and not java_check['meets_requirement']:
-                required_java = int(java_check['required_java'])
-                detected_java = java_check['detected_java']
-                runtime = java_check['runtime']
-                storage.update_server_status(server_id, 'stopped')
-                return jsonify({
-                    'success': False,
-                    'error': (
-                        f'Java {required_java}+ is required for Minecraft {server.get("version")} '
-                        f'(detected: {detected_java if detected_java is not None else "unknown"})'
-                    ),
-                    'java_missing': bool(runtime.get('java_missing', False)),
-                    'java_too_old': detected_java is not None,
-                    'required_java': required_java,
-                    'detected_java': detected_java,
-                    'server_java_target': runtime.get('java_exec'),
-                    'compatibility': compat,
-                    'recommended_install': _build_java_recommendation(
-                        platform_utils.platform_label(),
-                        required_java
-                    )
-                }), 400
+            def _on_progress(phase, detail):
+                install_progress.update(server_id, phase=phase, **detail)
 
-            # Second Java guard — installers that themselves invoke java
-            # need a usable JDK at install time even when the MC-compat
-            # branch above didn't fire (e.g. non-enforceable older MC
-            # version that we still want to allow installing for the user).
-            if installer.requires_java_for_install:
-                runtime = java_check['runtime']
-                detected_java = java_check.get('detected_java')
-                java_missing = bool(runtime.get('java_missing', False))
-                required_java_raw = java_check.get('required_java')
-                required_java = int(required_java_raw) if required_java_raw else None
-                java_too_old = (
-                    detected_java is not None
-                    and required_java is not None
-                    and int(detected_java) < required_java
+            try:
+                result = installer.install_with_config(
+                    mc_version=mc_version,
+                    server_config=server,
+                    progress_callback=_on_progress,
                 )
-                if java_missing or java_too_old:
-                    storage.update_server_status(server_id, 'stopped')
-                    return jsonify({
-                        'success': False,
-                        'error': (
-                            f'Java is required to install this loader. '
-                            f'Detected: {detected_java if detected_java is not None else "none"}.'
-                        ),
-                        'java_missing': java_missing,
-                        'java_too_old': java_too_old,
-                        'required_java': required_java,
-                        'detected_java': detected_java,
-                        'server_java_target': runtime.get('java_exec'),
-                        'compatibility': compat,
-                        'recommended_install': _build_java_recommendation(
-                            platform_utils.platform_label(),
-                            required_java if required_java else 21
-                        )
-                    }), 400
-
-            # Hand the installer the same Java the runtime path will use.
-            # Default no-op for Fabric/Vanilla (they don't invoke Java);
-            # NeoForge subprocess reads self.java_exec to honour managed Java
-            # and per-server javaPath overrides instead of falling through to
-            # whatever ``java`` happens to be on PATH.
-            installer.set_java_exec(java_check['runtime'].get('java_exec'))
-
-            result = installer.install_with_config(
-                mc_version=mc_version,
-                server_config=server
-            )
+            except Exception as exc:
+                storage.update_server_status(server_id, 'failed')
+                install_progress.update(
+                    server_id, phase='failed', error=f'Installation crashed: {exc}'
+                )
+                return
 
             if result.success:
                 updates: dict = {'status': 'stopped'}
                 if result.launch is not None:
                     updates['launch'] = result.launch.to_dict()
                 storage.update_server(server_id, updates)
-                return jsonify({
-                    'success': True,
-                    'message': result.message,
-                    'details': result.details,
-                    'server': _augment_with_runtime(storage.get_server(server_id))
-                })
+                # The installer already emitted 'done' before returning;
+                # this update is idempotent and ensures the entry has the
+                # final status flip for the frontend.
+                install_progress.update(server_id, phase='done')
             else:
                 storage.update_server_status(server_id, 'failed')
-                return jsonify({
-                    'success': False,
-                    'message': result.message,
-                    'details': result.details
-                }), 500
+                install_progress.update(
+                    server_id, phase='failed', error=result.message
+                )
+        finally:
+            worker_lock.release()
 
-        except Exception as exc:
-            storage.update_server_status(server_id, 'failed')
-            return jsonify({
-                'success': False,
-                'message': f'Installation failed: {str(exc)}'
-            }), 500
-    finally:
-        lock.release()
+    threading.Thread(
+        target=_run_install,
+        name=f"server-install-{server_id}",
+        daemon=True,
+    ).start()
+
+    # Return current progress (includes the 'starting' entry we just inserted).
+    return jsonify({
+        'active': install_progress.is_active(server_id),
+        **install_progress.get(server_id),
+    }), 202
+
+
+@server_bp.route('/servers/<server_id>/install/progress', methods=['GET'])
+def get_install_progress(server_id):
+    """Return current install progress for the server.
+
+    ``active`` is True iff there's an entry whose phase isn't ``done`` or
+    ``failed``. Frontend polls this endpoint at ~750ms intervals until
+    ``active`` flips to False.
+    """
+    if not storage.get_server(server_id):
+        return jsonify({'error': 'Server not found'}), 404
+    progress = install_progress.get(server_id)
+    return jsonify({
+        'active': install_progress.is_active(server_id),
+        **progress,
+    })
 
 
 @server_bp.route('/servers/<server_id>/start', methods=['POST'])

@@ -233,6 +233,16 @@ export async function installServer(serverId) {
 }
 
 /**
+ * Get the current install progress for a server.
+ * Returns { active: bool, phase?: string, bytes_done?: number, bytes_total?: number, error?: string, ... }.
+ * @param {string} serverId
+ * @returns {Promise<Object>}
+ */
+export async function getServerInstallProgress(serverId) {
+  return get(`/api/servers/${encodeURIComponent(serverId)}/install/progress`)
+}
+
+/**
  * Get Minecraft versions supported by a loader.
  * @param {string} loader - Loader name (e.g. 'fabric', 'vanilla')
  * @returns {Promise<Array<{version: string, stable: boolean, type?: string}>>}

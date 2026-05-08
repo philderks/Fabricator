@@ -1,9 +1,47 @@
 """Successful install must persist launch into servers.json."""
 from __future__ import annotations
 
+import importlib
+import time
 from unittest.mock import patch
 
 from backend.server.installer.base import InstallResult, InstallStatus, LaunchSpec
+
+
+def _install_progress_module():
+    """Look up the install_progress module via importlib.
+
+    test_app_factory.py reloads ``backend.*`` modules, which means a top-
+    level ``from backend.server import install_progress`` would hold the
+    pre-reload module while the route holds the post-reload one — they
+    have different ``_store`` dicts. ``importlib.import_module`` always
+    returns whatever sys.modules currently has, so this stays in sync
+    with the route's view of the world.
+    """
+    return importlib.import_module("backend.server.install_progress")
+
+
+def _wait_for_install_completion(server_id: str, timeout: float = 5.0) -> dict:
+    """Poll the in-memory progress store until the install thread reaches a terminal phase.
+
+    Tests mock the installer's install_with_config so the thread completes in
+    milliseconds. Polling the in-memory store is faster than HTTP-polling
+    /api/servers/<id>/install/progress and avoids extra moving parts.
+
+    Raises AssertionError on timeout (5s default — generous for mocked installs).
+    """
+    deadline = time.time() + timeout
+    ip = _install_progress_module()
+    while time.time() < deadline:
+        entry = ip.get(server_id)
+        phase = entry.get('phase')
+        if phase in ('done', 'failed'):
+            return entry
+        time.sleep(0.01)
+    raise AssertionError(
+        f"Install thread did not complete within {timeout}s. "
+        f"Last progress: {ip.get(server_id)!r}"
+    )
 
 
 def _seed_server(tmp_servers_root):
@@ -22,6 +60,7 @@ def _seed_server(tmp_servers_root):
 def test_install_writes_launch_to_storage(client, tmp_servers_root):
     server = _seed_server(tmp_servers_root)
     server_id = server["id"]
+    _install_progress_module().clear(server_id)
 
     fake_result = InstallResult(
         success=True,
@@ -44,9 +83,9 @@ def test_install_writes_launch_to_storage(client, tmp_servers_root):
          ):
         response = client.post(f"/api/servers/{server_id}/install")
 
-    assert response.status_code == 200
-    body = response.get_json()
-    assert body["success"] is True
+        assert response.status_code == 202
+        final_progress = _wait_for_install_completion(server_id)
+        assert final_progress["phase"] == "done", f"install failed: {final_progress!r}"
 
     from backend.server import storage
     persisted = storage.get_server(server_id)
@@ -62,6 +101,7 @@ def test_install_writes_launch_to_storage(client, tmp_servers_root):
 def test_install_failure_does_not_write_launch(client, tmp_servers_root):
     server = _seed_server(tmp_servers_root)
     server_id = server["id"]
+    _install_progress_module().clear(server_id)
 
     fake_result = InstallResult(
         success=False,
@@ -76,6 +116,8 @@ def test_install_failure_does_not_write_launch(client, tmp_servers_root):
              return_value=fake_result,
          ):
         client.post(f"/api/servers/{server_id}/install")
+        final_progress = _wait_for_install_completion(server_id)
+        assert final_progress["phase"] == "failed"
 
     from backend.server import storage
     persisted = storage.get_server(server_id)
@@ -94,6 +136,7 @@ def test_install_then_command_built_from_persisted_launch(client, tmp_servers_ro
 
     server = _seed_server(tmp_servers_root)
     server_id = server["id"]
+    _install_progress_module().clear(server_id)
 
     fake_result = InstallResult(
         success=True,
@@ -114,7 +157,9 @@ def test_install_then_command_built_from_persisted_launch(client, tmp_servers_ro
              return_value=fake_result,
          ):
         resp = client.post(f"/api/servers/{server_id}/install")
-    assert resp.status_code == 200
+        assert resp.status_code == 202
+        final_progress = _wait_for_install_completion(server_id)
+        assert final_progress["phase"] == "done", f"install failed: {final_progress!r}"
 
     from backend.server import storage
     from backend.server.registry import get_server_process_registry
@@ -155,6 +200,7 @@ def test_neoforge_install_then_command_built_from_persisted_args_file(client, tm
         "memory": 6,
     })
     server_id = server["id"]
+    _install_progress_module().clear(server_id)
 
     fake_result = InstallResult(
         success=True,
@@ -188,7 +234,9 @@ def test_neoforge_install_then_command_built_from_persisted_args_file(client, tm
              return_value=fake_result,
          ):
         resp = client.post(f"/api/servers/{server_id}/install")
-    assert resp.status_code == 200
+        assert resp.status_code == 202
+        final_progress = _wait_for_install_completion(server_id)
+        assert final_progress["phase"] == "done", f"install failed: {final_progress!r}"
 
     from backend.server.registry import get_server_process_registry
     persisted = storage.get_server(server_id)
@@ -231,6 +279,7 @@ def test_quilt_install_then_command_built_from_persisted_launch(
         "memory": 4,
     })
     server_id = server["id"]
+    _install_progress_module().clear(server_id)
 
     fake_result = InstallResult(
         success=True,
@@ -259,7 +308,9 @@ def test_quilt_install_then_command_built_from_persisted_launch(
              return_value=fake_result,
          ):
         resp = client.post(f"/api/servers/{server_id}/install")
-    assert resp.status_code == 200
+        assert resp.status_code == 202
+        final_progress = _wait_for_install_completion(server_id)
+        assert final_progress["phase"] == "done", f"install failed: {final_progress!r}"
 
     from backend.server.registry import get_server_process_registry
     persisted = storage.get_server(server_id)
@@ -303,6 +354,7 @@ def test_forge_legacy_install_then_command_built_from_persisted_launch(
         "memory": 4,
     })
     server_id = server["id"]
+    _install_progress_module().clear(server_id)
 
     fake_result = InstallResult(
         success=True,
@@ -331,7 +383,9 @@ def test_forge_legacy_install_then_command_built_from_persisted_launch(
              return_value=fake_result,
          ):
         resp = client.post(f"/api/servers/{server_id}/install")
-    assert resp.status_code == 200
+        assert resp.status_code == 202
+        final_progress = _wait_for_install_completion(server_id)
+        assert final_progress["phase"] == "done", f"install failed: {final_progress!r}"
 
     from backend.server.registry import get_server_process_registry
     persisted = storage.get_server(server_id)
@@ -374,6 +428,7 @@ def test_forge_modern_install_then_command_built_from_persisted_launch(
         "memory": 6,
     })
     server_id = server["id"]
+    _install_progress_module().clear(server_id)
 
     fake_result = InstallResult(
         success=True,
@@ -402,7 +457,9 @@ def test_forge_modern_install_then_command_built_from_persisted_launch(
              return_value=fake_result,
          ):
         resp = client.post(f"/api/servers/{server_id}/install")
-    assert resp.status_code == 200
+        assert resp.status_code == 202
+        final_progress = _wait_for_install_completion(server_id)
+        assert final_progress["phase"] == "done", f"install failed: {final_progress!r}"
 
     from backend.server.registry import get_server_process_registry
     persisted = storage.get_server(server_id)
