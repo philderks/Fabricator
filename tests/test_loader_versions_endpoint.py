@@ -100,3 +100,35 @@ def test_loader_versions_dispatch_to_quilt(client):
     assert resp.status_code == 200
     assert resp.get_json() == fake
     mock.assert_called_once_with("1.21.4")
+
+
+def test_game_versions_dispatch_to_forge(client):
+    fake_versions = [
+        {"version": "1.21.4", "stable": True, "type": "release"},
+        {"version": "1.20.1", "stable": True, "type": "release"},
+        {"version": "1.16.5", "stable": True, "type": "release"},
+    ]
+    with patch(
+        "backend.server.installer.forge.ForgeInstaller.get_minecraft_versions",
+        return_value=fake_versions,
+    ):
+        resp = client.get("/api/loaders/forge/versions/game")
+
+    assert resp.status_code == 200
+    assert resp.get_json() == fake_versions
+
+
+def test_loader_versions_dispatch_to_forge(client):
+    fake = [
+        {"version": "47.4.10", "stable": True, "type": "release"},
+        {"version": "47.4.20", "stable": True, "type": "release"},
+    ]
+    with patch(
+        "backend.server.installer.forge.ForgeInstaller.get_available_versions",
+        return_value=fake,
+    ) as mock:
+        resp = client.get("/api/loaders/forge/versions/loader?mc_version=1.20.1")
+
+    assert resp.status_code == 200
+    assert resp.get_json() == fake
+    mock.assert_called_once_with("1.20.1")
