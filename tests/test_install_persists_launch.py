@@ -208,3 +208,74 @@ def test_neoforge_install_then_command_built_from_persisted_args_file(client, tm
         "@libraries/net/neoforged/neoforge/21.1.228/unix_args.txt",
         "nogui",
     ]
+
+
+def test_quilt_install_then_command_built_from_persisted_launch(
+    client, tmp_servers_root, monkeypatch
+):
+    """End-to-end: Quilt install writes jar launch → registry builds command from it.
+
+    Validates that the Phase-0 jar branch still produces the right shape for
+    Quilt — same as Fabric/Vanilla, with the Quilt-specific jar name.
+    """
+    from unittest.mock import patch
+    from backend.server.installer.base import InstallResult, InstallStatus, LaunchSpec
+    from backend.server import storage
+
+    server = storage.create_server({
+        "name": "Demo-Quilt",
+        "version": "1.21.4",
+        "loader": "quilt",
+        "port": 25568,
+        "installPath": "demo-quilt",
+        "memory": 4,
+    })
+    server_id = server["id"]
+
+    fake_result = InstallResult(
+        success=True,
+        status=InstallStatus.COMPLETED,
+        message="ok",
+        details={"mc_version": "1.21.4", "installer_version": "0.12.1"},
+        launch=LaunchSpec(
+            type="jar",
+            jar="quilt-server-launch.jar",
+            jvm_args=[],
+            program_args=["nogui"],
+        ),
+    )
+
+    with patch.dict("os.environ", {"FABRICATOR_SKIP_JAVA_CHECK": "1"}), \
+         patch(
+             "backend.server.registry.ServerProcessRegistry.get_java_runtime",
+             return_value={
+                 "available": True, "java_exec": "java",
+                 "major_version": 21, "version_output": "",
+                 "message": "ok", "java_missing": False,
+             },
+         ), \
+         patch(
+             "backend.server.installer.quilt.QuiltInstaller.install_with_config",
+             return_value=fake_result,
+         ):
+        resp = client.post(f"/api/servers/{server_id}/install")
+    assert resp.status_code == 200
+
+    from backend.server.registry import get_server_process_registry
+    persisted = storage.get_server(server_id)
+    assert persisted["launch"]["type"] == "jar"
+    assert persisted["launch"]["jar"] == "quilt-server-launch.jar"
+    assert persisted["launch"]["args_file"] is None
+
+    reg = get_server_process_registry()
+    monkeypatch.setattr(reg, "_resolve_java_exec", lambda s: "/opt/java/bin/java")
+
+    cmd = reg._build_command(persisted)
+    assert cmd == [
+        "/opt/java/bin/java",
+        "-Xms4G",
+        "-Xmx4G",
+        "-jar",
+        "quilt-server-launch.jar",
+        "nogui",
+    ]
