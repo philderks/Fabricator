@@ -917,13 +917,29 @@ def install_server(server_id):
         return jsonify({'error': 'Another operation is in progress for this server'}), 409
     probe.release()
 
-    # Java guards (synchronous — fail-fast, return 400).
+    # Write the 'starting' busy marker IMMEDIATELY after probe release,
+    # BEFORE the Java guards. Closes the race window where a concurrent
+    # POST during the (~70-line) Java-guard block would see is_active=False
+    # AND a free lock and start a second install thread. With the marker
+    # in place from here on, every failure path that returns 400 below
+    # MUST call ``install_progress.clear(server_id)`` so the user's retry
+    # (after fixing Java) isn't blocked by a stale 'starting' entry.
+    install_progress.update(
+        server_id,
+        phase='starting',
+        server_id=server_id,
+        loader=loader,
+        mc_version=mc_version,
+    )
+
+    # Java guards (synchronous — fail-fast, clear marker, return 400).
     java_check = _server_java_check_payload(server)
     compat = java_check['compatibility']
     if java_check['enforceable'] and not java_check['meets_requirement']:
         required_java = int(java_check['required_java'])
         detected_java = java_check['detected_java']
         runtime = java_check['runtime']
+        install_progress.clear(server_id)
         return jsonify({
             'success': False,
             'error': (
@@ -958,6 +974,7 @@ def install_server(server_id):
             and int(detected_java) < required_java
         )
         if java_missing or java_too_old:
+            install_progress.clear(server_id)
             return jsonify({
                 'success': False,
                 'error': (
@@ -983,19 +1000,10 @@ def install_server(server_id):
     # whatever ``java`` happens to be on PATH.
     installer.set_java_exec(java_check['runtime'].get('java_exec'))
 
-    # Status flip + initial progress entry. Written BEFORE the thread
-    # spawn so the response includes the 'starting' phase and a fast
-    # follow-up GET sees it. The 'starting' entry also serves as the
-    # synchronous busy marker for any racing POST that slips between the
-    # try_acquire/release probe above and the worker's lock acquire.
+    # At this point we're committed to running the install. The
+    # 'starting' progress entry is already in place from above; we just
+    # need the persistent status flip on the server record.
     storage.update_server_status(server_id, 'installing')
-    install_progress.update(
-        server_id,
-        phase='starting',
-        server_id=server_id,
-        loader=loader,
-        mc_version=mc_version,
-    )
 
     # The worker thread acquires + releases the per-server lock itself
     # because RLock is thread-bound (Python's RLock binds the owning
