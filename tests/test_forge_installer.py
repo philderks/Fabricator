@@ -138,11 +138,366 @@ def test_get_minecraft_versions_returns_empty_on_meta_failure(tmp_path):
     assert inst.get_minecraft_versions() == []
 
 
-def test_install_stub_returns_failure(tmp_path):
-    """T1 ships only the stub. T2 fills in the real install."""
+def _patch_session_with_install(installer, *, promotions=None,
+                                installer_jar_bytes=b"PKforgeINST"):
+    """Stub installer.session.get for promotions + Maven jar + sha1 endpoints."""
+    session = MagicMock()
+
+    def get(url, **_):
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.headers = {"Content-Length": str(len(installer_jar_bytes))}
+        if "promotions_slim.json" in url:
+            resp.json.return_value = promotions
+        elif url.endswith(".jar"):
+            resp.iter_content = lambda chunk_size=8192: iter([installer_jar_bytes])
+            resp.__enter__ = lambda s: s
+            resp.__exit__ = lambda *a: False
+        elif url.endswith(".sha1"):
+            import hashlib
+            resp.text = hashlib.sha1(installer_jar_bytes).hexdigest()
+        return resp
+
+    session.get.side_effect = get
+    installer.session = session
+    return session
+
+
+def test_install_legacy_1_16_5_returns_jar_launchspec(
+    tmp_path, fake_promotions, monkeypatch
+):
+    """Legacy era: produces forge-<mc>-<build>.jar in install root."""
+    import subprocess
     from backend.server.installer.forge import ForgeInstaller
     inst = ForgeInstaller(tmp_path)
+    _patch_session_with_install(inst, promotions=fake_promotions)
+
+    def fake_run(cmd, **kwargs):
+        # Simulate Forge 1.16.5 installer output: launcher jar in cwd.
+        # Build = recommended for 1.16.5 = 36.2.34
+        (tmp_path / "forge-1.16.5-36.2.34.jar").write_bytes(b"PKforge-launcher")
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="ok", stderr="")
+    monkeypatch.setattr("backend.server.installer.forge.subprocess.run", fake_run)
+
+    result = inst.install("1.16.5")
+    assert result.success is True
+    assert result.launch is not None
+    assert result.launch.type == "jar"
+    assert result.launch.jar == "forge-1.16.5-36.2.34.jar"
+    assert result.launch.args_file is None
+    assert result.launch.program_args == ["nogui"]
+    assert (tmp_path / "eula.txt").read_text().strip() == "eula=true"
+
+
+def test_install_legacy_pre_1_13_returns_universal_jar_launchspec(
+    tmp_path, monkeypatch
+):
+    """Pre-1.13 (≤1.12.2) legacy: launcher uses -universal.jar suffix."""
+    import subprocess
+    from backend.server.installer.forge import ForgeInstaller
+    inst = ForgeInstaller(tmp_path)
+    promotions = {
+        "promos": {
+            "1.12.2-recommended": "14.23.5.2859",
+            "1.12.2-latest": "14.23.5.2864",
+        }
+    }
+    _patch_session_with_install(inst, promotions=promotions)
+
+    def fake_run(cmd, **kwargs):
+        # 1.12.2 produces -universal.jar.
+        (tmp_path / "forge-1.12.2-14.23.5.2859-universal.jar").write_bytes(b"PKuni")
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+    monkeypatch.setattr("backend.server.installer.forge.subprocess.run", fake_run)
+
+    result = inst.install("1.12.2")
+    assert result.success is True
+    assert result.launch.type == "jar"
+    assert result.launch.jar == "forge-1.12.2-14.23.5.2859-universal.jar"
+
+
+def test_install_modern_1_20_1_returns_args_file_launchspec(
+    tmp_path, fake_promotions, monkeypatch
+):
+    """Modern era: produces libraries/.../unix_args.txt."""
+    import subprocess
+    from backend.server.installer.forge import ForgeInstaller
+    inst = ForgeInstaller(tmp_path)
+    _patch_session_with_install(inst, promotions=fake_promotions)
+
+    def fake_run(cmd, **kwargs):
+        # Build = recommended for 1.20.1 = 47.4.10
+        target = (tmp_path / "libraries" / "net" / "minecraftforge"
+                  / "forge" / "1.20.1-47.4.10")
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "unix_args.txt").write_text("# args\n")
+        (target / "win_args.txt").write_text("# args\n")
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+    monkeypatch.setattr("backend.server.installer.forge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.forge.is_windows", lambda: False)
+
+    result = inst.install("1.20.1")
+    assert result.success is True
+    assert result.launch.type == "args_file"
+    assert result.launch.args_file == (
+        "libraries/net/minecraftforge/forge/1.20.1-47.4.10/unix_args.txt"
+    )
+    assert result.launch.jar is None
+    assert result.launch.program_args == ["nogui"]
+
+
+def test_install_subprocess_command_includes_explicit_install_dir(
+    tmp_path, fake_promotions, monkeypatch
+):
+    """The subprocess MUST pass --installServer <install_path> explicitly.
+
+    Quilt commit 541f26a established this defensive pattern: relying on
+    cwd alone is the bug-vector that broke Quilt installs. Forge supports
+    --installServer <path> per the audit (verified empirically) so we use
+    it. This test pins the cmd shape so a future refactor can't regress
+    it back to the cwd-only form.
+    """
+    import subprocess
+    from backend.server.installer.forge import ForgeInstaller
+    inst = ForgeInstaller(tmp_path)
+    _patch_session_with_install(inst, promotions=fake_promotions)
+
+    captured = {}
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["cwd"] = kwargs.get("cwd")
+        # Simulate modern output for 1.20.1 (recommended=47.4.10).
+        target = (tmp_path / "libraries" / "net" / "minecraftforge"
+                  / "forge" / "1.20.1-47.4.10")
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "unix_args.txt").write_text("# args\n")
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+    monkeypatch.setattr("backend.server.installer.forge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.forge.is_windows", lambda: False)
+
+    result = inst.install("1.20.1")
+    assert result.success is True
+    # cmd shape: [java, -jar, <installer>, --installServer, <install_path>]
+    assert "--installServer" in captured["cmd"]
+    install_dir_idx = captured["cmd"].index("--installServer") + 1
+    assert captured["cmd"][install_dir_idx] == str(tmp_path)
+    assert str(captured["cwd"]) == str(tmp_path)
+
+
+def test_install_uses_set_java_exec_path_for_subprocess(
+    tmp_path, fake_promotions, monkeypatch
+):
+    import subprocess
+    from backend.server.installer.forge import ForgeInstaller
+    inst = ForgeInstaller(tmp_path)
+    _patch_session_with_install(inst, promotions=fake_promotions)
+    inst.set_java_exec("/var/lib/fabricator/java/jdk-21/bin/java")
+
+    captured = {}
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        target = (tmp_path / "libraries" / "net" / "minecraftforge"
+                  / "forge" / "1.20.1-47.4.10")
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "unix_args.txt").write_text("# args\n")
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+    monkeypatch.setattr("backend.server.installer.forge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.forge.is_windows", lambda: False)
+
+    result = inst.install("1.20.1")
+    assert result.success is True
+    assert captured["cmd"][0] == "/var/lib/fabricator/java/jdk-21/bin/java"
+
+
+def test_install_subprocess_uses_no_window_kwargs(
+    tmp_path, fake_promotions, monkeypatch
+):
+    """Match codebase convention from manager / java_manager / neoforge / quilt."""
+    import subprocess
+    from backend.server.installer.forge import ForgeInstaller
+    inst = ForgeInstaller(tmp_path)
+    _patch_session_with_install(inst, promotions=fake_promotions)
+
+    captured_kwargs = {}
+    def fake_run(cmd, **kwargs):
+        captured_kwargs.update(kwargs)
+        target = (tmp_path / "libraries" / "net" / "minecraftforge"
+                  / "forge" / "1.20.1-47.4.10")
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "unix_args.txt").write_text("# args\n")
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+    SENTINEL_KW = {"creationflags": 0x08000000}
+    monkeypatch.setattr(
+        "backend.server.installer.forge.platform_utils.subprocess_no_window_kwargs",
+        lambda: SENTINEL_KW,
+    )
+    monkeypatch.setattr("backend.server.installer.forge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.forge.is_windows", lambda: False)
+
+    result = inst.install("1.20.1")
+    assert result.success is True
+    assert captured_kwargs.get("creationflags") == 0x08000000
+
+
+def test_install_subprocess_failure_returns_failure(
+    tmp_path, fake_promotions, monkeypatch
+):
+    import subprocess
+    from backend.server.installer.forge import ForgeInstaller
+    inst = ForgeInstaller(tmp_path)
+    _patch_session_with_install(inst, promotions=fake_promotions)
+
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(args=cmd, returncode=2, stdout="", stderr="installer exploded")
+    monkeypatch.setattr("backend.server.installer.forge.subprocess.run", fake_run)
+
     result = inst.install("1.20.1")
     assert result.success is False
-    assert "not yet implemented" in result.message.lower() or \
-           "not implemented" in result.message.lower()
+    assert "installer exploded" in result.message or "returncode 2" in result.message
+
+
+def test_install_unexpected_layout_returns_failure(
+    tmp_path, fake_promotions, monkeypatch
+):
+    """Subprocess succeeds but produces neither a launcher jar nor args files."""
+    import subprocess
+    from backend.server.installer.forge import ForgeInstaller
+    inst = ForgeInstaller(tmp_path)
+    _patch_session_with_install(inst, promotions=fake_promotions)
+
+    def fake_run(cmd, **kwargs):
+        # Don't create any launcher artefact — simulate a malformed install.
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+    monkeypatch.setattr("backend.server.installer.forge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.forge.is_windows", lambda: False)
+
+    result = inst.install("1.20.1")
+    assert result.success is False
+    msg = result.message.lower()
+    assert "unexpected layout" in msg or "unexpected" in msg
+    assert "args_file" in msg or "unix_args" in msg or "forge-" in msg
+
+
+def test_install_modern_wins_when_both_artefacts_present(
+    tmp_path, fake_promotions, monkeypatch
+):
+    """Defensive: if both modern args_file AND legacy jar exist, modern wins.
+
+    Pins deterministic dispatch when an unusual installer build (or a
+    re-install after era boundary) lays down both layouts.
+    """
+    import subprocess
+    from backend.server.installer.forge import ForgeInstaller
+    inst = ForgeInstaller(tmp_path)
+    _patch_session_with_install(inst, promotions=fake_promotions)
+
+    def fake_run(cmd, **kwargs):
+        # Modern artefact:
+        target = (tmp_path / "libraries" / "net" / "minecraftforge"
+                  / "forge" / "1.20.1-47.4.10")
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "unix_args.txt").write_text("# args\n")
+        # Legacy artefact too (defensive corner case):
+        (tmp_path / "forge-1.20.1-47.4.10.jar").write_bytes(b"PKlegacy")
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+    monkeypatch.setattr("backend.server.installer.forge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.forge.is_windows", lambda: False)
+
+    result = inst.install("1.20.1")
+    assert result.success is True
+    assert result.launch.type == "args_file"
+    assert result.launch.jar is None
+
+
+def test_install_modern_uses_windows_args_file_on_windows(
+    tmp_path, fake_promotions, monkeypatch
+):
+    import subprocess
+    from backend.server.installer.forge import ForgeInstaller
+    inst = ForgeInstaller(tmp_path)
+    _patch_session_with_install(inst, promotions=fake_promotions)
+
+    def fake_run(cmd, **kwargs):
+        target = (tmp_path / "libraries" / "net" / "minecraftforge"
+                  / "forge" / "1.20.1-47.4.10")
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "win_args.txt").write_text("# args\n")
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+    monkeypatch.setattr("backend.server.installer.forge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.forge.is_windows", lambda: True)
+
+    result = inst.install("1.20.1")
+    assert result.success is True
+    assert result.launch.args_file == (
+        "libraries/net/minecraftforge/forge/1.20.1-47.4.10/win_args.txt"
+    )
+
+
+def test_install_falls_back_to_latest_when_no_recommended(
+    tmp_path, monkeypatch
+):
+    """1.18.1 has only -latest — install should pick that build."""
+    import subprocess
+    from backend.server.installer.forge import ForgeInstaller
+    inst = ForgeInstaller(tmp_path)
+    _patch_session_with_install(inst, promotions={
+        "promos": {"1.18.1-latest": "39.1.2"},
+    })
+
+    captured = {}
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        # 1.18.1 is modern era (≥1.17).
+        target = (tmp_path / "libraries" / "net" / "minecraftforge"
+                  / "forge" / "1.18.1-39.1.2")
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "unix_args.txt").write_text("# args\n")
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+    monkeypatch.setattr("backend.server.installer.forge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.forge.is_windows", lambda: False)
+
+    result = inst.install("1.18.1")
+    assert result.success is True
+    # Build URL should embed 39.1.2 (the latest pointer).
+    jar_arg = captured["cmd"][captured["cmd"].index("-jar") + 1]
+    assert "1.18.1-39.1.2" in jar_arg
+
+
+def test_install_sha1_mismatch_aborts_before_subprocess(
+    tmp_path, fake_promotions, monkeypatch
+):
+    """SHA1 mismatch unlinks the bad JAR and never invokes subprocess."""
+    import subprocess
+    from backend.server.installer.forge import ForgeInstaller
+    inst = ForgeInstaller(tmp_path)
+
+    bytes_payload = b"PKforgeINST"
+    session = MagicMock()
+
+    def get(url, **_):
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.headers = {"Content-Length": str(len(bytes_payload))}
+        if "promotions_slim.json" in url:
+            resp.json.return_value = fake_promotions
+        elif url.endswith(".jar"):
+            resp.iter_content = lambda chunk_size=8192: iter([bytes_payload])
+            resp.__enter__ = lambda s: s
+            resp.__exit__ = lambda *a: False
+        elif url.endswith(".sha1"):
+            resp.text = "deadbeef" * 5  # 40 chars, intentionally wrong
+        return resp
+    session.get.side_effect = get
+    inst.session = session
+
+    subprocess_called = {"hit": False}
+    def fake_run(*a, **k):
+        subprocess_called["hit"] = True
+        return subprocess.CompletedProcess(args=[], returncode=0)
+    monkeypatch.setattr("backend.server.installer.forge.subprocess.run", fake_run)
+
+    result = inst.install("1.20.1")
+    assert result.success is False
+    assert "sha1" in result.message.lower()
+    assert subprocess_called["hit"] is False

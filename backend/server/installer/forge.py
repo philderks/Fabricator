@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from backend.utils import platform as platform_utils
+from backend.utils.platform import is_windows
 
 from .base import (
     InstallerBase,
@@ -141,17 +142,235 @@ class ForgeInstaller(InstallerBase):
             })
         return out
 
-    # ---------- Install (Task 2 fills in) ----------
+    # ---------- Install ----------
+
+    def _select_build_version(self, mc_version: str, promos: Dict[str, str]) -> Optional[str]:
+        """Pick the preferred Forge build for ``mc_version``.
+
+        Preference: ``<mc>-recommended`` if present, else ``<mc>-latest``.
+        Returns None if neither pointer exists for that MC version.
+        """
+        recommended = promos.get(f"{mc_version}-recommended")
+        if recommended:
+            return recommended
+        return promos.get(f"{mc_version}-latest")
+
+    def _installer_jar_url(self, mc_version: str, build: str) -> str:
+        return (
+            f"{self.MAVEN_BASE}/net/minecraftforge/forge/"
+            f"{mc_version}-{build}/forge-{mc_version}-{build}-installer.jar"
+        )
+
+    def _installer_jar_sha1_url(self, mc_version: str, build: str) -> str:
+        return self._installer_jar_url(mc_version, build) + ".sha1"
+
+    def _fetch_expected_sha1(self, mc_version: str, build: str) -> Optional[str]:
+        try:
+            response = self.session.get(
+                self._installer_jar_sha1_url(mc_version, build), timeout=15
+            )
+            response.raise_for_status()
+            text = (response.text or "").strip().split()[0].lower()
+            return text if len(text) == 40 else None
+        except (requests.RequestException, IndexError):
+            return None
+
+    def _download_installer_jar(
+        self, mc_version: str, build: str
+    ) -> "tuple[Optional[Path], Optional[str]]":
+        """Download and SHA1-verify the installer JAR.
+
+        Returns ``(path, None)`` on success or ``(None, error_message)``.
+        """
+        import hashlib
+
+        target = self.install_path / f"forge-{mc_version}-{build}-installer.jar"
+        hasher = hashlib.sha1()
+        try:
+            with self.session.get(
+                self._installer_jar_url(mc_version, build), stream=True, timeout=300
+            ) as response:
+                response.raise_for_status()
+                with open(target, "wb") as fh:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            fh.write(chunk)
+                            hasher.update(chunk)
+        except requests.RequestException as exc:
+            target.unlink(missing_ok=True)
+            return None, f"Failed to download Forge installer: {exc}"
+
+        expected_sha1 = self._fetch_expected_sha1(mc_version, build)
+        if not expected_sha1:
+            print(
+                f"WARNING: Forge installer SHA1 unavailable for "
+                f"{mc_version}-{build} — proceeding without integrity check."
+            )
+        if expected_sha1:
+            actual = hasher.hexdigest().lower()
+            if actual != expected_sha1:
+                target.unlink(missing_ok=True)
+                return None, (
+                    f"SHA1 checksum mismatch for installer JAR: "
+                    f"expected {expected_sha1}, got {actual}"
+                )
+
+        return target, None
+
+    def _detect_launch_artifact(
+        self, mc_version: str, build: str
+    ) -> Optional[LaunchSpec]:
+        """Era dispatch by post-install file detection (modern wins on tie).
+
+        Returns ``None`` if neither modern args_file nor legacy launcher jar
+        is present in the install directory — the caller turns this into a
+        clear "unexpected layout" failure.
+        """
+        # Modern: libraries/net/minecraftforge/forge/<mc>-<build>/{unix,win}_args.txt
+        args_filename = "win_args.txt" if is_windows() else "unix_args.txt"
+        modern_args = (
+            self.install_path / "libraries" / "net" / "minecraftforge"
+            / "forge" / f"{mc_version}-{build}" / args_filename
+        )
+        if modern_args.exists():
+            return LaunchSpec(
+                type="args_file",
+                args_file=modern_args.relative_to(self.install_path).as_posix(),
+                jvm_args=[],
+                program_args=["nogui"],
+            )
+
+        # Legacy: forge-<mc>-<build>.jar (1.13–1.16) or
+        # forge-<mc>-<build>-universal.jar (≤1.12).
+        for candidate_name in (
+            f"forge-{mc_version}-{build}.jar",
+            f"forge-{mc_version}-{build}-universal.jar",
+        ):
+            candidate = self.install_path / candidate_name
+            if candidate.exists():
+                return LaunchSpec(
+                    type="jar",
+                    jar=candidate_name,
+                    jvm_args=[],
+                    program_args=["nogui"],
+                )
+
+        return None
 
     def install(
         self,
         mc_version: str,
         loader_version: Optional[str] = None,
     ) -> InstallResult:
+        self._ensure_install_dir()
+
+        promos = self._fetch_promotions()
+        if not promos:
+            return InstallResult(
+                success=False,
+                status=InstallStatus.FAILED,
+                message="Could not fetch Forge promotions list. Check connectivity.",
+                details={"mc_version": mc_version},
+            )
+
+        build = loader_version or self._select_build_version(mc_version, promos)
+        if not build:
+            return InstallResult(
+                success=False,
+                status=InstallStatus.FAILED,
+                message=f"No Forge release found for Minecraft {mc_version}.",
+                details={"mc_version": mc_version},
+            )
+
+        installer_jar, dl_error = self._download_installer_jar(mc_version, build)
+        if not installer_jar or not installer_jar.exists():
+            return InstallResult(
+                success=False,
+                status=InstallStatus.FAILED,
+                message=dl_error or "Failed to download Forge installer JAR.",
+                details={"mc_version": mc_version, "loader_version": build},
+            )
+
+        # Run the installer subprocess. EXPLICIT --installServer <path>: the
+        # Forge installer's documented form takes a path argument and we use
+        # it defensively. Quilt commit 541f26a established this pattern after
+        # cwd-only invocation broke when the Quilt installer changed default
+        # behaviour to write into a `server/` subdirectory. Forge's installer
+        # writes to cwd by default today, but the explicit path is robust to
+        # future changes.
+        java_cmd = self.java_exec or "java"
+        try:
+            completed = subprocess.run(
+                [
+                    java_cmd, "-jar", str(installer_jar),
+                    "--installServer", str(self.install_path),
+                ],
+                cwd=str(self.install_path),
+                capture_output=True,
+                text=True,
+                timeout=600,
+                **platform_utils.subprocess_no_window_kwargs(),
+            )
+        except subprocess.TimeoutExpired as exc:
+            return InstallResult(
+                success=False,
+                status=InstallStatus.FAILED,
+                message=f"Forge installer timed out: {exc}",
+                details={"mc_version": mc_version, "loader_version": build},
+            )
+        except OSError as exc:
+            return InstallResult(
+                success=False,
+                status=InstallStatus.FAILED,
+                message=f"Failed to invoke Forge installer: {exc}",
+                details={"mc_version": mc_version, "loader_version": build},
+            )
+
+        if completed.returncode != 0:
+            tail = (completed.stderr or completed.stdout or "").strip().splitlines()
+            tail_str = tail[-1] if tail else f"returncode {completed.returncode}"
+            return InstallResult(
+                success=False,
+                status=InstallStatus.FAILED,
+                message=f"Forge installer failed: {tail_str}",
+                details={
+                    "mc_version": mc_version,
+                    "loader_version": build,
+                    "returncode": completed.returncode,
+                },
+            )
+
+        launch = self._detect_launch_artifact(mc_version, build)
+        if launch is None:
+            return InstallResult(
+                success=False,
+                status=InstallStatus.FAILED,
+                message=(
+                    "Forge installer reported success but produced unexpected "
+                    "layout. Expected either "
+                    f"libraries/net/minecraftforge/forge/{mc_version}-{build}/"
+                    "{unix,win}_args.txt (modern) or "
+                    f"forge-{mc_version}-{build}[-universal].jar (legacy) in "
+                    "install root."
+                ),
+                details={"mc_version": mc_version, "loader_version": build},
+            )
+
+        self._write_eula(accepted=True)
+
         return InstallResult(
-            success=False,
-            status=InstallStatus.FAILED,
-            message="Forge install not yet implemented (Phase 3b.1 T2).",
+            success=True,
+            status=InstallStatus.COMPLETED,
+            message=f"Forge {build} installed for MC {mc_version}",
+            server_jar=None,
+            details={
+                "mc_version": mc_version,
+                "loader_version": build,
+                "installer_jar": str(installer_jar),
+                "launch_type": launch.type,
+                "install_path": str(self.install_path),
+            },
+            launch=launch,
         )
 
     def install_with_config(
@@ -160,4 +379,14 @@ class ForgeInstaller(InstallerBase):
         server_config: Dict[str, Any],
         loader_version: Optional[str] = None,
     ) -> InstallResult:
-        return self.install(mc_version, loader_version)
+        result = self.install(mc_version, loader_version)
+        if not result.success:
+            return result
+
+        properties = self.generate_server_properties(server_config)
+        self._write_server_properties(properties)
+        if result.details:
+            result.details["server_properties"] = str(
+                self.install_path / "server.properties"
+            )
+        return result
