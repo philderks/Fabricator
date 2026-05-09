@@ -49,6 +49,17 @@ class ModrinthClient:
         "resourcepacks/", "shaderpacks/",
         "config/iris/", "config/oculus/", "config/optifine/",
     )
+    # Client-only Java package prefixes (slash-form, as they appear in .class
+    # constant pools). A class file that imports any of these will crash on a
+    # dedicated server at classloading. Used as a fallback when a Forge mod's
+    # mods.toml is silent on side — the common case for ETF, ModernUI,
+    # Dynamic FPS, etc.
+    CLIENT_ONLY_CLASS_PATTERNS: tuple[bytes, ...] = (
+        b"org/lwjgl/glfw/",
+        b"com/mojang/blaze3d/",
+        b"net/minecraft/client/gui/",
+        b"net/minecraft/client/renderer/",
+    )
 
     def __init__(self):
         self.session = requests.Session()
@@ -916,15 +927,29 @@ class ModrinthClient:
 
                 if loader_key == "forge":
                     if "META-INF/mods.toml" in names:
-                        return self._classify_forge_toml(zf.read("META-INF/mods.toml"))
-                    return "uncertain", "META-INF/mods.toml missing"
+                        result = self._classify_forge_toml(zf.read("META-INF/mods.toml"))
+                    else:
+                        result = ("uncertain", "META-INF/mods.toml missing")
+                    if result[0] == "uncertain":
+                        scan_result = self._scan_class_files_for_client_imports(zf)
+                        if scan_result[0] == "uncertain":
+                            return scan_result[0], f"{result[1]}; {scan_result[1].lower()}"
+                        return scan_result
+                    return result
 
                 if loader_key == "neoforge":
                     if "META-INF/neoforge.mods.toml" in names:
-                        return self._classify_forge_toml(zf.read("META-INF/neoforge.mods.toml"))
-                    if "META-INF/mods.toml" in names:
-                        return self._classify_forge_toml(zf.read("META-INF/mods.toml"))
-                    return "uncertain", "META-INF/(neoforge.)mods.toml missing"
+                        result = self._classify_forge_toml(zf.read("META-INF/neoforge.mods.toml"))
+                    elif "META-INF/mods.toml" in names:
+                        result = self._classify_forge_toml(zf.read("META-INF/mods.toml"))
+                    else:
+                        result = ("uncertain", "META-INF/(neoforge.)mods.toml missing")
+                    if result[0] == "uncertain":
+                        scan_result = self._scan_class_files_for_client_imports(zf)
+                        if scan_result[0] == "uncertain":
+                            return scan_result[0], f"{result[1]}; {scan_result[1].lower()}"
+                        return scan_result
+                    return result
 
                 # fabric or unknown -> fabric.mod.json
                 if "fabric.mod.json" in names:
@@ -969,6 +994,34 @@ class ModrinthClient:
             return "server", "quilt environment=dedicated_server"
 
         return "uncertain", "quilt manifest does not clearly mark client/server"
+
+    def _scan_class_files_for_client_imports(
+        self, zf: zipfile.ZipFile,
+    ) -> Tuple[str, str]:
+        """Scan every .class member of ``zf`` for client-only package refs.
+
+        Class references live in the constant pool as contiguous UTF-8
+        strings (internal binary names like ``org/lwjgl/glfw/GLFW``), so
+        a raw bytestring search over the file body is sufficient — no
+        class-file parsing required. First hit wins; we stop scanning
+        the moment any pattern matches.
+        """
+        for name in zf.namelist():
+            if not name.endswith(".class"):
+                continue
+            try:
+                with zf.open(name) as fh:
+                    data = fh.read()
+            except (KeyError, zipfile.BadZipFile, OSError):
+                continue
+            for pattern in self.CLIENT_ONLY_CLASS_PATTERNS:
+                if pattern in data:
+                    return (
+                        "client",
+                        f"Class file references client-only package "
+                        f"{pattern.decode('ascii')}",
+                    )
+        return "uncertain", "No client-only class references found"
 
     def _classify_forge_toml(self, raw: bytes) -> Tuple[str, str]:
         """Read mods.toml / neoforge.mods.toml.

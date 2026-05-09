@@ -415,3 +415,104 @@ version="2.5.0"
     assert "overrides/mods/configured.jar" not in files_skipped
     assert len(uncertain_mod_files) == 1
     assert uncertain_mod_files[0]["path"] == "overrides/mods/configured.jar"
+
+
+# ---------------------------------------------------------------------------
+# Constant-pool fallback for Forge/NeoForge (4) — when ``mods.toml`` is
+# silent (the common case for client-only Forge mods like ETF, ModernUI,
+# Dynamic FPS), scan ``.class`` bytes for known client-only package
+# references. A hit promotes the jar from ``uncertain`` to ``client``;
+# no hit leaves the metadata reader's ``uncertain`` verdict untouched.
+# Gated on loader in {forge, neoforge} AND metadata == uncertain so it
+# never overrides an explicit ``side="SERVER"``.
+# ---------------------------------------------------------------------------
+
+EMPTY_FORGE_TOML = '''modLoader="javafml"
+loaderVersion="[28,)"
+license="MIT"
+[[mods]]
+modId="demo"
+version="1.0"
+'''
+
+
+def test_forge_class_pool_lwjgl_hit_classifies_client(mod_client, tmp_path):
+    """A .class referencing org/lwjgl/glfw/* in its constant pool -> client."""
+    jar = make_mod_jar(
+        tmp_path,
+        {"META-INF/mods.toml": EMPTY_FORGE_TOML},
+        class_files={
+            "com/example/Demo.class": b"\xca\xfe\xba\xbeorg/lwjgl/glfw/GLFWErrorCallbackI",
+        },
+    )
+    classification, reason = mod_client._classify_mod_jar_for_server(jar, loader="forge")
+    assert classification == "client"
+    assert "org/lwjgl/glfw/" in reason
+
+
+def test_forge_class_pool_no_client_refs_stays_uncertain(mod_client, tmp_path):
+    """A clean .class (only safe refs) does not trigger the fallback."""
+    jar = make_mod_jar(
+        tmp_path,
+        {"META-INF/mods.toml": EMPTY_FORGE_TOML},
+        class_files={
+            "com/example/Demo.class": b"\xca\xfe\xba\xbejava/lang/String",
+        },
+    )
+    classification, _ = mod_client._classify_mod_jar_for_server(jar, loader="forge")
+    assert classification == "uncertain"
+
+
+def test_forge_class_pool_skipped_when_metadata_decided(mod_client, tmp_path):
+    """side="SERVER" in mods.toml short-circuits — class scan must NOT run."""
+    server_toml_with_client_class = '''modLoader="javafml"
+loaderVersion="[28,)"
+license="MIT"
+[[mods]]
+modId="demo"
+version="1.0"
+side="SERVER"
+'''
+    jar = make_mod_jar(
+        tmp_path,
+        {"META-INF/mods.toml": server_toml_with_client_class},
+        class_files={
+            "com/example/Demo.class": b"\xca\xfe\xba\xbeorg/lwjgl/glfw/GLFW",
+        },
+    )
+    classification, _ = mod_client._classify_mod_jar_for_server(jar, loader="forge")
+    assert classification == "server"
+
+
+def test_forge_class_pool_any_hit_in_mixed_jar_wins(mod_client, tmp_path):
+    """First .class with a client ref wins, even when others are clean."""
+    jar = make_mod_jar(
+        tmp_path,
+        {"META-INF/mods.toml": EMPTY_FORGE_TOML},
+        class_files={
+            "com/example/Clean.class": b"\xca\xfe\xba\xbejava/lang/String",
+            "com/example/Renderer.class": b"\xca\xfe\xba\xbenet/minecraft/client/renderer/RenderType",
+            "com/example/AlsoClean.class": b"\xca\xfe\xba\xbejava/util/List",
+        },
+    )
+    classification, reason = mod_client._classify_mod_jar_for_server(jar, loader="forge")
+    assert classification == "client"
+    assert "net/minecraft/client/renderer/" in reason
+
+
+def test_forge_uncertain_metadata_and_empty_scan_concatenate_reasons(mod_client, tmp_path):
+    """When metadata is uncertain AND the class scan finds nothing, the
+    final reason must surface BOTH the metadata cause and the scan result
+    so the user sees why classification failed at both layers."""
+    jar = make_mod_jar(
+        tmp_path,
+        # No mods.toml at all -> metadata reason is "META-INF/mods.toml missing"
+        {},
+        class_files={
+            "com/example/Demo.class": b"\xca\xfe\xba\xbejava/lang/String",
+        },
+    )
+    classification, reason = mod_client._classify_mod_jar_for_server(jar, loader="forge")
+    assert classification == "uncertain"
+    assert "mods.toml" in reason
+    assert "class references" in reason
