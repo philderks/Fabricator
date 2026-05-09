@@ -281,3 +281,137 @@ side="CLIENT"
     })
     classification, _ = mod_client._classify_mod_jar_for_server(jar, loader="forge")
     assert classification == "server"
+
+
+# ---------------------------------------------------------------------------
+# Overrides pipeline (3) — pins the end-to-end behavior of
+# ``_extract_overrides`` for each classification outcome. The "client"
+# case is the regression we care about most: a client-only Forge jar
+# shipped under ``overrides/mods/`` must be removed from disk after the
+# classifier identifies it. ``server`` and ``uncertain`` pin the other
+# two paths so a future refactor can't silently drop a file or leave a
+# dangling jar that the install report claims as installed.
+# ---------------------------------------------------------------------------
+
+def _build_mrpack_with_override_jar(
+    tmp_path: Path, jar_relpath: str, jar_bytes: bytes,
+) -> Path:
+    """Produce a minimal .mrpack-style zip with one overrides/ jar."""
+    pack_path = tmp_path / "pack.mrpack"
+    with zipfile.ZipFile(pack_path, "w") as zf:
+        zf.writestr("modrinth.index.json", '{"files": []}')
+        zf.writestr(f"overrides/{jar_relpath}", jar_bytes)
+    return pack_path
+
+
+def _override_jar_bytes(metadata_files: Dict[str, Union[str, bytes]]) -> bytes:
+    """Build an in-memory .jar (zip) with the given metadata members."""
+    import io
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for arcname, content in metadata_files.items():
+            zf.writestr(arcname, content)
+    return buf.getvalue()
+
+
+def test_overrides_client_jar_removed_from_disk(mod_client, tmp_path):
+    """Forge client-only jar in overrides/mods/ must be deleted after extract."""
+    install_path = tmp_path / "server"
+    install_path.mkdir()
+    pack = _build_mrpack_with_override_jar(
+        tmp_path, "mods/entityculling.jar",
+        _override_jar_bytes({"META-INF/mods.toml": ENTITYCULLING_MODS_TOML}),
+    )
+
+    files_installed: list = []
+    files_skipped: list = []
+    uncertain_mod_files: list = []
+    with zipfile.ZipFile(pack) as zf:
+        mod_client._extract_overrides(
+            zf, install_path, {},
+            files_installed, files_skipped, uncertain_mod_files,
+            loader="forge",
+        )
+
+    extracted = install_path / "mods" / "entityculling.jar"
+    assert not extracted.exists(), "client-classified jar must be unlinked"
+    assert "overrides/mods/entityculling.jar" not in files_installed
+    assert "overrides/mods/entityculling.jar" in files_skipped
+    assert uncertain_mod_files == []
+
+
+def test_overrides_server_jar_kept_and_listed_installed(mod_client, tmp_path):
+    """Server-side jar in overrides/mods/ stays on disk and is reported installed."""
+    install_path = tmp_path / "server"
+    install_path.mkdir()
+    server_toml = '''modLoader="javafml"
+loaderVersion="[28,)"
+license="MIT"
+[[mods]]
+modId="demo"
+version="1.0"
+side="SERVER"
+'''
+    pack = _build_mrpack_with_override_jar(
+        tmp_path, "mods/serverthing.jar",
+        _override_jar_bytes({"META-INF/mods.toml": server_toml}),
+    )
+
+    files_installed: list = []
+    files_skipped: list = []
+    uncertain_mod_files: list = []
+    with zipfile.ZipFile(pack) as zf:
+        mod_client._extract_overrides(
+            zf, install_path, {},
+            files_installed, files_skipped, uncertain_mod_files,
+            loader="forge",
+        )
+
+    extracted = install_path / "mods" / "serverthing.jar"
+    assert extracted.is_file(), "server-classified jar must remain on disk"
+    assert "overrides/mods/serverthing.jar" in files_installed
+    assert "overrides/mods/serverthing.jar" not in files_skipped
+    assert uncertain_mod_files == []
+
+
+def test_overrides_uncertain_jar_kept_for_modal_review(mod_client, tmp_path):
+    """Uncertain jar stays on disk (so the modal can resolve it) but is
+    NOT reported as installed — install_modpack raises 409 for these.
+    """
+    install_path = tmp_path / "server"
+    install_path.mkdir()
+    # Only a dependency-side declaration — host side is undetermined.
+    uncertain_toml = '''modLoader="javafml"
+loaderVersion="[39,)"
+license="LGPL-3.0"
+[[mods]]
+modId="configured"
+version="2.5.0"
+[[dependencies.configured]]
+    modId="catalogue"
+    mandatory=false
+    versionRange="[1.10.1,)"
+    ordering="NONE"
+    side="CLIENT"
+'''
+    pack = _build_mrpack_with_override_jar(
+        tmp_path, "mods/configured.jar",
+        _override_jar_bytes({"META-INF/mods.toml": uncertain_toml}),
+    )
+
+    files_installed: list = []
+    files_skipped: list = []
+    uncertain_mod_files: list = []
+    with zipfile.ZipFile(pack) as zf:
+        mod_client._extract_overrides(
+            zf, install_path, {},
+            files_installed, files_skipped, uncertain_mod_files,
+            loader="forge",
+        )
+
+    extracted = install_path / "mods" / "configured.jar"
+    assert extracted.is_file(), "uncertain jar must stay on disk for modal review"
+    assert "overrides/mods/configured.jar" not in files_installed
+    assert "overrides/mods/configured.jar" not in files_skipped
+    assert len(uncertain_mod_files) == 1
+    assert uncertain_mod_files[0]["path"] == "overrides/mods/configured.jar"
