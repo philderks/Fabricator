@@ -186,11 +186,22 @@ function formatNumber(num) {
   return num.toString()
 }
 
+// Modrinth tags loader compatibility as ordinary categories ('fabric',
+// 'forge', 'neoforge', 'quilt'). Multi-loader packs are tagged with all
+// four, so the alphabetical first three would read "fabric, forge, …" —
+// regardless of which loader the user is actually browsing for, leaving
+// the impression that the search is dominated by Fabric packs. Strip
+// loader tags here; the active loader is already shown in the filter chip.
+const LOADER_TAGS = new Set(['fabric', 'forge', 'neoforge', 'quilt'])
+
 function formatModpackMeta(pack) {
   const parts = []
   if (pack.downloads) parts.push(`${formatNumber(pack.downloads)} downloads`)
   if (pack.categories && pack.categories.length) {
-    parts.push(pack.categories.slice(0, 3).join(', '))
+    const nonLoader = pack.categories.filter((c) => !LOADER_TAGS.has(String(c).toLowerCase()))
+    if (nonLoader.length) {
+      parts.push(nonLoader.slice(0, 3).join(', '))
+    }
   }
   return parts.join(' · ')
 }
