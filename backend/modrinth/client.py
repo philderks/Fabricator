@@ -617,6 +617,8 @@ class ModrinthClient:
 
         server_entries = []
         index_env_decisions: Dict[str, str] = {}
+        # NOTE: this loop pre-filters server == "unsupported" before calling
+        # ``_resolve_index_mod_side``; that helper relies on this precondition.
         for entry in entries:
             env = entry.get("env", {})
             entry_path = entry.get("path", "")
@@ -879,6 +881,13 @@ class ModrinthClient:
         env: Dict[str, Any],
         mod_side_overrides: Dict[str, str],
     ) -> Tuple[str, str]:
+        """Resolve a single mod entry's install side from modpack index env.
+
+        Precondition (enforced by both callers — ``_install_index_files``
+        and ``_collect_unavailable_modpack_entries``): entries with
+        ``env.server == "unsupported"`` are filtered out before reaching
+        this helper, so that case is intentionally not handled here.
+        """
         forced_side = mod_side_overrides.get(entry_path)
         if forced_side in ("client", "server"):
             return forced_side, "User override"
@@ -886,8 +895,6 @@ class ModrinthClient:
         server_env = str(env.get("server") or "").strip().lower()
         client_env = str(env.get("client") or "").strip().lower()
 
-        if server_env == "unsupported":
-            return "client", "Index env marks server as unsupported"
         if server_env in ("required", "optional"):
             return "server", "Index env allows server"
 
@@ -969,7 +976,9 @@ class ModrinthClient:
         if result[0] == "uncertain":
             scan_result = self._scan_class_files_for_client_imports(zf)
             if scan_result[0] == "uncertain":
-                return scan_result[0], f"{result[1]}; {scan_result[1].lower()}"
+                def _decap(s: str) -> str:
+                    return s[0].lower() + s[1:] if s else s
+                return scan_result[0], f"{result[1]}; {_decap(scan_result[1])}"
             return scan_result
         return result
 

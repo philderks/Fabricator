@@ -162,7 +162,7 @@ def test_installer_base_set_java_exec_accepts_none(tmp_path):
 # loaders surface the same form. These tests pin that invariant.
 
 
-_X_Y_ZERO_RE = re.compile(r"^\d+\.\d+\.0$")
+_X_Y_ZERO_RE = re.compile(r"^[a-z]?\d+\.\d+\.0$")
 
 
 @pytest.mark.parametrize("raw,expected", [
