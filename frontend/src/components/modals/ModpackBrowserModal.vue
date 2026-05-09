@@ -93,9 +93,13 @@
         <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="2"/>
         <path d="M9 9H15M9 13H13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
       </svg>
-      <h3 class="modpack-browser-empty__heading" v-if="importMethod === 'search'">Search for modpacks</h3>
+      <h3 class="modpack-browser-empty__heading" v-if="importMethod === 'search' && imp.searchDone.value">No modpacks found</h3>
+      <h3 class="modpack-browser-empty__heading" v-else-if="importMethod === 'search'">Search for modpacks</h3>
       <h3 class="modpack-browser-empty__heading" v-else>Resolve a modpack link</h3>
-      <p class="modpack-browser-empty__body" v-if="importMethod === 'search'">
+      <p class="modpack-browser-empty__body" v-if="importMethod === 'search' && imp.searchDone.value">
+        No modpacks found for "{{ imp.searchQuery.value }}" on {{ loaderLabel }} {{ mcVersion }}. Try different keywords or check that your server's MC version has compatible modpacks.
+      </p>
+      <p class="modpack-browser-empty__body" v-else-if="importMethod === 'search'">
         Search for modpacks compatible with {{ mcVersion }}.
       </p>
       <p class="modpack-browser-empty__body" v-else>
