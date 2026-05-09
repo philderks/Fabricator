@@ -929,30 +929,14 @@ class ModrinthClient:
                     return "uncertain", "quilt.mod.json/fabric.mod.json missing"
 
                 if loader_key == "forge":
-                    if "META-INF/mods.toml" in names:
-                        result = self._classify_forge_toml(zf.read("META-INF/mods.toml"))
-                    else:
-                        result = ("uncertain", "META-INF/mods.toml missing")
-                    if result[0] == "uncertain":
-                        scan_result = self._scan_class_files_for_client_imports(zf)
-                        if scan_result[0] == "uncertain":
-                            return scan_result[0], f"{result[1]}; {scan_result[1].lower()}"
-                        return scan_result
-                    return result
+                    return self._classify_forge_family(
+                        zf, names, ("META-INF/mods.toml",)
+                    )
 
                 if loader_key == "neoforge":
-                    if "META-INF/neoforge.mods.toml" in names:
-                        result = self._classify_forge_toml(zf.read("META-INF/neoforge.mods.toml"))
-                    elif "META-INF/mods.toml" in names:
-                        result = self._classify_forge_toml(zf.read("META-INF/mods.toml"))
-                    else:
-                        result = ("uncertain", "META-INF/(neoforge.)mods.toml missing")
-                    if result[0] == "uncertain":
-                        scan_result = self._scan_class_files_for_client_imports(zf)
-                        if scan_result[0] == "uncertain":
-                            return scan_result[0], f"{result[1]}; {scan_result[1].lower()}"
-                        return scan_result
-                    return result
+                    return self._classify_forge_family(
+                        zf, names, ("META-INF/neoforge.mods.toml", "META-INF/mods.toml")
+                    )
 
                 # fabric or unknown -> fabric.mod.json
                 if "fabric.mod.json" in names:
@@ -960,6 +944,34 @@ class ModrinthClient:
                 return "uncertain", "fabric.mod.json missing"
         except (OSError, zipfile.BadZipFile):
             return "uncertain", "Failed to parse mod metadata"
+
+    def _classify_forge_family(
+        self,
+        zf: zipfile.ZipFile,
+        names: set,
+        toml_candidates: Tuple[str, ...],
+    ) -> Tuple[str, str]:
+        """Classify a Forge/NeoForge jar.
+
+        ``toml_candidates`` is an ordered tuple of META-INF/*.toml filenames;
+        the first one present in ``names`` is parsed. Falls back to the
+        constant-pool scanner if metadata is uncertain. The ordering encodes
+        the loader's own precedence (NeoForge prefers ``neoforge.mods.toml``;
+        Forge only knows ``mods.toml``).
+        """
+        for candidate in toml_candidates:
+            if candidate in names:
+                result = self._classify_forge_toml(zf.read(candidate))
+                break
+        else:
+            result = ("uncertain", f"{' or '.join(toml_candidates)} missing")
+
+        if result[0] == "uncertain":
+            scan_result = self._scan_class_files_for_client_imports(zf)
+            if scan_result[0] == "uncertain":
+                return scan_result[0], f"{result[1]}; {scan_result[1].lower()}"
+            return scan_result
+        return result
 
     def _classify_fabric(self, raw: bytes) -> Tuple[str, str]:
         try:

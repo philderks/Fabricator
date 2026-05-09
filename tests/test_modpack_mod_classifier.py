@@ -436,7 +436,8 @@ version="1.0"
 '''
 
 
-def test_forge_class_pool_lwjgl_hit_classifies_client(mod_client, tmp_path):
+@pytest.mark.parametrize("loader", ["forge", "neoforge"])
+def test_forge_class_pool_lwjgl_hit_classifies_client(mod_client, tmp_path, loader):
     """A .class referencing org/lwjgl/glfw/* in its constant pool -> client."""
     jar = make_mod_jar(
         tmp_path,
@@ -445,12 +446,13 @@ def test_forge_class_pool_lwjgl_hit_classifies_client(mod_client, tmp_path):
             "com/example/Demo.class": b"\xca\xfe\xba\xbeorg/lwjgl/glfw/GLFWErrorCallbackI",
         },
     )
-    classification, reason = mod_client._classify_mod_jar_for_server(jar, loader="forge")
+    classification, reason = mod_client._classify_mod_jar_for_server(jar, loader=loader)
     assert classification == "client"
     assert "org/lwjgl/glfw/" in reason
 
 
-def test_forge_class_pool_no_client_refs_stays_uncertain(mod_client, tmp_path):
+@pytest.mark.parametrize("loader", ["forge", "neoforge"])
+def test_forge_class_pool_no_client_refs_stays_uncertain(mod_client, tmp_path, loader):
     """A clean .class (only safe refs) does not trigger the fallback."""
     jar = make_mod_jar(
         tmp_path,
@@ -459,11 +461,12 @@ def test_forge_class_pool_no_client_refs_stays_uncertain(mod_client, tmp_path):
             "com/example/Demo.class": b"\xca\xfe\xba\xbejava/lang/String",
         },
     )
-    classification, _ = mod_client._classify_mod_jar_for_server(jar, loader="forge")
+    classification, _ = mod_client._classify_mod_jar_for_server(jar, loader=loader)
     assert classification == "uncertain"
 
 
-def test_forge_class_pool_skipped_when_metadata_decided(mod_client, tmp_path):
+@pytest.mark.parametrize("loader", ["forge", "neoforge"])
+def test_forge_class_pool_skipped_when_metadata_decided(mod_client, tmp_path, loader):
     """side="SERVER" in mods.toml short-circuits — class scan must NOT run."""
     server_toml_with_client_class = '''modLoader="javafml"
 loaderVersion="[28,)"
@@ -480,11 +483,12 @@ side="SERVER"
             "com/example/Demo.class": b"\xca\xfe\xba\xbeorg/lwjgl/glfw/GLFW",
         },
     )
-    classification, _ = mod_client._classify_mod_jar_for_server(jar, loader="forge")
+    classification, _ = mod_client._classify_mod_jar_for_server(jar, loader=loader)
     assert classification == "server"
 
 
-def test_forge_class_pool_any_hit_in_mixed_jar_wins(mod_client, tmp_path):
+@pytest.mark.parametrize("loader", ["forge", "neoforge"])
+def test_forge_class_pool_any_hit_in_mixed_jar_wins(mod_client, tmp_path, loader):
     """First .class with a client ref wins, even when others are clean."""
     jar = make_mod_jar(
         tmp_path,
@@ -495,7 +499,7 @@ def test_forge_class_pool_any_hit_in_mixed_jar_wins(mod_client, tmp_path):
             "com/example/AlsoClean.class": b"\xca\xfe\xba\xbejava/util/List",
         },
     )
-    classification, reason = mod_client._classify_mod_jar_for_server(jar, loader="forge")
+    classification, reason = mod_client._classify_mod_jar_for_server(jar, loader=loader)
     assert classification == "client"
     assert "net/minecraft/client/renderer/" in reason
 
