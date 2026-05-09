@@ -2,9 +2,9 @@
 import os
 import requests
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import Callable, List, Optional, Dict, Any
 
-from .base import InstallerBase, InstallResult, InstallStatus, DIR_PERMISSIONS
+from .base import InstallerBase, InstallResult, InstallStatus, LaunchSpec, DIR_PERMISSIONS
 
 
 class FabricInstaller(InstallerBase):
@@ -36,7 +36,7 @@ class FabricInstaller(InstallerBase):
 
     def get_minecraft_versions(self) -> List[Dict[str, Any]]:
         """Get Minecraft versions supported by Fabric.
-        
+
         Returns:
             List of game versions with stability info
         """
@@ -46,10 +46,21 @@ class FabricInstaller(InstallerBase):
                 timeout=15
             )
             response.raise_for_status()
-            return response.json()
+            payload = response.json()
         except requests.RequestException as exc:
             print(f"Failed to fetch game versions: {exc}")
             return []
+
+        out: List[Dict[str, Any]] = []
+        for entry in payload:
+            v = entry.get("version")
+            if not v:
+                out.append(entry)
+                continue
+            normalized = dict(entry)
+            normalized["version"] = self._canonicalize_mc_version(v)
+            out.append(normalized)
+        return out
 
     def get_available_versions(self, mc_version: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get available Fabric loader versions.
@@ -159,49 +170,60 @@ class FabricInstaller(InstallerBase):
         self,
         mc_version: str,
         loader_version: str,
-        installer_version: str
+        installer_version: str,
+        progress_callback: Optional[
+            "Callable[[str, Dict[str, Any]], None]"
+        ] = None,
     ) -> Optional[Path]:
         """Download the Fabric server JAR.
-        
+
         Args:
             mc_version: Minecraft version
             loader_version: Fabric loader version
             installer_version: Fabric installer version
-            
+            progress_callback: Optional ``(phase, detail)`` callback for
+                streaming bytes-progress updates.
+
         Returns:
             Path to downloaded JAR or None on failure
         """
         url = self._get_server_jar_url(mc_version, loader_version, installer_version)
         jar_path = self.install_path / "server.jar"
-        
+
         try:
             print(f"Downloading Fabric server from: {url}")
-            
+
             with self.session.get(url, stream=True, timeout=120) as response:
                 response.raise_for_status()
-                
+
                 # Check content type
                 content_type = response.headers.get("Content-Type", "")
                 if "application/java-archive" not in content_type and "application/octet-stream" not in content_type:
                     print(f"Unexpected content type: {content_type}")
                     # Still try to download, sometimes headers are wrong
-                
+
                 total_size = int(response.headers.get("Content-Length", 0))
                 downloaded = 0
-                
+
                 with open(jar_path, "wb") as jar_file:
-                    for chunk in response.iter_content(chunk_size=8192):
+                    for chunk in response.iter_content(chunk_size=65536):
                         if chunk:
                             jar_file.write(chunk)
                             downloaded += len(chunk)
+                            self._report(
+                                progress_callback,
+                                "downloading_server_jar",
+                                bytes_done=downloaded,
+                                bytes_total=total_size,
+                            )
                             if total_size > 0:
                                 progress = (downloaded / total_size) * 100
                                 print(f"Download progress: {progress:.1f}%", end="\r")
-                
+
                 print(f"\nDownloaded: {jar_path} ({downloaded} bytes)")
-                
+
             return jar_path
-            
+
         except requests.RequestException as exc:
             print(f"Download failed: {exc}")
             if jar_path.exists():
@@ -212,7 +234,10 @@ class FabricInstaller(InstallerBase):
         self,
         mc_version: str,
         loader_version: Optional[str] = None,
-        installer_version: Optional[str] = None
+        installer_version: Optional[str] = None,
+        progress_callback: Optional[
+            "Callable[[str, Dict[str, Any]], None]"
+        ] = None,
     ) -> InstallResult:
         """Install a Fabric server.
         
@@ -224,23 +249,27 @@ class FabricInstaller(InstallerBase):
         Returns:
             InstallResult with success status and details
         """
+        self._report(progress_callback, "starting")
         print(f"Installing Fabric server for MC {mc_version}")
-        
+
         # Ensure install directory exists
         self._ensure_install_dir()
-        
+
         # Get loader version if not specified
+        self._report(progress_callback, "resolving_versions")
         if not loader_version:
             print("Fetching latest stable loader version...")
             loader_version = self._get_latest_loader_version(mc_version)
             if not loader_version:
+                msg = f"Could not find Fabric loader for MC {mc_version}"
+                self._report(progress_callback, "failed", error=msg)
                 return InstallResult(
                     success=False,
                     status=InstallStatus.FAILED,
-                    message=f"Could not find Fabric loader for MC {mc_version}",
+                    message=msg,
                     details={"mc_version": mc_version}
                 )
-        
+
         print(f"Using loader version: {loader_version}")
 
         # Get installer version if not specified
@@ -248,33 +277,42 @@ class FabricInstaller(InstallerBase):
             print("Fetching latest stable installer version...")
             installer_version = self._get_latest_installer_version()
             if not installer_version:
+                msg = (
+                    "Could not determine Fabric installer version. "
+                    "Check network connectivity or Fabric Meta availability."
+                )
+                self._report(progress_callback, "failed", error=msg)
                 return InstallResult(
                     success=False,
                     status=InstallStatus.FAILED,
-                    message=(
-                        "Could not determine Fabric installer version. "
-                        "Check network connectivity or Fabric Meta availability."
-                    ),
+                    message=msg,
                     details={"mc_version": mc_version, "loader_version": loader_version}
                 )
 
         print(f"Using installer version: {installer_version}")
-        
+
         # Download server JAR
         print("Downloading server JAR...")
-        jar_path = self._download_server_jar(mc_version, loader_version, installer_version)
-        
+        jar_path = self._download_server_jar(
+            mc_version,
+            loader_version,
+            installer_version,
+            progress_callback=progress_callback,
+        )
+
         if not jar_path or not jar_path.exists():
+            msg = "Failed to download Fabric server JAR"
+            self._report(progress_callback, "failed", error=msg)
             return InstallResult(
                 success=False,
                 status=InstallStatus.FAILED,
-                message="Failed to download Fabric server JAR",
+                message=msg,
                 details={
                     "mc_version": mc_version,
                     "loader_version": loader_version
                 }
             )
-        
+
         # Pre-create .fabric cache directory so the launcher can
         # download the vanilla server JAR on first start without
         # running into permission issues.
@@ -287,8 +325,10 @@ class FabricInstaller(InstallerBase):
 
         # Write eula.txt
         print("Writing eula.txt...")
+        self._report(progress_callback, "writing_eula")
         self._write_eula(accepted=True)
-        
+
+        self._report(progress_callback, "done")
         return InstallResult(
             success=True,
             status=InstallStatus.COMPLETED,
@@ -299,8 +339,14 @@ class FabricInstaller(InstallerBase):
                 "loader_version": loader_version,
                 "installer_version": installer_version,
                 "jar_file": str(jar_path),
-                "install_path": str(self.install_path)
-            }
+                "install_path": str(self.install_path),
+            },
+            launch=LaunchSpec(
+                type="jar",
+                jar="server.jar",
+                jvm_args=[],
+                program_args=["nogui"],
+            ),
         )
 
     def install_with_config(
@@ -308,7 +354,10 @@ class FabricInstaller(InstallerBase):
         mc_version: str,
         server_config: Dict[str, Any],
         loader_version: Optional[str] = None,
-        installer_version: Optional[str] = None
+        installer_version: Optional[str] = None,
+        progress_callback: Optional[
+            "Callable[[str, Dict[str, Any]], None]"
+        ] = None,
     ) -> InstallResult:
         """Install a Fabric server with full configuration.
         
@@ -321,7 +370,12 @@ class FabricInstaller(InstallerBase):
             InstallResult with success status and details
         """
         # First do the basic installation
-        result = self.install(mc_version, loader_version, installer_version)
+        result = self.install(
+            mc_version,
+            loader_version,
+            installer_version,
+            progress_callback=progress_callback,
+        )
         
         if not result.success:
             return result

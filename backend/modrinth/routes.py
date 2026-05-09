@@ -138,7 +138,6 @@ def search_modpacks():
     query = request.args.get('query', '')
     mc_version = request.args.get('mc_version')
     loader = request.args.get('loader')
-    strict_version = request.args.get('strict_version', 'false').lower() in ('true', '1', 'yes')
     try:
         limit = int(request.args.get('limit', 20))
     except (TypeError, ValueError):
@@ -158,23 +157,6 @@ def search_modpacks():
             offset=offset,
             index=index
         )
-
-        # If strict version filtering returns no hits, retry without mc_version.
-        # This keeps UX friendly for modpacks that are compatible but not tagged consistently.
-        hits = result.get('hits') if isinstance(result, dict) else None
-        if mc_version and not strict_version and isinstance(hits, list) and not hits:
-            fallback = modrinth_client.search_modpacks(
-                query=query,
-                mc_version=None,
-                loader=loader,
-                limit=limit,
-                offset=offset,
-                index=index
-            )
-            if isinstance(fallback, dict):
-                fallback['version_filter_fallback'] = True
-            return jsonify(fallback)
-
         return jsonify(result)
     except ModrinthApiError as exc:
         return _modrinth_error_response(exc)

@@ -48,6 +48,30 @@ function isTextFile(path) {
   return TEXT_FILE_EXTENSIONS.has(extension)
 }
 
+// Statuses the runtime registry can authoritatively replace.
+// Mirror of backend _augment_with_runtime's _RUNTIME_KNOWN_STATUSES.
+const RUNTIME_KNOWN_STATUSES = new Set(['running', 'stopped'])
+
+/**
+ * Pick the effective status for display, mirroring the backend rule.
+ *
+ * The runtime registry tracks ServerManager processes; it only knows
+ * "running" or "stopped". For in-flight states owned by a route handler
+ * (pending, installing, starting, stopping, failed) the persisted status
+ * is authoritative and must NOT be overwritten by the registry's
+ * default "stopped". Without this, a server actively installing in a
+ * background thread would display as "stopped" the moment the modal
+ * closes — exactly the bug from the smoke test.
+ */
+function pickEffectiveStatus(server) {
+  const persisted = server?.status
+  const runtime = server?.runtime?.status
+  if (persisted && !RUNTIME_KNOWN_STATUSES.has(persisted)) {
+    return persisted
+  }
+  return runtime || persisted || 'pending'
+}
+
 export const useServerStore = defineStore('server', () => {
   const router = useRouter()
   const toast = useToast()
@@ -209,7 +233,12 @@ export const useServerStore = defineStore('server', () => {
 
     return {
       name: server.value?.name || 'Minecraft Server',
-      status: server.value?.runtime?.status || server.value?.status || 'pending',
+      // Mirror backend _augment_with_runtime semantics: the runtime registry
+      // only knows running/stopped. For in-flight states the persisted
+      // status (installing, starting, stopping, failed, pending) is
+      // authoritative — picking runtime would display "stopped" while an
+      // install thread is actively running.
+      status: pickEffectiveStatus(server.value),
       uptime: server.value?.runtime?.uptime || '—',
       version: server.value?.version || '—',
       loader: loaderName,
@@ -323,6 +352,18 @@ export const useServerStore = defineStore('server', () => {
     try {
       const data = await getServer(currentServerId.value)
       server.value = data
+      // Mirror the freshly augmented record into serversList so the sidebar
+      // dropdown trigger reflects the same status as the detail page header.
+      // ServerLayout polls loadServer every 2.5s; serversList alone is only
+      // refreshed on dropdown-open / mount / delete / save — without this
+      // patch the trigger badge stays "stopped" while the header says
+      // "running" until the user re-opens the dropdown or reloads the page.
+      const listIdx = serversList.value.findIndex((s) => s?.id === data?.id)
+      if (listIdx >= 0) {
+        const next = [...serversList.value]
+        next[listIdx] = data
+        serversList.value = next
+      }
       const mappedSettings = defaultSettings(data)
       if (!serverSettings.value || currentRouteName.value !== 'ServerSettings') {
         serverSettings.value = mappedSettings
@@ -641,10 +682,12 @@ export const useServerStore = defineStore('server', () => {
       modpackCreateBackup.value = true
       const cleanedCount = Array.isArray(result?.cleaned_paths) ? result.cleaned_paths.length : 0
       const missingCount = Array.isArray(result?.missing_files) ? result.missing_files.length : 0
+      const skippedCount = Array.isArray(result?.files_skipped) ? result.files_skipped.length : 0
       const cleanedNote = ` Replaced folders: ${cleanedCount}.`
       const missingNote = missingCount ? ` Missing files skipped: ${missingCount}.` : ''
+      const skippedNote = skippedCount ? ` Skipped ${skippedCount} client-only mod${skippedCount === 1 ? '' : 's'}.` : ''
       const backupNote = result?.backup_file ? ` Backup: ${result.backup_file}.` : ''
-      toast.success(`${modpackData.title} installed successfully.${cleanedNote}${missingNote}${backupNote}`, 'Modpack Installed')
+      toast.success(`${modpackData.title} installed successfully.${cleanedNote}${missingNote}${skippedNote}${backupNote}`, 'Modpack Installed')
       if (result?.java_warning) toast.warning(result.java_warning.message, 'Java Version Mismatch')
       await Promise.all([loadServer({ silent: true }), loadMods()])
     } catch (error) {

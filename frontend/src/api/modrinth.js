@@ -114,14 +114,12 @@ export async function searchModpacks({
   loader = '',
   sort = 'relevance',
   limit = 8,
-  offset = 0,
-  strictVersion = false
+  offset = 0
 }) {
   return get('/api/modrinth/modpacks/search', {
     query,
     mc_version: version,
     loader,
-    strict_version: strictVersion,
     index: sort,
     limit: Math.min(limit, 50),
     offset

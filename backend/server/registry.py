@@ -46,14 +46,68 @@ class ServerProcessRegistry:
 
         memory = server.get('memory', 4)
         java_exec = self._resolve_java_exec(server)
-        return [
-            java_exec,
-            f'-Xms{memory}G',
-            f'-Xmx{memory}G',
-            '-jar',
-            'server.jar',
-            'nogui'
-        ]
+        launch = server.get('launch')
+        launch_type = launch.get('type') if isinstance(launch, dict) else None
+
+        if launch_type == 'jar':
+            jvm_args_raw = launch.get('jvm_args')
+            jvm_args = list(jvm_args_raw) if jvm_args_raw is not None else []
+            program_args_raw = launch.get('program_args')
+            program_args = (
+                ['nogui'] if program_args_raw is None else list(program_args_raw)
+            )
+            jar_name = str(launch.get('jar') or 'server.jar')
+            return [
+                java_exec,
+                f'-Xms{memory}G',
+                f'-Xmx{memory}G',
+                *jvm_args,
+                '-jar',
+                jar_name,
+                *program_args,
+            ]
+
+        if launch_type == 'args_file':
+            args_file = launch.get('args_file')
+            if not args_file:
+                raise ValueError(
+                    f"args_file-type launch on server {server.get('id')!r} "
+                    "has no 'args_file' path — corrupted record?"
+                )
+            jvm_args_raw = launch.get('jvm_args')
+            jvm_args = list(jvm_args_raw) if jvm_args_raw is not None else []
+            program_args_raw = launch.get('program_args')
+            program_args = (
+                ['nogui'] if program_args_raw is None else list(program_args_raw)
+            )
+            return [
+                java_exec,
+                f'-Xms{memory}G',
+                f'-Xmx{memory}G',
+                *jvm_args,
+                f'@{args_file}',
+                *program_args,
+            ]
+
+        if launch_type is None:
+            # Legacy fallback for records created before LaunchSpec landed.
+            # Matches the historical hardcoded default exactly.
+            return [
+                java_exec,
+                f'-Xms{memory}G',
+                f'-Xmx{memory}G',
+                '-jar',
+                'server.jar',
+                'nogui',
+            ]
+
+        # Unknown launch.type → installer/registry version mismatch (e.g. a
+        # downgrade that loaded a Phase-2 NeoForge record on a Phase-0 build).
+        # Fail loudly rather than silently boot the wrong way.
+        raise ValueError(
+            f"Unknown launch.type {launch_type!r} on server "
+            f"{server.get('id')!r} — installer/registry version mismatch?"
+        )
 
     def _resolve_java_exec(self, server: Dict[str, object]) -> str:
         """Resolve the JVM binary for ``server``.
