@@ -722,7 +722,6 @@ class ModrinthClient:
         the caller append it to files_installed.
         """
         forced_side = overrides.get(entry_path)
-        classification, class_reason = self._classify_mod_jar_for_server(target, loader=loader)
 
         if forced_side == "client":
             target.unlink(missing_ok=True)
@@ -732,6 +731,8 @@ class ModrinthClient:
         if forced_side == "server":
             files_installed.append(entry_path)
             return "installed"
+
+        classification, class_reason = self._classify_mod_jar_for_server(target, loader=loader)
 
         if classification == "client":
             target.unlink(missing_ok=True)
