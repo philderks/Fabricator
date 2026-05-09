@@ -7,6 +7,7 @@ import json
 import re
 import shutil
 import tempfile
+import tomllib
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -447,6 +448,7 @@ class ModrinthClient:
                     normalized_overrides,
                     allow_missing,
                     progress_callback=_report,
+                    loader=loader,
                 )
                 _report("extracting_overrides")
                 self._extract_overrides(
@@ -454,6 +456,7 @@ class ModrinthClient:
                     result["files_installed"],
                     result["files_skipped"],
                     result["uncertain_mod_files"],
+                    loader=loader,
                 )
 
         if result["uncertain_mod_files"]:
@@ -591,6 +594,7 @@ class ModrinthClient:
         overrides: Dict[str, str],
         allow_missing: bool,
         progress_callback: Optional[Any] = None,
+        loader: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Download and classify every file listed in the modpack index."""
         files_installed: List[str] = []
@@ -674,6 +678,7 @@ class ModrinthClient:
                     target, entry_path, overrides,
                     files_installed, files_skipped, uncertain_mod_files,
                     index_env_decision=index_env_decisions.get(entry_path, ""),
+                    loader=loader,
                 )
                 if disposition is not None:
                     continue
@@ -696,6 +701,7 @@ class ModrinthClient:
         files_skipped: List[str],
         uncertain_mod_files: List[Dict[str, str]],
         index_env_decision: str = "",
+        loader: Optional[str] = None,
     ) -> Optional[str]:
         """After downloading a mod JAR, classify and possibly remove it.
 
@@ -703,7 +709,7 @@ class ModrinthClient:
         the caller append it to files_installed.
         """
         forced_side = overrides.get(entry_path)
-        classification, class_reason = self._classify_mod_jar_for_server(target)
+        classification, class_reason = self._classify_mod_jar_for_server(target, loader=loader)
 
         if forced_side == "client":
             target.unlink(missing_ok=True)
@@ -739,6 +745,7 @@ class ModrinthClient:
         files_installed: List[str],
         files_skipped: List[str],
         uncertain_mod_files: List[Dict[str, str]],
+        loader: Optional[str] = None,
     ) -> None:
         """Extract server-overrides/ and overrides/ from the .mrpack."""
         for member in zf.infolist():
@@ -787,6 +794,7 @@ class ModrinthClient:
                     target, scoped_path,
                     override_lookup,
                     files_installed, files_skipped, uncertain_mod_files,
+                    loader=loader,
                 )
                 if disposition is None:
                     files_installed.append(scoped_path)
@@ -874,13 +882,61 @@ class ModrinthClient:
 
         return "uncertain", "No server env metadata in modpack index"
 
-    def _classify_mod_jar_for_server(self, jar_path: Path) -> Tuple[str, str]:
+    def _classify_mod_jar_for_server(
+        self,
+        jar_path: Path,
+        loader: Optional[str] = None,
+    ) -> Tuple[str, str]:
+        """Classify a mod JAR as client/server/uncertain for server install.
+
+        ``loader`` selects the metadata reader to prefer when a jar ships
+        multiple manifest formats (cross-compat case):
+
+        * ``fabric``   -> ``fabric.mod.json`` only
+        * ``quilt``    -> ``quilt.mod.json`` first, then ``fabric.mod.json``
+        * ``forge``    -> ``META-INF/mods.toml`` only
+        * ``neoforge`` -> ``META-INF/neoforge.mods.toml`` first, then
+          ``META-INF/mods.toml``
+
+        Unknown / missing loader falls back to the legacy fabric reader so
+        existing call sites keep working.
+        """
+        loader_key = (loader or "").strip().lower()
+
         try:
             with zipfile.ZipFile(jar_path) as zf:
-                if "fabric.mod.json" not in zf.namelist():
-                    return "uncertain", "fabric.mod.json missing"
-                mod_meta = json.loads(zf.read("fabric.mod.json"))
-        except (OSError, zipfile.BadZipFile, json.JSONDecodeError):
+                names = set(zf.namelist())
+
+                if loader_key == "quilt":
+                    if "quilt.mod.json" in names:
+                        return self._classify_quilt(zf.read("quilt.mod.json"))
+                    if "fabric.mod.json" in names:
+                        return self._classify_fabric(zf.read("fabric.mod.json"))
+                    return "uncertain", "quilt.mod.json/fabric.mod.json missing"
+
+                if loader_key == "forge":
+                    if "META-INF/mods.toml" in names:
+                        return self._classify_forge_toml(zf.read("META-INF/mods.toml"))
+                    return "uncertain", "META-INF/mods.toml missing"
+
+                if loader_key == "neoforge":
+                    if "META-INF/neoforge.mods.toml" in names:
+                        return self._classify_forge_toml(zf.read("META-INF/neoforge.mods.toml"))
+                    if "META-INF/mods.toml" in names:
+                        return self._classify_forge_toml(zf.read("META-INF/mods.toml"))
+                    return "uncertain", "META-INF/(neoforge.)mods.toml missing"
+
+                # fabric or unknown -> fabric.mod.json
+                if "fabric.mod.json" in names:
+                    return self._classify_fabric(zf.read("fabric.mod.json"))
+                return "uncertain", "fabric.mod.json missing"
+        except (OSError, zipfile.BadZipFile):
+            return "uncertain", "Failed to parse mod metadata"
+
+    def _classify_fabric(self, raw: bytes) -> Tuple[str, str]:
+        try:
+            mod_meta = json.loads(raw)
+        except json.JSONDecodeError:
             return "uncertain", "Failed to parse mod metadata"
 
         environment = str(mod_meta.get("environment") or "").strip().lower()
@@ -896,6 +952,63 @@ class ModrinthClient:
             return "server", "Server entrypoint declared"
 
         return "uncertain", "Metadata does not clearly mark client/server"
+
+    def _classify_quilt(self, raw: bytes) -> Tuple[str, str]:
+        try:
+            mod_meta = json.loads(raw)
+        except json.JSONDecodeError:
+            return "uncertain", "Failed to parse mod metadata"
+
+        loader_block = mod_meta.get("quilt_loader") or {}
+        minecraft = loader_block.get("minecraft") or {}
+        environment = str(minecraft.get("environment") or "").strip().lower()
+
+        if environment == "client":
+            return "client", "quilt environment=client"
+        if environment == "dedicated_server":
+            return "server", "quilt environment=dedicated_server"
+
+        return "uncertain", "quilt manifest does not clearly mark client/server"
+
+    def _classify_forge_toml(self, raw: bytes) -> Tuple[str, str]:
+        """Read mods.toml / neoforge.mods.toml.
+
+        Honored mod-side signals:
+
+        * Top-level ``clientSideOnly = true`` (legacy Forge convention,
+          e.g. EntityCulling).
+        * ``[[mods]]`` table's optional ``side`` field
+          (``CLIENT`` / ``SERVER`` / ``BOTH``).
+
+        ``[[dependencies.<modid>]]`` ``side`` is intentionally NOT
+        consulted: it describes the dep's side-context, not the host
+        mod's. (Real example: ``configured`` declares its ``catalogue``
+        dep as ``side="CLIENT"`` while ``configured`` itself is
+        server-compatible.)
+        """
+        try:
+            data = tomllib.loads(raw.decode("utf-8", errors="replace"))
+        except (tomllib.TOMLDecodeError, UnicodeDecodeError):
+            return "uncertain", "Failed to parse mods.toml"
+
+        if data.get("clientSideOnly") is True:
+            return "client", "mods.toml clientSideOnly=true"
+
+        mods_list = data.get("mods")
+        # Forge convention: a jar's identity is its first [[mods]] entry; subsequent
+        # entries are sub-mods that share its side.
+        if isinstance(mods_list, list) and mods_list:
+            first = mods_list[0]
+            if isinstance(first, dict):
+                side = str(first.get("side") or "").strip().upper()
+                if side == "CLIENT":
+                    return "client", "mods.toml [[mods]] side=CLIENT"
+                if side == "SERVER":
+                    return "server", "mods.toml [[mods]] side=SERVER"
+                if side == "BOTH":
+                    return "server", "mods.toml [[mods]] side=BOTH"
+
+        return "uncertain", "mods.toml does not declare a mod-level side"
 
     def clean_modpack_switch_paths(self, install_path: Path) -> List[str]:
         """Remove known modpack-managed directories before a clean switch."""
