@@ -523,8 +523,9 @@ class ModrinthClient:
         version_game_versions = best.get("game_versions") or []
         if mc_version and version_game_versions and mc_version not in version_game_versions:
             raise ModrinthApiError(
-                f"Selected server version {mc_version} is not compatible with this modpack version "
-                f"({', '.join(version_game_versions)}).",
+                f"This modpack's latest version targets Minecraft {', '.join(version_game_versions)}, "
+                f"but your server runs Minecraft {mc_version}. "
+                f"Pick a different modpack, or recreate the server with a compatible Minecraft version.",
                 status_code=409,
                 details={
                     "requested_mc_version": mc_version,
@@ -535,8 +536,9 @@ class ModrinthClient:
         version_loaders = [str(v).lower() for v in (best.get("loaders") or [])]
         if loader and version_loaders and loader.lower() not in version_loaders:
             raise ModrinthApiError(
-                f"Selected loader {loader} is not compatible with this modpack version "
-                f"({', '.join(version_loaders)}).",
+                f"This modpack's latest version targets {', '.join(version_loaders)}, "
+                f"but your server uses {loader}. "
+                f"Pick a different modpack, or recreate the server with a compatible loader.",
                 status_code=409,
                 details={
                     "requested_loader": loader.lower(),
