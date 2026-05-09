@@ -36,7 +36,7 @@ class FabricInstaller(InstallerBase):
 
     def get_minecraft_versions(self) -> List[Dict[str, Any]]:
         """Get Minecraft versions supported by Fabric.
-        
+
         Returns:
             List of game versions with stability info
         """
@@ -46,10 +46,21 @@ class FabricInstaller(InstallerBase):
                 timeout=15
             )
             response.raise_for_status()
-            return response.json()
+            payload = response.json()
         except requests.RequestException as exc:
             print(f"Failed to fetch game versions: {exc}")
             return []
+
+        out: List[Dict[str, Any]] = []
+        for entry in payload:
+            v = entry.get("version")
+            if not v:
+                out.append(entry)
+                continue
+            normalized = dict(entry)
+            normalized["version"] = self._canonicalize_mc_version(v)
+            out.append(normalized)
+        return out
 
     def get_available_versions(self, mc_version: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get available Fabric loader versions.

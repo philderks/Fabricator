@@ -91,14 +91,19 @@ class NeoForgeInstaller(InstallerBase):
         Driven by part-count, not by a numeric threshold on the major:
         - 3-part NeoForge (X.Y.Z) corresponds to classic ``1.X.Y`` MC.
         - 4-part NeoForge (XX.Y.Z.W) corresponds to year-versioned ``XX.Y.Z`` MC.
+
+        The result is canonicalized via ``_canonicalize_mc_version`` so that
+        x.y.0 maps to the bare ``x.y`` form. This keeps the comparison sites
+        in ``_select_loader_version`` and ``get_available_versions`` matching
+        the canonical strings emitted by ``get_minecraft_versions``.
         """
         parts, _ = cls._split_version(neoforge_version)
         if parts is None:
             return None
         if len(parts) == 3:
-            return f"1.{parts[0]}.{parts[1]}"
+            return cls._canonicalize_mc_version(f"1.{parts[0]}.{parts[1]}")
         if len(parts) == 4:
-            return f"{parts[0]}.{parts[1]}.{parts[2]}"
+            return cls._canonicalize_mc_version(f"{parts[0]}.{parts[1]}.{parts[2]}")
         return None
 
     @staticmethod

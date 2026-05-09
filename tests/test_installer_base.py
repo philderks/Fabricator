@@ -1,7 +1,13 @@
 """LaunchSpec dataclass + InstallResult serialization."""
 from __future__ import annotations
 
+import re
+from unittest.mock import MagicMock
+
+import pytest
+
 from backend.server.installer.base import (
+    InstallerBase,
     InstallResult,
     InstallStatus,
     LaunchSpec,
@@ -146,3 +152,151 @@ def test_installer_base_set_java_exec_accepts_none(tmp_path):
     inst.set_java_exec("/path/to/java")
     inst.set_java_exec(None)
     assert inst.java_exec is None
+
+
+# ---------- Canonical MC version form ----------
+#
+# Modrinth and other downstream consumers tag x.y.0 MC releases with the
+# bare "x.y" form. Loaders whose own APIs return the explicit "x.y.0"
+# form (notably NeoForge) must canonicalize before returning so all
+# loaders surface the same form. These tests pin that invariant.
+
+
+_X_Y_ZERO_RE = re.compile(r"^\d+\.\d+\.0$")
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("1.21.0", "1.21"),
+    ("1.20.1", "1.20.1"),
+    ("1.21", "1.21"),
+    ("a1.2.0", "a1.2"),
+    ("26.2-snapshot-6", "26.2-snapshot-6"),
+])
+def test_canonicalize_mc_version(raw, expected):
+    assert InstallerBase._canonicalize_mc_version(raw) == expected
+
+
+def _assert_no_zero_patch(versions):
+    offenders = [v["version"] for v in versions if _X_Y_ZERO_RE.match(v.get("version", ""))]
+    assert offenders == [], f"x.y.0 entries leaked from get_minecraft_versions: {offenders}"
+
+
+def test_vanilla_get_minecraft_versions_no_zero_patch(tmp_path):
+    """Vanilla legacy entries like 'a1.2.0' must canonicalize before surfacing."""
+    from backend.server.installer.vanilla import VanillaInstaller
+    inst = VanillaInstaller(tmp_path)
+
+    session = MagicMock()
+    manifest = {
+        "latest": {"release": "1.21.4", "snapshot": "24w45a"},
+        "versions": [
+            {"id": "1.21.4", "type": "release", "url": "x"},
+            {"id": "1.21.0", "type": "release", "url": "x"},
+            {"id": "a1.2.0", "type": "old_alpha", "url": "x"},
+        ],
+    }
+
+    def get(url, **_):
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.json.return_value = manifest
+        return resp
+
+    session.get.side_effect = get
+    inst.session = session
+
+    _assert_no_zero_patch(inst.get_minecraft_versions())
+
+
+def test_fabric_get_minecraft_versions_no_zero_patch(tmp_path):
+    from backend.server.installer.fabric import FabricInstaller
+    inst = FabricInstaller(tmp_path)
+
+    session = MagicMock()
+    payload = [
+        {"version": "1.21.4", "stable": True},
+        {"version": "1.21.0", "stable": True},
+        {"version": "1.21", "stable": True},
+    ]
+
+    def get(url, **_):
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.json.return_value = payload
+        return resp
+
+    session.get.side_effect = get
+    inst.session = session
+
+    _assert_no_zero_patch(inst.get_minecraft_versions())
+
+
+def test_quilt_get_minecraft_versions_no_zero_patch(tmp_path):
+    from backend.server.installer.quilt import QuiltInstaller
+    inst = QuiltInstaller(tmp_path)
+
+    session = MagicMock()
+    payload = [
+        {"version": "1.21.4", "stable": True},
+        {"version": "1.21.0", "stable": True},
+    ]
+
+    def get(url, **_):
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.json.return_value = payload
+        return resp
+
+    session.get.side_effect = get
+    inst.session = session
+
+    _assert_no_zero_patch(inst.get_minecraft_versions())
+
+
+def test_forge_get_minecraft_versions_no_zero_patch(tmp_path):
+    """Forge promotions has a few legacy x.y.0 entries (e.g. 1.4.0)."""
+    from backend.server.installer.forge import ForgeInstaller
+    inst = ForgeInstaller(tmp_path)
+
+    session = MagicMock()
+    promotions = {
+        "promos": {
+            "1.21.4-latest": "54.1.16",
+            "1.4.0-latest": "6.0.0.0",
+            "1.20.1-recommended": "47.4.10",
+        },
+    }
+
+    def get(url, **_):
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.json.return_value = promotions
+        return resp
+
+    session.get.side_effect = get
+    inst.session = session
+
+    _assert_no_zero_patch(inst.get_minecraft_versions())
+
+
+def test_neoforge_get_minecraft_versions_no_zero_patch(tmp_path):
+    """The bug fix: NeoForge's 21.0.x → MC 1.21.0 must canonicalize to '1.21'."""
+    from backend.server.installer.neoforge import NeoForgeInstaller
+    inst = NeoForgeInstaller(tmp_path)
+
+    session = MagicMock()
+    payload = {
+        "isSnapshot": False,
+        "versions": ["21.0.143", "21.1.228", "26.1.2.43-beta"],
+    }
+
+    def get(url, **_):
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.json.return_value = payload
+        return resp
+
+    session.get.side_effect = get
+    inst.session = session
+
+    _assert_no_zero_patch(inst.get_minecraft_versions())

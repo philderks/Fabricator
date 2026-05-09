@@ -69,6 +69,32 @@ class InstallResult:
 class InstallerBase(ABC):
     """Abstract base class for Minecraft server installers."""
 
+    @staticmethod
+    def _canonicalize_mc_version(v: str) -> str:
+        """Strip trailing '.0' patch from a Minecraft version string.
+
+        Mojang's release naming uses bare 'x.y' for x.y.0 releases — Modrinth
+        and other downstream consumers tag with that bare form. Loaders whose
+        own APIs return the explicit 'x.y.0' form (notably NeoForge) must run
+        their MC version strings through this helper before returning them
+        from get_minecraft_versions(), so all loaders surface the same
+        canonical form.
+
+        1.21.0 → 1.21
+        1.20.1 → 1.20.1   (unchanged)
+        1.21   → 1.21     (unchanged)
+        a1.2.0 → a1.2     (alpha versions also normalized)
+
+        Two-part versions (1.21) are returned unchanged. Versions ending in
+        something else (e.g. snapshots like '26.2-snapshot-6') are returned
+        unchanged.
+        """
+        if not isinstance(v, str):
+            return v
+        if v.endswith(".0") and v.count(".") == 2:
+            return v[:-2]
+        return v
+
     def __init__(self, install_path: Path):
         """Initialize installer with target path.
 

@@ -106,7 +106,7 @@ class ForgeInstaller(InstallerBase):
             seen.add(match.group("mc"))
 
         out = [
-            {"version": mc, "stable": True, "type": "release"}
+            {"version": self._canonicalize_mc_version(mc), "stable": True, "type": "release"}
             for mc in seen
         ]
         out.sort(key=lambda v: self._mc_sort_key(v["version"]), reverse=True)

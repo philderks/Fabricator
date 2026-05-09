@@ -84,7 +84,7 @@ class QuiltInstaller(InstallerBase):
                 continue
             stable = bool(entry.get("stable"))
             out.append({
-                "version": version,
+                "version": self._canonicalize_mc_version(version),
                 "stable": stable,
                 "type": "release" if stable else "snapshot",
             })

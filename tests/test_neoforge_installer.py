@@ -72,8 +72,9 @@ def test_get_minecraft_versions_filters_and_normalizes(tmp_path, fake_maven_vers
     assert "1.20.2" in mc_strings
     # 20.4.237 → 1.20.4
     assert "1.20.4" in mc_strings
-    # 21.0.143 stable + 21.0.142-beta → 1.21.0 (stable=True, since at least one stable)
-    assert "1.21.0" in mc_strings
+    # 21.0.143 stable + 21.0.142-beta → 1.21 (canonical bare form;
+    # stable=True since at least one stable release exists)
+    assert "1.21" in mc_strings
     # 21.1.x → 1.21.1
     assert "1.21.1" in mc_strings
     # 26.1.2.43-beta → 26.1.2 (year-versioned, stable=False since only beta)

@@ -58,7 +58,7 @@ class VanillaInstaller(InstallerBase):
             if not mc_id:
                 continue
             out.append({
-                "version": mc_id,
+                "version": self._canonicalize_mc_version(mc_id),
                 "stable": mc_type == "release",
                 "type": mc_type,
             })
