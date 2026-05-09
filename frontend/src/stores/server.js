@@ -128,6 +128,7 @@ export const useServerStore = defineStore('server', () => {
   const showUncertainModsModal = ref(false)
   const uncertainModsReport = ref([])
   const pendingUncertainModpackData = ref(null)
+  const skippedFilesReport = ref([])
 
   // ---------- Private helpers (not returned) ----------
   const defaultSettings = (data = {}) => ({
@@ -682,10 +683,18 @@ export const useServerStore = defineStore('server', () => {
       modpackCreateBackup.value = true
       const cleanedCount = Array.isArray(result?.cleaned_paths) ? result.cleaned_paths.length : 0
       const missingCount = Array.isArray(result?.missing_files) ? result.missing_files.length : 0
+      // Backend returns files_skipped as a list of paths; tolerate an int
+      // count too in case an older backend is reached during rolling deploy.
+      const skippedList = Array.isArray(result?.files_skipped) ? result.files_skipped : []
+      const skippedCount = Array.isArray(result?.files_skipped)
+        ? result.files_skipped.length
+        : (Number.isFinite(result?.files_skipped) ? result.files_skipped : 0)
+      skippedFilesReport.value = skippedList
       const cleanedNote = ` Replaced folders: ${cleanedCount}.`
       const missingNote = missingCount ? ` Missing files skipped: ${missingCount}.` : ''
+      const skippedNote = skippedCount ? ` Skipped ${skippedCount} client-only mod${skippedCount === 1 ? '' : 's'}.` : ''
       const backupNote = result?.backup_file ? ` Backup: ${result.backup_file}.` : ''
-      toast.success(`${modpackData.title} installed successfully.${cleanedNote}${missingNote}${backupNote}`, 'Modpack Installed')
+      toast.success(`${modpackData.title} installed successfully.${cleanedNote}${missingNote}${skippedNote}${backupNote}`, 'Modpack Installed')
       if (result?.java_warning) toast.warning(result.java_warning.message, 'Java Version Mismatch')
       await Promise.all([loadServer({ silent: true }), loadMods()])
     } catch (error) {
@@ -969,6 +978,7 @@ export const useServerStore = defineStore('server', () => {
     showUncertainModsModal.value = false
     uncertainModsReport.value = []
     pendingUncertainModpackData.value = null
+    skippedFilesReport.value = []
     actionState.value = { start: false, stop: false, restart: false }
     showModBrowser.value = false
     showJavaModal.value = false
@@ -1035,6 +1045,7 @@ export const useServerStore = defineStore('server', () => {
     showUncertainModsModal,
     uncertainModsReport,
     pendingUncertainModpackData,
+    skippedFilesReport,
     // Getters
     modpackProgressLabel,
     modpackProgressPercent,

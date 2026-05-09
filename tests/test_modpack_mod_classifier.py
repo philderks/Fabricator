@@ -516,3 +516,116 @@ def test_forge_uncertain_metadata_and_empty_scan_concatenate_reasons(mod_client,
     assert classification == "uncertain"
     assert "mods.toml" in reason
     assert "class references" in reason
+
+
+# ---------------------------------------------------------------------------
+# End-to-end install pipeline (2) — exercises ``_install_index_files`` with
+# a stubbed download step so the classifier output flows through the real
+# partition logic. These pin that index-driven and metadata-driven skips
+# both end up in ``files_skipped`` with the matching jar deleted from disk,
+# and that ``files_installed``/``uncertain_mod_files`` agree.
+# ---------------------------------------------------------------------------
+
+def _stub_download_with_payloads(monkeypatch, payloads: Dict[str, bytes]) -> None:
+    """Patch ``_download_and_verify`` to write ``payloads[url]`` to ``target``.
+
+    Skips real HTTP and hash-checking so a synthetic jar can drive the
+    classifier path inside the install pipeline.
+    """
+    def fake_download(self, url, target, hashes, error_context):  # noqa: ARG001
+        target.write_bytes(payloads[url])
+
+    monkeypatch.setattr(ModrinthClient, "_download_and_verify", fake_download)
+
+
+def test_install_e2e_filters_client_mods_from_index(mod_client, tmp_path, monkeypatch):
+    """Two forge index entries: one client-only, one uncertain-but-server.
+
+    Pipeline must skip the client jar (deleted from disk) and install the
+    uncertain one because the index declares ``env.server=required`` (the
+    saving fallback inside ``_classify_installed_mod``).
+    """
+    install_path = tmp_path / "server"
+    install_path.mkdir()
+
+    client_jar_bytes = _override_jar_bytes({"META-INF/mods.toml": ENTITYCULLING_MODS_TOML})
+    # _override_jar_bytes only accepts metadata; build the uncertain jar
+    # inline so it ships a clean .class (constant-pool scan finds no client
+    # refs) on top of an empty mods.toml.
+    import io
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("META-INF/mods.toml", EMPTY_FORGE_TOML)
+        zf.writestr("com/example/Clean.class", b"\xca\xfe\xba\xbejava/lang/String")
+    server_jar_bytes = buf.getvalue()
+
+    entries = [
+        {
+            "path": "mods/entityculling.jar",
+            "env": {"server": "required", "client": "required"},
+            "downloads": ["https://stub.invalid/entityculling.jar"],
+            "hashes": {},
+        },
+        {
+            "path": "mods/uncertain-server.jar",
+            "env": {"server": "required", "client": "required"},
+            "downloads": ["https://stub.invalid/uncertain.jar"],
+            "hashes": {},
+        },
+    ]
+    _stub_download_with_payloads(monkeypatch, {
+        "https://stub.invalid/entityculling.jar": client_jar_bytes,
+        "https://stub.invalid/uncertain.jar": server_jar_bytes,
+    })
+
+    result = mod_client._install_index_files(
+        entries, install_path, overrides={}, allow_missing=False, loader="forge",
+    )
+
+    assert result["files_installed"] == ["mods/uncertain-server.jar"]
+    assert result["files_skipped"] == ["mods/entityculling.jar"]
+    assert result["uncertain_mod_files"] == []
+    assert not (install_path / "mods" / "entityculling.jar").exists()
+    assert (install_path / "mods" / "uncertain-server.jar").is_file()
+
+
+def test_install_e2e_classifier_catches_lwjgl_mod(mod_client, tmp_path, monkeypatch):
+    """Forge jar with empty mods.toml + an LWJGL class ref must be skipped.
+
+    Metadata reader returns uncertain, the constant-pool scan promotes it
+    to ``client``, and ``_install_index_files`` records the skip + unlinks
+    the freshly downloaded jar.
+    """
+    install_path = tmp_path / "server"
+    install_path.mkdir()
+
+    import io
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("META-INF/mods.toml", EMPTY_FORGE_TOML)
+        zf.writestr(
+            "com/example/Renderer.class",
+            b"\xca\xfe\xba\xbeorg/lwjgl/glfw/GLFWErrorCallbackI",
+        )
+    lwjgl_jar_bytes = buf.getvalue()
+
+    entries = [
+        {
+            "path": "mods/lwjgl-mod.jar",
+            "env": {"server": "required", "client": "required"},
+            "downloads": ["https://stub.invalid/lwjgl.jar"],
+            "hashes": {},
+        },
+    ]
+    _stub_download_with_payloads(monkeypatch, {
+        "https://stub.invalid/lwjgl.jar": lwjgl_jar_bytes,
+    })
+
+    result = mod_client._install_index_files(
+        entries, install_path, overrides={}, allow_missing=False, loader="forge",
+    )
+
+    assert result["files_installed"] == []
+    assert result["files_skipped"] == ["mods/lwjgl-mod.jar"]
+    assert result["uncertain_mod_files"] == []
+    assert not (install_path / "mods" / "lwjgl-mod.jar").exists()
