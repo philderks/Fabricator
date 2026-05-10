@@ -114,7 +114,8 @@ def search_mods():
     index = request.args.get('index', 'downloads')
 
     try:
-        result = modrinth_client.search_mods(
+        result = modrinth_client.search(
+            project_type='mod',
             query=query,
             mc_version=mc_version,
             loader=loader,
@@ -143,7 +144,8 @@ def search_modpacks():
     index = request.args.get('index', 'downloads')
 
     try:
-        result = modrinth_client.search_modpacks(
+        result = modrinth_client.search(
+            project_type='modpack',
             query=query,
             mc_version=mc_version,
             loader=loader,
@@ -159,7 +161,7 @@ def search_modpacks():
 @modrinth_bp.route('/mod/<mod_id>', methods=['GET'])
 def get_mod(mod_id):
     try:
-        result = modrinth_client.get_mod(mod_id)
+        result = modrinth_client.get_project(mod_id)
         return jsonify(result)
     except ModrinthApiError as exc:
         return _modrinth_error_response(exc)
@@ -185,8 +187,8 @@ def get_mod_versions(mod_id):
         featured_bool = bool_from_str(featured)
 
     try:
-        result = modrinth_client.get_mod_versions(
-            mod_id=mod_id,
+        result = modrinth_client.get_project_versions(
+            project_id=mod_id,
             loaders=loaders if loaders else None,
             game_versions=game_versions if game_versions else None,
             featured=featured_bool

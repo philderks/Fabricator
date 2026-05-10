@@ -47,14 +47,14 @@ def test_search_returns_empty_when_strict_filter_misses(client, monkeypatch):
 
     calls: list[dict] = []
 
-    def fake_search_modpacks(**kwargs):
+    def fake_search(**kwargs):
         calls.append(kwargs)
         return {"hits": [], "total_hits": 0, "limit": kwargs.get("limit", 20), "offset": 0}
 
     monkeypatch.setattr(
         modrinth_routes.modrinth_client,
-        "search_modpacks",
-        fake_search_modpacks,
+        "search",
+        fake_search,
     )
 
     resp = client.get(
@@ -71,6 +71,9 @@ def test_search_returns_empty_when_strict_filter_misses(client, monkeypatch):
     # And the underlying client was called exactly once — no fallback retry.
     assert len(calls) == 1
     assert calls[0]["mc_version"] == "1.21"
+    # Modpack route must dispatch through the unified search() with the
+    # modpack project_type — guards against accidental project_type="mod".
+    assert calls[0]["project_type"] == "modpack"
 
 
 def test_install_compat_error_message_is_actionable(monkeypatch):
