@@ -11,6 +11,7 @@ from backend.server.installer.base import (
     InstallResult,
     InstallStatus,
     LaunchSpec,
+    _validate_version_token,
 )
 
 
@@ -300,3 +301,120 @@ def test_neoforge_get_minecraft_versions_no_zero_patch(tmp_path):
     inst.session = session
 
     _assert_no_zero_patch(inst.get_minecraft_versions())
+
+
+# ---------- B10 Path-traversal mitigation (S1 + S5) ----------
+#
+# These tests pin the trust-boundary contract that closes Sicherheits-Block
+# S1 (Forge mc_version/build) and S5 (NeoForge / Quilt loader_version /
+# install-dir): every externally-controlled version token is whitelisted by
+# ``_validate_version_token`` before it lands in a filename or subprocess
+# arg, and every path constructed from those tokens is re-checked under
+# ``install_path`` by ``_resolve_within_install_path``.
+
+
+@pytest.mark.parametrize("good", [
+    "1.20.1",
+    "1.21",
+    "b1.7.3",
+    "21.1.228",
+    "54.1.16",
+    "1.21.4-rc1",
+    "0.27.0",
+    "26.1.2.43-beta",
+    "10.13.4.1614",
+])
+def test_validate_version_token_accepts_real_version_shapes(good):
+    assert _validate_version_token(good, field_name="mc_version") == good
+
+
+@pytest.mark.parametrize("bad", [
+    "../../etc/passwd",
+    "..",
+    "../1.20.1",
+    "1.20.1/..",
+    "1.20.1 --evil",
+    "1.20.1\nrm -rf /",
+    "1.20.1; rm -rf /",
+    "1.20.1\\..",
+    "",
+    "1.20.1\x00",
+    "1.20.1/extra",
+])
+def test_validate_version_token_rejects_path_and_shell_metachars(bad):
+    with pytest.raises(ValueError, match="Invalid mc_version"):
+        _validate_version_token(bad, field_name="mc_version")
+
+
+def test_validate_version_token_rejects_non_string():
+    with pytest.raises(ValueError, match="Invalid build"):
+        _validate_version_token(None, field_name="build")  # type: ignore[arg-type]
+
+
+def test_validate_version_token_field_name_in_error_message():
+    """Error must name the field so install routes can log a clear failure."""
+    with pytest.raises(ValueError, match="loader_version"):
+        _validate_version_token("..", field_name="loader_version")
+
+
+def test_resolve_within_install_path_returns_resolved_descendant(tmp_path):
+    from backend.server.installer.fabric import FabricInstaller
+    inst = FabricInstaller(tmp_path)
+
+    out = inst._resolve_within_install_path("forge-1.20.1-47.4.10-installer.jar")
+    assert out == (tmp_path / "forge-1.20.1-47.4.10-installer.jar").resolve()
+    # Result is always under the install path.
+    assert out.is_relative_to(tmp_path.resolve())
+
+
+def test_resolve_within_install_path_accepts_nested_segments(tmp_path):
+    from backend.server.installer.fabric import FabricInstaller
+    inst = FabricInstaller(tmp_path)
+
+    out = inst._resolve_within_install_path(
+        "libraries", "net", "neoforged", "neoforge", "21.1.228", "unix_args.txt"
+    )
+    expected = (
+        tmp_path / "libraries" / "net" / "neoforged" / "neoforge"
+        / "21.1.228" / "unix_args.txt"
+    ).resolve()
+    assert out == expected
+
+
+def test_resolve_within_install_path_rejects_parent_traversal(tmp_path):
+    from backend.server.installer.fabric import FabricInstaller
+    inst = FabricInstaller(tmp_path)
+
+    with pytest.raises(ValueError, match="escapes install_path"):
+        inst._resolve_within_install_path("..", "etc", "passwd")
+
+
+def test_resolve_within_install_path_rejects_absolute_segment(tmp_path):
+    """An absolute path part replaces the prior parts under pathlib semantics."""
+    from backend.server.installer.fabric import FabricInstaller
+    inst = FabricInstaller(tmp_path)
+
+    with pytest.raises(ValueError, match="escapes install_path"):
+        inst._resolve_within_install_path("/etc/passwd")
+
+
+def test_resolve_within_install_path_rejects_sibling_prefix(tmp_path):
+    """A sibling dir whose name is a prefix of install_path must not pass."""
+    from backend.server.installer.fabric import FabricInstaller
+    sibling = tmp_path / "sibling"
+    sibling.mkdir()
+    inst = FabricInstaller(sibling)
+
+    with pytest.raises(ValueError, match="escapes install_path"):
+        # ../sibling-evil-suffix would resolve to a path that *starts* with
+        # str(sibling) but isn't under it. relative_to() catches this.
+        inst._resolve_within_install_path("..", "sibling-evil-suffix")
+
+
+def test_resolve_within_install_path_zero_parts_returns_install_root(tmp_path):
+    """Calling with no parts returns the resolved install_path itself."""
+    from backend.server.installer.fabric import FabricInstaller
+    inst = FabricInstaller(tmp_path)
+
+    out = inst._resolve_within_install_path()
+    assert out == tmp_path.resolve()

@@ -12,6 +12,7 @@ from .base import (
     InstallResult,
     InstallStatus,
     LaunchSpec,
+    _validate_version_token,
 )
 from backend.utils import platform as platform_utils
 from backend.utils.platform import is_windows
@@ -236,7 +237,11 @@ class NeoForgeInstaller(InstallerBase):
         """
         import hashlib
 
-        target = self.install_path / f"neoforge-{loader_version}-installer.jar"
+        # loader_version is pre-validated at the install() boundary; this
+        # extra resolve()+relative_to() is defence-in-depth.
+        target = self._resolve_within_install_path(
+            f"neoforge-{loader_version}-installer.jar"
+        )
         hasher = hashlib.sha1()
         try:
             with self.session.get(
@@ -280,13 +285,18 @@ class NeoForgeInstaller(InstallerBase):
         return target, None
 
     def _detect_args_file(self, loader_version: str) -> Optional[Path]:
-        """Return the platform-specific args file produced by --installServer."""
-        base = (
-            self.install_path / "libraries" / "net" / "neoforged"
-            / "neoforge" / loader_version
-        )
+        """Return the platform-specific args file produced by --installServer.
+
+        ``loader_version`` is pre-validated at the install() boundary, so the
+        path build is trusted; the resolve()+relative_to() check inside
+        ``_resolve_within_install_path`` keeps callers honest if they reach
+        this method without going through install() first.
+        """
         filename = "win_args.txt" if is_windows() else "unix_args.txt"
-        candidate = base / filename
+        candidate = self._resolve_within_install_path(
+            "libraries", "net", "neoforged", "neoforge",
+            loader_version, filename,
+        )
         return candidate if candidate.exists() else None
 
     def install(
@@ -299,6 +309,27 @@ class NeoForgeInstaller(InstallerBase):
     ) -> InstallResult:
         self._report(progress_callback, "starting")
         self._ensure_install_dir()
+
+        # Whitelist user-controlled mc_version (and any caller-pinned
+        # loader_version) BEFORE they land in filenames or subprocess args.
+        # Auto-resolved loader_version from Maven is validated immediately
+        # after lookup — Maven's payload is third-party and treated as
+        # untrusted at the same trust-boundary.
+        try:
+            _validate_version_token(mc_version, field_name="mc_version")
+            if loader_version is not None:
+                _validate_version_token(
+                    loader_version, field_name="loader_version"
+                )
+        except ValueError as exc:
+            msg = str(exc)
+            self._report(progress_callback, "failed", error=msg)
+            return InstallResult(
+                success=False,
+                status=InstallStatus.FAILED,
+                message=msg,
+                details={"mc_version": mc_version},
+            )
 
         # Resolve loader_version if not pinned.
         self._report(progress_callback, "resolving_versions")
@@ -321,6 +352,22 @@ class NeoForgeInstaller(InstallerBase):
                     status=InstallStatus.FAILED,
                     message=msg,
                     details={"mc_version": mc_version},
+                )
+            try:
+                _validate_version_token(
+                    loader_version, field_name="loader_version"
+                )
+            except ValueError as exc:
+                msg = str(exc)
+                self._report(progress_callback, "failed", error=msg)
+                return InstallResult(
+                    success=False,
+                    status=InstallStatus.FAILED,
+                    message=msg,
+                    details={
+                        "mc_version": mc_version,
+                        "loader_version": loader_version,
+                    },
                 )
 
         # Download the installer JAR.
@@ -405,7 +452,9 @@ class NeoForgeInstaller(InstallerBase):
                 details={"mc_version": mc_version, "loader_version": loader_version},
             )
 
-        relative_args_file = args_file_path.relative_to(self.install_path).as_posix()
+        relative_args_file = args_file_path.relative_to(
+            self.install_path.resolve()
+        ).as_posix()
 
         self._report(progress_callback, "writing_eula")
         self._write_eula(accepted=True)

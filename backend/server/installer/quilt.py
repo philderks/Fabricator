@@ -33,6 +33,7 @@ from .base import (
     InstallResult,
     InstallStatus,
     LaunchSpec,
+    _validate_version_token,
 )
 
 
@@ -170,7 +171,11 @@ class QuiltInstaller(InstallerBase):
         """
         import hashlib
 
-        target = self.install_path / f"quilt-installer-{installer_version}.jar"
+        # installer_version is pre-validated at the install() boundary; this
+        # extra resolve()+relative_to() is defence-in-depth.
+        target = self._resolve_within_install_path(
+            f"quilt-installer-{installer_version}.jar"
+        )
         hasher = hashlib.sha1()
         try:
             with self.session.get(
@@ -224,6 +229,26 @@ class QuiltInstaller(InstallerBase):
         self._report(progress_callback, "starting")
         self._ensure_install_dir()
 
+        # Whitelist user-controlled mc_version (and any caller-pinned
+        # loader_version) BEFORE they land in filenames or subprocess args
+        # — Quilt's installer takes mc_version directly on the command line,
+        # so this is the trust-boundary check that closes the S5 vector.
+        try:
+            _validate_version_token(mc_version, field_name="mc_version")
+            if loader_version is not None:
+                _validate_version_token(
+                    loader_version, field_name="loader_version"
+                )
+        except ValueError as exc:
+            msg = str(exc)
+            self._report(progress_callback, "failed", error=msg)
+            return InstallResult(
+                success=False,
+                status=InstallStatus.FAILED,
+                message=msg,
+                details={"mc_version": mc_version},
+            )
+
         self._report(progress_callback, "resolving_versions")
         installer_version = self._resolve_installer_version()
         if not installer_version:
@@ -237,6 +262,23 @@ class QuiltInstaller(InstallerBase):
                 status=InstallStatus.FAILED,
                 message=msg,
                 details={"mc_version": mc_version},
+            )
+
+        try:
+            _validate_version_token(
+                installer_version, field_name="installer_version"
+            )
+        except ValueError as exc:
+            msg = str(exc)
+            self._report(progress_callback, "failed", error=msg)
+            return InstallResult(
+                success=False,
+                status=InstallStatus.FAILED,
+                message=msg,
+                details={
+                    "mc_version": mc_version,
+                    "installer_version": installer_version,
+                },
             )
 
         installer_jar, dl_error = self._download_installer_jar(
@@ -255,6 +297,13 @@ class QuiltInstaller(InstallerBase):
                 },
             )
 
+        # Re-check that ``self.install_path`` resolves under itself before
+        # passing it to the subprocess as ``--install-dir=``. ``install_path``
+        # is constructed by the install/register routes from a vetted server
+        # record, but defence-in-depth: the helper makes the contract explicit
+        # and refuses to invoke the subprocess if a future caller hands us a
+        # path that escapes its own root (symlink shenanigans, etc.).
+        install_dir = self._resolve_within_install_path()
         java_cmd = self.java_exec or "java"
         self._report(progress_callback, "running_installer")
         try:
@@ -263,7 +312,7 @@ class QuiltInstaller(InstallerBase):
                     java_cmd, "-jar", str(installer_jar),
                     "install", "server", mc_version,
                     "--download-server",
-                    f"--install-dir={self.install_path}",
+                    f"--install-dir={install_dir}",
                 ],
                 cwd=str(self.install_path),
                 capture_output=True,
@@ -313,7 +362,7 @@ class QuiltInstaller(InstallerBase):
             )
 
         self._report(progress_callback, "detecting_artifacts")
-        launch_jar = self.install_path / self.LAUNCH_JAR_NAME
+        launch_jar = self._resolve_within_install_path(self.LAUNCH_JAR_NAME)
         if not launch_jar.exists():
             msg = (
                 "Quilt installer reported success but the expected "

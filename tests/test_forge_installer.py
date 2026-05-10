@@ -501,3 +501,57 @@ def test_install_sha1_mismatch_aborts_before_subprocess(
     assert result.success is False
     assert "sha1" in result.message.lower()
     assert subprocess_called["hit"] is False
+
+
+# ---------- B10 Path-traversal mitigation (S1) ----------
+
+
+def test_install_rejects_traversal_mc_version(tmp_path):
+    """Sicherheit S1: ../-prefixed mc_version must be rejected at boundary."""
+    from backend.server.installer.forge import ForgeInstaller
+    inst = ForgeInstaller(tmp_path)
+
+    result = inst.install("../../etc/passwd")
+    assert result.success is False
+    assert "mc_version" in result.message
+    # No installer JAR should have been written anywhere under tmp_path.
+    assert not list(tmp_path.glob("**/*.jar"))
+
+
+def test_install_rejects_shell_metachar_mc_version(tmp_path):
+    """A space + flag injected into mc_version must not reach the subprocess."""
+    from backend.server.installer.forge import ForgeInstaller
+    inst = ForgeInstaller(tmp_path)
+
+    result = inst.install("1.20.1 --evil")
+    assert result.success is False
+    assert "mc_version" in result.message
+
+
+def test_install_rejects_traversal_loader_version(tmp_path):
+    """Caller-pinned loader_version is also whitelisted at the boundary."""
+    from backend.server.installer.forge import ForgeInstaller
+    inst = ForgeInstaller(tmp_path)
+
+    result = inst.install("1.20.1", loader_version="../../bad")
+    assert result.success is False
+    assert "loader_version" in result.message
+
+
+def test_install_rejects_poisoned_build_from_promotions(tmp_path):
+    """Defence-in-depth: a third-party promotions JSON returning a poisoned
+    ``build`` value (path-traversal in maven version) is rejected before
+    the installer JAR download begins.
+    """
+    from backend.server.installer.forge import ForgeInstaller
+    inst = ForgeInstaller(tmp_path)
+    # Promotions returns a build that escapes the version-token allowlist.
+    _patch_session_with_install(inst, promotions={
+        "promos": {"1.20.1-recommended": "../../evil"},
+    })
+
+    result = inst.install("1.20.1")
+    assert result.success is False
+    assert "build" in result.message
+    # Download path must NOT have materialised a jar outside install_path.
+    assert not list(tmp_path.glob("**/forge-*.jar"))

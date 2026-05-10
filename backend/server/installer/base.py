@@ -1,5 +1,6 @@
 """Abstract base class for Minecraft server installers."""
 import os
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
@@ -7,6 +8,44 @@ from pathlib import Path
 from typing import Callable, List, Optional, Dict, Any
 
 DIR_PERMISSIONS = 0o775
+
+# Allowlist for version tokens that flow into filenames or subprocess args.
+# Covers Mojang/loader version shapes: ``1.20.1``, ``b1.7.3``, ``21.1.228``,
+# ``54.1.16``, ``1.21.4-rc1`` — alphanumerics + ``. _ - +`` — and rejects
+# path separators, whitespace, shell metacharacters, and ``..``-only tokens.
+# Modelled on ``ModrinthClient._FILENAME_RE`` (the established pattern for
+# the same kind of trust-boundary check on user-influenced strings).
+_LOADER_VERSION_RE = re.compile(r"^[A-Za-z0-9._+\-]+$")
+
+
+def _validate_version_token(value: str, *, field_name: str) -> str:
+    """Reject version strings that could escape filename / subprocess contexts.
+
+    ``mc_version`` arrives from user JSON (POST /api/servers); ``build`` and
+    ``loader_version`` arrive from third-party promotions / Maven payloads —
+    all three are externally controlled and must be whitelisted before they
+    land in a path component or a subprocess argument.
+
+    The all-dots case (``.``, ``..``, ``...``) is explicitly rejected on top
+    of the regex: a dots-only token matches the alphanumeric-and-dots
+    allowlist but resolves to a parent / current dir when used as a path
+    segment (e.g. NeoForge's ``libraries/.../<loader_version>/...``).
+
+    Returns the validated string. Raises ``ValueError`` on rejection so the
+    install route surfaces a clear failure rather than continuing into a
+    poisoned path.
+    """
+    if (
+        not isinstance(value, str)
+        or not _LOADER_VERSION_RE.match(value)
+        or value.strip(".") == ""
+    ):
+        raise ValueError(
+            f"Invalid {field_name} {value!r}: "
+            f"must match {_LOADER_VERSION_RE.pattern} "
+            f"and must not be a dots-only segment"
+        )
+    return value
 
 
 class InstallStatus(Enum):
@@ -217,6 +256,30 @@ class InstallerBase(ABC):
             os.chmod(self.install_path, DIR_PERMISSIONS)
         except OSError:
             pass
+
+    def _resolve_within_install_path(self, *parts: str) -> Path:
+        """Build a path under ``install_path`` with traversal-rejection.
+
+        Each segment in ``parts`` is appended; the resolved final path must
+        be a descendant of ``install_path.resolve()`` or ``ValueError`` is
+        raised. Used at every loader filename / args_file / launcher-jar
+        construction site so a poisoned ``mc_version`` / ``build`` /
+        ``loader_version`` cannot escape the per-server install directory.
+
+        Defence-in-depth complement to ``_validate_version_token``: the
+        whitelist regex blocks the obvious vectors (``../``, NUL bytes,
+        spaces) at the input boundary; this helper catches anything that
+        slips past — symlink lookups, absolute-path segments, future
+        regex weaknesses.
+        """
+        candidate = (self.install_path / Path(*parts)).resolve()
+        try:
+            candidate.relative_to(self.install_path.resolve())
+        except ValueError as exc:
+            raise ValueError(
+                f"Path escapes install_path: {parts!r}"
+            ) from exc
+        return candidate
 
     def _write_eula(self, accepted: bool = True) -> Path:
         """Write eula.txt file.

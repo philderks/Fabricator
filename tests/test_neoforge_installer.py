@@ -436,3 +436,36 @@ def test_install_subprocess_uses_no_window_kwargs(tmp_path, fake_maven_versions,
     assert result.success is True
     # The sentinel kwarg must have made it through.
     assert captured_kwargs.get("creationflags") == 0x08000000
+
+
+# ---------- B10 Path-traversal mitigation (S5) ----------
+
+
+def test_install_rejects_traversal_mc_version(tmp_path):
+    """Sicherheit S5: ../-prefixed mc_version must be rejected at boundary."""
+    from backend.server.installer.neoforge import NeoForgeInstaller
+    inst = NeoForgeInstaller(tmp_path)
+
+    result = inst.install("../../etc/passwd")
+    assert result.success is False
+    assert "mc_version" in result.message
+    assert not list(tmp_path.glob("**/*.jar"))
+
+
+def test_install_rejects_shell_metachar_loader_version(tmp_path):
+    """A caller-pinned loader_version with shell metachars must not pass."""
+    from backend.server.installer.neoforge import NeoForgeInstaller
+    inst = NeoForgeInstaller(tmp_path)
+
+    result = inst.install("1.21.1", loader_version="21.1.228 --evil")
+    assert result.success is False
+    assert "loader_version" in result.message
+
+
+def test_install_rejects_traversal_loader_version(tmp_path):
+    from backend.server.installer.neoforge import NeoForgeInstaller
+    inst = NeoForgeInstaller(tmp_path)
+
+    result = inst.install("1.21.1", loader_version="../../bad")
+    assert result.success is False
+    assert "loader_version" in result.message

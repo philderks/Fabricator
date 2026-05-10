@@ -353,3 +353,39 @@ def test_install_unknown_installer_version_falls_back(
     result = inst.install("1.21.4")
     assert result.success is False
     assert "installer" in result.message.lower()
+
+
+# ---------- B10 Path-traversal mitigation (S5) ----------
+
+
+def test_install_rejects_traversal_mc_version(tmp_path):
+    """Sicherheit S5: ../-prefixed mc_version must be rejected before reaching
+    the Quilt installer subprocess (where it would have landed in
+    ``install server <mc_version>`` directly).
+    """
+    from backend.server.installer.quilt import QuiltInstaller
+    inst = QuiltInstaller(tmp_path)
+
+    result = inst.install("../../etc/passwd")
+    assert result.success is False
+    assert "mc_version" in result.message
+    assert not list(tmp_path.glob("**/*.jar"))
+
+
+def test_install_rejects_shell_metachar_mc_version(tmp_path):
+    from backend.server.installer.quilt import QuiltInstaller
+    inst = QuiltInstaller(tmp_path)
+
+    result = inst.install("1.21.4 --evil")
+    assert result.success is False
+    assert "mc_version" in result.message
+
+
+def test_install_rejects_traversal_loader_version(tmp_path):
+    """Caller-pinned loader_version is also whitelisted at the boundary."""
+    from backend.server.installer.quilt import QuiltInstaller
+    inst = QuiltInstaller(tmp_path)
+
+    result = inst.install("1.21.4", loader_version="../../bad")
+    assert result.success is False
+    assert "loader_version" in result.message

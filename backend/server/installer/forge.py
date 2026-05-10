@@ -38,6 +38,7 @@ from .base import (
     InstallResult,
     InstallStatus,
     LaunchSpec,
+    _validate_version_token,
 )
 
 
@@ -193,7 +194,13 @@ class ForgeInstaller(InstallerBase):
         """
         import hashlib
 
-        target = self.install_path / f"forge-{mc_version}-{build}-installer.jar"
+        # mc_version/build are pre-validated at the install() boundary; this
+        # extra resolve()+relative_to() is defence-in-depth — if a future
+        # caller bypasses install() and reaches _download_installer_jar
+        # directly, the helper still rejects path-escape attempts.
+        target = self._resolve_within_install_path(
+            f"forge-{mc_version}-{build}-installer.jar"
+        )
         hasher = hashlib.sha1()
         try:
             with self.session.get(
@@ -249,14 +256,16 @@ class ForgeInstaller(InstallerBase):
         """
         # Modern: libraries/net/minecraftforge/forge/<mc>-<build>/{unix,win}_args.txt
         args_filename = "win_args.txt" if is_windows() else "unix_args.txt"
-        modern_args = (
-            self.install_path / "libraries" / "net" / "minecraftforge"
-            / "forge" / f"{mc_version}-{build}" / args_filename
+        modern_args = self._resolve_within_install_path(
+            "libraries", "net", "minecraftforge",
+            "forge", f"{mc_version}-{build}", args_filename,
         )
         if modern_args.exists():
             return LaunchSpec(
                 type="args_file",
-                args_file=modern_args.relative_to(self.install_path).as_posix(),
+                args_file=modern_args.relative_to(
+                    self.install_path.resolve()
+                ).as_posix(),
                 jvm_args=[],
                 program_args=["nogui"],
             )
@@ -267,7 +276,7 @@ class ForgeInstaller(InstallerBase):
             f"forge-{mc_version}-{build}.jar",
             f"forge-{mc_version}-{build}-universal.jar",
         ):
-            candidate = self.install_path / candidate_name
+            candidate = self._resolve_within_install_path(candidate_name)
             if candidate.exists():
                 return LaunchSpec(
                     type="jar",
@@ -288,6 +297,27 @@ class ForgeInstaller(InstallerBase):
     ) -> InstallResult:
         self._report(progress_callback, "starting")
         self._ensure_install_dir()
+
+        # Whitelist mc_version (user-controlled JSON) and any caller-pinned
+        # loader_version BEFORE they land in filenames or subprocess args.
+        # The build value resolved from promotions is validated immediately
+        # below — Forge's promotions JSON is third-party so we treat it as
+        # untrusted at the same trust-boundary.
+        try:
+            _validate_version_token(mc_version, field_name="mc_version")
+            if loader_version is not None:
+                _validate_version_token(
+                    loader_version, field_name="loader_version"
+                )
+        except ValueError as exc:
+            msg = str(exc)
+            self._report(progress_callback, "failed", error=msg)
+            return InstallResult(
+                success=False,
+                status=InstallStatus.FAILED,
+                message=msg,
+                details={"mc_version": mc_version},
+            )
 
         self._report(progress_callback, "resolving_versions")
         promos = self._fetch_promotions()
@@ -310,6 +340,18 @@ class ForgeInstaller(InstallerBase):
                 status=InstallStatus.FAILED,
                 message=msg,
                 details={"mc_version": mc_version},
+            )
+
+        try:
+            _validate_version_token(build, field_name="build")
+        except ValueError as exc:
+            msg = str(exc)
+            self._report(progress_callback, "failed", error=msg)
+            return InstallResult(
+                success=False,
+                status=InstallStatus.FAILED,
+                message=msg,
+                details={"mc_version": mc_version, "loader_version": build},
             )
 
         installer_jar, dl_error = self._download_installer_jar(
