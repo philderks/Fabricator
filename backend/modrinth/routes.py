@@ -10,7 +10,7 @@ from backend.modrinth.client import ModrinthClient, ModrinthApiError
 from backend.server import storage
 from backend.server.registry import get_server_process_registry
 from backend.server.java_compat import resolve_required_java, skip_java_enforcement
-from backend.server.locks import try_acquire
+from backend.utils.routes import require_server, with_server_lock
 from backend.utils.strings import bool_from_str
 
 modrinth_bp = Blueprint('modrinth', __name__, url_prefix='/api/modrinth')
@@ -269,7 +269,9 @@ def get_mod_download_url(mod_id):
 
 
 @modrinth_bp.route('/mod/<mod_id>/install', methods=['POST'])
-def install_mod(mod_id):
+@require_server(source='body')
+@with_server_lock(source='body')
+def install_mod(mod_id, server):
     data = request.get_json() or {}
     mc_version = data.get('mc_version')
     loader = data.get('loader', 'fabric')
@@ -279,9 +281,6 @@ def install_mod(mod_id):
     if not mc_version:
         return jsonify({"error": "mc_version is required"}), 400
 
-    if not server_id:
-        return jsonify({"error": "server_id is required"}), 400
-
     if mods_folder_override:
         return jsonify({"error": "mods_folder override is not allowed"}), 400
 
@@ -290,41 +289,40 @@ def install_mod(mod_id):
         payload, status = error
         return jsonify(payload), status
 
-    lock = try_acquire(server_id)
-    if lock is None:
-        return jsonify({'error': 'Another operation is in progress for this server'}), 409
+    target_path = Path(mods_folder)
+
     try:
-        target_path = Path(mods_folder)
+        resolved = modrinth_client.get_mod_download_url(
+            mod_id=mod_id, mc_version=mc_version, loader=loader
+        )
+    except ModrinthApiError as exc:
+        return _modrinth_error_response(exc)
 
-        try:
-            resolved = modrinth_client.get_mod_download_url(
-                mod_id=mod_id, mc_version=mc_version, loader=loader
-            )
-        except ModrinthApiError as exc:
-            return _modrinth_error_response(exc)
+    if not resolved:
+        return jsonify({"error": "No suitable version found"}), 404
 
-        if not resolved:
-            return jsonify({"error": "No suitable version found"}), 404
+    try:
+        file_path = modrinth_client.download_mod(
+            resolved["url"], target_path, hashes=resolved["hashes"]
+        )
+    except ModrinthApiError as exc:
+        return _modrinth_error_response(exc)
 
-        try:
-            file_path = modrinth_client.download_mod(
-                resolved["url"], target_path, hashes=resolved["hashes"]
-            )
-        except ModrinthApiError as exc:
-            return _modrinth_error_response(exc)
-
-        return jsonify({
-            "success": True,
-            "message": "Mod installed successfully",
-            "file": str(file_path.name),
-            "path": str(file_path)
-        })
-    finally:
-        lock.release()
+    return jsonify({
+        "success": True,
+        "message": "Mod installed successfully",
+        "file": str(file_path.name),
+        "path": str(file_path)
+    })
 
 
 @modrinth_bp.route('/modpack/<project_id>/install', methods=['POST'])
-def install_modpack(project_id):
+@require_server(source='body')
+@with_server_lock(
+    source='body',
+    busy_message='A modpack install is already in progress for this server',
+)
+def install_modpack(project_id, server):
     data = request.get_json() or {}
     mc_version = data.get('mc_version')
     loader = data.get('loader')
@@ -334,74 +332,65 @@ def install_modpack(project_id):
     allow_missing = _parse_bool(data.get('allow_missing'), default=False)
     mod_side_overrides = data.get('mod_side_overrides')
 
-    if not server_id:
-        return jsonify({'error': 'server_id is required'}), 400
-
-    server = storage.get_server(server_id)
-    if not server:
-        return jsonify({'error': 'Server not found'}), 404
-
-    lock = try_acquire(server_id)
-    if lock is None:
-        return jsonify({'error': 'A modpack install is already in progress for this server'}), 409
+    runtime_status = _registry().get_status(server_id)
+    if runtime_status.get('status') == 'running':
+        return jsonify({'error': 'Stop the server before installing a modpack'}), 400
 
     try:
-        runtime_status = _registry().get_status(server_id)
-        if runtime_status.get('status') == 'running':
-            return jsonify({'error': 'Stop the server before installing a modpack'}), 400
+        install_path = _registry().resolve_install_path(server)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
 
+    backup_file = None
+    if create_backup:
         try:
-            install_path = _registry().resolve_install_path(server)
-        except ValueError as exc:
-            return jsonify({'error': str(exc)}), 400
+            backup_file = _create_server_backup(install_path)
+        except OSError as exc:
+            return jsonify({'error': f'Failed to create backup before install: {exc}'}), 500
 
-        backup_file = None
-        if create_backup:
-            try:
-                backup_file = _create_server_backup(install_path)
-            except OSError as exc:
-                return jsonify({'error': f'Failed to create backup before install: {exc}'}), 500
+    def _progress_cb(stage='', current=0, total=0, detail=''):
+        _update_install_progress(server_id, stage=stage, current=current, total=total, detail=detail)
 
-        def _progress_cb(stage='', current=0, total=0, detail=''):
-            _update_install_progress(server_id, stage=stage, current=current, total=total, detail=detail)
+    _update_install_progress(server_id, stage='starting', current=0, total=0, detail='')
 
-        _update_install_progress(server_id, stage='starting', current=0, total=0, detail='')
-
-        try:
-            result = modrinth_client.install_modpack(
-                project_id=project_id,
-                install_path=install_path,
-                mc_version=mc_version,
-                loader=loader,
-                clean_install=clean_install,
-                allow_missing=allow_missing,
-                mod_side_overrides=mod_side_overrides,
-                progress_callback=_progress_cb,
-            )
-        except ModrinthApiError as exc:
-            _clear_install_progress(server_id)
-            return _modrinth_error_response(exc)
-        except Exception as exc:  # pragma: no cover - defensive error mapping
-            _clear_install_progress(server_id)
-            current_app.logger.exception('Unexpected modpack install failure for %s', project_id)
-            return jsonify({'error': f'Modpack install failed: {exc}'}), 500
-
-        _update_install_progress(server_id, stage='done', current=0, total=0, detail='')
-
-        modpack_info = {
-            'projectId': project_id,
-            'versionId': result.get('version_id'),
-            'name': result.get('name'),
-            'version': result.get('version'),
-            'mcVersion': result.get('mc_version'),
-            'loaders': result.get('loaders', []),
-            'installedAt': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
-        }
-        storage.update_server(server_id, {'modpack': modpack_info})
+    try:
+        result = modrinth_client.install_modpack(
+            project_id=project_id,
+            install_path=install_path,
+            mc_version=mc_version,
+            loader=loader,
+            clean_install=clean_install,
+            allow_missing=allow_missing,
+            mod_side_overrides=mod_side_overrides,
+            progress_callback=_progress_cb,
+        )
+    except ModrinthApiError as exc:
         _clear_install_progress(server_id)
-    finally:
-        lock.release()
+        return _modrinth_error_response(exc)
+    except Exception as exc:  # pragma: no cover - defensive error mapping
+        _clear_install_progress(server_id)
+        current_app.logger.exception('Unexpected modpack install failure for %s', project_id)
+        return jsonify({'error': f'Modpack install failed: {exc}'}), 500
 
+    _update_install_progress(server_id, stage='done', current=0, total=0, detail='')
+
+    modpack_info = {
+        'projectId': project_id,
+        'versionId': result.get('version_id'),
+        'name': result.get('name'),
+        'version': result.get('version'),
+        'mcVersion': result.get('mc_version'),
+        'loaders': result.get('loaders', []),
+        'installedAt': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+    }
+    storage.update_server(server_id, {'modpack': modpack_info})
+    _clear_install_progress(server_id)
+
+    # NOTE: with @with_server_lock the per-server lock now covers this
+    # post-install java-warning compute (previously released earlier).
+    # The added scope is read-only on storage and registry so the only
+    # observable effect is that a contending request waits a few extra
+    # ms — acceptable and arguably safer.
     java_warning = None
     effective_mc = result.get('mc_version') or mc_version or server.get('version', '')
     if effective_mc and not skip_java_enforcement():
