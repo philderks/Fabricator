@@ -6,6 +6,8 @@ import os
 import re
 from typing import Optional
 
+from backend.utils.strings import bool_from_str
+
 
 def skip_java_enforcement() -> bool:
     """Return True when Java version checks should not block install/start.
@@ -14,8 +16,7 @@ def skip_java_enforcement() -> bool:
     ``yes``, or ``on`` for local development/testing only. Do not enable in
     production: servers may fail at runtime with the wrong JVM.
     """
-    val = os.environ.get("FABRICATOR_SKIP_JAVA_CHECK", "").strip().lower()
-    return val in ("1", "true", "yes", "on")
+    return bool_from_str(os.environ.get("FABRICATOR_SKIP_JAVA_CHECK"))
 
 
 @dataclass(frozen=True)

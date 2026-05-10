@@ -11,6 +11,7 @@ from backend.server import storage
 from backend.server.registry import get_server_process_registry
 from backend.server.java_compat import resolve_required_java, skip_java_enforcement
 from backend.server.locks import try_acquire
+from backend.utils.strings import bool_from_str
 
 modrinth_bp = Blueprint('modrinth', __name__, url_prefix='/api/modrinth')
 modrinth_client = ModrinthClient()
@@ -60,7 +61,7 @@ def _parse_bool(value, default: bool = False) -> bool:
     if isinstance(value, (int, float)):
         return bool(value)
     if isinstance(value, str):
-        return value.strip().lower() in ('1', 'true', 'yes', 'on')
+        return bool_from_str(value)
     return default
 
 
@@ -181,7 +182,7 @@ def get_mod_versions(mod_id):
 
     featured_bool = None
     if featured is not None:
-        featured_bool = featured.lower() in ('true', '1', 'yes')
+        featured_bool = bool_from_str(featured)
 
     try:
         result = modrinth_client.get_mod_versions(
@@ -203,7 +204,7 @@ def get_project_versions(project_id):
 
     featured_bool = None
     if featured is not None:
-        featured_bool = featured.lower() in ('true', '1', 'yes')
+        featured_bool = bool_from_str(featured)
 
     try:
         result = modrinth_client.get_project_versions(
