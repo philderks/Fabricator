@@ -14,7 +14,12 @@ if str(ROOT) not in sys.path:
 
 @pytest.fixture
 def tmp_servers_root(tmp_path, monkeypatch):
-    """Redirect SERVERS_ROOT + SERVER_INDEX_FILE + JAVA_ROOT to a temp dir.
+    """Redirect server/index/java roots to a temp dir.
+
+    Sets the env vars ``SERVER_ROOT`` (-> ``Config.SERVERS_ROOT``),
+    ``SERVER_INDEX_FILE`` (-> ``Config.SERVERS_FILE``) and ``JAVA_ROOT``
+    (-> ``Config.JAVA_ROOT``). The env-var name and the Python attribute
+    differ for ``SERVER_ROOT``/``SERVERS_ROOT`` — see ``core/config.py``.
 
     After Task 1, Config reads env vars at instance construction time, so
     monkeypatch.setenv alone is sufficient — no direct attribute writes.
