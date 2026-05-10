@@ -16,7 +16,7 @@ import tarfile
 import threading
 import uuid
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -420,7 +420,7 @@ def _update_task(task_id: str, **fields) -> None:
         if current is None:
             return
         current.update(fields)
-        current["updated_at"] = datetime.utcnow().isoformat() + "Z"
+        current["updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def get_install_task(task_id: str) -> Optional[dict]:
@@ -468,8 +468,8 @@ def start_install_task(major: int) -> str:
             "total": 0,
             "java_path": None,
             "error": None,
-            "created_at": datetime.utcnow().isoformat() + "Z",
-            "updated_at": datetime.utcnow().isoformat() + "Z",
+            "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         }
 
     thread = threading.Thread(

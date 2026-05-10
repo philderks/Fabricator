@@ -1,7 +1,7 @@
 """Modrinth API routes."""
 import threading
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, request
@@ -29,7 +29,7 @@ def _update_install_progress(server_id: str, **kwargs):
         _install_progress[server_id] = {
             **(_install_progress.get(server_id) or {}),
             **kwargs,
-            'updated_at': datetime.utcnow().isoformat() + 'Z',
+            'updated_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
         }
 
 
@@ -67,7 +67,7 @@ def _parse_bool(value, default: bool = False) -> bool:
 def _create_server_backup(install_path: Path) -> str:
     backups_dir = install_path / 'backups'
     backups_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.utcnow().strftime('%Y%m%d-%H%M%S')
+    stamp = datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')
     backup_name = f"modpack-switch-{stamp}.zip"
     backup_path = backups_dir / backup_name
 
@@ -394,7 +394,7 @@ def install_modpack(project_id):
             'version': result.get('version'),
             'mcVersion': result.get('mc_version'),
             'loaders': result.get('loaders', []),
-            'installedAt': datetime.utcnow().isoformat() + 'Z',
+            'installedAt': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
         }
         storage.update_server(server_id, {'modpack': modpack_info})
         _clear_install_progress(server_id)

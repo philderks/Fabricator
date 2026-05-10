@@ -1,5 +1,5 @@
 """Server management routes and blueprints."""
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 import os
@@ -133,7 +133,7 @@ def _serialize_file_entry(path: Path, base_path: Path | None = None) -> dict:
     return {
         'name': path.name,
         'size': stat_result.st_size,
-        'updatedAt': datetime.utcfromtimestamp(stat_result.st_mtime).isoformat() + 'Z',
+        'updatedAt': datetime.fromtimestamp(stat_result.st_mtime, timezone.utc).isoformat().replace('+00:00', 'Z'),
         'path': str(path),
         'relativePath': relative_path,
         'isDir': path.is_dir()
@@ -251,7 +251,7 @@ def _write_server_properties(server: dict) -> tuple[bool, str | None]:
     props_path = install_path / 'server.properties'
     lines = [
         '# Fabricator server properties',
-        f'# Updated {datetime.utcnow().isoformat()}Z'
+        f'# Updated {datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")}'
     ]
     for key, value in properties.items():
         if isinstance(value, bool):
@@ -648,7 +648,7 @@ def create_server_backup(server_id):
             return jsonify({'error': str(exc)}), 400
 
         backups_dir = _get_backups_dir(base_path)
-        timestamp = datetime.utcnow().strftime('%Y%m%d-%H%M%S')
+        timestamp = datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')
         archive_path = backups_dir / f'{timestamp}.zip'
 
         try:
@@ -703,7 +703,7 @@ def restore_server_backup(server_id, backup_id):
         if not backup_path.exists():
             return jsonify({'error': 'Backup not found'}), 404
 
-        staging = base_path.parent / f".restore-{server_id}-{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}"
+        staging = base_path.parent / f".restore-{server_id}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}"
         staging.mkdir(parents=True, exist_ok=False)
         try:
             with zipfile.ZipFile(backup_path, 'r') as zip_file:
@@ -730,7 +730,7 @@ def restore_server_backup(server_id, backup_id):
             return jsonify({'error': f'Failed to preserve backups: {exc}'}), 500
 
         # Swap: rename live dir aside, move staging in, delete old dir.
-        old_dir = base_path.parent / f".old-{server_id}-{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}"
+        old_dir = base_path.parent / f".old-{server_id}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}"
         try:
             os.replace(base_path, old_dir)
         except OSError as exc:

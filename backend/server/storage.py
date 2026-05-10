@@ -4,7 +4,7 @@ import os
 import shutil
 import threading
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -162,7 +162,7 @@ def create_server(server_data: Dict[str, Any]) -> Dict[str, Any]:
     with _storage_lock:
         servers = load_servers()
 
-        now_iso = datetime.utcnow().isoformat() + 'Z'
+        now_iso = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         new_server = {
             'id': generate_server_id(),
             'status': 'stopped',
@@ -193,7 +193,7 @@ def update_server(server_id: str, updates: Dict[str, Any]) -> Optional[Dict[str,
         for server in servers:
             if server.get('id') == server_id:
                 server.update(updates)
-                server['updatedAt'] = datetime.utcnow().isoformat() + 'Z'
+                server['updatedAt'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
                 save_servers(servers)
                 return server
 
