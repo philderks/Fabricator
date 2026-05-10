@@ -80,25 +80,17 @@ class Config:
         )
 
     # Sub-classes override these to change defaults without duplicating env
-    # handling. On Windows we always anchor data under %APPDATA%\Fabricator
-    # so the .exe stays portable and data survives if the user moves it.
+    # handling. ``appdata_dir()`` always returns a Path now: on Windows it
+    # is ``%APPDATA%\Fabricator`` (so the .exe stays portable and data
+    # survives if the user moves it); on POSIX it is ``~/.fabricator``.
     def _default_servers_root(self) -> str:
-        appdata = appdata_dir()
-        if appdata is not None:
-            return str(appdata / "servers")
-        return os.path.join(os.getcwd(), "servers")
+        return str(appdata_dir() / "servers")
 
     def _default_servers_file(self) -> str:
-        appdata = appdata_dir()
-        if appdata is not None:
-            return str(appdata / "servers.json")
-        return os.path.join(self.PROJECT_ROOT, "servers.json")
+        return str(appdata_dir() / "servers.json")
 
     def _default_java_root(self) -> str:
-        appdata = appdata_dir()
-        if appdata is not None:
-            return str(appdata / "java")
-        return os.path.join(self.PROJECT_ROOT, "java")
+        return str(appdata_dir() / "java")
 
 
 class DevelopmentConfig(Config):

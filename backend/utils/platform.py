@@ -1,6 +1,7 @@
 """Cross-platform helper utilities for Fabricator."""
 from __future__ import annotations
 
+import logging
 import os
 import platform
 import shlex
@@ -8,7 +9,10 @@ import subprocess
 import tempfile
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
+
+
+logger = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=1)
@@ -39,7 +43,12 @@ def platform_label() -> str:
 
 @lru_cache(maxsize=1)
 def arch_label() -> str:
-    """Return the Adoptium-compatible architecture label for this machine."""
+    """Return the Adoptium-compatible architecture label for this machine.
+
+    Falls back to ``'x64'`` for unknown machine strings (e.g. ``'arm64e'``,
+    ``'riscv64'``, ``'ppc64le'``) and emits a WARNING — without that signal
+    a mis-detected machine surfaces only mid-install as an Adoptium 404.
+    """
     machine = platform.machine().lower()
     mapping = {
         'x86_64': 'x64',
@@ -49,7 +58,15 @@ def arch_label() -> str:
         'armv7l': 'arm',
         'armv8l': 'arm',
     }
-    return mapping.get(machine, 'x64')
+    label = mapping.get(machine)
+    if label is None:
+        logger.warning(
+            "Unknown CPU architecture %r; defaulting to 'x64' — "
+            "Adoptium downloads may 404 on this host.",
+            machine,
+        )
+        return 'x64'
+    return label
 
 
 def split_command(command: str) -> List[str]:
@@ -59,20 +76,29 @@ def split_command(command: str) -> List[str]:
     return shlex.split(command, posix=not is_windows())
 
 
-def appdata_dir() -> Optional[Path]:
-    """Return the per-user Fabricator data directory on Windows, else None.
+@lru_cache(maxsize=1)
+def appdata_dir() -> Path:
+    """Return the per-user Fabricator data directory.
 
     On Windows the .exe is typically launched from Downloads or another
-    transient location, so user data must live in a stable, writable spot.
-    Returns ``%APPDATA%\\Fabricator`` (creating it if missing). On POSIX
-    deployments paths are managed by ``install.sh`` / systemd, so this
-    returns ``None`` and callers keep their existing behavior.
+    transient location, so user data must live in a stable, writable spot:
+    ``%APPDATA%\\Fabricator`` (creating it if missing).
+
+    On POSIX hosts there is no canonical equivalent to ``%APPDATA%``; we
+    pick ``~/.fabricator`` for symmetry with the Windows path and with the
+    PyInstaller-bundled deployment model (local app-data store). Callers
+    that previously branched on a ``None`` return now receive this path
+    unconditionally — drop the ``None``-checks.
+
+    Cached via ``lru_cache`` so the ``mkdir`` runs once per process; this
+    function is hit multiple times per request via ``core.config`` defaults.
     """
-    if not is_windows():
-        return None
-    raw = os.environ.get("APPDATA")
-    base = Path(raw) if raw else Path.home() / "AppData" / "Roaming"
-    target = base / "Fabricator"
+    if is_windows():
+        raw = os.environ.get("APPDATA")
+        base = Path(raw) if raw else Path.home() / "AppData" / "Roaming"
+        target = base / "Fabricator"
+    else:
+        target = Path.home() / ".fabricator"
     target.mkdir(parents=True, exist_ok=True)
     return target
 
