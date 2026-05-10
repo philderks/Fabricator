@@ -5,21 +5,35 @@ import ServerSwitcher from './ServerSwitcher.vue'
 import { version as appVersion } from '../../../package.json'
 import { getUpdateStatus, triggerUpdate } from '../../api/servers'
 import { useToast } from '../../composables/useToast'
+import { useServerStore } from '../../stores/server'
 
 const route = useRoute()
 const toast = useToast()
+const store = useServerStore()
 const showCreateModal = inject('showCreateModal', ref(false))
 
 const serverId = computed(() => route.params.id)
 const hasServerContext = computed(() => Boolean(serverId.value))
 
-const navItems = [
+const ALL_NAV_ITEMS = [
   { name: 'ServerOverview', label: 'Overview', icon: 'overview' },
   { name: 'ServerConsole',  label: 'Console',  icon: 'console'  },
   { name: 'ServerMods',     label: 'Mods',     icon: 'mods'     },
   { name: 'ServerFiles',    label: 'Files',    icon: 'files'    },
   { name: 'ServerSettings', label: 'Settings', icon: 'settings' }
 ]
+
+// Defensive guard: hide Mods tab for vanilla servers (they have no mod folder).
+// Intentionally not a capability map — with two loaders that would be over-fitting.
+// Revisit when Phase-2 loaders (Paper/Forge/NeoForge) land and per-loader feature
+// profiles become a real need.
+const navItems = computed(() => {
+  const loader = String(store.server?.loader || '').toLowerCase()
+  if (loader === 'vanilla') {
+    return ALL_NAV_ITEMS.filter(item => item.name !== 'ServerMods')
+  }
+  return ALL_NAV_ITEMS
+})
 
 // ---------- Update polling (relocated from Servers.vue) ----------
 const POLL_INTERVAL_IDLE = 15 * 60 * 1000   // 15 min — avoid hammering GitHub API

@@ -4,7 +4,7 @@
 
 # Fabricator
 
-**Self-hosted web dashboard for managing Fabric-based Minecraft servers.**
+**Self-hosted web dashboard for managing Fabric and Vanilla Minecraft servers.**
 
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/philderks/Fabricator?style=flat-square)](https://github.com/philderks/Fabricator/stargazers)
@@ -27,6 +27,7 @@
 
 | | Feature | Status |
 |---|---|---|
+| 🧩 | **Loaders** — Fabric (modded) and Vanilla | ✅ Available |
 | 📦 | **Mod Management** — install, remove, and browse Fabric mods | ✅ Available |
 | 📋 | **Logs & Monitoring** — live log stream, TPS and RAM graphs | ✅ Available |
 | 💾 | **Backups & Restore** — manual snapshots, restore from any backup | ✅ Available |
@@ -151,8 +152,8 @@ sudo systemctl restart fabricator
 | ✅ Done | Multiple server instances |
 | ✅ Done | Fabricator self-update (UI + installer) |
 | 🔧 In progress | CLI (`fabricator` command) |
+| 🔧 In progress | Additional loader support — Vanilla shipped; NeoForge, Forge, Quilt, Paper next |
 | 📋 Planned | One-click Minecraft / Fabric server upgrades |
-| 📋 Planned | Additional loader support |
 | 📋 Planned | Windows support |
 
 ---

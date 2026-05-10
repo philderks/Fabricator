@@ -68,7 +68,7 @@ onMounted(() => {
         aria-hidden="true"
       />
       <h2 class="servers-page__title">No servers yet</h2>
-      <p class="servers-page__subtitle">Create your first Fabric server to get started.</p>
+      <p class="servers-page__subtitle">Create your first Minecraft server to get started.</p>
       <AppButton variant="primary" size="md" @click="showCreateModal = true">
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <path d="M6 1v10M1 6h10"/>

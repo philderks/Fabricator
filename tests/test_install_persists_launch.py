@@ -1,0 +1,482 @@
+"""Successful install must persist launch into servers.json."""
+from __future__ import annotations
+
+import importlib
+import time
+from unittest.mock import patch
+
+from backend.server.installer.base import InstallResult, InstallStatus, LaunchSpec
+
+
+def _install_progress_module():
+    """Look up the install_progress module via importlib.
+
+    test_app_factory.py reloads ``backend.*`` modules, which means a top-
+    level ``from backend.server import install_progress`` would hold the
+    pre-reload module while the route holds the post-reload one — they
+    have different ``_store`` dicts. ``importlib.import_module`` always
+    returns whatever sys.modules currently has, so this stays in sync
+    with the route's view of the world.
+    """
+    return importlib.import_module("backend.server.install_progress")
+
+
+def _wait_for_install_completion(server_id: str, timeout: float = 5.0) -> dict:
+    """Poll the in-memory progress store until the install thread reaches a terminal phase.
+
+    Tests mock the installer's install_with_config so the thread completes in
+    milliseconds. Polling the in-memory store is faster than HTTP-polling
+    /api/servers/<id>/install/progress and avoids extra moving parts.
+
+    Raises AssertionError on timeout (5s default — generous for mocked installs).
+    """
+    deadline = time.time() + timeout
+    ip = _install_progress_module()
+    while time.time() < deadline:
+        entry = ip.get(server_id)
+        phase = entry.get('phase')
+        if phase in ('done', 'failed'):
+            return entry
+        time.sleep(0.01)
+    raise AssertionError(
+        f"Install thread did not complete within {timeout}s. "
+        f"Last progress: {ip.get(server_id)!r}"
+    )
+
+
+def _seed_server(tmp_servers_root):
+    """Create one Fabric server record so install_server can be called."""
+    from backend.server import storage
+    return storage.create_server({
+        "name": "Demo",
+        "version": "1.21.4",
+        "loader": "fabric",
+        "port": 25565,
+        "installPath": "demo",
+        "memory": 2,
+    })
+
+
+def test_install_writes_launch_to_storage(client, tmp_servers_root):
+    server = _seed_server(tmp_servers_root)
+    server_id = server["id"]
+    _install_progress_module().clear(server_id)
+
+    fake_result = InstallResult(
+        success=True,
+        status=InstallStatus.COMPLETED,
+        message="ok",
+        details={"mc_version": "1.21.4"},
+        launch=LaunchSpec(
+            type="jar",
+            jar="server.jar",
+            jvm_args=[],
+            program_args=["nogui"],
+        ),
+    )
+
+    # Skip Java enforcement — we only care about the persistence path.
+    with patch.dict("os.environ", {"FABRICATOR_SKIP_JAVA_CHECK": "1"}), \
+         patch(
+             "backend.server.installer.fabric.FabricInstaller.install_with_config",
+             return_value=fake_result,
+         ):
+        response = client.post(f"/api/servers/{server_id}/install")
+
+        assert response.status_code == 202
+        final_progress = _wait_for_install_completion(server_id)
+        assert final_progress["phase"] == "done", f"install failed: {final_progress!r}"
+
+    from backend.server import storage
+    persisted = storage.get_server(server_id)
+    assert persisted["launch"] == {
+        "type": "jar",
+        "jar": "server.jar",
+        "jvm_args": [],
+        "program_args": ["nogui"],
+        "args_file": None,
+    }
+
+
+def test_install_failure_does_not_write_launch(client, tmp_servers_root):
+    server = _seed_server(tmp_servers_root)
+    server_id = server["id"]
+    _install_progress_module().clear(server_id)
+
+    fake_result = InstallResult(
+        success=False,
+        status=InstallStatus.FAILED,
+        message="boom",
+        launch=None,
+    )
+
+    with patch.dict("os.environ", {"FABRICATOR_SKIP_JAVA_CHECK": "1"}), \
+         patch(
+             "backend.server.installer.fabric.FabricInstaller.install_with_config",
+             return_value=fake_result,
+         ):
+        client.post(f"/api/servers/{server_id}/install")
+        final_progress = _wait_for_install_completion(server_id)
+        assert final_progress["phase"] == "failed"
+
+    from backend.server import storage
+    persisted = storage.get_server(server_id)
+    assert "launch" not in persisted
+
+
+def test_install_then_command_built_from_persisted_launch(client, tmp_servers_root, monkeypatch):
+    """End-to-end: install writes launch → registry builds command from it.
+
+    Guards the central Phase-0 invariant — that the persisted LaunchSpec is
+    actually what drives the JVM command on next start, not a hardcoded
+    constant elsewhere.
+    """
+    from unittest.mock import patch
+    from backend.server.installer.base import InstallResult, InstallStatus, LaunchSpec
+
+    server = _seed_server(tmp_servers_root)
+    server_id = server["id"]
+    _install_progress_module().clear(server_id)
+
+    fake_result = InstallResult(
+        success=True,
+        status=InstallStatus.COMPLETED,
+        message="ok",
+        details={"mc_version": "1.21.4"},
+        launch=LaunchSpec(
+            type="jar",
+            jar="server.jar",
+            jvm_args=["-Dlog4j2.formatMsgNoLookups=true"],
+            program_args=["nogui"],
+        ),
+    )
+
+    with patch.dict("os.environ", {"FABRICATOR_SKIP_JAVA_CHECK": "1"}), \
+         patch(
+             "backend.server.installer.fabric.FabricInstaller.install_with_config",
+             return_value=fake_result,
+         ):
+        resp = client.post(f"/api/servers/{server_id}/install")
+        assert resp.status_code == 202
+        final_progress = _wait_for_install_completion(server_id)
+        assert final_progress["phase"] == "done", f"install failed: {final_progress!r}"
+
+    from backend.server import storage
+    from backend.server.registry import get_server_process_registry
+    persisted = storage.get_server(server_id)
+    reg = get_server_process_registry()
+    monkeypatch.setattr(reg, "_resolve_java_exec", lambda s: "/opt/java/bin/java")
+
+    cmd = reg._build_command(persisted)
+    assert cmd == [
+        "/opt/java/bin/java",
+        "-Xms2G",  # memory=2 was set in _seed_server
+        "-Xmx2G",
+        "-Dlog4j2.formatMsgNoLookups=true",
+        "-jar",
+        "server.jar",
+        "nogui",
+    ]
+
+
+def test_neoforge_install_then_command_built_from_persisted_args_file(client, tmp_servers_root, monkeypatch):
+    """End-to-end: NeoForge install writes args_file launch → registry builds @argfile command.
+
+    Mirrors test_install_then_command_built_from_persisted_launch (jar-type)
+    for the args_file-type LaunchSpec. Locks the Phase-2 invariant that
+    NeoForge's persisted launch drives _build_command via the args_file
+    branch.
+    """
+    from unittest.mock import patch
+    from backend.server.installer.base import InstallResult, InstallStatus, LaunchSpec
+    from backend.server import storage
+
+    server = storage.create_server({
+        "name": "Demo-NF",
+        "version": "1.21.1",
+        "loader": "neoforge",
+        "port": 25567,
+        "installPath": "demo-nf",
+        "memory": 6,
+    })
+    server_id = server["id"]
+    _install_progress_module().clear(server_id)
+
+    fake_result = InstallResult(
+        success=True,
+        status=InstallStatus.COMPLETED,
+        message="ok",
+        details={"mc_version": "1.21.1", "loader_version": "21.1.228"},
+        launch=LaunchSpec(
+            type="args_file",
+            args_file="libraries/net/neoforged/neoforge/21.1.228/unix_args.txt",
+            jvm_args=[],
+            program_args=["nogui"],
+        ),
+    )
+
+    fake_runtime = {
+        "available": True,
+        "java_exec": "/opt/java/bin/java",
+        "major_version": 21,
+        "version_output": "openjdk version \"21\"",
+        "message": "ok",
+        "java_missing": False,
+    }
+
+    with patch.dict("os.environ", {"FABRICATOR_SKIP_JAVA_CHECK": "1"}), \
+         patch(
+             "backend.server.registry.ServerProcessRegistry.get_java_runtime",
+             return_value=fake_runtime,
+         ), \
+         patch(
+             "backend.server.installer.neoforge.NeoForgeInstaller.install_with_config",
+             return_value=fake_result,
+         ):
+        resp = client.post(f"/api/servers/{server_id}/install")
+        assert resp.status_code == 202
+        final_progress = _wait_for_install_completion(server_id)
+        assert final_progress["phase"] == "done", f"install failed: {final_progress!r}"
+
+    from backend.server.registry import get_server_process_registry
+    persisted = storage.get_server(server_id)
+    assert persisted["launch"]["type"] == "args_file"
+    assert persisted["launch"]["args_file"] == (
+        "libraries/net/neoforged/neoforge/21.1.228/unix_args.txt"
+    )
+
+    reg = get_server_process_registry()
+    monkeypatch.setattr(reg, "_resolve_java_exec", lambda s: "/opt/java/bin/java")
+
+    cmd = reg._build_command(persisted)
+    assert cmd == [
+        "/opt/java/bin/java",
+        "-Xms6G",
+        "-Xmx6G",
+        "@libraries/net/neoforged/neoforge/21.1.228/unix_args.txt",
+        "nogui",
+    ]
+
+
+def test_quilt_install_then_command_built_from_persisted_launch(
+    client, tmp_servers_root, monkeypatch
+):
+    """End-to-end: Quilt install writes jar launch → registry builds command from it.
+
+    Validates that the Phase-0 jar branch still produces the right shape for
+    Quilt — same as Fabric/Vanilla, with the Quilt-specific jar name.
+    """
+    from unittest.mock import patch
+    from backend.server.installer.base import InstallResult, InstallStatus, LaunchSpec
+    from backend.server import storage
+
+    server = storage.create_server({
+        "name": "Demo-Quilt",
+        "version": "1.21.4",
+        "loader": "quilt",
+        "port": 25568,
+        "installPath": "demo-quilt",
+        "memory": 4,
+    })
+    server_id = server["id"]
+    _install_progress_module().clear(server_id)
+
+    fake_result = InstallResult(
+        success=True,
+        status=InstallStatus.COMPLETED,
+        message="ok",
+        details={"mc_version": "1.21.4", "installer_version": "0.12.1"},
+        launch=LaunchSpec(
+            type="jar",
+            jar="quilt-server-launch.jar",
+            jvm_args=[],
+            program_args=["nogui"],
+        ),
+    )
+
+    with patch.dict("os.environ", {"FABRICATOR_SKIP_JAVA_CHECK": "1"}), \
+         patch(
+             "backend.server.registry.ServerProcessRegistry.get_java_runtime",
+             return_value={
+                 "available": True, "java_exec": "java",
+                 "major_version": 21, "version_output": "",
+                 "message": "ok", "java_missing": False,
+             },
+         ), \
+         patch(
+             "backend.server.installer.quilt.QuiltInstaller.install_with_config",
+             return_value=fake_result,
+         ):
+        resp = client.post(f"/api/servers/{server_id}/install")
+        assert resp.status_code == 202
+        final_progress = _wait_for_install_completion(server_id)
+        assert final_progress["phase"] == "done", f"install failed: {final_progress!r}"
+
+    from backend.server.registry import get_server_process_registry
+    persisted = storage.get_server(server_id)
+    assert persisted["launch"]["type"] == "jar"
+    assert persisted["launch"]["jar"] == "quilt-server-launch.jar"
+    assert persisted["launch"]["args_file"] is None
+
+    reg = get_server_process_registry()
+    monkeypatch.setattr(reg, "_resolve_java_exec", lambda s: "/opt/java/bin/java")
+
+    cmd = reg._build_command(persisted)
+    assert cmd == [
+        "/opt/java/bin/java",
+        "-Xms4G",
+        "-Xmx4G",
+        "-jar",
+        "quilt-server-launch.jar",
+        "nogui",
+    ]
+
+
+def test_forge_legacy_install_then_command_built_from_persisted_launch(
+    client, tmp_servers_root, monkeypatch
+):
+    """Forge legacy era: install writes jar launch → registry builds command from it.
+
+    Mirrors test_quilt_install_then_command_built_from_persisted_launch — same
+    jar-branch shape, different filename. Covers the legacy era (≤1.16.5
+    where Forge produces a single launcher jar).
+    """
+    from unittest.mock import patch
+    from backend.server.installer.base import InstallResult, InstallStatus, LaunchSpec
+    from backend.server import storage
+
+    server = storage.create_server({
+        "name": "Demo-ForgeLegacy",
+        "version": "1.16.5",
+        "loader": "forge",
+        "port": 25570,
+        "installPath": "demo-forge-legacy",
+        "memory": 4,
+    })
+    server_id = server["id"]
+    _install_progress_module().clear(server_id)
+
+    fake_result = InstallResult(
+        success=True,
+        status=InstallStatus.COMPLETED,
+        message="ok",
+        details={"mc_version": "1.16.5", "loader_version": "36.2.34"},
+        launch=LaunchSpec(
+            type="jar",
+            jar="forge-1.16.5-36.2.34.jar",
+            jvm_args=[],
+            program_args=["nogui"],
+        ),
+    )
+
+    with patch.dict("os.environ", {"FABRICATOR_SKIP_JAVA_CHECK": "1"}), \
+         patch(
+             "backend.server.registry.ServerProcessRegistry.get_java_runtime",
+             return_value={
+                 "available": True, "java_exec": "java",
+                 "major_version": 8, "version_output": "",
+                 "message": "ok", "java_missing": False,
+             },
+         ), \
+         patch(
+             "backend.server.installer.forge.ForgeInstaller.install_with_config",
+             return_value=fake_result,
+         ):
+        resp = client.post(f"/api/servers/{server_id}/install")
+        assert resp.status_code == 202
+        final_progress = _wait_for_install_completion(server_id)
+        assert final_progress["phase"] == "done", f"install failed: {final_progress!r}"
+
+    from backend.server.registry import get_server_process_registry
+    persisted = storage.get_server(server_id)
+    assert persisted["launch"]["type"] == "jar"
+    assert persisted["launch"]["jar"] == "forge-1.16.5-36.2.34.jar"
+    assert persisted["launch"]["args_file"] is None
+
+    reg = get_server_process_registry()
+    monkeypatch.setattr(reg, "_resolve_java_exec", lambda s: "/opt/java/bin/java")
+
+    cmd = reg._build_command(persisted)
+    assert cmd == [
+        "/opt/java/bin/java",
+        "-Xms4G",
+        "-Xmx4G",
+        "-jar",
+        "forge-1.16.5-36.2.34.jar",
+        "nogui",
+    ]
+
+
+def test_forge_modern_install_then_command_built_from_persisted_launch(
+    client, tmp_servers_root, monkeypatch
+):
+    """Forge modern era: install writes args_file launch → registry builds @argfile command.
+
+    Mirrors test_neoforge_install_then_command_built_from_persisted_args_file
+    — same args_file branch, different libraries path (minecraftforge vs neoforged).
+    """
+    from unittest.mock import patch
+    from backend.server.installer.base import InstallResult, InstallStatus, LaunchSpec
+    from backend.server import storage
+
+    server = storage.create_server({
+        "name": "Demo-ForgeModern",
+        "version": "1.20.1",
+        "loader": "forge",
+        "port": 25571,
+        "installPath": "demo-forge-modern",
+        "memory": 6,
+    })
+    server_id = server["id"]
+    _install_progress_module().clear(server_id)
+
+    fake_result = InstallResult(
+        success=True,
+        status=InstallStatus.COMPLETED,
+        message="ok",
+        details={"mc_version": "1.20.1", "loader_version": "47.4.10"},
+        launch=LaunchSpec(
+            type="args_file",
+            args_file="libraries/net/minecraftforge/forge/1.20.1-47.4.10/unix_args.txt",
+            jvm_args=[],
+            program_args=["nogui"],
+        ),
+    )
+
+    with patch.dict("os.environ", {"FABRICATOR_SKIP_JAVA_CHECK": "1"}), \
+         patch(
+             "backend.server.registry.ServerProcessRegistry.get_java_runtime",
+             return_value={
+                 "available": True, "java_exec": "java",
+                 "major_version": 17, "version_output": "",
+                 "message": "ok", "java_missing": False,
+             },
+         ), \
+         patch(
+             "backend.server.installer.forge.ForgeInstaller.install_with_config",
+             return_value=fake_result,
+         ):
+        resp = client.post(f"/api/servers/{server_id}/install")
+        assert resp.status_code == 202
+        final_progress = _wait_for_install_completion(server_id)
+        assert final_progress["phase"] == "done", f"install failed: {final_progress!r}"
+
+    from backend.server.registry import get_server_process_registry
+    persisted = storage.get_server(server_id)
+    assert persisted["launch"]["type"] == "args_file"
+    assert persisted["launch"]["args_file"] == (
+        "libraries/net/minecraftforge/forge/1.20.1-47.4.10/unix_args.txt"
+    )
+    assert persisted["launch"]["jar"] is None
+
+    reg = get_server_process_registry()
+    monkeypatch.setattr(reg, "_resolve_java_exec", lambda s: "/opt/java/bin/java")
+
+    cmd = reg._build_command(persisted)
+    assert cmd == [
+        "/opt/java/bin/java",
+        "-Xms6G",
+        "-Xmx6G",
+        "@libraries/net/minecraftforge/forge/1.20.1-47.4.10/unix_args.txt",
+        "nogui",
+    ]

@@ -1,10 +1,10 @@
 """Abstract base class for Minecraft server installers."""
 import os
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import Callable, List, Optional, Dict, Any
 
 DIR_PERMISSIONS = 0o775
 
@@ -20,6 +20,32 @@ class InstallStatus(Enum):
 
 
 @dataclass
+class LaunchSpec:
+    """Normalized launch specification produced by an installer.
+
+    Supported ``type`` values:
+        - ``"jar"`` — boot via ``-jar <jar>``. Use ``jar`` field.
+        - ``"args_file"`` — boot via ``@<args_file>`` (a Java argument
+          file produced by a third-party installer, e.g. NeoForge).
+          Use ``args_file`` field.
+    """
+    type: str
+    jar: Optional[str] = None
+    jvm_args: List[str] = field(default_factory=list)
+    program_args: List[str] = field(default_factory=list)
+    args_file: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "type": self.type,
+            "jar": self.jar,
+            "jvm_args": list(self.jvm_args),
+            "program_args": list(self.program_args),
+            "args_file": self.args_file,
+        }
+
+
+@dataclass
 class InstallResult:
     """Result of an installation attempt."""
     success: bool
@@ -27,28 +53,56 @@ class InstallResult:
     message: str
     server_jar: Optional[Path] = None
     details: Optional[Dict[str, Any]] = None
+    launch: Optional[LaunchSpec] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for JSON serialization."""
         return {
             "success": self.success,
             "status": self.status.value,
             "message": self.message,
             "server_jar": str(self.server_jar) if self.server_jar else None,
-            "details": self.details
+            "details": self.details,
+            "launch": self.launch.to_dict() if self.launch else None,
         }
 
 
 class InstallerBase(ABC):
     """Abstract base class for Minecraft server installers."""
 
+    @staticmethod
+    def _canonicalize_mc_version(v: str) -> str:
+        """Strip trailing '.0' patch from a Minecraft version string.
+
+        Mojang's release naming uses bare 'x.y' for x.y.0 releases — Modrinth
+        and other downstream consumers tag with that bare form. Loaders whose
+        own APIs return the explicit 'x.y.0' form (notably NeoForge) must run
+        their MC version strings through this helper before returning them
+        from get_minecraft_versions(), so all loaders surface the same
+        canonical form.
+
+        1.21.0 → 1.21
+        1.20.1 → 1.20.1   (unchanged)
+        1.21   → 1.21     (unchanged)
+        a1.2.0 → a1.2     (alpha versions also normalized)
+
+        Two-part versions (1.21) are returned unchanged. Versions ending in
+        something else (e.g. snapshots like '26.2-snapshot-6') are returned
+        unchanged.
+        """
+        if not isinstance(v, str):
+            return v
+        if v.endswith(".0") and v.count(".") == 2:
+            return v[:-2]
+        return v
+
     def __init__(self, install_path: Path):
         """Initialize installer with target path.
-        
+
         Args:
             install_path: Directory where server will be installed
         """
         self.install_path = Path(install_path)
+        self.java_exec: Optional[str] = None
 
     @property
     @abstractmethod
@@ -56,24 +110,79 @@ class InstallerBase(ABC):
         """Return the name of the mod loader (e.g., 'fabric', 'forge')."""
         pass
 
+    @property
+    def requires_java_for_install(self) -> bool:
+        """Whether this installer needs a usable Java to run.
+
+        Most installers download a pre-built JAR and don't invoke Java
+        themselves; the install completes regardless of Java availability,
+        and Java is only needed at server-start time. Loaders whose
+        installer is itself a Java process (NeoForge, Forge) override
+        this to ``True`` so the install route can short-circuit with a
+        ``java_missing``/``java_too_old`` response before invoking
+        ``install_with_config``.
+        """
+        return False
+
+    def set_java_exec(self, path: Optional[str]) -> None:
+        """Hand over the resolved Java executable path.
+
+        Used by the install route for installers that invoke Java
+        themselves — e.g. NeoForge runs ``java -jar <installer>
+        --installServer`` as a subprocess and must use the same JVM
+        that the runtime path resolves (managed Java install or
+        explicit ``javaPath`` override on the server record).
+
+        Default implementation simply records the path on
+        ``self.java_exec``. Loaders that don't invoke Java during
+        install ignore this attribute.
+        """
+        self.java_exec = path
+
+    def _report(
+        self,
+        callback: Optional["Callable[[str, Dict[str, Any]], None]"],
+        phase: str,
+        **detail: Any,
+    ) -> None:
+        """Emit a progress event to the callback, swallowing all exceptions.
+
+        Progress reporting MUST never crash the install. A misbehaving
+        callback that raises (e.g. because the calling thread shut down
+        the progress store) is silently ignored.
+
+        ``detail`` becomes the second arg of the callback as a dict —
+        bytes_done/bytes_total for download phases, error for ``failed``,
+        empty for phase-only emissions.
+        """
+        if callback is None:
+            return
+        try:
+            callback(phase, dict(detail))
+        except Exception:
+            pass
+
     @abstractmethod
     def get_available_versions(self, mc_version: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Get available loader versions.
-        
-        Args:
-            mc_version: Optional Minecraft version to filter by
-            
-        Returns:
-            List of available versions with metadata
+        """Get loader-native version metadata for ``mc_version``.
+
+        Shape is loader-specific — the frontend treats this payload opaquely
+        per loader. Loaders that do not expose a separate loader version
+        (e.g. Vanilla) must return ``[]``.
         """
         pass
 
     @abstractmethod
     def get_minecraft_versions(self) -> List[Dict[str, Any]]:
-        """Get supported Minecraft versions.
-        
+        """Get supported Minecraft versions in normalized form.
+
         Returns:
-            List of supported Minecraft versions
+            List of dicts with shape:
+                ``{"version": str, "stable": bool, "type": Optional[str]}``
+
+            ``type`` is loader-native (e.g. "release" / "snapshot" for
+            Vanilla, may be omitted by loaders without that distinction).
+            ``stable`` is the only field every consumer can rely on.
         """
         pass
 
@@ -81,14 +190,20 @@ class InstallerBase(ABC):
     def install(
         self,
         mc_version: str,
-        loader_version: Optional[str] = None
+        loader_version: Optional[str] = None,
+        progress_callback: Optional[
+            "Callable[[str, Dict[str, Any]], None]"
+        ] = None,
     ) -> InstallResult:
         """Install the server.
-        
+
         Args:
             mc_version: Minecraft version to install
             loader_version: Optional specific loader version (uses latest if None)
-            
+            progress_callback: Optional ``(phase, detail_dict)`` callback for
+                streaming install progress to a per-server-id store.
+                ``None`` ⇒ silent install (existing call sites keep working).
+
         Returns:
             InstallResult with success status and details
         """

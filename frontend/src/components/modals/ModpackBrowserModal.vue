@@ -93,9 +93,13 @@
         <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="2"/>
         <path d="M9 9H15M9 13H13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
       </svg>
-      <h3 class="modpack-browser-empty__heading" v-if="importMethod === 'search'">Search for modpacks</h3>
+      <h3 class="modpack-browser-empty__heading" v-if="importMethod === 'search' && imp.searchDone.value">No modpacks found</h3>
+      <h3 class="modpack-browser-empty__heading" v-else-if="importMethod === 'search'">Search for modpacks</h3>
       <h3 class="modpack-browser-empty__heading" v-else>Resolve a modpack link</h3>
-      <p class="modpack-browser-empty__body" v-if="importMethod === 'search'">
+      <p class="modpack-browser-empty__body" v-if="importMethod === 'search' && imp.searchDone.value">
+        No modpacks found for "{{ imp.searchQuery.value }}" on {{ loaderLabel }} {{ mcVersion }}. Try different keywords or check that your server's MC version has compatible modpacks.
+      </p>
+      <p class="modpack-browser-empty__body" v-else-if="importMethod === 'search'">
         Search for modpacks compatible with {{ mcVersion }}.
       </p>
       <p class="modpack-browser-empty__body" v-else>
@@ -186,11 +190,22 @@ function formatNumber(num) {
   return num.toString()
 }
 
+// Modrinth tags loader compatibility as ordinary categories ('fabric',
+// 'forge', 'neoforge', 'quilt'). Multi-loader packs are tagged with all
+// four, so the alphabetical first three would read "fabric, forge, …" —
+// regardless of which loader the user is actually browsing for, leaving
+// the impression that the search is dominated by Fabric packs. Strip
+// loader tags here; the active loader is already shown in the filter chip.
+const LOADER_TAGS = new Set(['fabric', 'forge', 'neoforge', 'quilt'])
+
 function formatModpackMeta(pack) {
   const parts = []
   if (pack.downloads) parts.push(`${formatNumber(pack.downloads)} downloads`)
   if (pack.categories && pack.categories.length) {
-    parts.push(pack.categories.slice(0, 3).join(', '))
+    const nonLoader = pack.categories.filter((c) => !LOADER_TAGS.has(String(c).toLowerCase()))
+    if (nonLoader.length) {
+      parts.push(nonLoader.slice(0, 3).join(', '))
+    }
   }
   return parts.join(' · ')
 }

@@ -5,7 +5,47 @@
     size="large"
     @close="handleClose"
   >
-    <form @submit.prevent="handleCreate" class="settings-form">
+    <div v-if="installState === 'installing'" class="install-progress-pane">
+      <h3>Installing {{ formData.name }}…</h3>
+      <p class="install-progress-phase">{{ phaseLabel(installProgress?.phase) }}</p>
+
+      <div
+        v-if="installProgress?.bytes_total > 0"
+        class="install-progress-bar-wrap"
+      >
+        <div
+          class="install-progress-bar-fill"
+          :style="{ width: ((installProgress.bytes_done / installProgress.bytes_total) * 100) + '%' }"
+        ></div>
+        <span class="install-progress-bytes">
+          {{ Math.round(installProgress.bytes_done / 1024) }} KB
+          / {{ Math.round(installProgress.bytes_total / 1024) }} KB
+        </span>
+      </div>
+      <div v-else class="install-progress-spinner" aria-label="Working…"></div>
+
+      <p class="install-progress-hint" v-if="installProgress?.phase === 'running_installer'">
+        Forge / NeoForge installers download libraries and patch the vanilla server jar.
+        This step can take several minutes for modern Minecraft versions.
+      </p>
+
+      <div class="install-progress-actions">
+        <AppButton variant="ghost" size="md" @click="handleInstallClose">
+          Close (continues in background)
+        </AppButton>
+      </div>
+    </div>
+
+    <div v-else-if="installState === 'failed'" class="install-failed-pane">
+      <h3>Installation failed</h3>
+      <p class="install-failed-error">{{ installProgress?.error || 'Unknown error.' }}</p>
+      <div class="install-failed-actions">
+        <AppButton variant="primary" size="md" @click="handleInstallRetry">Retry</AppButton>
+        <AppButton variant="ghost" size="md" @click="handleInstallClose">Close</AppButton>
+      </div>
+    </div>
+
+    <form v-else @submit.prevent="handleCreate" class="settings-form">
       <!-- Basic Settings -->
       <Panel title="Basic Settings">
         <FormField label="Server Name">
@@ -102,8 +142,8 @@
         </div>
       </Panel>
 
-      <!-- Modpack Setup -->
-      <Panel title="Modpack Setup">
+      <!-- Modpack Setup — vanilla servers have no mod loader, so the Modrinth modpack flow doesn't apply. -->
+      <Panel v-if="formData.loader !== 'vanilla'" title="Modpack Setup">
 
         <div class="mode-toggle" role="tablist" aria-label="Server setup mode">
           <button
@@ -464,18 +504,20 @@
     </form>
 
     <template #footer>
-      <AppButton variant="ghost" size="md" :disabled="creating" @click="handleClose">
-        Cancel
-      </AppButton>
-      <AppButton
-        variant="primary"
-        size="md"
-        :disabled="creating || !formData.acceptEula"
-        :loading="creating"
-        @click="handleCreate"
-      >
-        {{ creating ? 'Creating' : 'Create Server' }}
-      </AppButton>
+      <template v-if="!installState">
+        <AppButton variant="ghost" size="md" :disabled="creating" @click="handleClose">
+          Cancel
+        </AppButton>
+        <AppButton
+          variant="primary"
+          size="md"
+          :disabled="creating || !formData.acceptEula"
+          :loading="creating"
+          @click="handleCreate"
+        >
+          {{ creating ? 'Creating' : 'Create Server' }}
+        </AppButton>
+      </template>
     </template>
   </BaseModal>
 
@@ -505,7 +547,7 @@ import JavaInstallModal from './JavaInstallModal.vue'
 import Panel from '../ui/Panel.vue'
 import AppButton from '../ui/AppButton.vue'
 import FormField from '../ui/FormField.vue'
-import { createServer, installServer, getFabricGameVersions, getJavaStatus } from '../../api/servers'
+import { createServer, installServer, getLoaderGameVersions, getJavaStatus, getServerInstallProgress } from '../../api/servers'
 import ModSideDecisionModal from './ModSideDecisionModal.vue'
 import { installModpack, resolveProjectVersion } from '../../api/modrinth'
 import { useToast } from '../../composables/useToast'
@@ -535,6 +577,15 @@ export default {
   data() {
     return {
       creating: false,
+      // Phase 3c: install-progress state. Modal flips into 'installing' or
+      // 'failed' once the user submits and the backend returns 202; the
+      // existing 'creating' flag stays true during this phase to keep the
+      // submit button disabled if the modal is somehow re-rendered.
+      installState: null,           // null | 'installing' | 'failed'
+      installProgress: null,         // last-seen progress payload from GET /install/progress
+      installPollHandle: null,       // setInterval handle; clear on terminal/unmount
+      installPollResolver: null,     // Promise resolve fn so handleInstallClose can release a mid-install await
+      installCreatedServerId: null,  // server.id that the install ran against (for retry)
       versionsLoading: false,
       javaRequirementLoading: false,
       imp: null,
@@ -549,7 +600,11 @@ export default {
       javaStatus: null,
       javaRequirementWarning: '',
       loaderOptions: [
-        { value: 'fabric', label: 'Fabric (supported)' }
+        { value: 'fabric',   label: 'Fabric'   },
+        { value: 'quilt',    label: 'Quilt'    },
+        { value: 'neoforge', label: 'NeoForge' },
+        { value: 'forge',    label: 'Forge'    },
+        { value: 'vanilla',  label: 'Vanilla'  }
       ],
       formData: {
         setupMode: 'custom',
@@ -577,7 +632,7 @@ export default {
         whitelist: false,
         pvp: true,
         commandBlocks: true,
-        motd: 'A Minecraft Server',
+        motd: 'A Minecraft Server managed by Fabricator',
         acceptEula: false
       }
     };
@@ -645,6 +700,20 @@ export default {
           }
         }
       }
+    },
+    'formData.loader'(newLoader, oldLoader) {
+      if (newLoader === oldLoader) return
+      this.formData.version = ''
+      // Vanilla has no modpack story — flip back to custom and drop any
+      // cached modpack selection so a stale modpack URL/object doesn't
+      // ride along into the create POST and trip a backend 409.
+      if (newLoader === 'vanilla') {
+        this.formData.setupMode = 'custom'
+        if (this.imp?.selectedModpack) {
+          this.imp.selectedModpack.value = null
+        }
+      }
+      this.loadGameVersions()
     }
   },
   methods: {
@@ -766,7 +835,8 @@ export default {
     async loadGameVersions() {
       this.versionsLoading = true
       try {
-        const versions = await getFabricGameVersions()
+        const loader = this.formData.loader || 'fabric'
+        const versions = await getLoaderGameVersions(loader)
         this.gameVersions = Array.isArray(versions) ? versions : []
         const stableVersions = this.gameVersions.filter(v => v.stable)
         const preferred = stableVersions[0] || this.gameVersions[0]
@@ -776,7 +846,7 @@ export default {
         }
         await this.refreshJavaRequirement()
       } catch (error) {
-        console.error('Failed to load Fabric game versions:', error)
+        console.error('Failed to load game versions:', error)
         this.toast.error('Could not load Minecraft versions.', 'Version Fetch Failed')
       } finally {
         this.versionsLoading = false
@@ -820,19 +890,36 @@ export default {
       this.showJavaModal = false
       this.pendingJavaRetryServerId = null
       if (retryServerId) {
-        // Server was already created; retry just the install step.
+        // Server was already created on the prior attempt; retry just the
+        // install step. Phase 3c made /install async (returns 202 + initial
+        // progress, real outcome arrives via polling) — mirror handleCreate's
+        // post-202 flow so success/failure surfaces correctly. Without this,
+        // the call silently no-ops because installResult?.success is undefined
+        // on the new 202 body.
+        this.installCreatedServerId = retryServerId
+        this.installState = 'installing'
+        this.installProgress = null
         try {
-          this.toast.info('Re-running server install with Java installed...', 'Installation')
-          const installResult = await installServer(retryServerId)
-          if (installResult?.success) {
+          const initialProgress = await installServer(retryServerId)
+          this.installProgress = initialProgress
+          const finalProgress = await this.pollInstallProgress(retryServerId)
+          if (finalProgress.phase === 'aborted') {
+            // User cancelled the retry mid-install via Close.
+          } else if (finalProgress.phase === 'done') {
             this.toast.success('Server installed successfully.', 'Server Installation')
+            this.installState = null
+            this.installProgress = null
           } else {
+            this.installState = 'failed'
+            this.installProgress = finalProgress
             this.toast.error(
-              installResult?.message || 'Installation failed',
-              'Server Installation Failed'
+              finalProgress.error || 'Installation failed',
+              'Server Installation Failed',
             )
           }
         } catch (error) {
+          this.installState = 'failed'
+          this.installProgress = { phase: 'failed', error: error?.message || 'Installation failed' }
           this.toast.error(error?.message || 'Installation failed', 'Server Installation Failed')
         }
       } else {
@@ -841,7 +928,101 @@ export default {
       }
     },
 
+    phaseLabel(phase) {
+      const labels = {
+        starting:               'Preparing install…',
+        resolving_versions:     'Resolving versions…',
+        downloading_installer:  'Downloading installer…',
+        downloading_server_jar: 'Downloading server jar…',
+        verifying:              'Verifying download…',
+        running_installer:      'Running installer (this can take 2–15 minutes)…',
+        detecting_artifacts:    'Verifying artefacts…',
+        writing_eula:           'Finalising…',
+        done:                   'Done',
+        failed:                 'Failed',
+      }
+      return labels[phase] || 'Installing…'
+    },
+
+    /**
+     * Poll GET /install/progress until phase is terminal.
+     * Resolves with the final progress payload ({phase, error?, ...}).
+     * Updates this.installProgress on every poll so the template stays live.
+     * Cleans up its own interval handle.
+     */
+    async pollInstallProgress(serverId) {
+      return new Promise((resolve) => {
+        // Stash the resolver so handleInstallClose can release this Promise
+        // when the user clicks Close mid-install. Without that escape hatch,
+        // clearInterval stops further ticks but leaves the awaiting handleCreate
+        // hung — its finally never runs, this.creating stays true forever.
+        this.installPollResolver = resolve
+        const tick = async () => {
+          try {
+            const progress = await getServerInstallProgress(serverId)
+            this.installProgress = progress
+            if (!progress.active || progress.phase === 'done' || progress.phase === 'failed') {
+              if (this.installPollHandle) {
+                clearInterval(this.installPollHandle)
+                this.installPollHandle = null
+              }
+              this.installPollResolver = null
+              resolve(progress)
+            }
+          } catch (err) {
+            // If the GET itself fails (rare — server unreachable), surface as failed.
+            console.error('Install-progress poll failed:', err)
+            if (this.installPollHandle) {
+              clearInterval(this.installPollHandle)
+              this.installPollHandle = null
+            }
+            this.installPollResolver = null
+            resolve({ phase: 'failed', error: err.message || 'Lost contact with backend during install.' })
+          }
+        }
+        // Tick once immediately so a fast install (e.g. Vanilla cached) resolves
+        // without a 750ms wait, then on the interval.
+        tick()
+        this.installPollHandle = setInterval(tick, 750)
+      })
+    },
+
+    handleInstallRetry() {
+      // Reset install state and call handleCreate again. The form data is still
+      // in place, so the same install runs against the same server record.
+      this.installState = null
+      this.installProgress = null
+      // Re-use the same created server: skip the createServer step. Easiest is
+      // to just call installServer directly and re-run the polling.
+      // To keep things simple we re-trigger handleCreate, which will create a
+      // NEW server record. If the user wants to retry the same record, they
+      // can use the server-detail page's Install button. v1: new record on retry.
+      // (Avoiding stale-record reuse simplifies error handling.)
+      this.handleCreate()
+    },
+
+    handleInstallClose() {
+      // Release the awaiting handleCreate Promise so its finally block runs
+      // and `this.creating` flips back to false. resetForm only stops the
+      // polling interval; the Promise itself stays pending without this.
+      // Backend install thread continues — we just stop watching.
+      if (this.installPollResolver) {
+        this.installPollResolver({ phase: 'aborted' })
+        this.installPollResolver = null
+      }
+      if (this.installState === 'installing') {
+        this.toast.info(
+          'Installation continues in the background. The server appears in your list when it\'s ready.',
+          'Install Running',
+        )
+      }
+      this.$emit('close')
+      this.resetForm()
+    },
+
     async handleCreate() {
+      if (this.creating) return
+
       if (!this.formData.name.trim()) {
         this.toast.warning('Please enter a server name.', 'Name Required')
         return
@@ -869,6 +1050,7 @@ export default {
         }
       }
 
+      // Pre-flight Java check (existing — unchanged).
       try {
         const status = await getJavaStatus({
           mcVersion: this.formData.version,
@@ -885,26 +1067,38 @@ export default {
       }
 
       this.creating = true
-      let createdServerId = null
-      
+      this.installState = null
+      this.installProgress = null
+      this.installCreatedServerId = null
+
       try {
         const server = await createServer(this.buildServerPayload())
-        createdServerId = server.id
-        this.toast.info('Installing server...', 'Installation')
-        const installResult = await installServer(server.id)
+        this.installCreatedServerId = server.id
 
-        if (installResult.success) {
-          const createdServer = installResult.server || server
+        // POST /install — 202 on async start; 400 (Java guard) throws into catch.
+        const initialProgress = await installServer(server.id)
+
+        // Switch modal into install-progress UI and start polling.
+        this.installState = 'installing'
+        this.installProgress = initialProgress
+
+        const finalProgress = await this.pollInstallProgress(server.id)
+
+        if (finalProgress.phase === 'aborted') {
+          // User clicked Close during install. Modal already closed and state
+          // already reset by handleInstallClose; backend continues in
+          // background. Nothing else to do — finally clears `creating`.
+        } else if (finalProgress.phase === 'done') {
+          // Modpack install (if any) runs AFTER loader install succeeds.
           let modpackInstallError = null
-
           if (this.formData.setupMode === 'modpack' && this.selectedModpack) {
-            this.toast.info(`Installing ${this.selectedModpack.title}...`, 'Modpack')
+            this.toast.info(`Installing ${this.selectedModpack.title}…`, 'Modpack')
             try {
               let mpResult = null
               let overrideMap = null
               while (true) {
                 try {
-                  mpResult = await this.installSelectedModpackOnServer(createdServer.id, overrideMap)
+                  mpResult = await this.installSelectedModpackOnServer(server.id, overrideMap)
                   break
                 } catch (installError) {
                   const uncertainMods = installError?.data?.uncertain_mod_files
@@ -922,11 +1116,10 @@ export default {
                   throw installError
                 }
               }
-
               if (mpResult?.uncertain_mod_files?.length) {
                 this.toast.info(
                   `${mpResult.uncertain_mod_files.length} uncertain mods were classified by your selection.`,
-                  'Modpack Choices Applied'
+                  'Modpack Choices Applied',
                 )
               }
               this.toast.success(`${this.selectedModpack.title} installed successfully!`, 'Modpack Installed')
@@ -936,35 +1129,33 @@ export default {
             }
           }
 
-          this.$emit('create', { ...createdServer, modpackInstallError })
+          this.$emit('create', { id: server.id, name: this.formData.name, modpackInstallError })
           this.$emit('close')
           this.resetForm()
         } else {
-          const isJavaIssue = installResult.java_missing || installResult.java_too_old
-          if (isJavaIssue) {
-            this.openJavaModal({ createdServerId })
-          } else {
-            this.toast.error(installResult.message || 'Installation failed', 'Server Installation Failed')
-          }
-          this.$emit('create', { id: createdServerId, name: this.formData.name })
-          this.$emit('close')
-          this.resetForm({ keepJavaModal: isJavaIssue })
+          // phase === 'failed' — show inline error UI, do NOT auto-close.
+          this.installState = 'failed'
+          this.installProgress = finalProgress
+          // Server record exists but is in 'failed' status. User can Retry or Close.
         }
       } catch (error) {
-        console.error('Failed to create server:', error)
+        // 400 (Java guard) and other non-2xx errors land here.
+        console.error('Failed to create/install server:', error)
         const isJavaIssue = error?.data?.java_missing || error?.data?.java_too_old
         if (isJavaIssue) {
-          this.openJavaModal({ createdServerId })
+          this.openJavaModal({ createdServerId: this.installCreatedServerId })
         } else {
-          this.toast.error(error.message, 'Server Creation Failed')
+          this.toast.error(error.message || 'Server creation failed', 'Server Creation Failed')
         }
-        if (createdServerId) {
-          this.$emit('create', { id: createdServerId, name: this.formData.name })
+        if (this.installCreatedServerId) {
+          this.$emit('create', { id: this.installCreatedServerId, name: this.formData.name })
           this.$emit('close')
           this.resetForm({ keepJavaModal: isJavaIssue })
         }
       } finally {
         this.creating = false
+        // installState handles the rest: 'installing' (still polling), 'failed' (UI),
+        // null (success/close-emitted-already, modal will be unmounted).
       }
     },
     
@@ -1013,6 +1204,22 @@ export default {
       this.showUncertainModsModal = false
       this.uncertainModsReport = []
       this.pendingUncertainModsResolver = null
+
+      // Phase 3c: clear install-progress state so re-opening the modal starts clean.
+      this.installState = null
+      this.installProgress = null
+      this.installCreatedServerId = null
+      this.installPollResolver = null
+      if (this.installPollHandle) {
+        clearInterval(this.installPollHandle)
+        this.installPollHandle = null
+      }
+    }
+  },
+  beforeUnmount() {
+    if (this.installPollHandle) {
+      clearInterval(this.installPollHandle)
+      this.installPollHandle = null
     }
   }
 }
@@ -1368,5 +1575,81 @@ export default {
   .form-checkboxes {
     grid-template-columns: 1fr;
   }
+}
+
+/* Phase 3c: install-progress UI panes shown after the user submits and the
+   backend returns 202. The form is hidden during this state. */
+.install-progress-pane,
+.install-failed-pane {
+  padding: 24px 16px;
+  text-align: center;
+}
+
+.install-progress-phase {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin: 8px 0 16px;
+}
+
+.install-progress-bar-wrap {
+  position: relative;
+  height: 20px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 16px auto;
+  max-width: 320px;
+}
+
+.install-progress-bar-fill {
+  height: 100%;
+  background: var(--primary);
+  transition: width 200ms ease-out;
+}
+
+.install-progress-bytes {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.install-progress-spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--bg-tertiary);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: install-spin 0.8s linear infinite;
+  margin: 16px auto;
+}
+
+@keyframes install-spin {
+  to { transform: rotate(360deg); }
+}
+
+.install-progress-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 16px auto;
+  max-width: 360px;
+}
+
+.install-progress-actions,
+.install-failed-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.install-failed-error {
+  color: var(--danger);
+  margin: 8px 0 16px;
+  white-space: pre-wrap;
 }
 </style>

@@ -233,21 +233,33 @@ export async function installServer(serverId) {
 }
 
 /**
- * Get Fabric-supported Minecraft versions
- * @returns {Promise<Array>} List of game versions from Fabric Meta
+ * Get the current install progress for a server.
+ * Returns { active: bool, phase?: string, bytes_done?: number, bytes_total?: number, error?: string, ... }.
+ * @param {string} serverId
+ * @returns {Promise<Object>}
  */
-export async function getFabricGameVersions() {
-  return get('/api/fabric/versions/game')
+export async function getServerInstallProgress(serverId) {
+  return get(`/api/servers/${encodeURIComponent(serverId)}/install/progress`)
 }
 
 /**
- * Get Fabric loader versions for a Minecraft version
- * @param {string} mcVersion - Minecraft version filter
- * @returns {Promise<Array>} Loader versions metadata
+ * Get Minecraft versions supported by a loader.
+ * @param {string} loader - Loader name (e.g. 'fabric', 'vanilla')
+ * @returns {Promise<Array<{version: string, stable: boolean, type?: string}>>}
  */
-export async function getFabricLoaderVersions(mcVersion) {
+export async function getLoaderGameVersions(loader) {
+  return get(`/api/loaders/${encodeURIComponent(loader)}/versions/game`)
+}
+
+/**
+ * Get loader-specific versions for a Minecraft version.
+ * @param {string} loader - Loader name
+ * @param {string} [mcVersion] - Minecraft version filter
+ * @returns {Promise<Array>} Loader-native version metadata (shape varies by loader)
+ */
+export async function getLoaderVersions(loader, mcVersion) {
   const params = mcVersion ? { mc_version: mcVersion } : {}
-  return get('/api/fabric/versions/loader', params)
+  return get(`/api/loaders/${encodeURIComponent(loader)}/versions/loader`, params)
 }
 
 /**

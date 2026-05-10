@@ -56,7 +56,11 @@ def _ensure_file_exists():
     """Create servers.json if it doesn't exist."""
     SERVERS_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-    # One-time migration from the historical cwd-based location.
+    # One-time migration from the historical cwd-based location. Copy, never
+    # move: a test (or any sibling process) running from the repo root can
+    # resolve SERVERS_FILE to a tmp path while legacy still points at the
+    # live /workspaces/.../servers.json — `move` would then destroy the live
+    # data when the tmp dir is cleaned up.
     legacy = _legacy_servers_file()
     if (
         not SERVERS_FILE.exists()
@@ -64,14 +68,10 @@ def _ensure_file_exists():
         and legacy.exists()
     ):
         try:
-            shutil.move(str(legacy), str(SERVERS_FILE))
+            shutil.copy2(str(legacy), str(SERVERS_FILE))
             return
         except OSError:
-            try:
-                shutil.copy2(str(legacy), str(SERVERS_FILE))
-                return
-            except OSError:
-                pass
+            pass
 
     if not SERVERS_FILE.exists():
         SERVERS_FILE.write_text("[]", encoding='utf-8')

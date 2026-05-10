@@ -114,6 +114,54 @@ Minecraft Server stoppen.
 
 ---
 
+### Loader-Versions
+
+Liefert die Minecraft- und Loader-Versionen, die ein registrierter Loader installieren kann. Wird vom Frontend (`ServerCreateModal`) genutzt, sobald der Anwender einen Loader auswählt. Über die `LOADER_REGISTRY` (siehe „Loader Registry" weiter unten) sind neue Loader sofort an diesen Endpoints sichtbar.
+
+#### `GET /api/loaders/<loader>/versions/game`
+
+Unterstützte Minecraft-Versionen für `<loader>` (case-insensitive Lookup).
+
+**Pfad-Parameter:**
+- `<loader>` (string): z.B. `fabric`, `vanilla`.
+
+**Response (200) — normalisiertes Schema:**
+```json
+[
+  { "version": "1.21.4", "stable": true,  "type": "release"  },
+  { "version": "24w45a", "stable": false, "type": "snapshot" }
+]
+```
+
+`stable` ist das einzige Feld, auf das jeder Consumer verlässlich zugreifen kann. `type` ist loader-nativ (z.B. `release`/`snapshot` für Vanilla) und kann entfallen, wenn der Loader keine solche Unterscheidung macht.
+
+**Error (404):**
+```json
+{ "error": "Unknown loader: <name>" }
+```
+
+#### `GET /api/loaders/<loader>/versions/loader`
+
+Loader-spezifische Versionen für eine Minecraft-Version. Loader ohne separate Loader-Version (z.B. Vanilla) liefern `[]`.
+
+**Pfad-Parameter:** `<loader>` wie oben.
+
+**Query Parameter:**
+- `mc_version` (string, optional): Filter auf eine Minecraft-Version.
+
+**Response (200):** Loader-natives Array; Form variiert pro Loader und wird vom Frontend opak weitergereicht.
+
+Beispiel (Fabric):
+```json
+[
+  { "loader": { "version": "0.16.0", "stable": true } }
+]
+```
+
+Beispiel (Vanilla): `[]`.
+
+---
+
 ### Modrinth Integration
 
 #### `GET /api/modrinth/search`
@@ -410,6 +458,35 @@ CORS_ORIGINS=*               # Erlaubte Origins
 In `backend/core/config.py`:
 - `DevelopmentConfig`: Debug-Modus aktiviert
 - `ProductionConfig`: Optimiert für Production
+
+---
+
+## 🧩 Loader Registry (Entwickler)
+
+Die Loader-Dispatch-Schicht lebt in `backend/server/installer/__init__.py`. Ein neuer Loader benötigt drei Schritte:
+
+1. **Subklasse von `InstallerBase`** (`backend/server/installer/base.py`) mit diesen Pflicht-Methoden anlegen:
+   - `loader_name` (Property) — der Registry-Key, z.B. `"neoforge"`
+   - `get_minecraft_versions()` → `List[{version, stable, type?}]` im normalisierten Schema (siehe `/api/loaders/<loader>/versions/game`)
+   - `get_available_versions(mc_version)` → loader-natives Array; `[]` wenn der Loader keine separate Loader-Version hat
+   - `install(mc_version, loader_version=None)` → `InstallResult` mit gesetztem `launch: LaunchSpec`. Der `LaunchSpec` wird in `servers.json` persistiert und treibt anschließend `ServerProcessRegistry._build_command`
+
+2. **In `LOADER_REGISTRY` eintragen:**
+   ```python
+   from .neoforge import NeoForgeInstaller
+
+   LOADER_REGISTRY: Dict[str, Type[InstallerBase]] = {
+       "fabric": FabricInstaller,
+       "vanilla": VanillaInstaller,
+       "neoforge": NeoForgeInstaller,
+   }
+   ```
+
+   `get_installer_for(loader, install_path)` (case-insensitive) und `supported_loaders()` greifen automatisch auf den neuen Eintrag zu — Routes und der Install-Flow brauchen keine Änderung.
+
+3. **Frontend:** in `frontend/src/components/modals/ServerCreateModal.vue` der `loaderOptions`-Liste eine Option mit demselben `value` wie `loader_name` hinzufügen.
+
+Phase-2-Loader (Forge, NeoForge) werden voraussichtlich einen neuen `LaunchSpec.type` einführen (z.B. `args_files` für die `@user_jvm_args.txt`-Form). `_build_command` wirft heute schon `ValueError` bei unbekanntem Typ — das ist absichtlich, damit ein Phase-2-Record auf einem alten Build früh erkannt wird.
 
 ---
 

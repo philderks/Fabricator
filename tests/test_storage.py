@@ -72,6 +72,39 @@ def test_save_survives_simulated_crash_mid_write(tmp_servers_root, monkeypatch):
         assert json.load(fh) == [{"id": "srv_original", "name": "Keep me"}]
 
 
+def test_legacy_migration_does_not_destroy_source_file(tmp_path, monkeypatch):
+    """Regression: the legacy-cwd migration must copy, not move.
+
+    Before the fix, `_ensure_file_exists` did `shutil.move(legacy, configured)`.
+    Tests run from the repo root with SERVER_INDEX_FILE pointed at a tmp path —
+    so `legacy` resolved to the LIVE `servers.json` in the repo. Any test that
+    triggered `_ensure_file_exists()` would silently move the user's live data
+    into the tmp dir, which then got cleaned up. Catastrophic data loss.
+    """
+    import importlib
+    import backend.server.storage as storage
+    importlib.reload(storage)
+
+    fake_repo = tmp_path / "repo"
+    fake_repo.mkdir()
+    legacy_path = fake_repo / "servers.json"
+    legacy_path.write_text('[{"id": "srv_live", "name": "Live data"}]', encoding="utf-8")
+
+    fresh_target = tmp_path / "configured" / "servers.json"
+    monkeypatch.setenv("SERVER_INDEX_FILE", str(fresh_target))
+    monkeypatch.chdir(fake_repo)
+
+    storage._ensure_file_exists()
+
+    assert legacy_path.exists(), (
+        "Legacy servers.json was destroyed by the migration — "
+        "must use copy2, not move"
+    )
+    assert fresh_target.exists(), "Migration should have populated the configured path"
+    assert json.loads(legacy_path.read_text(encoding="utf-8")) == \
+           json.loads(fresh_target.read_text(encoding="utf-8"))
+
+
 def test_save_cleans_up_tmp_on_json_failure(tmp_servers_root, monkeypatch):
     """If json.dump raises, the tmp file must not be left behind."""
     import importlib
