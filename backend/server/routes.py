@@ -22,6 +22,8 @@ from backend.server.java_compat import resolve_required_java, skip_java_enforcem
 from backend.server import java_manager
 from backend.server.locks import get_server_lock, try_acquire, discard_lock
 from backend.utils import platform as platform_utils
+from backend.utils.java import parse_java_major
+from backend.utils.zip import safe_extract_zip
 
 try:
     import psutil  # type: ignore
@@ -264,28 +266,6 @@ def _write_server_properties(server: dict) -> tuple[bool, str | None]:
         return False, f'Failed to write server.properties: {exc}'
 
     return True, None
-
-
-def _safe_extract_zip(zip_file: zipfile.ZipFile, destination: Path) -> None:
-    destination = destination.resolve()
-
-    for member in zip_file.infolist():
-        member_path = destination / member.filename
-        resolved_path = member_path.resolve()
-        try:
-            resolved_path.relative_to(destination)
-        except ValueError as exc:
-            raise ValueError(
-                f"Archive member escapes destination: {member.filename!r}"
-            ) from exc
-
-        if member.is_dir():
-            resolved_path.mkdir(parents=True, exist_ok=True)
-            continue
-
-        resolved_path.parent.mkdir(parents=True, exist_ok=True)
-        with zip_file.open(member, 'r') as source, open(resolved_path, 'wb') as target:
-            shutil.copyfileobj(source, target)
 
 
 def _java_download_url(system: str, java_major: int) -> str:
@@ -707,7 +687,7 @@ def restore_server_backup(server_id, backup_id):
         staging.mkdir(parents=True, exist_ok=False)
         try:
             with zipfile.ZipFile(backup_path, 'r') as zip_file:
-                _safe_extract_zip(zip_file, staging)
+                safe_extract_zip(zip_file, staging)
         except (OSError, zipfile.BadZipFile, ValueError) as exc:
             shutil.rmtree(staging, ignore_errors=True)
             return jsonify({'error': f'Failed to extract backup: {exc}'}), 400
@@ -1202,8 +1182,8 @@ def restart_server_by_id(server_id):
 @server_bp.route('/java/status', methods=['GET'])
 def get_java_status():
     """Return managed Java status, system Java probe and Temurin asset metadata."""
-    import subprocess
     import re
+    import subprocess
 
     system = platform_utils.platform_label()
     mc_version = request.args.get('mc_version', '').strip()
@@ -1237,14 +1217,7 @@ def get_java_status():
             match = re.search(r'version "([^"]+)"', version_output)
             if match:
                 version = match.group(1)
-                if version.startswith('1.'):
-                    parts = version.split('.')
-                    if len(parts) > 1 and parts[1].isdigit():
-                        detected_major = int(parts[1])
-                else:
-                    major_match = re.match(r'^(\d+)', version)
-                    if major_match:
-                        detected_major = int(major_match.group(1))
+            detected_major = parse_java_major(version_output)
     except FileNotFoundError:
         installed = False
         version = None

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import re
 import shutil
 import subprocess
 import tarfile
@@ -25,6 +24,8 @@ import requests
 from backend.core.config import get_config
 from backend.server.java_compat import resolve_required_java
 from backend.utils import platform as platform_utils
+from backend.utils.java import parse_java_major
+from backend.utils.zip import safe_extract_zip
 
 
 ADOPTIUM_API = "https://api.adoptium.net/v3/assets/latest/{major}/hotspot"
@@ -112,19 +113,7 @@ def _parse_system_java_major() -> Optional[int]:
     output = (result.stdout or "") + (result.stderr or "")
     if result.returncode != 0:
         return None
-    match = re.search(r'version "([^"]+)"', output)
-    if not match:
-        return None
-    raw = match.group(1).strip()
-    if raw.startswith("1."):
-        parts = raw.split(".")
-        if len(parts) > 1 and parts[1].isdigit():
-            return int(parts[1])
-        return None
-    major_match = re.match(r"^(\d+)", raw)
-    if not major_match:
-        return None
-    return int(major_match.group(1))
+    return parse_java_major(output)
 
 
 def find_compatible_java(required: int) -> Optional[str]:
@@ -334,7 +323,7 @@ def _extract_archive(archive: Path, staging: Path) -> None:
             _safe_extract_tar(tar, staging)
     elif archive.suffix == ".zip":
         with zipfile.ZipFile(archive, "r") as zf:
-            _safe_extract_zip(zf, staging)
+            safe_extract_zip(zf, staging)
     else:
         raise RuntimeError(f"Unsupported archive format: {archive.name}")
 
@@ -346,20 +335,6 @@ def _safe_extract_tar(tar: tarfile.TarFile, destination: Path) -> None:
         if not str(member_path).startswith(str(destination)):
             raise RuntimeError("Archive contains invalid paths")
     tar.extractall(destination)
-
-
-def _safe_extract_zip(zf: zipfile.ZipFile, destination: Path) -> None:
-    destination = destination.resolve()
-    for member in zf.infolist():
-        member_path = (destination / member.filename).resolve()
-        if not str(member_path).startswith(str(destination)):
-            raise RuntimeError("Archive contains invalid paths")
-        if member.is_dir():
-            member_path.mkdir(parents=True, exist_ok=True)
-            continue
-        member_path.parent.mkdir(parents=True, exist_ok=True)
-        with zf.open(member, "r") as source, open(member_path, "wb") as sink:
-            shutil.copyfileobj(source, sink)
 
 
 def install_java(major: int, archive_path: Path) -> str:

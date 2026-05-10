@@ -8,6 +8,7 @@ import time
 from typing import Iterable, List, Optional
 
 from backend.utils import platform as platform_utils
+from backend.utils.java import parse_java_major
 try:
     import psutil  # type: ignore
 except ImportError:  # pragma: no cover - optional dependency fallback
@@ -110,23 +111,6 @@ class ServerManager:
         with open(eula_path, "w", encoding="utf-8") as eula_file:
             eula_file.write("eula=true\n")
 
-    @staticmethod
-    def _resolve_java_major(version_output: str) -> Optional[int]:
-        match = re.search(r'version "([^"]+)"', version_output)
-        if not match:
-            return None
-        raw = match.group(1).strip()
-        # Legacy Java 8 format is 1.8.x, where major version is 8.
-        if raw.startswith("1."):
-            parts = raw.split(".")
-            if len(parts) > 1 and parts[1].isdigit():
-                return int(parts[1])
-            return None
-        major_match = re.match(r"^(\d+)", raw)
-        if not major_match:
-            return None
-        return int(major_match.group(1))
-
     def _java_executable(self) -> str:
         if self.command and isinstance(self.command[0], str) and self.command[0].strip():
             return self.command[0]
@@ -164,7 +148,7 @@ class ServerManager:
                 "java_missing": False,
             }
 
-        major_version = self._resolve_java_major(version_output)
+        major_version = parse_java_major(version_output)
         if major_version is None:
             return {
                 "available": False,
