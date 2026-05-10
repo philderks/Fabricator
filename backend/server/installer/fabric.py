@@ -1,10 +1,14 @@
 """Fabric server installer using the Fabric Meta API."""
+import logging
 import os
 import requests
 from pathlib import Path
 from typing import Callable, List, Optional, Dict, Any
 
 from .base import InstallerBase, InstallResult, InstallStatus, LaunchSpec, DIR_PERMISSIONS
+
+
+logger = logging.getLogger(__name__)
 
 
 class FabricInstaller(InstallerBase):
@@ -47,8 +51,8 @@ class FabricInstaller(InstallerBase):
             )
             response.raise_for_status()
             payload = response.json()
-        except requests.RequestException as exc:
-            print(f"Failed to fetch game versions: {exc}")
+        except requests.RequestException:
+            logger.exception("Failed to fetch Fabric game versions")
             return []
 
         out: List[Dict[str, Any]] = []
@@ -87,8 +91,8 @@ class FabricInstaller(InstallerBase):
             
             response.raise_for_status()
             return response.json()
-        except requests.RequestException as exc:
-            print(f"Failed to fetch loader versions: {exc}")
+        except requests.RequestException:
+            logger.exception("Failed to fetch Fabric loader versions")
             return []
 
     def get_installer_versions(self) -> List[Dict[str, Any]]:
@@ -104,8 +108,8 @@ class FabricInstaller(InstallerBase):
             )
             response.raise_for_status()
             return response.json()
-        except requests.RequestException as exc:
-            print(f"Failed to fetch installer versions: {exc}")
+        except requests.RequestException:
+            logger.exception("Failed to fetch Fabric installer versions")
             return []
 
     def _get_latest_installer_version(self) -> Optional[str]:
@@ -224,8 +228,8 @@ class FabricInstaller(InstallerBase):
 
             return jar_path
 
-        except requests.RequestException as exc:
-            print(f"Download failed: {exc}")
+        except requests.RequestException:
+            logger.exception("Failed to download Fabric server JAR")
             if jar_path.exists():
                 jar_path.unlink()
             return None

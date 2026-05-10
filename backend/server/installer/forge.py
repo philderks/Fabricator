@@ -23,6 +23,7 @@ Versions API: https://files.minecraftforge.net/net/minecraftforge/forge/promotio
 """
 from __future__ import annotations
 
+import logging
 import re
 import requests
 import subprocess
@@ -38,6 +39,9 @@ from .base import (
     InstallStatus,
     LaunchSpec,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 # Promotion-key shape: "<mc>-latest" or "<mc>-recommended".
@@ -78,8 +82,8 @@ class ForgeInstaller(InstallerBase):
             response = self.session.get(self.PROMOTIONS_URL, timeout=15)
             response.raise_for_status()
             payload = response.json()
-        except requests.RequestException as exc:
-            print(f"Failed to fetch Forge promotions: {exc}")
+        except requests.RequestException:
+            logger.exception("Failed to fetch Forge promotions")
             return {}
         return dict(payload.get("promos") or {})
 
@@ -217,9 +221,11 @@ class ForgeInstaller(InstallerBase):
         self._report(progress_callback, "verifying")
         expected_sha1 = self._fetch_expected_sha1(mc_version, build)
         if not expected_sha1:
-            print(
-                f"WARNING: Forge installer SHA1 unavailable for "
-                f"{mc_version}-{build} — proceeding without integrity check."
+            logger.warning(
+                "Forge installer SHA1 unavailable for %s-%s "
+                "— proceeding without integrity check.",
+                mc_version,
+                build,
             )
         if expected_sha1:
             actual = hasher.hexdigest().lower()

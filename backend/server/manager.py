@@ -1,4 +1,5 @@
 """Minecraft server management service."""
+import logging
 import os
 import re
 import subprocess
@@ -11,6 +12,9 @@ try:
     import psutil  # type: ignore
 except ImportError:  # pragma: no cover - optional dependency fallback
     psutil = None
+
+
+logger = logging.getLogger(__name__)
 
 
 class ServerManager:
@@ -241,6 +245,7 @@ class ServerManager:
 
             return True, "Server started"
         except Exception as exc:
+            logger.exception("Failed to start server process")
             self._process = None
             return False, f"Failed to start server: {exc}"
 
@@ -310,7 +315,10 @@ class ServerManager:
                         self._process.stdin.write("stop\n")
                         self._process.stdin.flush()
                     except Exception:
-                        pass
+                        logger.warning(
+                            "Failed to write 'stop' command to server stdin",
+                            exc_info=True,
+                        )
 
                 proc.terminate()
                 proc.wait(timeout=5)
@@ -391,6 +399,7 @@ class ServerManager:
                 stdin.write(command.strip() + "\n")
                 stdin.flush()
             except Exception as exc:  # pragma: no cover - best effort logging
+                logger.exception("Failed to send command to server")
                 return {
                     "success": False,
                     "message": f"Failed to send command: {exc}"
