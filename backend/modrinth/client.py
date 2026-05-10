@@ -1093,9 +1093,6 @@ class ModrinthClient:
         removed: List[str] = []
 
         for relative in self.MODPACK_SWITCH_PATHS:
-            if relative in self.PROTECTED_SERVER_PATHS:
-                continue
-
             target = (install_root / relative).resolve()
             if not str(target).startswith(str(install_root)):
                 continue

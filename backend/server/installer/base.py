@@ -11,10 +11,6 @@ DIR_PERMISSIONS = 0o775
 
 class InstallStatus(Enum):
     """Installation status enum."""
-    PENDING = "pending"
-    DOWNLOADING = "downloading"
-    INSTALLING = "installing"
-    CONFIGURING = "configuring"
     COMPLETED = "completed"
     FAILED = "failed"
 

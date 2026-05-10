@@ -1,5 +1,4 @@
 """Modrinth API routes."""
-import os
 import threading
 import zipfile
 from datetime import datetime
@@ -87,21 +86,15 @@ def _create_server_backup(install_path: Path) -> str:
     return backup_name
 
 
-def _resolve_mods_folder(server_id: str | None):
-    if server_id:
-        server = storage.get_server(server_id)
-        if not server:
-            return None, ({'error': 'Server not found'}, 404)
-        try:
-            path = _registry().resolve_mods_path(server)
-            return path, None
-        except ValueError as exc:
-            return None, ({'error': str(exc)}, 400)
-
-    legacy_root = Path(os.path.join(os.getcwd(), 'server'))
-    mods_path = legacy_root / 'mods'
-    mods_path.mkdir(parents=True, exist_ok=True)
-    return mods_path, None
+def _resolve_mods_folder(server_id: str):
+    server = storage.get_server(server_id)
+    if not server:
+        return None, ({'error': 'Server not found'}, 404)
+    try:
+        path = _registry().resolve_mods_path(server)
+        return path, None
+    except ValueError as exc:
+        return None, ({'error': str(exc)}, 400)
 
 
 @modrinth_bp.route('/search', methods=['GET'])

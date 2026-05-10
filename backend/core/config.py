@@ -63,8 +63,6 @@ class Config:
         self.PORT = int(os.environ.get("PORT", 5000))
 
         # Server management
-        self.SERVER_COMMAND = os.environ.get("SERVER_COMMAND")
-        self.SERVER_DIR = os.environ.get("SERVER_DIR", "server")
         self.SERVERS_ROOT = os.environ.get(
             "SERVER_ROOT", self._default_servers_root()
         )
