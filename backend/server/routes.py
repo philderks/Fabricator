@@ -1333,6 +1333,28 @@ def get_java_install_progress(task_id):
     return jsonify(task)
 
 
+@server_bp.route('/java/install/<task_id>', methods=['DELETE'])
+def cancel_java_install(task_id):
+    """Signal cancellation for an in-flight managed Java install task.
+
+    Best-effort: a Python thread cannot be hard-killed, so the worker only
+    notices the cancel between phases / between download chunks. The
+    per-request HTTP timeout bounds how long a wedged socket can keep the
+    worker alive after cancellation. Returns 404 for unknown task ids and
+    409 when the task is already in a terminal state.
+    """
+    task = java_manager.get_install_task(task_id)
+    if not task:
+        return jsonify({'error': 'Task not found'}), 404
+    cancelled = java_manager.cancel_install_task(task_id)
+    if not cancelled:
+        return jsonify({
+            'error': 'Task is already in a terminal state',
+            'status': task.get('status'),
+        }), 409
+    return jsonify(java_manager.get_install_task(task_id) or {})
+
+
 @server_bp.route('/metrics/system', methods=['GET'])
 def get_system_metrics():
     if not psutil:
