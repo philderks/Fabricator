@@ -351,7 +351,7 @@ def install_modpack(project_id):
             return jsonify({'error': 'Stop the server before installing a modpack'}), 400
 
         try:
-            install_path = _registry()._resolve_install_path(server)
+            install_path = _registry().resolve_install_path(server)
         except ValueError as exc:
             return jsonify({'error': str(exc)}), 400
 

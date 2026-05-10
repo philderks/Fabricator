@@ -40,7 +40,7 @@ def app(tmp_servers_root):
     """Return a Flask app configured against the temp servers root."""
     # Clear the registry singleton between tests.
     import backend.server.registry as registry_mod
-    registry_mod._registry = None
+    registry_mod.reset_for_tests()
 
     from backend.core.app import create_app
     app = create_app()

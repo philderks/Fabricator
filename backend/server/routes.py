@@ -39,7 +39,7 @@ server_bp = Blueprint('server', __name__, url_prefix='/api')
 _RUNTIME_KNOWN_STATUSES = frozenset({'running', 'stopped'})
 
 
-def _cleanup_stale_statuses() -> None:
+def cleanup_stale_statuses() -> None:
     """Reset 'installing'/'starting'/'stopping' records from a previous run.
 
     Called once from create_app() — must tolerate a missing or malformed
@@ -157,7 +157,7 @@ def _get_installer(loader: str, install_path: Path):
 
 def _get_install_path(server: dict) -> Path:
     try:
-        return _registry()._resolve_install_path(server)
+        return _registry().resolve_install_path(server)
     except ValueError as exc:
         raise ValueError(str(exc)) from exc
 
@@ -889,7 +889,7 @@ def install_server(server_id):
         return jsonify({'error': 'Server has no Minecraft version configured'}), 400
 
     try:
-        install_path = _registry()._resolve_install_path(server)
+        install_path = _registry().resolve_install_path(server)
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
 
