@@ -632,7 +632,7 @@ export default {
         whitelist: false,
         pvp: true,
         commandBlocks: true,
-        motd: 'A Minecraft Server',
+        motd: 'A Minecraft Server managed by Fabricator',
         acceptEula: false
       }
     };
