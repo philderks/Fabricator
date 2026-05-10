@@ -39,6 +39,11 @@ server_bp = Blueprint('server', __name__, url_prefix='/api')
 # leave those alone or it silently downgrades 'installing' to 'stopped'
 # while the install subprocess is still running, making the UI think the
 # server is ready to start while the per-server lock is still held.
+#
+# CROSS-BRANCH CONTRACT (CC5): this set is mirrored by
+# frontend/src/stores/server.js:RUNTIME_KNOWN_STATUSES. Any change here
+# requires a lockstep frontend update. The pin is enforced by
+# tests/test_runtime_status_pin.py.
 _RUNTIME_KNOWN_STATUSES = frozenset({'running', 'stopped'})
 
 
