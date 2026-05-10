@@ -8,11 +8,13 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .base import (
+    HashVerifyError,
     InstallerBase,
     InstallResult,
     InstallStatus,
     LaunchSpec,
     _validate_version_token,
+    download_with_hash_verify,
 )
 from backend.utils import platform as platform_utils
 from backend.utils.platform import is_windows
@@ -233,55 +235,57 @@ class NeoForgeInstaller(InstallerBase):
     ) -> "tuple[Optional[Path], Optional[str]]":
         """Download and SHA1-verify the installer JAR.
 
+        S7 hardening (B11): the SHA1 must be available BEFORE the download,
+        and a missing SHA1 hard-fails the install instead of silently
+        degrading to an unverified payload — NeoForge installer JARs are
+        ``java -jar`` payloads, so an unverified install equals arbitrary
+        code execution from the Maven path.
+
         Returns ``(path, None)`` on success or ``(None, error_message)``.
         """
-        import hashlib
-
         # loader_version is pre-validated at the install() boundary; this
         # extra resolve()+relative_to() is defence-in-depth.
         target = self._resolve_within_install_path(
             f"neoforge-{loader_version}-installer.jar"
         )
-        hasher = hashlib.sha1()
-        try:
-            with self.session.get(
-                self._installer_jar_url(loader_version), stream=True, timeout=300
-            ) as response:
-                response.raise_for_status()
-                total_size = int(response.headers.get("Content-Length", 0))
-                downloaded = 0
-                with open(target, "wb") as fh:
-                    for chunk in response.iter_content(chunk_size=65536):
-                        if chunk:
-                            fh.write(chunk)
-                            hasher.update(chunk)
-                            downloaded += len(chunk)
-                            self._report(
-                                progress_callback,
-                                "downloading_installer",
-                                bytes_done=downloaded,
-                                bytes_total=total_size,
-                            )
-        except requests.RequestException as exc:
-            target.unlink(missing_ok=True)
-            return None, f"Failed to download NeoForge installer: {exc}"
 
-        self._report(progress_callback, "verifying")
+        # Resolve the expected SHA1 first so we can hard-fail before doing
+        # the (potentially large) JAR download. A None return from
+        # ``_fetch_expected_sha1`` (transient 404 / Maven hiccup / endpoint
+        # drift) aborts the install instead of skipping verification.
         expected_sha1 = self._fetch_expected_sha1(loader_version)
         if not expected_sha1:
-            print(
-                f"WARNING: NeoForge installer SHA1 unavailable for "
-                f"{loader_version} — proceeding without integrity check."
+            return None, (
+                f"Could not retrieve NeoForge installer SHA1 for "
+                f"{loader_version} from Maven; refusing to install without "
+                f"an integrity check."
             )
-        if expected_sha1:
-            actual = hasher.hexdigest().lower()
-            if actual != expected_sha1:
-                target.unlink(missing_ok=True)
-                return None, (
-                    f"SHA1 checksum mismatch for installer JAR: "
-                    f"expected {expected_sha1}, got {actual}"
-                )
 
+        def _emit(bytes_done: int, bytes_total: int) -> None:
+            self._report(
+                progress_callback,
+                "downloading_installer",
+                bytes_done=bytes_done,
+                bytes_total=bytes_total,
+            )
+
+        try:
+            download_with_hash_verify(
+                self._installer_jar_url(loader_version),
+                target,
+                sha1=expected_sha1,
+                session=self.session,
+                timeout=300,
+                progress_callback=_emit,
+            )
+        except HashVerifyError as exc:
+            return None, str(exc)
+        except requests.RequestException as exc:
+            return None, f"Failed to download NeoForge installer: {exc}"
+        except OSError as exc:
+            return None, f"Failed to write NeoForge installer: {exc}"
+
+        self._report(progress_callback, "verifying")
         return target, None
 
     def _detect_args_file(self, loader_version: str) -> Optional[Path]:

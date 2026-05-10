@@ -1,17 +1,21 @@
 """LaunchSpec dataclass + InstallResult serialization."""
 from __future__ import annotations
 
+import hashlib
 import re
 from unittest.mock import MagicMock
 
 import pytest
+import requests
 
 from backend.server.installer.base import (
+    HashVerifyError,
     InstallerBase,
     InstallResult,
     InstallStatus,
     LaunchSpec,
     _validate_version_token,
+    download_with_hash_verify,
 )
 
 
@@ -418,3 +422,300 @@ def test_resolve_within_install_path_zero_parts_returns_install_root(tmp_path):
 
     out = inst._resolve_within_install_path()
     assert out == tmp_path.resolve()
+
+
+# ---------- B11 download_with_hash_verify (S7 Sicherheits-Block) ----------
+#
+# Helper consolidates the streaming + hash-verify dance previously copied
+# across vanilla/neoforge/quilt + the modrinth client. Lazy-init: only the
+# requested algos run. Mismatch unlinks the partial file and raises
+# HashVerifyError; network/OSError unlink and re-raise the original.
+
+
+def _stub_session(payload: bytes) -> MagicMock:
+    """Return a MagicMock session whose .get streams ``payload`` in chunks."""
+    session = MagicMock()
+    response = MagicMock()
+    response.raise_for_status = MagicMock()
+    response.headers = {"Content-Length": str(len(payload))}
+    response.iter_content = lambda chunk_size: iter([payload])
+    response.__enter__ = lambda self: self
+    response.__exit__ = lambda *a: False
+    session.get = MagicMock(return_value=response)
+    return session
+
+
+def test_download_with_hash_verify_happy_path_sha1(tmp_path):
+    payload = b"hello world"
+    expected = hashlib.sha1(payload).hexdigest()
+    target = tmp_path / "out.bin"
+    session = _stub_session(payload)
+
+    download_with_hash_verify(
+        "https://example.invalid/x", target, sha1=expected, session=session
+    )
+
+    assert target.read_bytes() == payload
+
+
+def test_download_with_hash_verify_happy_path_sha512(tmp_path):
+    payload = b"hello world"
+    expected = hashlib.sha512(payload).hexdigest()
+    target = tmp_path / "out.bin"
+    session = _stub_session(payload)
+
+    download_with_hash_verify(
+        "https://example.invalid/x", target, sha512=expected, session=session
+    )
+
+    assert target.read_bytes() == payload
+
+
+def test_download_with_hash_verify_no_hash_pass_through(tmp_path):
+    """Both sha1 and sha512 None → bytes are still written (no integrity gate)."""
+    payload = b"\x00\x01\x02"
+    target = tmp_path / "raw.bin"
+    session = _stub_session(payload)
+
+    download_with_hash_verify("https://example.invalid/x", target, session=session)
+
+    assert target.read_bytes() == payload
+
+
+def test_download_with_hash_verify_sha1_mismatch_unlinks_and_raises(tmp_path):
+    payload = b"hello world"
+    bad_sha1 = "deadbeef" * 5  # 40 hex chars, intentionally wrong
+    target = tmp_path / "evil.bin"
+    session = _stub_session(payload)
+
+    with pytest.raises(HashVerifyError, match="SHA1"):
+        download_with_hash_verify(
+            "https://example.invalid/x", target, sha1=bad_sha1, session=session
+        )
+
+    assert not target.exists()
+
+
+def test_download_with_hash_verify_sha512_mismatch_unlinks_and_raises(tmp_path):
+    payload = b"hello world"
+    bad_sha512 = "deadbeef" * 16  # 128 hex chars, intentionally wrong
+    target = tmp_path / "evil.bin"
+    session = _stub_session(payload)
+
+    with pytest.raises(HashVerifyError, match="SHA512"):
+        download_with_hash_verify(
+            "https://example.invalid/x", target, sha512=bad_sha512, session=session
+        )
+
+    assert not target.exists()
+
+
+def test_download_with_hash_verify_sha512_checked_before_sha1(tmp_path):
+    """Both supplied: SHA-512 mismatch wins even when SHA-1 happens to match.
+
+    Pins the helper's strong-hash-first ordering — relevant when an attacker
+    has produced a SHA-1 collision on a payload that does not match the
+    SHA-512 the upstream API publishes.
+    """
+    payload = b"hello world"
+    correct_sha1 = hashlib.sha1(payload).hexdigest()
+    bad_sha512 = "deadbeef" * 16
+    target = tmp_path / "evil.bin"
+    session = _stub_session(payload)
+
+    with pytest.raises(HashVerifyError, match="SHA512"):
+        download_with_hash_verify(
+            "https://example.invalid/x",
+            target,
+            sha1=correct_sha1,
+            sha512=bad_sha512,
+            session=session,
+        )
+
+    assert not target.exists()
+
+
+def test_download_with_hash_verify_network_failure_cleanup(tmp_path):
+    """RequestException mid-stream: partial file is unlinked + exception re-raised."""
+    target = tmp_path / "partial.bin"
+    # Pre-create a stub partial file to verify cleanup actively unlinks.
+    target.write_bytes(b"junk")
+
+    session = MagicMock()
+    session.get.side_effect = requests.ConnectionError("boom")
+
+    with pytest.raises(requests.RequestException):
+        download_with_hash_verify(
+            "https://example.invalid/x", target, sha1="0" * 40, session=session
+        )
+
+    assert not target.exists()
+
+
+def test_download_with_hash_verify_lazy_init_skips_unrequested_hashers(tmp_path):
+    """When sha512 isn't requested, the SHA-512 hasher must not be constructed.
+
+    Pins the [SMELL] fix flagged in the modrinth_client inventory: the original
+    ``_download_and_verify`` always built both hashers regardless of need.
+    """
+    import backend.server.installer.base as base_mod
+
+    payload = b"abc" * 100
+    expected_sha1 = hashlib.sha1(payload).hexdigest()
+    target = tmp_path / "lazy.bin"
+    session = _stub_session(payload)
+
+    sha512_constructed = []
+    real_sha512 = hashlib.sha512
+
+    def _spy_sha512(*args, **kwargs):
+        sha512_constructed.append(True)
+        return real_sha512(*args, **kwargs)
+
+    real_hashlib = base_mod.hashlib
+
+    class _SpyHashlib:
+        sha1 = real_hashlib.sha1
+        sha512 = staticmethod(_spy_sha512)
+
+    base_mod.hashlib = _SpyHashlib  # type: ignore[assignment]
+    try:
+        download_with_hash_verify(
+            "https://example.invalid/x", target, sha1=expected_sha1, session=session
+        )
+    finally:
+        base_mod.hashlib = real_hashlib
+
+    assert sha512_constructed == []
+
+
+def test_download_with_hash_verify_progress_callback_sequence(tmp_path):
+    """progress_callback receives (bytes_done, bytes_total) per chunk, monotonic."""
+    chunks = [b"A" * 1000, b"B" * 500, b"C" * 250]
+    payload = b"".join(chunks)
+    expected = hashlib.sha1(payload).hexdigest()
+    target = tmp_path / "stream.bin"
+
+    session = MagicMock()
+    response = MagicMock()
+    response.raise_for_status = MagicMock()
+    response.headers = {"Content-Length": str(len(payload))}
+    response.iter_content = lambda chunk_size: iter(chunks)
+    response.__enter__ = lambda self: self
+    response.__exit__ = lambda *a: False
+    session.get = MagicMock(return_value=response)
+
+    events: list[tuple[int, int]] = []
+    download_with_hash_verify(
+        "https://example.invalid/x",
+        target,
+        sha1=expected,
+        session=session,
+        progress_callback=lambda done, total: events.append((done, total)),
+    )
+
+    bytes_done = [done for done, _ in events]
+    bytes_total = [total for _, total in events]
+    assert bytes_done == sorted(bytes_done)
+    assert bytes_done[-1] == len(payload)
+    assert all(t == len(payload) for t in bytes_total)
+
+
+def test_download_with_hash_verify_swallows_progress_callback_errors(tmp_path):
+    """A misbehaving progress callback must not abort the download (parity with _report)."""
+    payload = b"OK"
+    expected = hashlib.sha1(payload).hexdigest()
+    target = tmp_path / "robust.bin"
+    session = _stub_session(payload)
+
+    def explosive(done, total):
+        raise RuntimeError("never propagated")
+
+    download_with_hash_verify(
+        "https://example.invalid/x",
+        target,
+        sha1=expected,
+        session=session,
+        progress_callback=explosive,
+    )
+
+    assert target.read_bytes() == payload
+
+
+# ---------- B11 Loader hard-fail invariants ----------
+
+
+def test_neoforge_install_hard_fails_when_sha1_unavailable(tmp_path):
+    """NeoForge: missing _fetch_expected_sha1 → install aborts with integrity message.
+
+    Pins the S7 fix: previously a None SHA1 silently degraded to an
+    unverified install (just printed a WARNING).
+    """
+    from backend.server.installer.neoforge import NeoForgeInstaller
+    inst = NeoForgeInstaller(tmp_path)
+
+    fake_maven = {"isSnapshot": False, "versions": ["21.1.228"]}
+
+    session = MagicMock()
+
+    def get(url, **_):
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        if "api/maven/versions/releases" in url:
+            resp.json.return_value = fake_maven
+        elif url.endswith(".sha1"):
+            # Empty body → _fetch_expected_sha1 returns None → hard-fail.
+            resp.text = ""
+        return resp
+
+    session.get.side_effect = get
+    inst.session = session
+
+    result = inst.install("1.21.1")
+
+    assert result.success is False
+    assert "sha1" in result.message.lower() or "integrity" in result.message.lower()
+    # Refusal must be BEFORE the JAR download — no installer JAR on disk.
+    assert not list(tmp_path.glob("neoforge-*-installer.jar"))
+
+
+def test_vanilla_install_hard_fails_when_manifest_omits_sha1(tmp_path):
+    """Vanilla: missing downloads.server.sha1 in piston-meta → install refuses.
+
+    Pins the S7 fix for vanilla: the previous code silently downloaded
+    without verification when the manifest omitted the SHA1 field.
+    """
+    from backend.server.installer.vanilla import VanillaInstaller
+    inst = VanillaInstaller(tmp_path)
+
+    manifest = {
+        "versions": [
+            {"id": "1.21.4", "type": "release", "url": "https://example.invalid/v.json"}
+        ],
+    }
+    # Note: no "sha1" key in downloads.server.
+    version_meta = {
+        "downloads": {"server": {"url": "https://example.invalid/server.jar"}}
+    }
+
+    session = MagicMock()
+
+    def get(url, **_):
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.headers = {"Content-Length": "0"}
+        if "version_manifest" in url:
+            resp.json.return_value = manifest
+        elif "v.json" in url:
+            resp.json.return_value = version_meta
+        return resp
+
+    session.get.side_effect = get
+    inst.session = session
+
+    result = inst.install("1.21.4")
+
+    assert result.success is False
+    assert "integrity" in result.message.lower() or "sha1" in result.message.lower()
+    # No server.jar on disk: refusal happens before download.
+    assert not (tmp_path / "server.jar").exists()

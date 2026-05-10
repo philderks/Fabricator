@@ -1,4 +1,5 @@
 """Abstract base class for Minecraft server installers."""
+import hashlib
 import os
 import re
 from abc import ABC, abstractmethod
@@ -7,7 +8,15 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable, List, Optional, Dict, Any
 
+import requests
+
 DIR_PERMISSIONS = 0o775
+
+# Streaming chunk size for ``download_with_hash_verify``; matches the value
+# used at the Modrinth-client + per-loader sites prior to consolidation. 64 KiB
+# strikes a balance between per-chunk syscall overhead and progress-callback
+# granularity for multi-MB installer JARs.
+_DOWNLOAD_CHUNK_SIZE = 65536
 
 # Allowlist for version tokens that flow into filenames or subprocess args.
 # Covers Mojang/loader version shapes: ``1.20.1``, ``b1.7.3``, ``21.1.228``,
@@ -46,6 +55,94 @@ def _validate_version_token(value: str, *, field_name: str) -> str:
             f"and must not be a dots-only segment"
         )
     return value
+
+
+class HashVerifyError(Exception):
+    """Raised when a downloaded file's hash does not match the expected value.
+
+    Distinct from ``requests.RequestException`` so callers can branch on the
+    integrity-failure path (delete + abort install) versus a transient network
+    error (retryable, B12).
+    """
+
+
+def download_with_hash_verify(
+    url: str,
+    target: Path,
+    *,
+    sha1: Optional[str] = None,
+    sha512: Optional[str] = None,
+    session: Optional[requests.Session] = None,
+    timeout: int = 60,
+    chunk_size: int = _DOWNLOAD_CHUNK_SIZE,
+    progress_callback: Optional["Callable[[int, int], None]"] = None,
+) -> None:
+    """Download ``url`` to ``target`` and verify the body hash.
+
+    Lazy-init: only the requested hash algorithms run. Both ``sha1`` and
+    ``sha512`` are optional; passing ``None`` for both downloads without an
+    integrity check (the helper still streams + cleans up on network/OSError
+    errors, which is why Loader sites without an upstream-published hash —
+    e.g. Fabric Meta's ``/server/jar`` endpoint — still go through here).
+
+    On hash mismatch the partial ``target`` is unlinked and ``HashVerifyError``
+    is raised. On network or OSError the partial file is unlinked and the
+    original exception is re-raised.
+
+    ``progress_callback`` (optional) is invoked as ``(bytes_done, bytes_total)``
+    after each written chunk. ``bytes_total`` is taken from the ``Content-Length``
+    header (0 if absent). All exceptions raised by the callback are swallowed
+    so a misbehaving observer never aborts an in-flight install.
+    """
+    sha1_hasher = hashlib.sha1() if sha1 else None
+    sha512_hasher = hashlib.sha512() if sha512 else None
+
+    target = Path(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    http = session if session is not None else requests
+    bytes_done = 0
+
+    try:
+        with http.get(url, stream=True, timeout=timeout) as response:
+            response.raise_for_status()
+            bytes_total = int(response.headers.get("Content-Length", 0))
+            with open(target, "wb") as fh:
+                for chunk in response.iter_content(chunk_size=chunk_size):
+                    if not chunk:
+                        continue
+                    fh.write(chunk)
+                    if sha1_hasher is not None:
+                        sha1_hasher.update(chunk)
+                    if sha512_hasher is not None:
+                        sha512_hasher.update(chunk)
+                    bytes_done += len(chunk)
+                    if progress_callback is not None:
+                        try:
+                            progress_callback(bytes_done, bytes_total)
+                        except Exception:
+                            pass
+    except (requests.RequestException, OSError):
+        target.unlink(missing_ok=True)
+        raise
+
+    # Verify after the file is fully written. SHA-512 first because it's the
+    # strictly stronger guarantee — if both are supplied we want the strong
+    # check to gate even if SHA-1 happens to collide with attacker input.
+    if sha512_hasher is not None and sha512:
+        actual = sha512_hasher.hexdigest().lower()
+        if actual != sha512.lower():
+            target.unlink(missing_ok=True)
+            raise HashVerifyError(
+                f"SHA512 mismatch for {url}: expected {sha512}, got {actual}"
+            )
+    if sha1_hasher is not None and sha1:
+        actual = sha1_hasher.hexdigest().lower()
+        if actual != sha1.lower():
+            target.unlink(missing_ok=True)
+            raise HashVerifyError(
+                f"SHA1 mismatch for {url}: expected {sha1}, got {actual}"
+            )
 
 
 class InstallStatus(Enum):
