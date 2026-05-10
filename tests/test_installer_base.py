@@ -17,6 +17,7 @@ from backend.server.installer.base import (
     SubprocessTimeout,
     _validate_version_token,
     download_with_hash_verify,
+    request_with_retry,
     run_subprocess_streaming,
 )
 
@@ -748,13 +749,17 @@ def test_download_with_hash_verify_atomic_no_partial_target_on_network_error(tmp
     assert not (tmp_path / "installer.jar.tmp").exists()
 
 
-def test_download_with_hash_verify_atomic_preserves_existing_target_on_failure(tmp_path):
+def test_download_with_hash_verify_clean_slate_on_failure_removes_existing_target(tmp_path):
     """Pre-existing ``target`` must not survive a failed re-download.
 
     Contract: the helper guarantees a clean slate on failure — either the
     new (verified) bytes appear at ``target``, or ``target`` is absent. A
     stale-but-present ``target`` from a prior pass would defeat the
-    file-existence checks at install-resume time.
+    file-existence checks at install-resume time. Note that this test
+    asserts the active-removal behaviour (B12b contract clarification:
+    the docstring used to say "leaves target untouched" but the code
+    has always actively unlinked the pre-existing target — we treat the
+    code as the source of truth and aligned the docstring + name).
     """
     target = tmp_path / "installer.jar"
     target.write_bytes(b"stale-from-prior-run")
@@ -932,3 +937,413 @@ def test_run_subprocess_streaming_unknown_executable_raises_oserror(tmp_path):
 
     with pytest.raises((FileNotFoundError, OSError)):
         run_subprocess_streaming([str(nonexistent), "--help"])
+
+
+# ---------- B12b request_with_retry ----------
+#
+# Wrapper around idempotent-GET callables that absorbs transient network /
+# 5xx / 408 / 429 errors with exponential backoff. Cryptographic mismatches
+# (HashVerifyError) and 4xx-other are NEVER retried — pinning that boundary
+# is the whole point of these tests.
+
+
+def _http_error_with_status(status: int) -> requests.HTTPError:
+    """Build a requests.HTTPError carrying a response with ``status``."""
+    response = MagicMock()
+    response.status_code = status
+    return requests.HTTPError(f"status {status}", response=response)
+
+
+def test_request_with_retry_happy_path_first_attempt_succeeds():
+    """No retry needed: callable returns on first call."""
+    calls = []
+
+    def ok():
+        calls.append(1)
+        return "result"
+
+    assert request_with_retry(ok, retries=3, initial_backoff=0) == "result"
+    assert calls == [1]
+
+
+def test_request_with_retry_retries_on_connection_error_then_succeeds(monkeypatch):
+    """ConnectionError on first attempt, success on second → returns the value."""
+    monkeypatch.setattr("backend.server.installer.base.time.sleep", lambda _: None)
+    attempts = []
+
+    def flaky():
+        attempts.append(len(attempts) + 1)
+        if len(attempts) == 1:
+            raise requests.ConnectionError("transient")
+        return "ok"
+
+    assert request_with_retry(flaky, retries=3, initial_backoff=0) == "ok"
+    assert attempts == [1, 2]
+
+
+def test_request_with_retry_retries_on_timeout(monkeypatch):
+    """requests.Timeout is part of the retry whitelist."""
+    monkeypatch.setattr("backend.server.installer.base.time.sleep", lambda _: None)
+    attempts = []
+
+    def flaky():
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise requests.Timeout("slow")
+        return "done"
+
+    assert request_with_retry(flaky, retries=3, initial_backoff=0) == "done"
+    assert len(attempts) == 3
+
+
+def test_request_with_retry_exhausts_retries_and_reraises_last(monkeypatch):
+    """All attempts fail → the last exception propagates."""
+    monkeypatch.setattr("backend.server.installer.base.time.sleep", lambda _: None)
+    attempts = []
+
+    def always_fails():
+        attempts.append(1)
+        raise requests.ConnectionError(f"attempt {len(attempts)}")
+
+    with pytest.raises(requests.ConnectionError, match="attempt 4"):
+        request_with_retry(always_fails, retries=3, initial_backoff=0)
+    # 1 initial + 3 retries = 4 attempts total.
+    assert len(attempts) == 4
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 404])
+def test_request_with_retry_does_not_retry_4xx_other(status, monkeypatch):
+    """Caller-side errors (400/401/403/404) raise immediately — not transient."""
+    sleeps = []
+    monkeypatch.setattr(
+        "backend.server.installer.base.time.sleep",
+        lambda s: sleeps.append(s),
+    )
+    attempts = []
+
+    def fails_4xx():
+        attempts.append(1)
+        raise _http_error_with_status(status)
+
+    with pytest.raises(requests.HTTPError):
+        request_with_retry(fails_4xx, retries=3, initial_backoff=0)
+    assert len(attempts) == 1, "4xx-other must not retry"
+    assert sleeps == [], "4xx-other must not sleep"
+
+
+@pytest.mark.parametrize("status", [500, 502, 503, 504, 408, 429])
+def test_request_with_retry_retries_5xx_408_429(status, monkeypatch):
+    """5xx + 408 (timeout) + 429 (rate-limit) all retry until exhaustion."""
+    monkeypatch.setattr("backend.server.installer.base.time.sleep", lambda _: None)
+    attempts = []
+
+    def flaky():
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise _http_error_with_status(status)
+        return "recovered"
+
+    assert request_with_retry(flaky, retries=3, initial_backoff=0) == "recovered"
+    assert len(attempts) == 2
+
+
+def test_request_with_retry_does_not_retry_hashverifyerror(monkeypatch):
+    """A cryptographic mismatch is by definition non-transient — no retry."""
+    sleeps = []
+    monkeypatch.setattr(
+        "backend.server.installer.base.time.sleep",
+        lambda s: sleeps.append(s),
+    )
+    attempts = []
+
+    def hash_fail():
+        attempts.append(1)
+        raise HashVerifyError("SHA1 mismatch")
+
+    with pytest.raises(HashVerifyError):
+        request_with_retry(hash_fail, retries=3, initial_backoff=0)
+    assert len(attempts) == 1
+    assert sleeps == []
+
+
+def test_request_with_retry_does_not_retry_value_error(monkeypatch):
+    """Non-whitelisted exceptions surface immediately (no implicit catch-all)."""
+    sleeps = []
+    monkeypatch.setattr(
+        "backend.server.installer.base.time.sleep",
+        lambda s: sleeps.append(s),
+    )
+    attempts = []
+
+    def boom():
+        attempts.append(1)
+        raise ValueError("caller bug")
+
+    with pytest.raises(ValueError, match="caller bug"):
+        request_with_retry(boom, retries=3, initial_backoff=0)
+    assert len(attempts) == 1
+    assert sleeps == []
+
+
+def test_request_with_retry_on_retry_callback_invoked_with_attempt_and_exc(monkeypatch):
+    """on_retry receives (1-indexed attempt, exception) for each retry."""
+    monkeypatch.setattr("backend.server.installer.base.time.sleep", lambda _: None)
+    seen: list[tuple[int, BaseException]] = []
+    attempts = []
+
+    def flaky():
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise requests.ConnectionError(f"hiccup {len(attempts)}")
+        return "ok"
+
+    request_with_retry(
+        flaky,
+        retries=3,
+        initial_backoff=0,
+        on_retry=lambda n, exc: seen.append((n, exc)),
+    )
+    # Two retries scheduled (after attempt 1 and attempt 2).
+    assert [n for n, _ in seen] == [1, 2]
+    assert all(isinstance(exc, requests.ConnectionError) for _, exc in seen)
+
+
+def test_request_with_retry_swallows_on_retry_errors(monkeypatch):
+    """A misbehaving on_retry callback must not abort the retry loop."""
+    monkeypatch.setattr("backend.server.installer.base.time.sleep", lambda _: None)
+    attempts = []
+
+    def flaky():
+        attempts.append(1)
+        if len(attempts) < 2:
+            raise requests.ConnectionError("once")
+        return "ok"
+
+    def explosive(_n, _exc):
+        raise RuntimeError("never propagated")
+
+    assert request_with_retry(
+        flaky, retries=3, initial_backoff=0, on_retry=explosive
+    ) == "ok"
+    assert len(attempts) == 2
+
+
+def test_request_with_retry_zero_retries_is_single_attempt(monkeypatch):
+    """retries=0 → no retry on transient errors; raise immediately."""
+    sleeps = []
+    monkeypatch.setattr(
+        "backend.server.installer.base.time.sleep",
+        lambda s: sleeps.append(s),
+    )
+    attempts = []
+
+    def flaky():
+        attempts.append(1)
+        raise requests.ConnectionError("once")
+
+    with pytest.raises(requests.ConnectionError):
+        request_with_retry(flaky, retries=0, initial_backoff=0)
+    assert len(attempts) == 1
+    assert sleeps == []
+
+
+# ---------- B12b download_with_hash_verify retries opt-in ----------
+
+
+def test_download_with_hash_verify_retries_param_retries_transient_failure(
+    tmp_path, monkeypatch
+):
+    """retries=3 absorbs a transient ConnectionError on the first call."""
+    monkeypatch.setattr("backend.server.installer.base.time.sleep", lambda _: None)
+    payload = b"hello world"
+    expected_sha1 = hashlib.sha1(payload).hexdigest()
+    target = tmp_path / "out.bin"
+
+    call_count = []
+
+    def make_response():
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.headers = {"Content-Length": str(len(payload))}
+        resp.iter_content = lambda chunk_size: iter([payload])
+        resp.__enter__ = lambda self: self
+        resp.__exit__ = lambda *a: False
+        return resp
+
+    def flaky_get(url, **kwargs):
+        call_count.append(1)
+        if len(call_count) == 1:
+            raise requests.ConnectionError("transient")
+        return make_response()
+
+    session = MagicMock()
+    session.get = flaky_get
+
+    download_with_hash_verify(
+        "https://example.invalid/x",
+        target,
+        sha1=expected_sha1,
+        session=session,
+        retries=3,
+    )
+
+    assert target.read_bytes() == payload
+    assert len(call_count) == 2  # one failure + one retry success
+
+
+def test_download_with_hash_verify_retries_does_not_retry_hash_mismatch(
+    tmp_path, monkeypatch
+):
+    """retries=3 must NOT mask a SHA1 mismatch — cryptographic, never transient."""
+    monkeypatch.setattr("backend.server.installer.base.time.sleep", lambda _: None)
+    payload = b"hello world"
+    bad_sha1 = "deadbeef" * 5
+    target = tmp_path / "evil.bin"
+    session = _stub_session(payload)
+
+    with pytest.raises(HashVerifyError, match="SHA1"):
+        download_with_hash_verify(
+            "https://example.invalid/x",
+            target,
+            sha1=bad_sha1,
+            session=session,
+            retries=3,
+        )
+
+    # _stub_session.get is a MagicMock; we can read its call_count.
+    assert session.get.call_count == 1, "HashVerifyError must not trigger retry"
+    assert not target.exists()
+
+
+def test_download_with_hash_verify_retries_zero_default_keeps_legacy_contract(
+    tmp_path,
+):
+    """Default retries=0 → first transient error propagates (legacy behaviour)."""
+    target = tmp_path / "out.bin"
+    session = MagicMock()
+    session.get.side_effect = requests.ConnectionError("boom")
+
+    with pytest.raises(requests.RequestException):
+        download_with_hash_verify(
+            "https://example.invalid/x", target, sha1="0" * 40, session=session
+        )
+    assert session.get.call_count == 1
+
+
+# ---------- B12b Forge _fetch_expected_sha1 empty-body robustness ----------
+#
+# The previous implementation collapsed empty / whitespace-only / non-hex
+# responses through an IndexError-swallow; the call site then silently
+# degraded to "no integrity check". B12b: every shape that isn't a real
+# 40-char hex SHA-1 returns None deterministically, and the retry helper
+# absorbs transient 5xx that previously fell through the same path.
+
+
+def _stub_forge_session_with_sha1_text(sha1_text: str) -> MagicMock:
+    """Stub a session whose .sha1 endpoint returns ``sha1_text``."""
+    session = MagicMock()
+
+    def get(url, **_):
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        if url.endswith(".sha1"):
+            resp.text = sha1_text
+        return resp
+
+    session.get.side_effect = get
+    return session
+
+
+def test_forge_fetch_expected_sha1_returns_token_for_valid_response(tmp_path):
+    """Happy path: 40-char hex token is returned lowercased."""
+    from backend.server.installer.forge import ForgeInstaller
+    inst = ForgeInstaller(tmp_path)
+    inst.session = _stub_forge_session_with_sha1_text("ABC" + "1" * 37)
+
+    out = inst._fetch_expected_sha1("1.20.1", "47.4.10")
+    assert out == ("abc" + "1" * 37)
+
+
+def test_forge_fetch_expected_sha1_returns_none_for_empty_body(tmp_path):
+    """Empty body → None (was IndexError-swallowed before B12b)."""
+    from backend.server.installer.forge import ForgeInstaller
+    inst = ForgeInstaller(tmp_path)
+    inst.session = _stub_forge_session_with_sha1_text("")
+
+    assert inst._fetch_expected_sha1("1.20.1", "47.4.10") is None
+
+
+def test_forge_fetch_expected_sha1_returns_none_for_whitespace_only_body(tmp_path):
+    """Whitespace-only body → None."""
+    from backend.server.installer.forge import ForgeInstaller
+    inst = ForgeInstaller(tmp_path)
+    inst.session = _stub_forge_session_with_sha1_text("   \n\t  ")
+
+    assert inst._fetch_expected_sha1("1.20.1", "47.4.10") is None
+
+
+def test_forge_fetch_expected_sha1_returns_none_for_short_token(tmp_path):
+    """Short / wrong-length token → None."""
+    from backend.server.installer.forge import ForgeInstaller
+    inst = ForgeInstaller(tmp_path)
+    inst.session = _stub_forge_session_with_sha1_text("abc123")
+
+    assert inst._fetch_expected_sha1("1.20.1", "47.4.10") is None
+
+
+def test_forge_fetch_expected_sha1_returns_none_for_non_hex_token(tmp_path):
+    """40-char but contains non-hex chars → None."""
+    from backend.server.installer.forge import ForgeInstaller
+    inst = ForgeInstaller(tmp_path)
+    # 40 chars but with 'z' (non-hex).
+    inst.session = _stub_forge_session_with_sha1_text("z" + "0" * 39)
+
+    assert inst._fetch_expected_sha1("1.20.1", "47.4.10") is None
+
+
+def test_forge_fetch_expected_sha1_strips_filename_suffix(tmp_path):
+    """Some Maven sha1 endpoints emit '<hash>  <filename>' — first token wins."""
+    from backend.server.installer.forge import ForgeInstaller
+    inst = ForgeInstaller(tmp_path)
+    sha1 = "a" * 40
+    inst.session = _stub_forge_session_with_sha1_text(
+        f"{sha1}  forge-1.20.1-47.4.10-installer.jar\n"
+    )
+
+    assert inst._fetch_expected_sha1("1.20.1", "47.4.10") == sha1
+
+
+# ---------- B12b NeoForge _fetch_expected_sha1 empty-body robustness ----------
+
+
+def _stub_neoforge_session_with_sha1_text(sha1_text: str) -> MagicMock:
+    """Stub a session whose .sha1 endpoint returns ``sha1_text``."""
+    session = MagicMock()
+
+    def get(url, **_):
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        if url.endswith(".sha1"):
+            resp.text = sha1_text
+        return resp
+
+    session.get.side_effect = get
+    return session
+
+
+def test_neoforge_fetch_expected_sha1_returns_none_for_empty_body(tmp_path):
+    """Empty body parity with the Forge fix."""
+    from backend.server.installer.neoforge import NeoForgeInstaller
+    inst = NeoForgeInstaller(tmp_path)
+    inst.session = _stub_neoforge_session_with_sha1_text("")
+
+    assert inst._fetch_expected_sha1("21.1.228") is None
+
+
+def test_neoforge_fetch_expected_sha1_returns_none_for_non_hex(tmp_path):
+    """Non-hex token parity with the Forge fix."""
+    from backend.server.installer.neoforge import NeoForgeInstaller
+    inst = NeoForgeInstaller(tmp_path)
+    inst.session = _stub_neoforge_session_with_sha1_text("g" * 40)
+
+    assert inst._fetch_expected_sha1("21.1.228") is None

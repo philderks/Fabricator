@@ -41,6 +41,7 @@ from .base import (
     SubprocessTimeout,
     _validate_version_token,
     download_with_hash_verify,
+    request_with_retry,
     run_subprocess_streaming,
 )
 
@@ -81,11 +82,27 @@ class ForgeInstaller(InstallerBase):
     # ---------- Version listing ----------
 
     def _fetch_promotions(self) -> Dict[str, str]:
-        """Return the flat ``<mc>-channel → build`` dict, or empty on error."""
-        try:
+        """Return the flat ``<mc>-channel → build`` dict, or empty on error.
+
+        Wrapped in :func:`request_with_retry` because Forge Maven has been
+        historically wobbly (transient 5xx / connection resets during peak
+        Modrinth traffic). The GET is idempotent, so retrying with backoff is
+        safe.
+        """
+        def _do_request() -> Dict[str, Any]:
             response = self.session.get(self.PROMOTIONS_URL, timeout=15)
             response.raise_for_status()
-            payload = response.json()
+            return response.json()
+
+        try:
+            payload = request_with_retry(
+                _do_request,
+                retries=3,
+                on_retry=lambda attempt, exc: logger.warning(
+                    "Retrying Forge promotions fetch (attempt %d): %s",
+                    attempt, exc,
+                ),
+            )
         except requests.RequestException:
             logger.exception("Failed to fetch Forge promotions")
             return {}
@@ -173,15 +190,51 @@ class ForgeInstaller(InstallerBase):
         return self._installer_jar_url(mc_version, build) + ".sha1"
 
     def _fetch_expected_sha1(self, mc_version: str, build: str) -> Optional[str]:
-        try:
+        """Resolve the expected installer-jar SHA1 from Forge Maven.
+
+        Defensive parse (B12b): an empty body, whitespace-only body, or
+        non-hex / wrong-length token returns ``None`` deterministically. The
+        previous implementation relied on ``IndexError`` from ``split()[0]``
+        on an empty body — silently caught by a broad ``except (..., IndexError)``
+        — so a flaky Maven response would degrade to "no integrity check" with
+        no visibility. Now every shape that isn't a real 40-char hex SHA-1
+        returns ``None`` via the explicit branches, and the caller (Forge:
+        WARN-and-proceed; NeoForge: hard-fail) decides the policy.
+
+        Retry-wrapped (B12b): the ``.sha1`` URL has been observed to flap
+        with transient 5xx during Forge Maven incidents. Idempotent GET → safe.
+        """
+        def _do_request() -> requests.Response:
             response = self.session.get(
                 self._installer_jar_sha1_url(mc_version, build), timeout=15
             )
             response.raise_for_status()
-            text = (response.text or "").strip().split()[0].lower()
-            return text if len(text) == 40 else None
-        except (requests.RequestException, IndexError):
+            return response
+
+        try:
+            response = request_with_retry(
+                _do_request,
+                retries=3,
+                on_retry=lambda attempt, exc: logger.warning(
+                    "Retrying Forge SHA1 fetch for %s-%s (attempt %d): %s",
+                    mc_version, build, attempt, exc,
+                ),
+            )
+        except requests.RequestException:
             return None
+
+        text = (response.text or "").strip()
+        if not text:
+            return None
+        parts = text.split()
+        if not parts:
+            return None
+        sha1_token = parts[0].lower()
+        if len(sha1_token) != 40 or not all(
+            c in "0123456789abcdef" for c in sha1_token
+        ):
+            return None
+        return sha1_token
 
     def _download_installer_jar(
         self,

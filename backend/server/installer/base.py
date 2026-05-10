@@ -9,9 +9,11 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Callable, List, Optional, Dict, Any
+from typing import Callable, List, Optional, Dict, Any, TypeVar
 
 import requests
+
+T = TypeVar("T")
 
 DIR_PERMISSIONS = 0o775
 
@@ -67,6 +69,88 @@ class HashVerifyError(Exception):
     integrity-failure path (delete + abort install) versus a transient network
     error (retryable, B12).
     """
+
+
+def _is_retryable_status(status: int) -> bool:
+    """Return True for HTTP statuses worth retrying on an idempotent GET.
+
+    5xx (server-side hiccups), 408 (request timeout), and 429 (rate-limit) are
+    the conventional "retry with backoff" set. 4xx-other (400/401/403/404)
+    indicates a caller-side problem that retrying cannot fix and must surface
+    immediately so the install route reports a clear failure.
+    """
+    return status in (408, 429) or 500 <= status < 600
+
+
+def request_with_retry(
+    request_callable: Callable[[], T],
+    *,
+    retries: int = 3,
+    initial_backoff: float = 0.5,
+    backoff_factor: float = 2.0,
+    max_backoff: float = 8.0,
+    on_retry: Optional[Callable[[int, BaseException], None]] = None,
+) -> T:
+    """Run ``request_callable`` with exponential backoff for transient errors.
+
+    Wrap the network-side work — typically a ``session.get(...)`` plus
+    ``raise_for_status()`` and JSON / SHA1 parsing — in a closure and pass it
+    in. The closure is re-invoked on retry, so any per-attempt setup (a fresh
+    response, a fresh stream) is correctly redone.
+
+    Retries on:
+        * ``requests.ConnectionError`` and ``requests.Timeout`` — transient
+          network-side conditions (DNS hiccup, TCP reset, idle-socket timeout).
+        * ``requests.HTTPError`` if ``response.status_code`` is retryable per
+          :func:`_is_retryable_status` (5xx + 408 + 429).
+
+    Does NOT retry:
+        * 4xx-other (400/401/403/404) — caller-side problem, not transient.
+        * :class:`HashVerifyError` — a cryptographic mismatch is never
+          transient. Retrying after a hash mismatch would offer a
+          malicious / corrupted upstream another shot at slipping bad bytes
+          past the gate.
+        * ``ValueError`` / ``OSError`` / any other non-listed exception — only
+          the explicit ``requests.*`` whitelist is retried.
+
+    ``retries`` is the count of *additional* attempts after the first; the
+    callable is invoked at most ``retries + 1`` times. Default 3 retries
+    matches the common "fast initial + three backed-off retries" pattern at
+    Maven / Modrinth / piston-meta.
+
+    ``on_retry(attempt, exception)`` is invoked for each retry (``attempt`` is
+    1-indexed). Typically forwards to ``logger.warning`` for visibility.
+    Exceptions raised by ``on_retry`` itself are swallowed (parity with the
+    ``_report`` / ``run_subprocess_streaming`` callback contracts) so a
+    misbehaving logger never aborts an in-flight install.
+
+    On exhaustion the last raised exception propagates unchanged.
+    """
+    attempt = 0
+    backoff = initial_backoff
+    last_exc: BaseException
+    while True:
+        try:
+            return request_callable()
+        except requests.HTTPError as exc:
+            response = exc.response
+            if response is None or not _is_retryable_status(response.status_code):
+                raise
+            if attempt >= retries:
+                raise
+            last_exc = exc
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            if attempt >= retries:
+                raise
+            last_exc = exc
+        attempt += 1
+        if on_retry is not None:
+            try:
+                on_retry(attempt, last_exc)
+            except Exception:
+                pass
+        time.sleep(min(backoff, max_backoff))
+        backoff *= backoff_factor
 
 
 class SubprocessTimeout(Exception):
@@ -229,6 +313,7 @@ def download_with_hash_verify(
     timeout: int = 60,
     chunk_size: int = _DOWNLOAD_CHUNK_SIZE,
     progress_callback: Optional["Callable[[int, int], None]"] = None,
+    retries: int = 0,
 ) -> None:
     """Download ``url`` to ``target`` and verify the body hash.
 
@@ -238,9 +323,13 @@ def download_with_hash_verify(
     errors, which is why Loader sites without an upstream-published hash —
     e.g. Fabric Meta's ``/server/jar`` endpoint — still go through here).
 
-    On hash mismatch the partial ``target`` is unlinked and ``HashVerifyError``
-    is raised. On network or OSError the partial file is unlinked and the
-    original exception is re-raised.
+    Clean-slate-on-failure (B12a contract): on ANY failure path — network
+    error, OSError mid-stream, hash mismatch, or final ``os.replace`` failure
+    — both the sibling ``.tmp`` AND any pre-existing ``target`` are unlinked
+    before the original exception is re-raised. The next install pass that
+    file-existence-checks ``target`` will therefore correctly re-download
+    instead of treating a stale-from-prior-run JAR as complete. Hash mismatch
+    raises :class:`HashVerifyError`; network/OS errors re-raise the original.
 
     ``progress_callback`` (optional) is invoked as ``(bytes_done, bytes_total)``
     after each written chunk. ``bytes_total`` is taken from the ``Content-Length``
@@ -249,76 +338,92 @@ def download_with_hash_verify(
 
     Atomic-write invariant (B12a): bytes are streamed to a sibling ``.tmp``
     file and ``os.replace``'d into ``target`` only after the hash gate passes.
-    A network mid-stream failure or hash mismatch leaves ``target`` untouched
-    — no partial / corrupt JAR can be observed by a subsequent install pass
-    that file-existence-checks before re-downloading.
+    A network mid-stream failure or hash mismatch leaves ``target`` absent —
+    no partial / corrupt JAR can be observed by a subsequent install pass.
+
+    ``retries`` (B12b): when > 0, the entire download attempt (including the
+    HTTP request, stream, and hash check) is wrapped in
+    :func:`request_with_retry` so transient network errors (5xx / 408 / 429 /
+    ConnectionError / Timeout) are retried with exponential backoff. A
+    :class:`HashVerifyError` is NEVER retried (cryptographic mismatch is by
+    definition non-transient). Default ``0`` keeps the legacy single-attempt
+    contract for callers that have not opted in.
     """
-    sha1_hasher = hashlib.sha1() if sha1 else None
-    sha512_hasher = hashlib.sha512() if sha512 else None
 
-    target = Path(target)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = target.with_suffix(target.suffix + ".tmp")
+    def _attempt() -> None:
+        sha1_hasher = hashlib.sha1() if sha1 else None
+        sha512_hasher = hashlib.sha512() if sha512 else None
 
-    http = session if session is not None else requests
-    bytes_done = 0
+        nonlocal_target = Path(target)
+        nonlocal_target.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = nonlocal_target.with_suffix(nonlocal_target.suffix + ".tmp")
 
-    try:
-        with http.get(url, stream=True, timeout=timeout) as response:
-            response.raise_for_status()
-            bytes_total = int(response.headers.get("Content-Length", 0))
-            with open(tmp_path, "wb") as fh:
-                for chunk in response.iter_content(chunk_size=chunk_size):
-                    if not chunk:
-                        continue
-                    fh.write(chunk)
-                    if sha1_hasher is not None:
-                        sha1_hasher.update(chunk)
-                    if sha512_hasher is not None:
-                        sha512_hasher.update(chunk)
-                    bytes_done += len(chunk)
-                    if progress_callback is not None:
-                        try:
-                            progress_callback(bytes_done, bytes_total)
-                        except Exception:
-                            pass
-    except (requests.RequestException, OSError):
-        tmp_path.unlink(missing_ok=True)
-        # Pre-existing partial ``target`` from an earlier failed run is also
-        # cleaned up — the contract is that on any failure path the caller
-        # observes a clean slate at ``target``.
-        target.unlink(missing_ok=True)
-        raise
+        http = session if session is not None else requests
+        bytes_done = 0
 
-    # Verify after the file is fully written. SHA-512 first because it's the
-    # strictly stronger guarantee — if both are supplied we want the strong
-    # check to gate even if SHA-1 happens to collide with attacker input.
-    if sha512_hasher is not None and sha512:
-        actual = sha512_hasher.hexdigest().lower()
-        if actual != sha512.lower():
+        try:
+            with http.get(url, stream=True, timeout=timeout) as response:
+                response.raise_for_status()
+                bytes_total = int(response.headers.get("Content-Length", 0))
+                with open(tmp_path, "wb") as fh:
+                    for chunk in response.iter_content(chunk_size=chunk_size):
+                        if not chunk:
+                            continue
+                        fh.write(chunk)
+                        if sha1_hasher is not None:
+                            sha1_hasher.update(chunk)
+                        if sha512_hasher is not None:
+                            sha512_hasher.update(chunk)
+                        bytes_done += len(chunk)
+                        if progress_callback is not None:
+                            try:
+                                progress_callback(bytes_done, bytes_total)
+                            except Exception:
+                                pass
+        except (requests.RequestException, OSError):
             tmp_path.unlink(missing_ok=True)
-            target.unlink(missing_ok=True)
-            raise HashVerifyError(
-                f"SHA512 mismatch for {url}: expected {sha512}, got {actual}"
-            )
-    if sha1_hasher is not None and sha1:
-        actual = sha1_hasher.hexdigest().lower()
-        if actual != sha1.lower():
-            tmp_path.unlink(missing_ok=True)
-            target.unlink(missing_ok=True)
-            raise HashVerifyError(
-                f"SHA1 mismatch for {url}: expected {sha1}, got {actual}"
-            )
+            # Pre-existing partial ``target`` from an earlier failed run is
+            # also cleaned up — the contract is that on any failure path the
+            # caller observes a clean slate at ``target``.
+            nonlocal_target.unlink(missing_ok=True)
+            raise
 
-    # Hash gate cleared (or hashing was disabled): atomically promote the
-    # ``.tmp`` to the final ``target``. ``os.replace`` is atomic on the same
-    # filesystem on POSIX and Windows alike — partial-file races between a
-    # crashing download and the next install pass are eliminated.
-    try:
-        os.replace(tmp_path, target)
-    except OSError:
-        tmp_path.unlink(missing_ok=True)
-        raise
+        # Verify after the file is fully written. SHA-512 first because it's
+        # the strictly stronger guarantee — if both are supplied we want the
+        # strong check to gate even if SHA-1 happens to collide with attacker
+        # input.
+        if sha512_hasher is not None and sha512:
+            actual = sha512_hasher.hexdigest().lower()
+            if actual != sha512.lower():
+                tmp_path.unlink(missing_ok=True)
+                nonlocal_target.unlink(missing_ok=True)
+                raise HashVerifyError(
+                    f"SHA512 mismatch for {url}: expected {sha512}, got {actual}"
+                )
+        if sha1_hasher is not None and sha1:
+            actual = sha1_hasher.hexdigest().lower()
+            if actual != sha1.lower():
+                tmp_path.unlink(missing_ok=True)
+                nonlocal_target.unlink(missing_ok=True)
+                raise HashVerifyError(
+                    f"SHA1 mismatch for {url}: expected {sha1}, got {actual}"
+                )
+
+        # Hash gate cleared (or hashing was disabled): atomically promote the
+        # ``.tmp`` to the final ``target``. ``os.replace`` is atomic on the
+        # same filesystem on POSIX and Windows alike — partial-file races
+        # between a crashing download and the next install pass are
+        # eliminated.
+        try:
+            os.replace(tmp_path, nonlocal_target)
+        except OSError:
+            tmp_path.unlink(missing_ok=True)
+            raise
+
+    if retries > 0:
+        request_with_retry(_attempt, retries=retries)
+    else:
+        _attempt()
 
 
 class InstallStatus(Enum):

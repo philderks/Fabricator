@@ -16,6 +16,7 @@ from .base import (
     SubprocessTimeout,
     _validate_version_token,
     download_with_hash_verify,
+    request_with_retry,
     run_subprocess_streaming,
 )
 from backend.utils import platform as platform_utils
@@ -69,14 +70,30 @@ class NeoForgeInstaller(InstallerBase):
     # ---------- Version listing ----------
 
     def _fetch_maven_versions(self) -> List[str]:
-        try:
+        """Return the NeoForged Maven version list, ``[]`` on hard failure.
+
+        Retry-wrapped (B12b): NeoForged Maven shares the same transient-5xx
+        pattern as the Forge Maven; idempotent GET so retry-with-backoff is
+        safe.
+        """
+        def _do_request() -> Dict[str, Any]:
             response = self.session.get(self.MAVEN_VERSIONS_URL, timeout=15)
             response.raise_for_status()
-            payload = response.json()
-            return list(payload.get("versions") or [])
+            return response.json()
+
+        try:
+            payload = request_with_retry(
+                _do_request,
+                retries=3,
+                on_retry=lambda attempt, exc: logger.warning(
+                    "Retrying NeoForge Maven versions fetch (attempt %d): %s",
+                    attempt, exc,
+                ),
+            )
         except requests.RequestException as exc:
-            print(f"Failed to fetch NeoForge versions: {exc}")
+            logger.warning("Failed to fetch NeoForge versions: %s", exc)
             return []
+        return list(payload.get("versions") or [])
 
     @staticmethod
     def _split_version(neoforge_version: str) -> Tuple[Optional[List[int]], bool]:
@@ -221,15 +238,43 @@ class NeoForgeInstaller(InstallerBase):
         return self._installer_jar_url(loader_version) + ".sha1"
 
     def _fetch_expected_sha1(self, loader_version: str) -> Optional[str]:
-        try:
+        """Resolve the expected installer-jar SHA1 from NeoForged Maven.
+
+        Same defensive empty-body / non-hex parse as
+        :meth:`ForgeInstaller._fetch_expected_sha1` (B12b). Retry-wrapped on
+        transient 5xx because Maven outages are observed in the wild.
+        """
+        def _do_request() -> requests.Response:
             response = self.session.get(
                 self._installer_jar_sha1_url(loader_version), timeout=15
             )
             response.raise_for_status()
-            text = (response.text or "").strip().split()[0].lower()
-            return text if len(text) == 40 else None
-        except (requests.RequestException, IndexError):
+            return response
+
+        try:
+            response = request_with_retry(
+                _do_request,
+                retries=3,
+                on_retry=lambda attempt, exc: logger.warning(
+                    "Retrying NeoForge SHA1 fetch for %s (attempt %d): %s",
+                    loader_version, attempt, exc,
+                ),
+            )
+        except requests.RequestException:
             return None
+
+        text = (response.text or "").strip()
+        if not text:
+            return None
+        parts = text.split()
+        if not parts:
+            return None
+        sha1_token = parts[0].lower()
+        if len(sha1_token) != 40 or not all(
+            c in "0123456789abcdef" for c in sha1_token
+        ):
+            return None
+        return sha1_token
 
     def _download_installer_jar(
         self,
@@ -282,6 +327,10 @@ class NeoForgeInstaller(InstallerBase):
                 session=self.session,
                 timeout=300,
                 progress_callback=_emit,
+                # B12b: retry transient 5xx / connection-resets on the JAR
+                # download. HashVerifyError is never retried (cryptographic
+                # mismatch is non-transient by definition).
+                retries=3,
             )
         except HashVerifyError as exc:
             return None, str(exc)

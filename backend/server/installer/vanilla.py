@@ -1,6 +1,7 @@
 """Vanilla server installer using Mojang piston-meta."""
 from __future__ import annotations
 
+import logging
 import requests
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -12,7 +13,11 @@ from .base import (
     InstallStatus,
     LaunchSpec,
     download_with_hash_verify,
+    request_with_retry,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class VanillaInstaller(InstallerBase):
@@ -42,15 +47,33 @@ class VanillaInstaller(InstallerBase):
         return "vanilla"
 
     def _fetch_manifest(self) -> Dict[str, Any]:
-        response = self.session.get(self.MANIFEST_URL, timeout=15)
-        response.raise_for_status()
-        return response.json()
+        """Fetch the Mojang piston-meta version manifest.
+
+        Retry-wrapped (B12b): piston-meta is generally rock-solid but the
+        idempotent GET pattern is the same as the loader Mavens, so we
+        absorb transient 5xx / connection-resets uniformly. ``raise_for_status``
+        + JSON parse run inside the closure so each retry gets a fresh
+        response.
+        """
+        def _do_request() -> Dict[str, Any]:
+            response = self.session.get(self.MANIFEST_URL, timeout=15)
+            response.raise_for_status()
+            return response.json()
+
+        return request_with_retry(
+            _do_request,
+            retries=3,
+            on_retry=lambda attempt, exc: logger.warning(
+                "Retrying Mojang manifest fetch (attempt %d): %s",
+                attempt, exc,
+            ),
+        )
 
     def get_minecraft_versions(self) -> List[Dict[str, Any]]:
         try:
             manifest = self._fetch_manifest()
         except requests.RequestException as exc:
-            print(f"Failed to fetch Mojang version manifest: {exc}")
+            logger.warning("Failed to fetch Mojang version manifest: %s", exc)
             return []
 
         out: List[Dict[str, Any]] = []
@@ -81,9 +104,23 @@ class VanillaInstaller(InstallerBase):
         return None
 
     def _fetch_version_meta(self, version_url: str) -> Dict[str, Any]:
-        response = self.session.get(version_url, timeout=15)
-        response.raise_for_status()
-        return response.json()
+        """Fetch a per-MC-version metadata document from piston-meta.
+
+        Retry-wrapped (B12b): same rationale as :meth:`_fetch_manifest`.
+        """
+        def _do_request() -> Dict[str, Any]:
+            response = self.session.get(version_url, timeout=15)
+            response.raise_for_status()
+            return response.json()
+
+        return request_with_retry(
+            _do_request,
+            retries=3,
+            on_retry=lambda attempt, exc: logger.warning(
+                "Retrying Mojang version-meta fetch (attempt %d): %s",
+                attempt, exc,
+            ),
+        )
 
     def _download_server_jar(
         self,
@@ -121,6 +158,9 @@ class VanillaInstaller(InstallerBase):
                 session=self.session,
                 timeout=300,
                 progress_callback=_emit,
+                # B12b: retry transient 5xx / connection-resets on the JAR
+                # download. HashVerifyError is never retried.
+                retries=3,
             )
         except HashVerifyError as exc:
             return None, str(exc)
