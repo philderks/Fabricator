@@ -6,9 +6,14 @@ import hashlib
 import json
 import re
 import shutil
+import sys
 import tempfile
-import tomllib
 import zipfile
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
