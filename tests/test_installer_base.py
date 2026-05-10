@@ -14,8 +14,10 @@ from backend.server.installer.base import (
     InstallResult,
     InstallStatus,
     LaunchSpec,
+    SubprocessTimeout,
     _validate_version_token,
     download_with_hash_verify,
+    run_subprocess_streaming,
 )
 
 
@@ -719,3 +721,214 @@ def test_vanilla_install_hard_fails_when_manifest_omits_sha1(tmp_path):
     assert "integrity" in result.message.lower() or "sha1" in result.message.lower()
     # No server.jar on disk: refusal happens before download.
     assert not (tmp_path / "server.jar").exists()
+
+
+# ---------- B12a download_with_hash_verify atomic-write invariant ----------
+#
+# The helper streams bytes to a sibling ``.tmp`` file and ``os.replace``s
+# into ``target`` only after the hash gate passes. A crashed download / bad
+# hash leaves ``target`` UNTOUCHED — the next install pass must not observe
+# a partial JAR that file-existence-checks would mistake for a complete
+# artefact.
+
+
+def test_download_with_hash_verify_atomic_no_partial_target_on_network_error(tmp_path):
+    """Network failure mid-stream must not leave a partial ``target`` JAR."""
+    target = tmp_path / "installer.jar"
+    session = MagicMock()
+    session.get.side_effect = requests.ConnectionError("connection reset mid-stream")
+
+    with pytest.raises(requests.RequestException):
+        download_with_hash_verify(
+            "https://example.invalid/x", target, sha1="0" * 40, session=session
+        )
+
+    # Neither the final target nor any sibling .tmp may remain.
+    assert not target.exists()
+    assert not (tmp_path / "installer.jar.tmp").exists()
+
+
+def test_download_with_hash_verify_atomic_preserves_existing_target_on_failure(tmp_path):
+    """Pre-existing ``target`` must not survive a failed re-download.
+
+    Contract: the helper guarantees a clean slate on failure — either the
+    new (verified) bytes appear at ``target``, or ``target`` is absent. A
+    stale-but-present ``target`` from a prior pass would defeat the
+    file-existence checks at install-resume time.
+    """
+    target = tmp_path / "installer.jar"
+    target.write_bytes(b"stale-from-prior-run")
+
+    session = MagicMock()
+    session.get.side_effect = requests.ConnectionError("boom")
+
+    with pytest.raises(requests.RequestException):
+        download_with_hash_verify(
+            "https://example.invalid/x", target, sha1="0" * 40, session=session
+        )
+
+    assert not target.exists()
+    assert not (tmp_path / "installer.jar.tmp").exists()
+
+
+def test_download_with_hash_verify_atomic_no_partial_target_on_hash_mismatch(tmp_path):
+    """SHA1 mismatch must not leave a partial ``target`` for the next pass."""
+    payload = b"hello world"
+    bad_sha1 = "deadbeef" * 5  # 40 hex chars, intentionally wrong
+    target = tmp_path / "installer.jar"
+    session = _stub_session(payload)
+
+    with pytest.raises(HashVerifyError, match="SHA1"):
+        download_with_hash_verify(
+            "https://example.invalid/x", target, sha1=bad_sha1, session=session
+        )
+
+    assert not target.exists()
+    assert not (tmp_path / "installer.jar.tmp").exists()
+
+
+def test_download_with_hash_verify_atomic_replace_into_target_on_success(tmp_path):
+    """Success path: bytes land at ``target`` and the ``.tmp`` is gone."""
+    payload = b"correct payload"
+    expected = hashlib.sha1(payload).hexdigest()
+    target = tmp_path / "installer.jar"
+    session = _stub_session(payload)
+
+    download_with_hash_verify(
+        "https://example.invalid/x", target, sha1=expected, session=session
+    )
+
+    assert target.read_bytes() == payload
+    assert not (tmp_path / "installer.jar.tmp").exists()
+
+
+# ---------- B12a run_subprocess_streaming ----------
+#
+# Replacement for ``subprocess.run(..., capture_output=True, timeout=...)``
+# at the loader-installer call sites. Streams stdout/stderr line-by-line
+# through ``on_line`` callbacks (typically forwarded to ``logger.info``)
+# instead of buffering tens of MB in RAM, and on timeout it kills the
+# child + drains pipes before raising ``SubprocessTimeout``.
+
+
+def test_run_subprocess_streaming_happy_path_collects_lines_and_exits_zero():
+    """Echo three lines on stdout, exit 0; on_line fires per line."""
+    import sys
+
+    lines: list[str] = []
+    completed = run_subprocess_streaming(
+        [sys.executable, "-c", "print('one'); print('two'); print('three')"],
+        on_line=lambda line: lines.append(line),
+    )
+
+    assert completed.returncode == 0
+    assert lines == ["one", "two", "three"]
+    # stdout buffer also retains the joined bytes for back-compat.
+    assert "one" in completed.stdout and "three" in completed.stdout
+
+
+def test_run_subprocess_streaming_failure_returncode_propagates():
+    """Non-zero exit returns CompletedProcess with the actual returncode."""
+    import sys
+
+    completed = run_subprocess_streaming(
+        [sys.executable, "-c", "import sys; sys.stderr.write('bad\\n'); sys.exit(7)"],
+    )
+
+    assert completed.returncode == 7
+    assert "bad" in completed.stderr
+
+
+def test_run_subprocess_streaming_stderr_routes_to_on_stderr_line():
+    """When on_stderr_line is supplied, stderr lines go there exclusively."""
+    import sys
+
+    out_lines: list[str] = []
+    err_lines: list[str] = []
+
+    completed = run_subprocess_streaming(
+        [sys.executable, "-c",
+         "import sys; print('hello-out'); sys.stderr.write('hello-err\\n')"],
+        on_line=lambda line: out_lines.append(line),
+        on_stderr_line=lambda line: err_lines.append(line),
+    )
+
+    assert completed.returncode == 0
+    assert out_lines == ["hello-out"]
+    assert err_lines == ["hello-err"]
+
+
+def test_run_subprocess_streaming_stderr_defaults_to_on_line():
+    """Without on_stderr_line, stderr also routes to the unified on_line."""
+    import sys
+
+    lines: list[str] = []
+    run_subprocess_streaming(
+        [sys.executable, "-c",
+         "import sys; print('out'); sys.stderr.write('err\\n')"],
+        on_line=lambda line: lines.append(line),
+    )
+
+    # Both streams reached the same callback (order is non-deterministic
+    # under the reader-thread fanout, so we check membership).
+    assert set(lines) == {"out", "err"}
+
+
+def test_run_subprocess_streaming_swallows_callback_errors():
+    """A misbehaving on_line callback must not crash the runner."""
+    import sys
+
+    def explosive(line: str) -> None:
+        raise RuntimeError("never propagated")
+
+    completed = run_subprocess_streaming(
+        [sys.executable, "-c", "print('hi')"],
+        on_line=explosive,
+    )
+
+    assert completed.returncode == 0
+    assert "hi" in completed.stdout
+
+
+def test_run_subprocess_streaming_timeout_kills_and_raises():
+    """A child that exceeds ``timeout`` is killed and SubprocessTimeout raised."""
+    import sys
+
+    with pytest.raises(SubprocessTimeout, match="timeout"):
+        run_subprocess_streaming(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            timeout=1,
+            poll_interval=0.05,
+        )
+
+
+def test_run_subprocess_streaming_timeout_drains_lines_before_raise():
+    """Lines emitted before the kill must reach ``on_line`` before the raise.
+
+    Pins the kill+drain contract: if the runner raised without joining the
+    reader threads, observers (UI / logger) would silently lose any output
+    the child produced before the timeout.
+    """
+    import sys
+
+    lines: list[str] = []
+
+    with pytest.raises(SubprocessTimeout):
+        run_subprocess_streaming(
+            [sys.executable, "-u", "-c",
+             "import sys, time; print('before-sleep'); sys.stdout.flush(); "
+             "time.sleep(30)"],
+            timeout=2,
+            on_line=lambda line: lines.append(line),
+            poll_interval=0.05,
+        )
+
+    assert "before-sleep" in lines
+
+
+def test_run_subprocess_streaming_unknown_executable_raises_oserror(tmp_path):
+    """Spawn failure surfaces as OSError, distinct from SubprocessTimeout."""
+    nonexistent = tmp_path / "definitely-not-a-real-binary"
+
+    with pytest.raises((FileNotFoundError, OSError)):
+        run_subprocess_streaming([str(nonexistent), "--help"])

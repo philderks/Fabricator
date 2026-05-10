@@ -177,7 +177,7 @@ def test_install_legacy_1_16_5_returns_jar_launchspec(
         # Build = recommended for 1.16.5 = 36.2.34
         (tmp_path / "forge-1.16.5-36.2.34.jar").write_bytes(b"PKforge-launcher")
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="ok", stderr="")
-    monkeypatch.setattr("backend.server.installer.forge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.forge.run_subprocess_streaming", fake_run)
 
     result = inst.install("1.16.5")
     assert result.success is True
@@ -208,7 +208,7 @@ def test_install_legacy_pre_1_13_returns_universal_jar_launchspec(
         # 1.12.2 produces -universal.jar.
         (tmp_path / "forge-1.12.2-14.23.5.2859-universal.jar").write_bytes(b"PKuni")
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
-    monkeypatch.setattr("backend.server.installer.forge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.forge.run_subprocess_streaming", fake_run)
 
     result = inst.install("1.12.2")
     assert result.success is True
@@ -233,7 +233,7 @@ def test_install_modern_1_20_1_returns_args_file_launchspec(
         (target / "unix_args.txt").write_text("# args\n")
         (target / "win_args.txt").write_text("# args\n")
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
-    monkeypatch.setattr("backend.server.installer.forge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.forge.run_subprocess_streaming", fake_run)
     monkeypatch.setattr("backend.server.installer.forge.is_windows", lambda: False)
 
     result = inst.install("1.20.1")
@@ -272,7 +272,7 @@ def test_install_subprocess_command_includes_explicit_install_dir(
         target.mkdir(parents=True, exist_ok=True)
         (target / "unix_args.txt").write_text("# args\n")
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
-    monkeypatch.setattr("backend.server.installer.forge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.forge.run_subprocess_streaming", fake_run)
     monkeypatch.setattr("backend.server.installer.forge.is_windows", lambda: False)
 
     result = inst.install("1.20.1")
@@ -301,7 +301,7 @@ def test_install_uses_set_java_exec_path_for_subprocess(
         target.mkdir(parents=True, exist_ok=True)
         (target / "unix_args.txt").write_text("# args\n")
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
-    monkeypatch.setattr("backend.server.installer.forge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.forge.run_subprocess_streaming", fake_run)
     monkeypatch.setattr("backend.server.installer.forge.is_windows", lambda: False)
 
     result = inst.install("1.20.1")
@@ -332,7 +332,7 @@ def test_install_subprocess_uses_no_window_kwargs(
         "backend.server.installer.forge.platform_utils.subprocess_no_window_kwargs",
         lambda: SENTINEL_KW,
     )
-    monkeypatch.setattr("backend.server.installer.forge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.forge.run_subprocess_streaming", fake_run)
     monkeypatch.setattr("backend.server.installer.forge.is_windows", lambda: False)
 
     result = inst.install("1.20.1")
@@ -350,7 +350,7 @@ def test_install_subprocess_failure_returns_failure(
 
     def fake_run(cmd, **kwargs):
         return subprocess.CompletedProcess(args=cmd, returncode=2, stdout="", stderr="installer exploded")
-    monkeypatch.setattr("backend.server.installer.forge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.forge.run_subprocess_streaming", fake_run)
 
     result = inst.install("1.20.1")
     assert result.success is False
@@ -369,7 +369,7 @@ def test_install_unexpected_layout_returns_failure(
     def fake_run(cmd, **kwargs):
         # Don't create any launcher artefact — simulate a malformed install.
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
-    monkeypatch.setattr("backend.server.installer.forge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.forge.run_subprocess_streaming", fake_run)
     monkeypatch.setattr("backend.server.installer.forge.is_windows", lambda: False)
 
     result = inst.install("1.20.1")
@@ -401,7 +401,7 @@ def test_install_modern_wins_when_both_artefacts_present(
         # Legacy artefact too (defensive corner case):
         (tmp_path / "forge-1.20.1-47.4.10.jar").write_bytes(b"PKlegacy")
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
-    monkeypatch.setattr("backend.server.installer.forge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.forge.run_subprocess_streaming", fake_run)
     monkeypatch.setattr("backend.server.installer.forge.is_windows", lambda: False)
 
     result = inst.install("1.20.1")
@@ -424,7 +424,7 @@ def test_install_modern_uses_windows_args_file_on_windows(
         target.mkdir(parents=True, exist_ok=True)
         (target / "win_args.txt").write_text("# args\n")
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
-    monkeypatch.setattr("backend.server.installer.forge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.forge.run_subprocess_streaming", fake_run)
     monkeypatch.setattr("backend.server.installer.forge.is_windows", lambda: True)
 
     result = inst.install("1.20.1")
@@ -454,7 +454,7 @@ def test_install_falls_back_to_latest_when_no_recommended(
         target.mkdir(parents=True, exist_ok=True)
         (target / "unix_args.txt").write_text("# args\n")
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
-    monkeypatch.setattr("backend.server.installer.forge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.forge.run_subprocess_streaming", fake_run)
     monkeypatch.setattr("backend.server.installer.forge.is_windows", lambda: False)
 
     result = inst.install("1.18.1")
@@ -495,7 +495,7 @@ def test_install_sha1_mismatch_aborts_before_subprocess(
     def fake_run(*a, **k):
         subprocess_called["hit"] = True
         return subprocess.CompletedProcess(args=[], returncode=0)
-    monkeypatch.setattr("backend.server.installer.forge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.forge.run_subprocess_streaming", fake_run)
 
     result = inst.install("1.20.1")
     assert result.success is False

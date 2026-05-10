@@ -2,6 +2,9 @@
 import hashlib
 import os
 import re
+import subprocess
+import threading
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
@@ -66,6 +69,156 @@ class HashVerifyError(Exception):
     """
 
 
+class SubprocessTimeout(Exception):
+    """Raised by :func:`run_subprocess_streaming` after a force-kill on timeout.
+
+    The helper kills the child, drains its pipes, and joins the reader threads
+    before raising — a cleaner contract than ``subprocess.TimeoutExpired``,
+    which leaves the child running and pipes attached on some platforms (the
+    NeoForge bug B12a addresses).
+    """
+
+
+def run_subprocess_streaming(
+    args: List[str],
+    *,
+    cwd: Optional[Path] = None,
+    env: Optional[Dict[str, str]] = None,
+    timeout: Optional[int] = None,
+    on_line: Optional[Callable[[str], None]] = None,
+    on_stderr_line: Optional[Callable[[str], None]] = None,
+    poll_interval: float = 0.1,
+    **subprocess_kwargs: Any,
+) -> subprocess.CompletedProcess:
+    """Run a subprocess streaming stdout/stderr line-by-line with a hard timeout.
+
+    Replacement for ``subprocess.run(..., capture_output=True, timeout=...)``
+    at the loader-installer call sites where:
+
+    * Stdout/stderr can be very large (verbose Java-8 Forge installer logs hit
+      tens of MB). ``capture_output=True`` buffers the lot in RAM; this helper
+      streams via reader threads and forwards each line to ``on_line`` so the
+      user can watch progress live (typically wired to ``logger.info``).
+    * Wall-clock-timeout enforcement must guarantee the child is killed and
+      its pipes drained — ``subprocess.run``'s ``TimeoutExpired`` path is
+      not reliable across platforms (the underlying ``Popen.communicate``
+      returns but the child may persist). This helper does its own poll loop
+      and on timeout calls ``proc.kill()`` + ``proc.wait()`` + drains the
+      reader threads before raising :class:`SubprocessTimeout`.
+
+    ``on_line`` defaults to ``None`` (drop). ``on_stderr_line`` defaults to
+    ``on_line`` so callers wanting a single combined logger only pass one
+    callback. Callback exceptions are swallowed (parity with ``_report``):
+    a misbehaving logger never crashes the install.
+
+    Returns a :class:`subprocess.CompletedProcess` whose ``stdout`` / ``stderr``
+    are the joined captured-line strings (newline-delimited, trailing newline
+    preserved on the last line if the child emitted one). Existing call sites
+    that previously inspected ``returncode`` and the last stderr line still
+    work without changes.
+
+    Raises:
+        SubprocessTimeout: ``timeout`` elapsed before the child exited.
+        OSError: child could not be spawned (e.g. ``java`` not on PATH).
+    """
+    if on_stderr_line is None:
+        on_stderr_line = on_line
+
+    proc = subprocess.Popen(
+        args,
+        cwd=str(cwd) if cwd is not None else None,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,  # line-buffered text mode
+        **subprocess_kwargs,
+    )
+
+    stdout_lines: List[str] = []
+    stderr_lines: List[str] = []
+
+    def _pump(pipe, sink: List[str], cb: Optional[Callable[[str], None]]) -> None:
+        try:
+            for raw_line in iter(pipe.readline, ""):
+                # Strip the trailing newline from the callback view but
+                # retain the original (with newline) in the joined buffer
+                # so existing splitlines()-based inspection at the callsite
+                # is unchanged.
+                sink.append(raw_line)
+                if cb is not None:
+                    line = raw_line.rstrip("\r\n")
+                    try:
+                        cb(line)
+                    except Exception:
+                        # Swallow per the _report contract: a misbehaving
+                        # logger / observer must never abort an install.
+                        pass
+        finally:
+            try:
+                pipe.close()
+            except OSError:
+                pass
+
+    stdout_thread = threading.Thread(
+        target=_pump, args=(proc.stdout, stdout_lines, on_line), daemon=True
+    )
+    stderr_thread = threading.Thread(
+        target=_pump, args=(proc.stderr, stderr_lines, on_stderr_line), daemon=True
+    )
+    stdout_thread.start()
+    stderr_thread.start()
+
+    deadline: Optional[float] = (
+        time.monotonic() + timeout if timeout is not None else None
+    )
+    timed_out = False
+
+    try:
+        while True:
+            rc = proc.poll()
+            if rc is not None:
+                break
+            if deadline is not None and time.monotonic() >= deadline:
+                timed_out = True
+                break
+            time.sleep(poll_interval)
+    except BaseException:
+        # SIGINT / KeyboardInterrupt mid-poll: don't leak the child.
+        try:
+            proc.kill()
+        finally:
+            proc.wait()
+            stdout_thread.join(timeout=5)
+            stderr_thread.join(timeout=5)
+        raise
+
+    if timed_out:
+        try:
+            proc.kill()
+        finally:
+            # Wait for the kill to take effect and reader threads to drain
+            # — do NOT raise without joining or we leave a zombie.
+            proc.wait()
+            stdout_thread.join(timeout=5)
+            stderr_thread.join(timeout=5)
+        raise SubprocessTimeout(
+            f"Subprocess {args[0]!r} exceeded timeout of {timeout}s "
+            f"and was terminated."
+        )
+
+    # Normal exit: just join readers so the buffers are complete.
+    stdout_thread.join(timeout=5)
+    stderr_thread.join(timeout=5)
+
+    return subprocess.CompletedProcess(
+        args=args,
+        returncode=proc.returncode,
+        stdout="".join(stdout_lines),
+        stderr="".join(stderr_lines),
+    )
+
+
 def download_with_hash_verify(
     url: str,
     target: Path,
@@ -93,12 +246,19 @@ def download_with_hash_verify(
     after each written chunk. ``bytes_total`` is taken from the ``Content-Length``
     header (0 if absent). All exceptions raised by the callback are swallowed
     so a misbehaving observer never aborts an in-flight install.
+
+    Atomic-write invariant (B12a): bytes are streamed to a sibling ``.tmp``
+    file and ``os.replace``'d into ``target`` only after the hash gate passes.
+    A network mid-stream failure or hash mismatch leaves ``target`` untouched
+    — no partial / corrupt JAR can be observed by a subsequent install pass
+    that file-existence-checks before re-downloading.
     """
     sha1_hasher = hashlib.sha1() if sha1 else None
     sha512_hasher = hashlib.sha512() if sha512 else None
 
     target = Path(target)
     target.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = target.with_suffix(target.suffix + ".tmp")
 
     http = session if session is not None else requests
     bytes_done = 0
@@ -107,7 +267,7 @@ def download_with_hash_verify(
         with http.get(url, stream=True, timeout=timeout) as response:
             response.raise_for_status()
             bytes_total = int(response.headers.get("Content-Length", 0))
-            with open(target, "wb") as fh:
+            with open(tmp_path, "wb") as fh:
                 for chunk in response.iter_content(chunk_size=chunk_size):
                     if not chunk:
                         continue
@@ -123,6 +283,10 @@ def download_with_hash_verify(
                         except Exception:
                             pass
     except (requests.RequestException, OSError):
+        tmp_path.unlink(missing_ok=True)
+        # Pre-existing partial ``target`` from an earlier failed run is also
+        # cleaned up — the contract is that on any failure path the caller
+        # observes a clean slate at ``target``.
         target.unlink(missing_ok=True)
         raise
 
@@ -132,6 +296,7 @@ def download_with_hash_verify(
     if sha512_hasher is not None and sha512:
         actual = sha512_hasher.hexdigest().lower()
         if actual != sha512.lower():
+            tmp_path.unlink(missing_ok=True)
             target.unlink(missing_ok=True)
             raise HashVerifyError(
                 f"SHA512 mismatch for {url}: expected {sha512}, got {actual}"
@@ -139,10 +304,21 @@ def download_with_hash_verify(
     if sha1_hasher is not None and sha1:
         actual = sha1_hasher.hexdigest().lower()
         if actual != sha1.lower():
+            tmp_path.unlink(missing_ok=True)
             target.unlink(missing_ok=True)
             raise HashVerifyError(
                 f"SHA1 mismatch for {url}: expected {sha1}, got {actual}"
             )
+
+    # Hash gate cleared (or hashing was disabled): atomically promote the
+    # ``.tmp`` to the final ``target``. ``os.replace`` is atomic on the same
+    # filesystem on POSIX and Windows alike — partial-file races between a
+    # crashing download and the next install pass are eliminated.
+    try:
+        os.replace(tmp_path, target)
+    except OSError:
+        tmp_path.unlink(missing_ok=True)
+        raise
 
 
 class InstallStatus(Enum):

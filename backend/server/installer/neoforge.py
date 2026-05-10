@@ -1,8 +1,8 @@
 """NeoForge server installer using the NeoForged Maven repo + installer JAR."""
 from __future__ import annotations
 
+import logging
 import re
-import subprocess
 import requests
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -13,11 +13,16 @@ from .base import (
     InstallResult,
     InstallStatus,
     LaunchSpec,
+    SubprocessTimeout,
     _validate_version_token,
     download_with_hash_verify,
+    run_subprocess_streaming,
 )
 from backend.utils import platform as platform_utils
 from backend.utils.platform import is_windows
+
+
+logger = logging.getLogger(__name__)
 
 
 _VERSION_SUFFIX_RE = re.compile(r"-(beta|rc\d*|pre\d*)$", re.IGNORECASE)
@@ -393,18 +398,23 @@ class NeoForgeInstaller(InstallerBase):
         # self.java_exec (set by the route via set_java_exec) so the
         # subprocess uses Fabricator's managed Java / per-server javaPath
         # override, not whatever ``java`` happens to be first on PATH.
+        #
+        # Streaming runner (B12a): forwards each stdout/stderr line live to
+        # ``logger.info`` and guarantees a clean kill + drain on timeout —
+        # the previous ``subprocess.run(..., timeout=1800)`` raised
+        # ``TimeoutExpired`` but could leave the child JVM running and pipes
+        # attached, producing a zombie process under load.
         java_cmd = self.java_exec or "java"
         self._report(progress_callback, "running_installer")
         try:
-            completed = subprocess.run(
+            completed = run_subprocess_streaming(
                 [java_cmd, "-jar", str(installer_jar), "--installServer"],
-                cwd=str(self.install_path),
-                capture_output=True,
-                text=True,
+                cwd=Path(self.install_path),
                 timeout=1800,
+                on_line=lambda line: logger.info("neoforge-installer: %s", line),
                 **platform_utils.subprocess_no_window_kwargs(),
             )
-        except subprocess.TimeoutExpired as exc:
+        except SubprocessTimeout as exc:
             msg = f"NeoForge installer timed out: {exc}"
             self._report(progress_callback, "failed", error=msg)
             return InstallResult(
@@ -424,8 +434,12 @@ class NeoForgeInstaller(InstallerBase):
             )
 
         if completed.returncode != 0:
+            # Streaming logger already forwarded every line; surface the last
+            # few for the InstallResult message without dumping megabytes.
             tail = (completed.stderr or completed.stdout or "").strip().splitlines()
-            tail_str = tail[-1] if tail else f"returncode {completed.returncode}"
+            tail_str = (
+                " | ".join(tail[-3:]) if tail else f"returncode {completed.returncode}"
+            )
             msg = f"NeoForge installer failed: {tail_str}"
             self._report(progress_callback, "failed", error=msg)
             return InstallResult(

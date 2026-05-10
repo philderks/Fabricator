@@ -144,7 +144,7 @@ def test_install_picks_latest_stable_when_unspecified(tmp_path, fake_maven_versi
         (target_dir / "win_args.txt").write_text("@@ args\n")
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="ok", stderr="")
 
-    monkeypatch.setattr("backend.server.installer.neoforge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.neoforge.run_subprocess_streaming", fake_run)
     monkeypatch.setattr("backend.server.installer.neoforge.is_windows", lambda: False)
 
     result = inst.install("1.21.1")
@@ -179,7 +179,7 @@ def test_install_uses_set_java_exec_path_for_subprocess(tmp_path, fake_maven_ver
         (target_dir / "unix_args.txt").write_text("# args\n")
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr("backend.server.installer.neoforge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.neoforge.run_subprocess_streaming", fake_run)
     monkeypatch.setattr("backend.server.installer.neoforge.is_windows", lambda: False)
 
     result = inst.install("1.21.1")
@@ -200,7 +200,7 @@ def test_install_uses_windows_args_file_on_windows(tmp_path, fake_maven_versions
         (target_dir / "win_args.txt").write_text("@@ win args\n")
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr("backend.server.installer.neoforge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.neoforge.run_subprocess_streaming", fake_run)
     monkeypatch.setattr("backend.server.installer.neoforge.is_windows", lambda: True)
 
     result = inst.install("1.21.1")
@@ -219,7 +219,7 @@ def test_install_subprocess_failure_returns_failure(tmp_path, fake_maven_version
     def fake_run(cmd, **kwargs):
         return subprocess.CompletedProcess(args=cmd, returncode=2, stdout="", stderr="installer exploded")
 
-    monkeypatch.setattr("backend.server.installer.neoforge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.neoforge.run_subprocess_streaming", fake_run)
     monkeypatch.setattr("backend.server.installer.neoforge.is_windows", lambda: False)
 
     result = inst.install("1.21.1")
@@ -237,7 +237,7 @@ def test_install_args_file_missing_after_install_returns_failure(tmp_path, fake_
     def fake_run(cmd, **kwargs):
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr("backend.server.installer.neoforge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.neoforge.run_subprocess_streaming", fake_run)
     monkeypatch.setattr("backend.server.installer.neoforge.is_windows", lambda: False)
 
     result = inst.install("1.21.1")
@@ -280,7 +280,7 @@ def test_install_sha1_mismatch_fails(tmp_path, fake_maven_versions, monkeypatch)
     session.get.side_effect = get
     inst.session = session
 
-    monkeypatch.setattr("backend.server.installer.neoforge.subprocess.run",
+    monkeypatch.setattr("backend.server.installer.neoforge.run_subprocess_streaming",
                         lambda *a, **k: subprocess.CompletedProcess(args=[], returncode=0))
 
     result = inst.install("1.21.1")
@@ -309,7 +309,7 @@ def test_install_with_config_writes_server_properties_and_returns_launch(
         (target_dir / "unix_args.txt").write_text("# args\n")
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr("backend.server.installer.neoforge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.neoforge.run_subprocess_streaming", fake_run)
     monkeypatch.setattr("backend.server.installer.neoforge.is_windows", lambda: False)
 
     server_config = {
@@ -354,7 +354,7 @@ def test_install_with_config_failure_does_not_write_server_properties(
             args=cmd, returncode=2, stdout="", stderr="installer crashed"
         )
 
-    monkeypatch.setattr("backend.server.installer.neoforge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.neoforge.run_subprocess_streaming", fake_run)
     monkeypatch.setattr("backend.server.installer.neoforge.is_windows", lambda: False)
 
     result = inst.install_with_config("1.21.1", {"port": 25570})
@@ -380,7 +380,7 @@ def test_install_with_config_emits_progress_phases(
         (target_dir / "unix_args.txt").write_text("# args\n")
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr("backend.server.installer.neoforge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.neoforge.run_subprocess_streaming", fake_run)
     monkeypatch.setattr("backend.server.installer.neoforge.is_windows", lambda: False)
 
     events: list[tuple[str, dict]] = []
@@ -429,7 +429,7 @@ def test_install_subprocess_uses_no_window_kwargs(tmp_path, fake_maven_versions,
         "backend.server.installer.neoforge.platform_utils.subprocess_no_window_kwargs",
         lambda: SENTINEL_KW,
     )
-    monkeypatch.setattr("backend.server.installer.neoforge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.neoforge.run_subprocess_streaming", fake_run)
     monkeypatch.setattr("backend.server.installer.neoforge.is_windows", lambda: False)
 
     result = inst.install("1.21.1")
