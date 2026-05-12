@@ -80,26 +80,40 @@ def split_command(command: str) -> List[str]:
 def appdata_dir() -> Path:
     """Return the per-user Fabricator data directory.
 
-    On Windows the .exe is typically launched from Downloads or another
-    transient location, so user data must live in a stable, writable spot:
-    ``%APPDATA%\\Fabricator`` (creating it if missing).
+    Per-platform conventions:
 
-    On POSIX hosts there is no canonical equivalent to ``%APPDATA%``; we
-    pick ``~/.fabricator`` for symmetry with the Windows path and with the
-    PyInstaller-bundled deployment model (local app-data store). Callers
-    that previously branched on a ``None`` return now receive this path
-    unconditionally — drop the ``None``-checks.
+    - Windows: ``%APPDATA%\\Fabricator`` (typically ``~/AppData/Roaming/Fabricator``)
+    - POSIX:   ``~/.fabricator``
+
+    POSIX uses ``~/.fabricator`` (not XDG ``~/.local/share/fabricator``) for
+    cross-platform symmetry with ``%APPDATA%`` — both sit at the user-home
+    root rather than under a nested data-directory hierarchy, which keeps
+    the PyInstaller-bundled .exe and POSIX dev install pointing at
+    structurally equivalent locations.
+
+    Override via the ``FABRICATOR_APPDATA`` environment variable for
+    testing or non-default installs. The override path is ``~``-expanded
+    and created if missing; no platform branch runs when an override is
+    set.
 
     Cached via ``lru_cache`` so the ``mkdir`` runs once per process; this
     function is hit multiple times per request via ``core.config`` defaults.
+    Call ``appdata_dir.cache_clear()`` in tests that monkey-patch ``HOME``,
+    ``APPDATA``, or ``FABRICATOR_APPDATA`` between calls.
     """
-    if is_windows():
+    override = os.environ.get("FABRICATOR_APPDATA")
+    if override:
+        target = Path(override).expanduser()
+    elif is_windows():
         raw = os.environ.get("APPDATA")
         base = Path(raw) if raw else Path.home() / "AppData" / "Roaming"
         target = base / "Fabricator"
     else:
         target = Path.home() / ".fabricator"
+    first_create = not target.exists()
     target.mkdir(parents=True, exist_ok=True)
+    if first_create:
+        logger.info("Fabricator data directory: %s", target)
     return target
 
 

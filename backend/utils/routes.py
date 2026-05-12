@@ -37,11 +37,13 @@ from typing import Callable
 from flask import jsonify, request
 
 # NOTE: ``backend.server.storage`` and ``backend.server.locks`` are
-# imported lazily inside the wrappers — eager imports here close a
-# circular path through ``backend.core.app`` → ``backend.server.routes``
-# → ``backend.utils.routes`` → ``backend.server`` (which re-imports
-# storage). The deferred lookup runs once per request, costs a dict
-# lookup, and keeps the module import-safe from any direction.
+# imported lazily inside the wrappers — defensive lazy lookup. The current
+# topology (``backend.core.app`` → ``backend.server.routes`` →
+# ``backend.utils.routes`` → ``backend.server.storage``) has no actual
+# cycle (``backend.server.__init__`` does not import this module back),
+# but a local import keeps the contract safe against future re-orderings
+# of the ``backend.server`` package or any of its consumers. The deferred
+# lookup runs once per request and costs a dict lookup.
 
 
 def _server_id_from(source: str, kwargs: dict) -> str | None:
@@ -72,7 +74,7 @@ def require_server(view: Callable | None = None, *, source: str = 'url') -> Call
     def decorator(inner: Callable) -> Callable:
         @wraps(inner)
         def wrapper(*args, **kwargs):
-            from backend.server import storage  # local: avoid import cycle
+            from backend.server import storage  # defensive lazy import; see module-level NOTE
 
             server_id = _server_id_from(source, kwargs)
             if source == 'body' and not server_id:
@@ -116,7 +118,7 @@ def with_server_lock(
     def decorator(inner: Callable) -> Callable:
         @wraps(inner)
         def wrapper(*args, **kwargs):
-            from backend.server.locks import try_acquire  # local: avoid import cycle
+            from backend.server.locks import try_acquire  # defensive lazy import; see module-level NOTE
 
             server_id = _server_id_from(source, kwargs)
             lock = try_acquire(server_id)

@@ -348,6 +348,12 @@ def download_with_hash_verify(
     :class:`HashVerifyError` is NEVER retried (cryptographic mismatch is by
     definition non-transient). Default ``0`` keeps the legacy single-attempt
     contract for callers that have not opted in.
+
+    Note: the unlink-on-failure semantics mean any pre-existing file at
+    ``target`` is removed when a network or OS error aborts the download.
+    Do not pass a ``target`` path that aliases a file you want preserved
+    across a partial-download failure — atomicity of pre-existing data is
+    the caller's responsibility.
     """
 
     def _attempt() -> None:

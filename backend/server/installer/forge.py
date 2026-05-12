@@ -289,6 +289,10 @@ class ForgeInstaller(InstallerBase):
             )
 
         try:
+            # No ``retries=`` here: Forge's SHA1 lookup is WARN-and-proceed
+            # (see ``_fetch_expected_sha1`` — missing-hash is not fatal), so
+            # single-attempt parity with pre-B12a behaviour is intentional.
+            # NeoForge sets ``retries=3`` because its hash is mandatory.
             download_with_hash_verify(
                 self._installer_jar_url(mc_version, build),
                 target,
