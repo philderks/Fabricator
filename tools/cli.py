@@ -11,7 +11,6 @@ APP_DIR = f"{INSTALL_DIR}/app"
 VERSION_FILE = f"{APP_DIR}/.fabricator_version"
 INSTALL_SCRIPT = f"{APP_DIR}/tools/install.sh"
 SERVICE_NAME = "fabricator"
-API_BASE = "http://localhost:5000"
 GITHUB_API = "https://api.github.com/repos/philderks/Fabricator/releases/latest"
 
 
@@ -64,11 +63,6 @@ def start():
 def stop():
     """Stop the Fabricator service (graceful shutdown attempt first)."""
     click.echo("Stopping Fabricator...")
-
-    try:
-        requests.post(f"{API_BASE}/api/stop", timeout=10)
-    except Exception:
-        pass
 
     rc = _systemctl("stop")
     if rc == 0:

@@ -37,7 +37,7 @@ function extractErrorMessageFromBody(rawBody) {
 
 /**
  * Make an API request with error handling
- * @param {string} endpoint - API endpoint (e.g., '/api/status')
+ * @param {string} endpoint - API endpoint (e.g., '/api/servers')
  * @param {Object} options - Fetch options
  * @returns {Promise<any>} Response data
  * @throws {ApiError} If request fails

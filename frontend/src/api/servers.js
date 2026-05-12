@@ -6,14 +6,6 @@
 import { get, post, put, del } from './client'
 
 /**
- * Get server status
- * @returns {Promise<Object>} Server status information
- */
-export async function getServerStatus() {
-  return get('/api/status')
-}
-
-/**
  * Get list of all servers
  * @returns {Promise<Array>} List of servers
  */
