@@ -1,4 +1,17 @@
-/* Global Styles for Fabricator */
+/* Global Styles for Fabricator
+ *
+ * Cascade order (single source of truth):
+ *   1. style.css  — bare-minimum font-stack + body background fallback.
+ *      Imported once via main.js; bridge to global tokens below.
+ *   2. global.css — token definitions (:root), universal resets, body
+ *      font/smoothing, input baseline, scrollbar styling. THIS FILE.
+ *   3. Component <style scoped> — surface-specific styling, may reference
+ *      tokens defined here.
+ *
+ * App.vue used to carry a third <style> with duplicate resets + scrollbar
+ * rules; those were consolidated here (F3). Any future global rule lives
+ * in this file, not in App.vue.
+ */
 
 * {
   box-sizing: border-box;
@@ -8,8 +21,15 @@
 
 body {
   font-family: var(--font-sans);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+#app {
+  min-height: 100vh;
 }
 
 /* Colors */
@@ -24,19 +44,24 @@ body {
   --text-secondary: #d4d4d4;
   --text-muted: #888888;
   --text-disabled: #555555;
+  --text-on-primary: #ffffff;
 
   /* Borders */
   --border-color: #1e1e1e;
   --border-hover: #f97316;
 
   /* Status */
+  --info: #60a5fa;
   --success: #22c55e;
   --warning: #fbbf24;
   --warning-dark: #f59e0b;
   --danger: #ef4444;
   --danger-dark: #dc2626;
 
-  /* Brand */
+  /* Brand
+   * --secondary-hover is a hover-only background utility (no base
+   * --secondary token by design — the surface palette is governed by
+   * --bg-* tokens). Used by AppButton ghost-hover and ServerFilesPage. */
   --primary: #f97316;
   --primary-dark: #ea6d0e;
   --secondary-hover: #252525;
@@ -64,17 +89,15 @@ body {
   --text-sm: 13px;
   --text-md: 16px;
   --text-lg: 20px;
-  --text-xl: 24px;
   --leading-tight: 1.2;
   --leading-normal: 1.5;
 
   /* Shadows
-   * Size-based tokens (sm/md/lg) cast downward (positive Y offset).
-   * Direction-based tokens are added for upward-casting elements
-   * (sticky footers, dropdown menus that open downward, etc.) that can't
-   * reuse the size scale without CSS direction tricks. Magnitude aligned
-   * with --shadow-md (12px blur, 0.4 alpha). */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+   * Size-based tokens (md/lg) cast downward (positive Y offset).
+   * Direction-based --shadow-up is for upward-casting elements (sticky
+   * footers, dropdown menus that open downward) that can't reuse the size
+   * scale without CSS direction tricks. Magnitude aligned with --shadow-md
+   * (12px blur, 0.4 alpha). */
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.5);
   --shadow-up: 0 -4px 12px rgba(0, 0, 0, 0.4);
@@ -113,3 +136,24 @@ textarea::placeholder {
 /* Form Elements (.form-group/.form-hint/.form-row/.form-checkboxes/.checkbox-label
    were retired in Phase 7 Task 7; remaining LEAVE-native callers in
    ServerCreateModal own scoped copies.) */
+
+/* Scrollbars — consolidated from App.vue's <style> block in F3. Token-mapped
+   from the prior hardcoded #1a1f29/#2a3441/#3a4551 to the closest surface
+   tokens; minor visual drift accepted, tokens are the source of truth. */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-tertiary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--text-disabled);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}

@@ -127,6 +127,7 @@ import BaseModal from './BaseModal.vue'
 import SearchResultCard from '../ui/SearchResultCard.vue'
 import AppButton from '../ui/AppButton.vue'
 import { useModpackImport } from '../../composables/useModpackImport'
+import { formatNumber, truncate } from '../../utils/format'
 
 const props = defineProps({
   show: { type: Boolean, required: true },
@@ -176,19 +177,6 @@ function confirmInstall() {
   })
 }
 
-function truncate(text, length = 100) {
-  if (!text) {
-    return ''
-  }
-  return text.length > length ? `${text.slice(0, length)}...` : text
-}
-
-function formatNumber(num) {
-  if (!num) return '0'
-  if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M'
-  if (num >= 1000) return (num / 1000).toFixed(1) + 'K'
-  return num.toString()
-}
 
 // Modrinth tags loader compatibility as ordinary categories ('fabric',
 // 'forge', 'neoforge', 'quilt'). Multi-loader packs are tagged with all

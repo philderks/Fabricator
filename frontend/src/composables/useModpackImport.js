@@ -41,13 +41,6 @@ export function normalizeModpack(project) {
   }
 }
 
-/**
- * Format a number with locale-aware thousand separators.
- */
-export function formatDownloads(value) {
-  return new Intl.NumberFormat().format(value || 0)
-}
-
 function isNotFoundError(error) {
   if (!error) {
     return false

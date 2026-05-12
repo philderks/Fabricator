@@ -1000,10 +1000,6 @@ const onReset = () => {
   min-width: 0;
 }
 
-.settings-page__field--full {
-  grid-column: 1 / -1;
-}
-
 .settings-page__label {
   font-size: var(--text-xs);
   font-weight: 600;

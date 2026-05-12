@@ -149,12 +149,6 @@ export default {
     },
     versionsToShow() {
       return this.versions
-    },
-    hasMoreVersions() {
-      return false
-    },
-    extraCount() {
-      return 0
     }
   },
   methods: {
@@ -241,8 +235,7 @@ export default {
   color: var(--warning);
 }
 
-.status-banner--danger,
-.status-banner--unknown {
+.status-banner--danger {
   background: color-mix(in oklch, var(--danger) 12%, transparent);
   border-color: color-mix(in oklch, var(--danger) 28%, transparent);
   color: var(--danger);

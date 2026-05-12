@@ -166,7 +166,7 @@ const onSubmit = (event) => {
   color: var(--text-primary);
 }
 
-.console-page__filter--info.is-active   { color: var(--info, #60a5fa); }
+.console-page__filter--info.is-active   { color: var(--info); }
 .console-page__filter--warn.is-active   { color: var(--warning); }
 .console-page__filter--error.is-active  { color: var(--danger); }
 .console-page__filter--debug.is-active  { color: var(--primary); }

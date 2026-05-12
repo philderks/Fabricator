@@ -19,16 +19,12 @@ const props = defineProps({
 defineEmits(['update:modelValue'])
 
 const inputId = useId()
-const descriptionId = useId()
 </script>
 
 <template>
   <div class="toggle-row" :class="{ 'toggle-row--disabled': disabled }">
     <div class="toggle-row__text">
       <label :for="inputId" class="toggle-row__label">{{ label }}</label>
-      <p v-if="$slots.default" :id="descriptionId" class="toggle-row__description">
-        <slot />
-      </p>
     </div>
     <label class="toggle-row__switch" :for="inputId">
       <input
@@ -37,7 +33,6 @@ const descriptionId = useId()
         role="switch"
         :checked="modelValue"
         :disabled="disabled"
-        :aria-describedby="$slots.default ? descriptionId : undefined"
         @change="$emit('update:modelValue', $event.target.checked)"
       />
       <span class="toggle-row__track" aria-hidden="true">
@@ -75,18 +70,6 @@ const descriptionId = useId()
 .toggle-row--disabled .toggle-row__label {
   color: var(--text-muted);
   cursor: not-allowed;
-}
-
-.toggle-row__description {
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-  margin: 0;
-  line-height: var(--leading-normal);
-}
-
-.toggle-row__description :deep(a) {
-  color: var(--primary);
-  text-decoration: underline;
 }
 
 .toggle-row__switch {

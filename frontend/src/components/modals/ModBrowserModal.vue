@@ -159,6 +159,7 @@ import {
 } from '../../api/modrinth'
 import { useServerStore } from '../../stores/server'
 import { installedJarMatchesBrowseHit, installedJarMatchesProjectRef } from '../../utils/modrinthJarMatch'
+import { formatNumber, truncate } from '../../utils/format'
 
 export default {
   name: 'ModBrowserModal',
@@ -535,21 +536,13 @@ export default {
       console.log('Selected mod:', mod);
     },
 
-    truncate(text, length) {
-      if (!text) return '';
-      return text.length > length ? text.substring(0, length) + '...' : text;
-    },
+    truncate,
 
-    formatNumber(num) {
-      if (!num) return '0';
-      if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
-      if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
-      return num.toString();
-    },
+    formatNumber,
 
     formatModMeta(mod) {
       const parts = []
-      if (mod.downloads) parts.push(`${this.formatNumber(mod.downloads)} downloads`)
+      if (mod.downloads) parts.push(`${formatNumber(mod.downloads)} downloads`)
       if (mod.categories && mod.categories.length) {
         parts.push(mod.categories[0])
       } else if (mod.loaders && mod.loaders.length) {
