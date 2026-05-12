@@ -24,7 +24,10 @@ import {
   saveServerFile
 } from '../api/servers'
 import { useToast } from '../composables/useToast'
-import { enrichInstalledModsWithModrinth } from '../utils/enrichInstalledModsModrinth'
+import {
+  enrichInstalledModsWithModrinth,
+  invalidateModrinthMetaCache
+} from '../utils/enrichInstalledModsModrinth'
 // Status-display logic consolidated in utils/getEffectiveStatus (F6/CC5);
 // keep alias for the existing call sites in this file.
 import { getEffectiveStatus as pickEffectiveStatus } from '../utils/getEffectiveStatus'
@@ -363,7 +366,7 @@ export const useServerStore = defineStore('server', () => {
     modsLoading.value = true
     try {
       const files = await getInstalledMods(currentServerId.value)
-      installedMods.value = files.map((file) => ({
+      const base = files.map((file) => ({
         name: file.name,
         filename: file.name,
         displayTitle: null,
@@ -376,7 +379,11 @@ export const useServerStore = defineStore('server', () => {
         source: 'Local',
         category: 'Mods Folder'
       }))
-      void enrichInstalledModsWithModrinth(installedMods.value)
+      installedMods.value = base
+      // F11/S9: enrich returns a NEW list (does not mutate in place); await
+      // it so the icon/title fields render in a single deterministic patch
+      // rather than appearing piecemeal via mutated refs.
+      installedMods.value = await enrichInstalledModsWithModrinth(base)
     } catch (error) {
       console.error('Failed to load mods:', error)
       toast.error('Failed to load installed mods', 'Error')
@@ -762,8 +769,12 @@ export const useServerStore = defineStore('server', () => {
       await confirmBulkRemoveMods()
       return
     }
+    const filename = modToRemove.value.filename || modToRemove.value.name
     try {
-      await removeMod(currentServerId.value, modToRemove.value.filename || modToRemove.value.name)
+      await removeMod(currentServerId.value, filename)
+      // Drop cache entry so re-list doesn't show stale metadata if a
+      // different jar with the same filename ever lands later.
+      invalidateModrinthMetaCache(filename)
       toast.success(`${modToRemove.value.name} removed`, 'Mod Removed')
       await loadMods()
     } catch (error) {
@@ -836,6 +847,9 @@ export const useServerStore = defineStore('server', () => {
     bulkDeleting.value = true
     try {
       await bulkRemoveMods(currentServerId.value, filenames)
+      for (const fn of filenames) {
+        invalidateModrinthMetaCache(fn)
+      }
       toast.success(`${filenames.length} mod${filenames.length === 1 ? '' : 's'} removed`, 'Mods Removed')
       await loadMods()
     } catch (error) {
