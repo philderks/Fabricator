@@ -51,7 +51,11 @@ const updateState = ref({
 const updateTriggering = ref(false)
 /** 0 idle, 1 armed after trigger, 2 saw inProgress true (avoids toast if job never starts). */
 const updateOutcomeWatch = ref(0)
-let updateStatusIntervalId = null
+// setTimeout handle (was setInterval + recursive-rearm, which created a
+// fresh interval on every fire — wasteful and made the "double-mount" claim
+// in F7 hard to reason about). Switched to setTimeout-recursive so one
+// timer is in flight at any moment.
+let updateStatusTimeoutId = null
 
 watch(
   () => updateState.value.inProgress,
@@ -87,12 +91,19 @@ const loadUpdateState = async () => {
 }
 
 const scheduleNextPoll = () => {
-  if (updateStatusIntervalId) clearInterval(updateStatusIntervalId)
+  if (updateStatusTimeoutId) clearTimeout(updateStatusTimeoutId)
   const interval = updateState.value.inProgress ? POLL_INTERVAL_ACTIVE : POLL_INTERVAL_IDLE
-  updateStatusIntervalId = setInterval(async () => {
+  updateStatusTimeoutId = setTimeout(async () => {
     await loadUpdateState()
     scheduleNextPoll()
   }, interval)
+}
+
+const stopUpdatePoll = () => {
+  if (updateStatusTimeoutId) {
+    clearTimeout(updateStatusTimeoutId)
+    updateStatusTimeoutId = null
+  }
 }
 
 const updateAvailable = computed(() =>
@@ -167,12 +178,7 @@ onMounted(async () => {
   scheduleNextPoll()
 })
 
-onUnmounted(() => {
-  if (updateStatusIntervalId) {
-    clearInterval(updateStatusIntervalId)
-    updateStatusIntervalId = null
-  }
-})
+onUnmounted(stopUpdatePoll)
 </script>
 
 <template>

@@ -88,6 +88,12 @@ watch(() => store.currentServerId, async (newId, oldId) => {
   if (!newId || newId === oldId) return
   stopLogPolling()
   stopServerStatusPolling()
+  // F7: clear any in-flight modpack-progress polling owned by the
+  // previous server — without this, switching mid-install would leak
+  // the old server's polling and surface its progress as the new
+  // server's. The store.modpackInstalling watcher restarts it for the
+  // new server if needed.
+  stopModpackProgressPolling()
   store.resetState()
   await store.refreshAll()
   if (shouldPollLogs(route.name)) {
