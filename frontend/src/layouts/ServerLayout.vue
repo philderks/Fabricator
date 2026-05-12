@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onUnmounted, watch } from 'vue'
+import { onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import AppSidebar from '../components/layout/AppSidebar.vue'
 import AppTopbar from '../components/layout/AppTopbar.vue'
@@ -84,6 +84,9 @@ watch(() => route.name, (name) => {
 
 // ---------- Watches ----------
 
+// F7-fixup: immediate:true makes this watcher the single source of initial
+// fetch + status polling. onMounted previously also fired refreshAll/
+// startServerStatusPolling — duplicate on cold load.
 watch(() => store.currentServerId, async (newId, oldId) => {
   if (!newId || newId === oldId) return
   stopLogPolling()
@@ -101,7 +104,7 @@ watch(() => store.currentServerId, async (newId, oldId) => {
     startLogPolling()
   }
   startServerStatusPolling()
-})
+}, { immediate: true })
 
 // Drive modpack-progress polling from the store's installing flag.
 watch(() => store.modpackInstalling, (installing) => {
@@ -110,14 +113,6 @@ watch(() => store.modpackInstalling, (installing) => {
 })
 
 // ---------- Lifecycle ----------
-
-onMounted(async () => {
-  // Console / files initial-load conditions are handled by the route.name
-  // immediate-watcher above (lines 67-78). Keep onMounted focused on global
-  // initial fetch + status polling.
-  await store.refreshAll()
-  startServerStatusPolling()
-})
 
 onUnmounted(() => {
   stopLogPolling()

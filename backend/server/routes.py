@@ -42,8 +42,8 @@ server_bp = Blueprint('server', __name__, url_prefix='/api')
 # server is ready to start while the per-server lock is still held.
 #
 # CROSS-BRANCH CONTRACT (CC5): this set is mirrored by
-# frontend/src/stores/server.js:RUNTIME_KNOWN_STATUSES. Any change here
-# requires a lockstep frontend update. The pin is enforced by
+# frontend/src/utils/getEffectiveStatus.js:RUNTIME_KNOWN_STATUSES. Any change
+# here requires a lockstep frontend update. The pin is enforced by
 # tests/test_runtime_status_pin.py.
 _RUNTIME_KNOWN_STATUSES = frozenset({'running', 'stopped'})
 

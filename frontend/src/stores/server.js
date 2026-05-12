@@ -25,6 +25,9 @@ import {
 } from '../api/servers'
 import { useToast } from '../composables/useToast'
 import { enrichInstalledModsWithModrinth } from '../utils/enrichInstalledModsModrinth'
+// Status-display logic consolidated in utils/getEffectiveStatus (F6/CC5);
+// keep alias for the existing call sites in this file.
+import { getEffectiveStatus as pickEffectiveStatus } from '../utils/getEffectiveStatus'
 
 const MODPACK_STAGE_LABELS = {
   starting: 'Starting install...',
@@ -47,10 +50,6 @@ function isTextFile(path) {
   const extension = segments.pop() || ''
   return TEXT_FILE_EXTENSIONS.has(extension)
 }
-
-// Status-display logic consolidated in utils/getEffectiveStatus (F6/CC5);
-// keep alias for the existing call sites in this file.
-import { getEffectiveStatus as pickEffectiveStatus } from '../utils/getEffectiveStatus'
 
 export const useServerStore = defineStore('server', () => {
   const router = useRouter()
@@ -321,8 +320,12 @@ export const useServerStore = defineStore('server', () => {
       if (Array.isArray(list)) {
         serversList.value = list
       }
-    } catch {
+      return { ok: true }
+    } catch (error) {
       // Failure-safe: keep last-known-good state. Switcher pseudo-entry handles empty list.
+      // Returns a tuple so opt-in callers (e.g. Servers.vue) can surface the
+      // error UI; internal callers ignore the return value.
+      return { ok: false, error }
     }
   }
 

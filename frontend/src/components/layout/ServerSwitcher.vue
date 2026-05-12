@@ -2,6 +2,7 @@
 import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useServerStore } from '../../stores/server'
+import { getEffectiveStatus as statusOf } from '../../utils/getEffectiveStatus'
 
 const route = useRoute()
 const router = useRouter()
@@ -25,13 +26,9 @@ const otherServers = computed(() =>
   store.serversList.filter((s) => s.id !== currentId.value)
 )
 
-// Mirror backend _augment_with_runtime: the runtime registry only knows
-// running/stopped. For in-flight states (pending, installing, starting,
 // Status-display logic consolidated in utils/getEffectiveStatus (F6/CC5).
-// The historical 'unknown' fallback used here was a drift from the store's
-// 'pending' default — both now go through the same util with the same
-// default.
-import { getEffectiveStatus as statusOf } from '../../utils/getEffectiveStatus'
+// Historical local fallback was 'unknown' (drift); now uses the util's
+// 'pending' default, lockstep with stores/server.js + the backend pin.
 
 const dotColor = (s) => {
   switch (statusOf(s)) {
