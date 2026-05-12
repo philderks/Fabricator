@@ -25,16 +25,17 @@ const loadServers = async () => {
     if (list.length > 0) {
       // Skip the empty state entirely — there's no list view here anymore,
       // so anyone landing on `/` with at least one server gets sent to the
-      // first server's overview.
+      // first server's overview. Early-return to avoid touching `loading`
+      // on a component the router is about to unmount (F9 race-fix).
       router.replace({ name: 'ServerOverview', params: { id: list[0].id } })
+      return
     }
   } catch (error) {
     console.error('Failed to load servers:', error)
     errorMessage.value = error?.message || 'Failed to load servers'
     toast.error('Failed to load servers', 'Error')
-  } finally {
-    loading.value = false
   }
+  loading.value = false
 }
 
 onMounted(() => {

@@ -226,7 +226,7 @@ export const useServerStore = defineStore('server', () => {
         online: server.value?.runtime?.players?.online ?? 0,
         max: server.value?.maxPlayers ?? server.value?.runtime?.players?.max ?? 0
       },
-      tps: server.value?.runtime?.tps ?? 20
+      tps: server.value?.runtime?.tps ?? null
     }
   })
 
@@ -834,12 +834,15 @@ export const useServerStore = defineStore('server', () => {
     try {
       await bulkRemoveMods(currentServerId.value, filenames)
       toast.success(`${filenames.length} mod${filenames.length === 1 ? '' : 's'} removed`, 'Mods Removed')
-      selectedModPaths.value = new Set()
       await loadMods()
     } catch (error) {
       console.error('Failed to bulk remove mods:', error)
       toast.error('Failed to remove selected mods', 'Error')
     } finally {
+      // F9: clear selection in finally — success AND failure both invalidate
+      // the previous selection (some mods may have been deleted on the
+      // server before an error mid-batch). User re-selects from fresh state.
+      selectedModPaths.value = new Set()
       bulkDeleting.value = false
       showConfirmModal.value = false
       modToRemove.value = null

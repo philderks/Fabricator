@@ -32,7 +32,7 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
     <section class="overview-page__stats">
       <StatCard label="Players" :value="store.serverStatus.players.online" :unit="store.serverStatus.players.max ? `/${store.serverStatus.players.max}` : ''" />
       <StatCard label="Uptime" :value="store.serverStatus.uptime" />
-      <StatCard label="TPS" :value="store.serverStatus.tps" :accent="store.serverStatus.status === 'running' ? 'success' : 'default'" />
+      <StatCard label="TPS" :value="store.serverStatus.tps ?? '—'" :accent="store.serverStatus.status === 'running' ? 'success' : 'default'" />
       <StatCard label="Mods" :value="store.installedMods.length" :accent="store.installedMods.length > 0 ? 'primary' : 'default'" />
     </section>
 
@@ -121,7 +121,7 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
             </button>
             <button type="button" class="overview-page__qa" @click="store.goToSettings">
               <span class="overview-page__qa-title">World</span>
-              <span class="overview-page__qa-sub">World config</span>
+              <span class="overview-page__qa-sub">Manage in settings</span>
             </button>
           </div>
         </Panel>
