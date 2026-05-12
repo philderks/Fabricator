@@ -122,6 +122,11 @@
 </template>
 
 <script setup>
+// Q: structural lookalike to ModBrowserModal (search-bar → results-grid →
+// empty-state → footer + matching prop shape `show`/`mcVersion`/`loader`).
+// formatNumber + truncate already share `utils/format.js` (F4). A full
+// `useResourceBrowser` composable extraction is EXCLUDED (H3 cluster /
+// CC7 Setup-API migration); track in FINDINGS.md if revisited.
 import { ref, computed, watch } from 'vue'
 import BaseModal from './BaseModal.vue'
 import SearchResultCard from '../ui/SearchResultCard.vue'

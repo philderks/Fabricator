@@ -64,6 +64,33 @@
 import BaseModal from './BaseModal.vue'
 import AppButton from '../ui/AppButton.vue'
 
+const STATUS_META = {
+  full: {
+    bannerClass: 'status-banner--full',
+    buttonVariant: 'primary',
+    title: 'Vollständig kompatibel',
+    describe: (t /* , v */) => `${t} unterstützt deine Server-Version ausdrücklich.`
+  },
+  likely: {
+    bannerClass: 'status-banner--likely',
+    buttonVariant: 'warning',
+    title: 'Wahrscheinlich kompatibel',
+    describe: (t, v) => `${t} ist nicht offiziell für ${v} freigegeben, sollte aber funktionieren.`
+  },
+  unlikely: {
+    bannerClass: 'status-banner--danger',
+    buttonVariant: 'danger',
+    title: 'Möglicherweise inkompatibel',
+    describe: (t, v) => `${t} scheint nicht für ${v} geeignet zu sein.`
+  },
+  unknown: {
+    bannerClass: 'status-banner--danger',
+    buttonVariant: 'danger',
+    title: 'Kompatibilität unbekannt',
+    describe: (/* t, v */) => 'Wir konnten keine kompatiblen Versionen finden.'
+  }
+}
+
 export default {
   name: 'CompatibilityConfirmModal',
   components: { BaseModal, AppButton },
@@ -100,50 +127,22 @@ export default {
     }
   },
   computed: {
+    // Single source of truth — `unlikely`/`unknown` both fall through to the
+    // danger banner (preserves F5 fix-up semantics).
+    statusMeta() {
+      return STATUS_META[this.status] ?? STATUS_META.unknown
+    },
     statusClass() {
-      switch (this.status) {
-        case 'full':
-          return 'status-banner--full'
-        case 'likely':
-          return 'status-banner--likely'
-        default:
-          // unlikely / unknown / unexpected — render as danger.
-          return 'status-banner--danger'
-      }
+      return this.statusMeta.bannerClass
     },
     installButtonVariant() {
-      switch (this.status) {
-        case 'full':
-          return 'primary'
-        case 'likely':
-          return 'warning'
-        default:
-          return 'danger'
-      }
+      return this.statusMeta.buttonVariant
     },
     statusTitle() {
-      switch (this.status) {
-        case 'full':
-          return 'Vollständig kompatibel'
-        case 'likely':
-          return 'Wahrscheinlich kompatibel'
-        case 'unlikely':
-          return 'Möglicherweise inkompatibel'
-        default:
-          return 'Kompatibilität unbekannt'
-      }
+      return this.statusMeta.title
     },
     statusDescription() {
-      switch (this.status) {
-        case 'full':
-          return `${this.modTitle} unterstützt deine Server-Version ausdrücklich.`
-        case 'likely':
-          return `${this.modTitle} ist nicht offiziell für ${this.serverVersion} freigegeben, sollte aber funktionieren.`
-        case 'unlikely':
-          return `${this.modTitle} scheint nicht für ${this.serverVersion} geeignet zu sein.`
-        default:
-          return 'Wir konnten keine kompatiblen Versionen finden.'
-      }
+      return this.statusMeta.describe(this.modTitle, this.serverVersion)
     },
     versionsToShow() {
       return this.versions

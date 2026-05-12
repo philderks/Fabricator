@@ -202,7 +202,8 @@ export default {
       modVersionCache: {},
       versionFilterExpanded: false,
       showDependencyModal: false,
-      pendingDependencyContext: null
+      pendingDependencyContext: null,
+      loadVersionsInflight: false
     };
   },
   computed: {
@@ -262,6 +263,11 @@ export default {
       }
     },
     async loadVersions() {
+      // Dedup guard — protects against concurrent calls (e.g. created() hook
+      // + open + loader-change races) without affecting any user-visible
+      // spinner state.
+      if (this.loadVersionsInflight) return
+      this.loadVersionsInflight = true
       try {
         const versions = await getGameVersions()
         const normalized = (versions || [])
@@ -315,6 +321,8 @@ export default {
       } catch (error) {
         console.error('Failed to load game versions:', error)
         this.availableVersions = []
+      } finally {
+        this.loadVersionsInflight = false
       }
     },
 
@@ -622,6 +630,7 @@ export default {
         this.searchQuery = '';
         this.results = [];
         this.versionFilterExpanded = false;
+        this.modVersionCache = {};
         this.cancelCompatibilityInstall()
         this.cancelDependencyInstall()
       }
@@ -638,6 +647,8 @@ export default {
     },
     loader(newVal) {
       this.selectedLoader = (newVal || 'fabric').toLowerCase()
+      // Parent loader change invalidates per-loader compat cache entries.
+      this.modVersionCache = {}
     }
   }
 }
