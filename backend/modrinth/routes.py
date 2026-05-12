@@ -12,6 +12,7 @@ from backend.server.registry import get_server_process_registry
 from backend.server.java_compat import resolve_required_java, skip_java_enforcement
 from backend.utils.routes import require_server, with_server_lock
 from backend.utils.strings import bool_from_str
+from backend.utils.time import iso_z_now
 
 modrinth_bp = Blueprint('modrinth', __name__, url_prefix='/api/modrinth')
 modrinth_client = ModrinthClient()
@@ -30,7 +31,7 @@ def _update_install_progress(server_id: str, **kwargs):
         _install_progress[server_id] = {
             **(_install_progress.get(server_id) or {}),
             **kwargs,
-            'updated_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+            'updated_at': iso_z_now(),
         }
 
 
@@ -87,10 +88,14 @@ def _create_server_backup(install_path: Path) -> str:
     return backup_name
 
 
-def _resolve_mods_folder(server_id: str):
-    server = storage.get_server(server_id)
-    if not server:
-        return None, ({'error': 'Server not found'}, 404)
+def _resolve_mods_folder(server: dict):
+    """Resolve ``server``'s mods folder via the registry.
+
+    Takes the already-validated server dict (typically from
+    ``@require_server``) so we don't make a redundant ``storage.get_server``
+    call. Returns ``(path, None)`` on success or ``(None, (payload, status))``
+    on a registry-level ``ValueError`` (e.g. install path config issue).
+    """
     try:
         path = _registry().resolve_mods_path(server)
         return path, None
@@ -249,6 +254,11 @@ def resolve_project_version(project_id):
     })
 
 
+# Public HTTP route stays `/mod/<mod_id>/download-url` for backward compat
+# (B14b precedent: legacy `/mod/` route co-exists with new `/project/` route).
+# The view function name and the URL placeholder name retain `mod_id` to
+# match the URL surface; only the client-method internal name was renamed
+# to ``get_project_download_url`` in B15.5d.
 @modrinth_bp.route('/mod/<mod_id>/download-url', methods=['GET'])
 def get_mod_download_url(mod_id):
     mc_version = request.args.get('mc_version')
@@ -286,7 +296,7 @@ def install_mod(mod_id, server):
     if mods_folder_override:
         return jsonify({"error": "mods_folder override is not allowed"}), 400
 
-    mods_folder, error = _resolve_mods_folder(server_id)
+    mods_folder, error = _resolve_mods_folder(server)
     if error:
         payload, status = error
         return jsonify(payload), status
@@ -383,7 +393,7 @@ def install_modpack(project_id, server):
         'version': result.get('version'),
         'mcVersion': result.get('mc_version'),
         'loaders': result.get('loaders', []),
-        'installedAt': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+        'installedAt': iso_z_now(),
     }
     storage.update_server(server_id, {'modpack': modpack_info})
     _clear_install_progress(server_id)

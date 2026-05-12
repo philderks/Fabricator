@@ -17,7 +17,6 @@ import threading
 import time
 import uuid
 import zipfile
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -28,6 +27,7 @@ from backend.server.installer.base import request_with_retry
 from backend.server.java_compat import resolve_required_java
 from backend.utils import platform as platform_utils
 from backend.utils.java import parse_java_major
+from backend.utils.time import iso_z_now
 from backend.utils.zip import safe_extract_zip
 
 
@@ -502,7 +502,7 @@ _TERMINAL_STATUSES: frozenset[str] = frozenset({"done", "error", "cancelled"})
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return iso_z_now()
 
 
 def _apply_task_update_locked(task_id: str, **fields) -> None:

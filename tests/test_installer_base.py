@@ -347,6 +347,9 @@ def test_validate_version_token_accepts_real_version_shapes(good):
     "",
     "1.20.1\x00",
     "1.20.1/extra",
+    # B15.5b: length-cap {1,128} — 129-char input must be rejected even when
+    # every char individually matches [A-Za-z0-9._+\-].
+    "1." + "a" * 127,
 ])
 def test_validate_version_token_rejects_path_and_shell_metachars(bad):
     with pytest.raises(ValueError, match="Invalid mc_version"):

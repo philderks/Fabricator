@@ -9,6 +9,21 @@ _VERSION_QUOTED_RE = re.compile(r'version "([^"]+)"')
 _LEADING_DIGITS_RE = re.compile(r"^(\d+)")
 
 
+def parse_java_version_string(version_output: str) -> str | None:
+    """Extract the quoted version literal from ``java -version`` output.
+
+    Returns the raw string inside the ``version "..."`` token (e.g.
+    ``"1.8.0_362"``, ``"17.0.5"``, ``"21"``), or ``None`` if no such token
+    is present. Sibling of :func:`parse_java_major` — both read the same
+    upstream output but with different responsibilities (display string vs.
+    semantic major-version int).
+    """
+    match = _VERSION_QUOTED_RE.search(version_output)
+    if not match:
+        return None
+    return match.group(1).strip()
+
+
 def parse_java_major(version_output: str) -> int | None:
     """Extract the Java major version from ``java -version``-style output.
 

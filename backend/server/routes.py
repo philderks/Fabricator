@@ -22,8 +22,9 @@ from backend.server.java_compat import resolve_required_java, skip_java_enforcem
 from backend.server import java_manager
 from backend.server.locks import get_server_lock, try_acquire, discard_lock
 from backend.utils import platform as platform_utils
-from backend.utils.java import parse_java_major
+from backend.utils.java import parse_java_major, parse_java_version_string
 from backend.utils.routes import require_server, with_server_lock
+from backend.utils.time import iso_z_from_timestamp, iso_z_now
 from backend.utils.zip import safe_extract_zip
 
 try:
@@ -141,7 +142,7 @@ def _serialize_file_entry(path: Path, base_path: Path | None = None) -> dict:
     return {
         'name': path.name,
         'size': stat_result.st_size,
-        'updatedAt': datetime.fromtimestamp(stat_result.st_mtime, timezone.utc).isoformat().replace('+00:00', 'Z'),
+        'updatedAt': iso_z_from_timestamp(stat_result.st_mtime),
         'path': str(path),
         'relativePath': relative_path,
         'isDir': path.is_dir()
@@ -259,7 +260,7 @@ def _write_server_properties(server: dict) -> tuple[bool, str | None]:
     props_path = install_path / 'server.properties'
     lines = [
         '# Fabricator server properties',
-        f'# Updated {datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")}'
+        f'# Updated {iso_z_now()}',
     ]
     for key, value in properties.items():
         if isinstance(value, bool):
@@ -1130,9 +1131,7 @@ def get_java_status():
         version = None
         detected_major = None
         if installed:
-            match = re.search(r'version "([^"]+)"', version_output)
-            if match:
-                version = match.group(1)
+            version = parse_java_version_string(version_output)
             detected_major = parse_java_major(version_output)
     except FileNotFoundError:
         installed = False

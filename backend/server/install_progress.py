@@ -28,8 +28,9 @@ and the in-memory dict is wiped.
 from __future__ import annotations
 
 import threading
-from datetime import datetime, timezone
 from typing import Any, Dict
+
+from backend.utils.time import iso_z_now
 
 
 _lock = threading.Lock()
@@ -50,7 +51,7 @@ def update(server_id: str, /, **kwargs: Any) -> None:
     overwritten — e.g. ``server_id`` set on the first ``starting`` update
     survives subsequent bytes-progress updates.
     """
-    timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    timestamp = iso_z_now()
     with _lock:
         existing = _store.get(server_id) or {}
         _store[server_id] = {
