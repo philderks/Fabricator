@@ -80,13 +80,6 @@ export function useToast() {
     }
   }
 
-  /**
-   * Clear all toasts
-   */
-  const clearAll = () => {
-    toasts.value = []
-  }
-
   return {
     toasts,
     success,

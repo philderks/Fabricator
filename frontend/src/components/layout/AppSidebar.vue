@@ -2,6 +2,7 @@
 import { computed, inject, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import ServerSwitcher from './ServerSwitcher.vue'
+import ConfirmModal from '../modals/ConfirmModal.vue'
 import { version as appVersion } from '../../../package.json'
 import { getUpdateStatus, triggerUpdate } from '../../api/servers'
 import { useToast } from '../../composables/useToast'
@@ -109,11 +110,37 @@ const updateVersionLabel = computed(() => {
   return v ? String(v) : ''
 })
 
+// In-app modal-based confirm (CC6: no window.confirm). The runUpdate flow
+// is the only consumer here, so we keep state local instead of pushing it
+// into the store — the promise-resolve pattern lets us preserve the
+// `await confirmed` shape of the original window.confirm call.
+const showUpdateConfirm = ref(false)
+let updateConfirmResolver = null
+
+const requestUpdateConfirmation = () => new Promise((resolve) => {
+  updateConfirmResolver = resolve
+  showUpdateConfirm.value = true
+})
+
+const handleUpdateConfirm = () => {
+  showUpdateConfirm.value = false
+  if (updateConfirmResolver) {
+    updateConfirmResolver(true)
+    updateConfirmResolver = null
+  }
+}
+
+const handleUpdateCancel = () => {
+  showUpdateConfirm.value = false
+  if (updateConfirmResolver) {
+    updateConfirmResolver(false)
+    updateConfirmResolver = null
+  }
+}
+
 const runUpdate = async () => {
   if (!updateAvailable.value || updateTriggering.value) return
-  const confirmed = window.confirm(
-    'Run Fabricator update now? The service may restart briefly while preserving server data and config.'
-  )
+  const confirmed = await requestUpdateConfirmation()
   if (!confirmed) return
 
   updateTriggering.value = true
@@ -232,6 +259,19 @@ onUnmounted(() => {
         <span class="app-sidebar__update-ver">{{ updateVersionLabel }}</span>
       </component>
     </div>
+
+    <ConfirmModal
+      :show="showUpdateConfirm"
+      title="Run Fabricator update?"
+      message="Run Fabricator update now?"
+      description="The service may restart briefly while preserving server data and config."
+      type="warning"
+      confirm-text="Run update"
+      cancel-text="Cancel"
+      @confirm="handleUpdateConfirm"
+      @cancel="handleUpdateCancel"
+      @close="handleUpdateCancel"
+    />
   </aside>
 </template>
 

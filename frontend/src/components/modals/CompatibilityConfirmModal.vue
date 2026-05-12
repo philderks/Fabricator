@@ -106,11 +106,9 @@ export default {
           return 'status-banner--full'
         case 'likely':
           return 'status-banner--likely'
-        case 'unlikely':
-        case 'unknown':
-          return 'status-banner--danger'
         default:
-          return 'status-banner--unknown'
+          // unlikely / unknown / unexpected — render as danger.
+          return 'status-banner--danger'
       }
     },
     installButtonVariant() {

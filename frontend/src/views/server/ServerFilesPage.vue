@@ -2,6 +2,7 @@
 import { computed, nextTick, ref } from 'vue'
 import AppButton from '../../components/ui/AppButton.vue'
 import Panel from '../../components/ui/Panel.vue'
+import ConfirmModal from '../../components/modals/ConfirmModal.vue'
 import { formatFileSize } from '../../utils/format'
 import { useServerStore } from '../../stores/server'
 
@@ -9,14 +10,38 @@ const store = useServerStore()
 
 const editorRef = ref(null)
 
+// CC6: modal-based confirm instead of window.confirm. Local state with a
+// promise-resolver lets the call sites keep their `if (!await ...) return`
+// shape without pushing dialog state into the store (single consumer).
+const showDiscardConfirm = ref(false)
+let discardResolver = null
+
 const confirmDiscardChanges = () => {
-  if (!store.hasFileChanges) return true
-  if (typeof window === 'undefined') return true
-  return window.confirm('Discard unsaved changes?')
+  if (!store.hasFileChanges) return Promise.resolve(true)
+  return new Promise((resolve) => {
+    discardResolver = resolve
+    showDiscardConfirm.value = true
+  })
+}
+
+const handleDiscardConfirm = () => {
+  showDiscardConfirm.value = false
+  if (discardResolver) {
+    discardResolver(true)
+    discardResolver = null
+  }
+}
+
+const handleDiscardCancel = () => {
+  showDiscardConfirm.value = false
+  if (discardResolver) {
+    discardResolver(false)
+    discardResolver = null
+  }
 }
 
 const onFileClick = async (entry) => {
-  if (!confirmDiscardChanges()) return
+  if (!(await confirmDiscardChanges())) return
   await store.openFile(entry.relativePath || entry.name)
   // Scroll the editor into view after Vue paints it.
   await nextTick()
@@ -28,8 +53,8 @@ const onFileClick = async (entry) => {
   }
 }
 
-const onCloseEditor = () => {
-  if (!confirmDiscardChanges()) return
+const onCloseEditor = async () => {
+  if (!(await confirmDiscardChanges())) return
   store.closeFile()
 }
 
@@ -198,6 +223,19 @@ const onCopyPath = async () => {
         <p v-if="store.fileEditor.error" class="files-page__editor-error">{{ store.fileEditor.error }}</p>
       </div>
     </Panel>
+
+    <ConfirmModal
+      :show="showDiscardConfirm"
+      title="Discard unsaved changes?"
+      message="You have unsaved changes."
+      description="Continuing will discard your edits. This cannot be undone."
+      type="warning"
+      confirm-text="Discard changes"
+      cancel-text="Keep editing"
+      @confirm="handleDiscardConfirm"
+      @cancel="handleDiscardCancel"
+      @close="handleDiscardCancel"
+    />
   </div>
 </template>
 
