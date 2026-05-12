@@ -27,19 +27,11 @@ const otherServers = computed(() =>
 
 // Mirror backend _augment_with_runtime: the runtime registry only knows
 // running/stopped. For in-flight states (pending, installing, starting,
-// stopping, failed) the persisted status is authoritative — without this,
-// a server installing in a background thread would render as "stopped"
-// the moment the modal closes (smoke-test bug, fixed alongside the same
-// change in stores/server.js#pickEffectiveStatus).
-const RUNTIME_KNOWN_STATUSES = new Set(['running', 'stopped'])
-const statusOf = (s) => {
-  const persisted = s?.status
-  const runtime = s?.runtime?.status
-  if (persisted && !RUNTIME_KNOWN_STATUSES.has(persisted)) {
-    return persisted
-  }
-  return runtime || persisted || 'unknown'
-}
+// Status-display logic consolidated in utils/getEffectiveStatus (F6/CC5).
+// The historical 'unknown' fallback used here was a drift from the store's
+// 'pending' default — both now go through the same util with the same
+// default.
+import { getEffectiveStatus as statusOf } from '../../utils/getEffectiveStatus'
 
 const dotColor = (s) => {
   switch (statusOf(s)) {

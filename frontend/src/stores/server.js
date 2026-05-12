@@ -48,29 +48,9 @@ function isTextFile(path) {
   return TEXT_FILE_EXTENSIONS.has(extension)
 }
 
-// Statuses the runtime registry can authoritatively replace.
-// Mirror of backend _augment_with_runtime's _RUNTIME_KNOWN_STATUSES.
-const RUNTIME_KNOWN_STATUSES = new Set(['running', 'stopped'])
-
-/**
- * Pick the effective status for display, mirroring the backend rule.
- *
- * The runtime registry tracks ServerManager processes; it only knows
- * "running" or "stopped". For in-flight states owned by a route handler
- * (pending, installing, starting, stopping, failed) the persisted status
- * is authoritative and must NOT be overwritten by the registry's
- * default "stopped". Without this, a server actively installing in a
- * background thread would display as "stopped" the moment the modal
- * closes — exactly the bug from the smoke test.
- */
-function pickEffectiveStatus(server) {
-  const persisted = server?.status
-  const runtime = server?.runtime?.status
-  if (persisted && !RUNTIME_KNOWN_STATUSES.has(persisted)) {
-    return persisted
-  }
-  return runtime || persisted || 'pending'
-}
+// Status-display logic consolidated in utils/getEffectiveStatus (F6/CC5);
+// keep alias for the existing call sites in this file.
+import { getEffectiveStatus as pickEffectiveStatus } from '../utils/getEffectiveStatus'
 
 export const useServerStore = defineStore('server', () => {
   const router = useRouter()
