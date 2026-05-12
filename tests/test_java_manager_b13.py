@@ -16,6 +16,7 @@ Pins the four behaviours introduced by commit B13 (partial — the
 """
 from __future__ import annotations
 
+import re
 import subprocess
 import time
 from unittest.mock import MagicMock, patch
@@ -24,6 +25,9 @@ import pytest
 import requests
 
 from backend.server import java_manager
+
+
+_ISO_Z_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{6})?Z")
 
 
 # ---------------------------------------------------------------------------
@@ -325,3 +329,52 @@ def test_adoptium_asset_url_retries_on_connection_error():
 
     assert result["filename"] == "jdk.tar.gz"
     assert mock_get.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# ISO-Z wire-format pin
+# ---------------------------------------------------------------------------
+
+
+def test_now_iso_matches_iso_z_wire_format():
+    """``_now_iso`` is pinned to ``YYYY-MM-DDTHH:MM:SS[.ffffff]Z``.
+
+    Install-task records (``created_at``, ``updated_at``) flow through
+    this helper. Frontend renders these strings verbatim.
+    """
+    ts = java_manager._now_iso()
+    assert _ISO_Z_RE.fullmatch(ts), f"_now_iso not ISO-Z: {ts!r}"
+
+
+def test_run_install_task_walls_clock_cap_transitions_to_error(monkeypatch):
+    """A task whose ``started_at`` is past the cap transitions to ``error``.
+
+    Pins the wall-clock-cap branch of ``_check_cancel_or_timeout``: when
+    ``time.monotonic() - started_at > _INSTALL_TASK_MAX_RUNTIME_SEC`` the
+    first check raises, the cancel event is set, and the task's status
+    flips to ``error`` with the cap message preserved in ``error``.
+    """
+    import threading
+
+    task_id = "t_cap"
+    with java_manager._install_tasks_lock:
+        java_manager._install_tasks[task_id] = {
+            "status": "queued",
+            "downloaded": 0,
+            "total": 0,
+            "completed_at": None,
+        }
+
+    cancel_event = threading.Event()
+    # Pin started_at far enough in the past that the FIRST cap check fires.
+    started_at = time.monotonic() - (java_manager._INSTALL_TASK_MAX_RUNTIME_SEC + 100)
+
+    # effective_install_major is pure; no patching needed. download_java would
+    # never be called because the first _check_cancel_or_timeout raises.
+    java_manager._run_install_task(task_id, major=21, cancel_event=cancel_event, started_at=started_at)
+
+    with java_manager._install_tasks_lock:
+        task = java_manager._install_tasks[task_id]
+    assert task["status"] == "error", task
+    assert "wall-clock cap" in (task.get("error") or "").lower()
+    assert cancel_event.is_set()

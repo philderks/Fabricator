@@ -474,6 +474,44 @@ def test_download_with_hash_verify_happy_path_sha512(tmp_path):
     assert target.read_bytes() == payload
 
 
+def test_download_with_hash_verify_handles_missing_content_length(tmp_path):
+    """Chunked transfer encoding (no ``Content-Length``) is non-fatal.
+
+    Behaviour pinned: the response omits ``Content-Length`` so ``bytes_total``
+    falls back to ``0``. The download still completes; the progress callback
+    is invoked with ``(bytes_done, 0)`` where ``bytes_done`` may exceed the
+    reported total. Pre-B11 inline code tolerated this — the helper does too.
+    """
+    payload = b"chunked-stream-payload"
+    target = tmp_path / "chunked.bin"
+
+    session = MagicMock()
+    response = MagicMock()
+    response.raise_for_status = MagicMock()
+    response.headers = {}  # no Content-Length → chunked encoding contract
+    response.iter_content = lambda chunk_size: iter([payload])
+    response.__enter__ = lambda self: self
+    response.__exit__ = lambda *a: False
+    session.get = MagicMock(return_value=response)
+
+    events: list[tuple[int, int]] = []
+
+    download_with_hash_verify(
+        "https://example.invalid/chunked",
+        target,
+        session=session,
+        progress_callback=lambda done, total: events.append((done, total)),
+    )
+
+    assert target.read_bytes() == payload
+    # At least one callback invocation, all with bytes_total == 0.
+    assert events, "progress_callback was never invoked"
+    assert all(total == 0 for _, total in events)
+    # bytes_done exceeds the reported total (0) — this is the contract under
+    # chunked encoding and the helper does not error on it.
+    assert events[-1][0] == len(payload)
+
+
 def test_download_with_hash_verify_no_hash_pass_through(tmp_path):
     """Both sha1 and sha512 None → bytes are still written (no integrity gate)."""
     payload = b"\x00\x01\x02"

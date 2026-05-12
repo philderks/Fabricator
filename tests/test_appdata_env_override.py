@@ -30,7 +30,12 @@ def test_fabricator_appdata_creates_missing_directory(monkeypatch, tmp_path):
 
 
 def test_fabricator_appdata_expands_tilde(monkeypatch, tmp_path):
+    # ``Path.expanduser`` reads HOME on POSIX and USERPROFILE on Windows.
+    # The Windows-bundled deployment target makes the USERPROFILE leg
+    # non-theoretical — set both so the expansion is deterministic across
+    # platforms.
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setenv("FABRICATOR_APPDATA", "~/sentinel-appdata")
     appdata_dir.cache_clear()
     result = appdata_dir()

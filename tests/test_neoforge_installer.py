@@ -367,7 +367,13 @@ def test_install_with_config_failure_does_not_write_server_properties(
 def test_install_with_config_emits_progress_phases(
     tmp_path, fake_maven_versions, monkeypatch
 ):
-    """Progress callback receives the documented phase sequence ending with done."""
+    """Progress callback receives the documented phase sequence in monotonic order.
+
+    Pins both membership AND ordering — a regression that emits e.g.
+    ``writing_eula`` before ``running_installer`` would silently break the
+    UI's progress bar. ``phases.index(...)`` is used so a duplicate emission
+    of the same phase still pins the FIRST occurrence's relative position.
+    """
     import subprocess
     from backend.server.installer.neoforge import NeoForgeInstaller
     inst = NeoForgeInstaller(tmp_path)
@@ -394,11 +400,104 @@ def test_install_with_config_emits_progress_phases(
     phases = [phase for phase, _ in events]
     assert phases[0] == "starting"
     assert phases[-1] == "done"
-    # Composition path runs the underlying install() phases.
-    for expected in ("resolving_versions", "running_installer", "writing_eula"):
-        assert expected in phases, f"missing phase: {expected}"
-    # No failure phase on the happy path.
     assert "failed" not in phases
+
+    # Monotonic ordering of all 5 install() phases plus install_with_config's
+    # writing_eula. Each phase must appear and earlier ones must precede later.
+    expected_sequence = [
+        "starting",
+        "resolving_versions",
+        "running_installer",
+        "detecting_artifacts",
+        "writing_eula",
+    ]
+    indices = [phases.index(p) for p in expected_sequence]
+    assert indices == sorted(indices), (
+        f"phase sequence not monotonic: {list(zip(expected_sequence, indices))}\n"
+        f"all phases: {phases}"
+    )
+
+
+# ---------- B15.5a: parametrized failure-mode property ----------
+
+
+def _setup_subprocess_timeout(inst, monkeypatch):
+    """The subprocess invocation raises SubprocessTimeout."""
+    from backend.server.installer.base import SubprocessTimeout
+
+    def boom(*args, **kwargs):
+        raise SubprocessTimeout("installer wedged at 1800s")
+
+    monkeypatch.setattr("backend.server.installer.neoforge.run_subprocess_streaming", boom)
+    monkeypatch.setattr("backend.server.installer.neoforge.is_windows", lambda: False)
+
+
+def _setup_subprocess_oserror(inst, monkeypatch):
+    """The subprocess can't be invoked (e.g. java binary missing)."""
+    def boom(*args, **kwargs):
+        raise OSError("[Errno 2] No such file or directory: 'java'")
+
+    monkeypatch.setattr("backend.server.installer.neoforge.run_subprocess_streaming", boom)
+    monkeypatch.setattr("backend.server.installer.neoforge.is_windows", lambda: False)
+
+
+def _setup_empty_maven(inst, monkeypatch):
+    """Maven returns an empty version list — no loader_version resolvable."""
+    monkeypatch.setattr(inst, "_fetch_maven_versions", lambda: [])
+
+
+def _setup_unknown_mc_version(inst, monkeypatch):
+    """The requested mc_version has no NeoForge release."""
+    # Default fixture has no 1.19.4-era releases (all are 20.x+/21.x+/26.x).
+    # The install() call uses mc_version="1.19.4" so loader_version resolution fails.
+    pass
+
+
+def _setup_missing_args_file(inst, monkeypatch):
+    """Subprocess returns 0 but does not create the args_file artefact."""
+    import subprocess
+
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("backend.server.installer.neoforge.run_subprocess_streaming", fake_run)
+    monkeypatch.setattr("backend.server.installer.neoforge.is_windows", lambda: False)
+
+
+@pytest.mark.parametrize(
+    ("scenario", "setup", "mc_version", "expected_substring"),
+    [
+        ("subprocess_timeout",   _setup_subprocess_timeout,   "1.21.1", "timed out"),
+        ("subprocess_oserror",   _setup_subprocess_oserror,   "1.21.1", "invoke"),
+        ("empty_maven",          _setup_empty_maven,          "1.21.1", "could not fetch"),
+        ("unknown_mc_version",   _setup_unknown_mc_version,   "1.19.4", "1.19.4"),
+        ("missing_args_file",    _setup_missing_args_file,    "1.21.1", "args_file"),
+    ],
+)
+def test_install_with_config_failure_modes_dont_write_server_properties(
+    tmp_path, fake_maven_versions, monkeypatch, scenario, setup, mc_version, expected_substring
+):
+    """Failure-mode property: on ANY failure path, server.properties stays absent.
+
+    Pins the no-side-effect contract: a failed install_with_config must not
+    write a partial properties file that a subsequent start would pick up.
+    """
+    from backend.server.installer.neoforge import NeoForgeInstaller
+    inst = NeoForgeInstaller(tmp_path)
+    _patch_session(inst, maven_response=fake_maven_versions)
+
+    setup(inst, monkeypatch)
+
+    result = inst.install_with_config(mc_version, {"port": 25570})
+
+    assert result.success is False, f"{scenario}: install_with_config should have failed"
+    assert expected_substring.lower() in result.message.lower(), (
+        f"{scenario}: expected {expected_substring!r} in message, got {result.message!r}"
+    )
+    # Property assertion: no server.properties leak on the failure path.
+    assert not (tmp_path / "server.properties").exists(), (
+        f"{scenario}: server.properties was written on a failure path"
+    )
 
 
 def test_install_subprocess_uses_no_window_kwargs(tmp_path, fake_maven_versions, monkeypatch):

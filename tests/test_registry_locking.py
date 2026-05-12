@@ -123,6 +123,29 @@ def test_discard_lock_while_held_does_not_break_holding_thread():
     assert holder_finished.is_set()
 
 
+def test_discard_lock_same_thread_holding_lock_does_not_deadlock():
+    """Same-thread holds + discards + re-enters: RLock re-entrant after registry forget.
+
+    Mirrors the production pattern in ``routes.py:delete_server_route`` —
+    the delete-handler holds its own per-server lock, then drops the
+    registry entry, then continues to do work inside the still-held lock.
+    The RLock object itself stays valid (the thread has a direct reference);
+    only the registry mapping is forgotten. A re-acquire by the SAME thread
+    must succeed without deadlock.
+    """
+    from backend.server.locks import discard_lock, get_server_lock
+
+    server_id = "srv_same_thread_discard"
+    lock = get_server_lock(server_id)
+    with lock:
+        # Drop the registry entry while still inside ``with lock:``.
+        discard_lock(server_id)
+        # RLock is re-entrant — the same thread can re-acquire its own held lock
+        # even though the registry no longer remembers the mapping.
+        with lock:
+            assert True
+
+
 def test_install_returns_409_when_lock_held_by_other_thread(client, tmp_servers_root):
     """Install endpoint must 409 when another thread already holds the lock.
 

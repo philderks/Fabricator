@@ -12,6 +12,26 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
+@pytest.fixture(autouse=True)
+def _clear_platform_caches():
+    """Reset platform-level ``lru_cache``s before each test.
+
+    ``appdata_dir``, ``arch_label``, and ``_system_name`` are cached for
+    process-lifetime. Tests that monkey-patch HOME, APPDATA,
+    FABRICATOR_APPDATA, or the platform-name need a clean slate; without
+    this fixture a stale cache from a previous test could leak into the
+    next one and silently produce wrong paths or arch labels.
+    """
+    from backend.utils.platform import appdata_dir, arch_label, _system_name
+    appdata_dir.cache_clear()
+    arch_label.cache_clear()
+    _system_name.cache_clear()
+    yield
+    appdata_dir.cache_clear()
+    arch_label.cache_clear()
+    _system_name.cache_clear()
+
+
 @pytest.fixture
 def tmp_servers_root(tmp_path, monkeypatch):
     """Redirect server/index/java roots to a temp dir.
