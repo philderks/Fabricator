@@ -334,27 +334,6 @@ def _server_java_check_payload(server: dict) -> dict:
     }
 
 
-@server_bp.route('/status', methods=['GET'])
-def get_status():
-    return jsonify({
-        'error': 'Deprecated endpoint. Use /api/servers/<id>/metrics or other new routes.'
-    }), 410
-
-
-@server_bp.route('/start', methods=['POST'])
-def start_server_legacy():
-    return jsonify({
-        'error': 'Deprecated endpoint. Use /api/servers/<server_id>/start instead.'
-    }), 410
-
-
-@server_bp.route('/stop', methods=['POST'])
-def stop_server_legacy():
-    return jsonify({
-        'error': 'Deprecated endpoint. Use /api/servers/<server_id>/stop instead.'
-    }), 410
-
-
 @server_bp.route('/health', methods=['GET'])
 def health_check():
     return jsonify({'healthy': True})

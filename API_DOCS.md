@@ -77,41 +77,6 @@ Health Check Endpoint.
 }
 ```
 
-#### `GET /api/status`
-Aktuellen Server-Status abrufen.
-
-**Response:**
-```json
-{
-  "status": "stopped",
-  "message": "Server process is not running",
-  "version": "1.0.0"
-}
-```
-
-#### `POST /api/start`
-Minecraft Server starten.
-
-**Response:**
-```json
-{
-  "status": "running",
-  "message": "Server started (Java verified: ...)",
-  "command": ["java", "-Xmx2G", "-jar", "server.jar", "nogui"]
-}
-```
-
-#### `POST /api/stop`
-Minecraft Server stoppen.
-
-**Response:**
-```json
-{
-  "status": "stopped",
-  "message": "Server stopped"
-}
-```
-
 ---
 
 ### Loader-Versions
@@ -545,11 +510,11 @@ curl "http://localhost:5000/api/modrinth/mod/sodium/versions?loaders=fabric&game
 ### 3. Server starten mit installierten Mods
 
 ```bash
-# Server starten
-curl -X POST http://localhost:5000/api/start
+# Server starten (per-Server-Endpoint; <server_id> aus GET /api/servers)
+curl -X POST http://localhost:5000/api/servers/<server_id>/start
 
-# Status prüfen
-curl http://localhost:5000/api/status
+# Metriken / Status prüfen
+curl http://localhost:5000/api/servers/<server_id>/metrics
 ```
 
 ---
