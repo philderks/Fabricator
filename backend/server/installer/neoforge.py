@@ -374,9 +374,9 @@ class NeoForgeInstaller(InstallerBase):
         # after lookup — Maven's payload is third-party and treated as
         # untrusted at the same trust-boundary.
         try:
-            validate_version_token(mc_version, field_name="mc_version")
+            mc_version = validate_version_token(mc_version, field_name="mc_version")
             if loader_version is not None:
-                validate_version_token(
+                loader_version = validate_version_token(
                     loader_version, field_name="loader_version"
                 )
         except ValueError as exc:
@@ -412,7 +412,7 @@ class NeoForgeInstaller(InstallerBase):
                     details={"mc_version": mc_version},
                 )
             try:
-                validate_version_token(
+                loader_version = validate_version_token(
                     loader_version, field_name="loader_version"
                 )
             except ValueError as exc:

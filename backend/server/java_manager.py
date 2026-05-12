@@ -505,20 +505,31 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _apply_task_update_locked(task_id: str, **fields) -> None:
+    """Mutate ``_install_tasks[task_id]`` in place; caller MUST hold the lock.
+
+    Split out of :func:`_update_task` so the worker success-path can compose
+    a cancel-event recheck and the status write atomically under one lock
+    acquisition. See ``_run_install_task`` for the cancel-vs-success race
+    that this enables fixing.
+    """
+    current = _install_tasks.get(task_id)
+    if current is None:
+        return
+    current.update(fields)
+    current["updated_at"] = _now_iso()
+    # Stamp ``completed_at`` (monotonic) the first time the task enters a
+    # terminal state. Used by :func:`_evict_old_install_tasks` — wall-clock
+    # is not safe here (clock-skew / NTP-jumps) but ``time.monotonic`` is
+    # immune.
+    status = current.get("status")
+    if status in _TERMINAL_STATUSES and current.get("completed_at") is None:
+        current["completed_at"] = time.monotonic()
+
+
 def _update_task(task_id: str, **fields) -> None:
     with _install_tasks_lock:
-        current = _install_tasks.get(task_id)
-        if current is None:
-            return
-        current.update(fields)
-        current["updated_at"] = _now_iso()
-        # Stamp ``completed_at`` (monotonic) the first time the task enters a
-        # terminal state. Used by :func:`_evict_old_install_tasks` — wall-clock
-        # is not safe here (clock-skew / NTP-jumps) but ``time.monotonic`` is
-        # immune.
-        status = current.get("status")
-        if status in _TERMINAL_STATUSES and current.get("completed_at") is None:
-            current["completed_at"] = time.monotonic()
+        _apply_task_update_locked(task_id, **fields)
 
 
 def _evict_old_install_tasks() -> None:
@@ -617,19 +628,27 @@ def _run_install_task(
         _check_cancel_or_timeout()
         _update_task(task_id, status="installing")
         java_path = install_java(install_major, archive)
-        # If the user cancelled while ``install_java`` was extracting, honour
-        # the request rather than reporting a misleading ``done`` — the
-        # extracted tree stays on disk (cleanup is the user's call once they
-        # decide whether to retry).
-        if cancel_event.is_set():
-            _update_task(task_id, status="cancelled", error="Install cancelled by user")
-            return
-        _update_task(
-            task_id,
-            status="done",
-            java_path=java_path,
-            install_major=install_major,
-        )
+        # Atomic cancel-vs-success finalisation under the lock. Without it, a
+        # concurrent ``cancel_install_task`` could interleave between the
+        # is_set() check and the ``status="done"`` write — either direction
+        # could clobber the other's terminal status. The lock-held recheck
+        # closes the race: a cancel that wins the lock first will already
+        # have flipped status to ``cancelled``, and our finalise branches
+        # honour ``cancel_event``.
+        with _install_tasks_lock:
+            if cancel_event.is_set():
+                _apply_task_update_locked(
+                    task_id,
+                    status="cancelled",
+                    error="Install cancelled by user",
+                )
+            else:
+                _apply_task_update_locked(
+                    task_id,
+                    status="done",
+                    java_path=java_path,
+                    install_major=install_major,
+                )
     except Exception as exc:  # pragma: no cover - runtime/network path
         # Preserve cancel state if it was already set: a cancel that races
         # with a download abort should report ``cancelled``, not ``error``.

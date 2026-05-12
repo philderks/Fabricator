@@ -20,9 +20,9 @@ Boot (via _build_command's existing jar branch):
 """
 from __future__ import annotations
 
+import logging
 import re
 import requests
-import subprocess
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -33,8 +33,13 @@ from .base import (
     InstallResult,
     InstallStatus,
     LaunchSpec,
+    SubprocessTimeout,
+    run_subprocess_streaming,
     validate_version_token,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 _MAVEN_RELEASE_RE = re.compile(r"<release>([^<]+)</release>")
@@ -234,9 +239,9 @@ class QuiltInstaller(InstallerBase):
         # — Quilt's installer takes mc_version directly on the command line,
         # so this is the trust-boundary check that closes the S5 vector.
         try:
-            validate_version_token(mc_version, field_name="mc_version")
+            mc_version = validate_version_token(mc_version, field_name="mc_version")
             if loader_version is not None:
-                validate_version_token(
+                loader_version = validate_version_token(
                     loader_version, field_name="loader_version"
                 )
         except ValueError as exc:
@@ -265,7 +270,7 @@ class QuiltInstaller(InstallerBase):
             )
 
         try:
-            validate_version_token(
+            installer_version = validate_version_token(
                 installer_version, field_name="installer_version"
             )
         except ValueError as exc:
@@ -306,21 +311,22 @@ class QuiltInstaller(InstallerBase):
         install_dir = self._resolve_within_install_path()
         java_cmd = self.java_exec or "java"
         self._report(progress_callback, "running_installer")
+        # Streaming runner (B12a parity): forwards each stdout/stderr line live
+        # to ``logger.info`` and guarantees a clean kill + drain on timeout.
         try:
-            completed = subprocess.run(
+            completed = run_subprocess_streaming(
                 [
                     java_cmd, "-jar", str(installer_jar),
                     "install", "server", mc_version,
                     "--download-server",
                     f"--install-dir={install_dir}",
                 ],
-                cwd=str(self.install_path),
-                capture_output=True,
-                text=True,
+                cwd=Path(self.install_path),
                 timeout=1800,
+                on_line=lambda line: logger.info("quilt-installer: %s", line),
                 **platform_utils.subprocess_no_window_kwargs(),
             )
-        except subprocess.TimeoutExpired as exc:
+        except SubprocessTimeout as exc:
             msg = f"Quilt installer timed out: {exc}"
             self._report(progress_callback, "failed", error=msg)
             return InstallResult(

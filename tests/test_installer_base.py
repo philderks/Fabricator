@@ -512,6 +512,68 @@ def test_download_with_hash_verify_handles_missing_content_length(tmp_path):
     assert events[-1][0] == len(payload)
 
 
+def test_download_with_hash_verify_size_mismatch_no_hash_path(tmp_path):
+    """No hash + Content-Length mismatch → HashVerifyError, target unlinked.
+
+    Fabric Meta serves the server JAR without an upstream hash. The
+    Content-Length size-check is the Best-Effort tamper-detection that
+    closes the no-hash gap (B15.5b). Mismatch must NOT leak partial bytes
+    to ``target``.
+    """
+    payload = b"truncated-payload"
+    target = tmp_path / "fabric.jar"
+
+    session = MagicMock()
+    response = MagicMock()
+    response.raise_for_status = MagicMock()
+    # Server claims 100 bytes via Content-Length; we only stream `payload`.
+    response.headers = {"Content-Length": "100"}
+    response.iter_content = lambda chunk_size: iter([payload])
+    response.__enter__ = lambda self: self
+    response.__exit__ = lambda *a: False
+    session.get = MagicMock(return_value=response)
+
+    with pytest.raises(HashVerifyError, match="Size mismatch"):
+        download_with_hash_verify(
+            "https://example.invalid/fabric.jar", target, session=session
+        )
+
+    assert not target.exists(), "target must be unlinked on size mismatch"
+
+
+def test_download_with_hash_verify_no_hash_chunked_logs_warning(tmp_path, caplog):
+    """No hash + no Content-Length (chunked) → WARN log, accept.
+
+    Documented limitation: when the server uses chunked transfer encoding
+    AND no upstream hash is available, body integrity cannot be verified.
+    The download is accepted (legacy behaviour) but a WARN log surfaces
+    the gap.
+    """
+    import logging
+    payload = b"chunked-fabric-payload"
+    target = tmp_path / "fabric.jar"
+
+    session = MagicMock()
+    response = MagicMock()
+    response.raise_for_status = MagicMock()
+    response.headers = {}  # no Content-Length → bytes_total=0
+    response.iter_content = lambda chunk_size: iter([payload])
+    response.__enter__ = lambda self: self
+    response.__exit__ = lambda *a: False
+    session.get = MagicMock(return_value=response)
+
+    with caplog.at_level(logging.WARNING, logger="backend.server.installer.base"):
+        download_with_hash_verify(
+            "https://example.invalid/fabric.jar", target, session=session
+        )
+
+    assert target.read_bytes() == payload
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("size cannot be verified" in r.getMessage() for r in warnings), (
+        f"Expected size-cannot-be-verified WARN, got: {[r.getMessage() for r in warnings]}"
+    )
+
+
 def test_download_with_hash_verify_no_hash_pass_through(tmp_path):
     """Both sha1 and sha512 None → bytes are still written (no integrity gate)."""
     payload = b"\x00\x01\x02"

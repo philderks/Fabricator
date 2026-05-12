@@ -370,9 +370,9 @@ class ForgeInstaller(InstallerBase):
         # below — Forge's promotions JSON is third-party so we treat it as
         # untrusted at the same trust-boundary.
         try:
-            validate_version_token(mc_version, field_name="mc_version")
+            mc_version = validate_version_token(mc_version, field_name="mc_version")
             if loader_version is not None:
-                validate_version_token(
+                loader_version = validate_version_token(
                     loader_version, field_name="loader_version"
                 )
         except ValueError as exc:
@@ -409,7 +409,7 @@ class ForgeInstaller(InstallerBase):
             )
 
         try:
-            validate_version_token(build, field_name="build")
+            build = validate_version_token(build, field_name="build")
         except ValueError as exc:
             msg = str(exc)
             self._report(progress_callback, "failed", error=msg)

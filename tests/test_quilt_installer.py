@@ -159,7 +159,7 @@ def test_install_resolves_installer_version_from_maven_metadata(
         (tmp_path / "quilt-server-launch.jar").write_bytes(b"PKquilt-launch")
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="ok", stderr="")
 
-    monkeypatch.setattr("backend.server.installer.quilt.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.quilt.run_subprocess_streaming", fake_run)
 
     result = inst.install("1.21.4")
 
@@ -188,7 +188,7 @@ def test_install_returns_jar_launchspec(tmp_path, fake_game_versions, monkeypatc
     def fake_run(cmd, **kwargs):
         (tmp_path / "quilt-server-launch.jar").write_bytes(b"PKquilt")
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
-    monkeypatch.setattr("backend.server.installer.quilt.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.quilt.run_subprocess_streaming", fake_run)
 
     result = inst.install("1.21.4")
     assert result.success is True
@@ -217,7 +217,7 @@ def test_install_uses_set_java_exec_path_for_subprocess(
         captured["cmd"] = cmd
         (tmp_path / "quilt-server-launch.jar").write_bytes(b"PKquilt")
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
-    monkeypatch.setattr("backend.server.installer.quilt.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.quilt.run_subprocess_streaming", fake_run)
 
     result = inst.install("1.21.4")
     assert result.success is True
@@ -244,7 +244,7 @@ def test_install_subprocess_uses_no_window_kwargs(
         "backend.server.installer.quilt.platform_utils.subprocess_no_window_kwargs",
         lambda: SENTINEL_KW,
     )
-    monkeypatch.setattr("backend.server.installer.quilt.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.quilt.run_subprocess_streaming", fake_run)
 
     result = inst.install("1.21.4")
     assert result.success is True
@@ -261,7 +261,7 @@ def test_install_subprocess_failure_returns_failure(
 
     def fake_run(cmd, **kwargs):
         return subprocess.CompletedProcess(args=cmd, returncode=2, stdout="", stderr="installer exploded")
-    monkeypatch.setattr("backend.server.installer.quilt.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.quilt.run_subprocess_streaming", fake_run)
 
     result = inst.install("1.21.4")
     assert result.success is False
@@ -280,7 +280,7 @@ def test_install_launcher_jar_missing_returns_failure(
     def fake_run(cmd, **kwargs):
         # Don't create the launcher jar — simulate a malformed install.
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
-    monkeypatch.setattr("backend.server.installer.quilt.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.quilt.run_subprocess_streaming", fake_run)
 
     result = inst.install("1.21.4")
     assert result.success is False
@@ -319,7 +319,7 @@ def test_install_sha1_mismatch_fails(tmp_path, fake_game_versions, monkeypatch):
     def fake_run(*a, **k):
         subprocess_called["hit"] = True
         return subprocess.CompletedProcess(args=[], returncode=0)
-    monkeypatch.setattr("backend.server.installer.quilt.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.quilt.run_subprocess_streaming", fake_run)
 
     result = inst.install("1.21.4")
     assert result.success is False

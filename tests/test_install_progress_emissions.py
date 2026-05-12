@@ -242,7 +242,7 @@ def test_quilt_install_emits_subprocess_phases(tmp_path, monkeypatch):
     def fake_run(cmd, **kwargs):
         (tmp_path / "quilt-server-launch.jar").write_bytes(b"PK")
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
-    monkeypatch.setattr("backend.server.installer.quilt.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.quilt.run_subprocess_streaming", fake_run)
 
     events = []
     result = inst.install("1.21.4", progress_callback=_record(events))
@@ -308,7 +308,7 @@ def test_quilt_download_installer_bytes_monotonic(tmp_path, monkeypatch):
     def fake_run(cmd, **kwargs):
         (tmp_path / "quilt-server-launch.jar").write_bytes(b"PK")
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
-    monkeypatch.setattr("backend.server.installer.quilt.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.quilt.run_subprocess_streaming", fake_run)
 
     events = []
     result = inst.install("1.21.4", progress_callback=_record(events))

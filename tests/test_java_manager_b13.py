@@ -378,3 +378,60 @@ def test_run_install_task_wall_clock_cap_transitions_to_error():
     assert task["status"] == "error", task
     assert "wall-clock cap" in (task.get("error") or "").lower()
     assert cancel_event.is_set()
+
+
+def test_cancel_vs_success_race_atomic_under_lock():
+    """Cancel interleaved between install_java and finalise must win.
+
+    Deterministic race reproduction: ``install_java`` blocks on a
+    ``threading.Event`` until the test thread sets it. While blocked, the
+    test issues ``cancel_install_task``. When the event releases the
+    worker, its atomic-under-lock finalise block sees ``cancel_event``
+    set and writes ``cancelled``. Without the lock-held recheck, the
+    worker would race past is_set() and overwrite the status.
+    """
+    import threading
+    from unittest.mock import patch
+
+    install_started = threading.Event()
+    can_finalize = threading.Event()
+    java_path_sentinel = "/tmp/fake-java-21"
+
+    def slow_install(major, archive):
+        install_started.set()
+        assert can_finalize.wait(timeout=5)
+        return java_path_sentinel
+
+    cancel_event = threading.Event()
+    task_id = "race"
+    with java_manager._install_tasks_lock:
+        java_manager._install_tasks[task_id] = {
+            "status": "queued",
+            "downloaded": 0,
+            "total": 0,
+            "completed_at": None,
+        }
+        java_manager._install_task_handles[task_id] = {
+            "cancel_event": cancel_event,
+            "thread": None,
+        }
+
+    with patch.object(java_manager, "download_java", return_value="/tmp/fake-arch"), \
+         patch.object(java_manager, "install_java", side_effect=slow_install):
+        worker = threading.Thread(
+            target=java_manager._run_install_task,
+            args=(task_id, 21, cancel_event, time.monotonic()),
+            daemon=True,
+        )
+        worker.start()
+        assert install_started.wait(timeout=5)
+        # Worker is inside install_java; issue the cancel.
+        assert java_manager.cancel_install_task(task_id) is True
+        # Release install_java so the worker proceeds to the finalise block.
+        can_finalize.set()
+        worker.join(timeout=5)
+
+    with java_manager._install_tasks_lock:
+        final = java_manager._install_tasks[task_id]
+    assert final["status"] == "cancelled", final
+    assert "java_path" not in final or final.get("java_path") != java_path_sentinel

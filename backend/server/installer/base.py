@@ -1,5 +1,6 @@
 """Abstract base class for Minecraft server installers."""
 import hashlib
+import logging
 import os
 import re
 import subprocess
@@ -12,6 +13,9 @@ from pathlib import Path
 from typing import Callable, List, Optional, Dict, Any, TypeVar
 
 import requests
+
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -29,7 +33,7 @@ _DOWNLOAD_CHUNK_SIZE = 65536
 # path separators, whitespace, shell metacharacters, and ``..``-only tokens.
 # Modelled on ``ModrinthClient._FILENAME_RE`` (the established pattern for
 # the same kind of trust-boundary check on user-influenced strings).
-LOADER_VERSION_RE = re.compile(r"^[A-Za-z0-9._+\-]+$")
+LOADER_VERSION_RE = re.compile(r"^[A-Za-z0-9._+\-]{1,128}$")
 
 
 def validate_version_token(value: str, *, field_name: str) -> str:
@@ -144,6 +148,10 @@ def request_with_retry(
                 raise
             last_exc = exc
         attempt += 1
+        # last_exc is provably non-None here — each except-arm sets it before
+        # reaching this point. The assert documents that for strict type
+        # checkers and short-circuits if the invariant is ever broken.
+        assert last_exc is not None
         if on_retry is not None:
             try:
                 on_retry(attempt, last_exc)
@@ -413,6 +421,26 @@ def download_with_hash_verify(
                 nonlocal_target.unlink(missing_ok=True)
                 raise HashVerifyError(
                     f"SHA1 mismatch for {url}: expected {sha1}, got {actual}"
+                )
+
+        # No-hash path (e.g. Fabric Meta's server JAR endpoint has no upstream
+        # hash): fall back to Content-Length size-check as best-effort tamper
+        # detection. Chunked encoding (Content-Length absent → bytes_total=0)
+        # is logged as a known limitation; truncation in that case stays
+        # undetectable until the JAR fails to boot.
+        if sha1 is None and sha512 is None:
+            if bytes_total > 0 and bytes_done != bytes_total:
+                tmp_path.unlink(missing_ok=True)
+                nonlocal_target.unlink(missing_ok=True)
+                raise HashVerifyError(
+                    f"Size mismatch for {url}: "
+                    f"Content-Length={bytes_total} but wrote {bytes_done} bytes"
+                )
+            if bytes_total == 0:
+                logger.warning(
+                    "Downloaded %s without Content-Length (chunked encoding) "
+                    "and no upstream hash — body size cannot be verified.",
+                    url,
                 )
 
         # Hash gate cleared (or hashing was disabled): atomically promote the
