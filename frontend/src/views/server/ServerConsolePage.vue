@@ -102,7 +102,7 @@ const onSubmit = (event) => {
         type="text"
         class="console-page__cmd-input"
         :value="store.consoleCommand"
-        @input="store.consoleCommand = $event.target.value"
+        @input="store.setConsoleCommand($event.target.value)"
         :disabled="!store.canSendCommand"
         :placeholder="store.canSendCommand ? 'Type a command and press Enter…' : 'Server not running'"
       />

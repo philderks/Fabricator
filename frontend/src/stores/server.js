@@ -546,9 +546,13 @@ export const useServerStore = defineStore('server', () => {
   }
 
   function openModBrowser() { showModBrowser.value = true }
+  function closeModBrowser() { showModBrowser.value = false }
   function openModpackBrowser() { showModpackBrowser.value = true }
+  function closeModpackBrowser() { showModpackBrowser.value = false }
+  function closeJavaModal() { showJavaModal.value = false }
   function openDeleteServerModal() { showDeleteServerModal.value = true }
   function cancelDeleteServer() { showDeleteServerModal.value = false }
+  function setConsoleCommand(value) { consoleCommand.value = value }
 
   function goToConsole()  { router.push({ name: 'ServerConsole',  params: { id: currentServerId.value } }) }
   function goToFiles()    { router.push({ name: 'ServerFiles',    params: { id: currentServerId.value } }) }
@@ -1037,6 +1041,10 @@ export const useServerStore = defineStore('server', () => {
     hasFileChanges,
     isDirtySettings,
     // Actions
+    closeModBrowser,
+    closeModpackBrowser,
+    closeJavaModal,
+    setConsoleCommand,
     loadServers,
     loadServer,
     loadMods,

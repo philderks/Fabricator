@@ -152,7 +152,7 @@ onUnmounted(() => {
       :show="store.showModBrowser"
       :mc-version="store.server?.version || store.serverStatus.version"
       :loader="(store.server?.loader || store.serverStatus.loader).toLowerCase()"
-      @close="store.showModBrowser = false"
+      @close="store.closeModBrowser"
       @install="store.handleInstallMod"
     />
 
@@ -160,7 +160,7 @@ onUnmounted(() => {
       :show="store.showModpackBrowser"
       :mc-version="store.server?.version || store.serverStatus.version"
       :loader="(store.server?.loader || store.serverStatus.loader).toLowerCase()"
-      @close="store.showModpackBrowser = false"
+      @close="store.closeModpackBrowser"
       @install="store.handleInstallModpack"
     />
 
@@ -281,7 +281,7 @@ onUnmounted(() => {
     <JavaInstallModal
       :show="store.showJavaModal"
       :mc-version="store.server?.version || ''"
-      @close="store.showJavaModal = false"
+      @close="store.closeJavaModal"
       @java-installed="store.handleJavaInstalled"
     />
   </div>
