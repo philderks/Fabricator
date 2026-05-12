@@ -346,7 +346,7 @@ def test_now_iso_matches_iso_z_wire_format():
     assert _ISO_Z_RE.fullmatch(ts), f"_now_iso not ISO-Z: {ts!r}"
 
 
-def test_run_install_task_walls_clock_cap_transitions_to_error(monkeypatch):
+def test_run_install_task_wall_clock_cap_transitions_to_error():
     """A task whose ``started_at`` is past the cap transitions to ``error``.
 
     Pins the wall-clock-cap branch of ``_check_cancel_or_timeout``: when

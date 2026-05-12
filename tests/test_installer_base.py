@@ -15,7 +15,7 @@ from backend.server.installer.base import (
     InstallStatus,
     LaunchSpec,
     SubprocessTimeout,
-    _validate_version_token,
+    validate_version_token,
     download_with_hash_verify,
     request_with_retry,
     run_subprocess_streaming,
@@ -315,7 +315,7 @@ def test_neoforge_get_minecraft_versions_no_zero_patch(tmp_path):
 # These tests pin the trust-boundary contract that closes Sicherheits-Block
 # S1 (Forge mc_version/build) and S5 (NeoForge / Quilt loader_version /
 # install-dir): every externally-controlled version token is whitelisted by
-# ``_validate_version_token`` before it lands in a filename or subprocess
+# ``validate_version_token`` before it lands in a filename or subprocess
 # arg, and every path constructed from those tokens is re-checked under
 # ``install_path`` by ``_resolve_within_install_path``.
 
@@ -332,7 +332,7 @@ def test_neoforge_get_minecraft_versions_no_zero_patch(tmp_path):
     "10.13.4.1614",
 ])
 def test_validate_version_token_accepts_real_version_shapes(good):
-    assert _validate_version_token(good, field_name="mc_version") == good
+    assert validate_version_token(good, field_name="mc_version") == good
 
 
 @pytest.mark.parametrize("bad", [
@@ -350,18 +350,18 @@ def test_validate_version_token_accepts_real_version_shapes(good):
 ])
 def test_validate_version_token_rejects_path_and_shell_metachars(bad):
     with pytest.raises(ValueError, match="Invalid mc_version"):
-        _validate_version_token(bad, field_name="mc_version")
+        validate_version_token(bad, field_name="mc_version")
 
 
 def test_validate_version_token_rejects_non_string():
     with pytest.raises(ValueError, match="Invalid build"):
-        _validate_version_token(None, field_name="build")  # type: ignore[arg-type]
+        validate_version_token(None, field_name="build")  # type: ignore[arg-type]
 
 
 def test_validate_version_token_field_name_in_error_message():
     """Error must name the field so install routes can log a clear failure."""
     with pytest.raises(ValueError, match="loader_version"):
-        _validate_version_token("..", field_name="loader_version")
+        validate_version_token("..", field_name="loader_version")
 
 
 def test_resolve_within_install_path_returns_resolved_descendant(tmp_path):

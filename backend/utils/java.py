@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import re
-from typing import Optional
 
 
 _VERSION_QUOTED_RE = re.compile(r'version "([^"]+)"')
 _LEADING_DIGITS_RE = re.compile(r"^(\d+)")
 
 
-def parse_java_major(version_output: str) -> Optional[int]:
+def parse_java_major(version_output: str) -> int | None:
     """Extract the Java major version from ``java -version``-style output.
 
     Examples:

@@ -39,7 +39,7 @@ from .base import (
     InstallStatus,
     LaunchSpec,
     SubprocessTimeout,
-    _validate_version_token,
+    validate_version_token,
     download_with_hash_verify,
     request_with_retry,
     run_subprocess_streaming,
@@ -370,9 +370,9 @@ class ForgeInstaller(InstallerBase):
         # below — Forge's promotions JSON is third-party so we treat it as
         # untrusted at the same trust-boundary.
         try:
-            _validate_version_token(mc_version, field_name="mc_version")
+            validate_version_token(mc_version, field_name="mc_version")
             if loader_version is not None:
-                _validate_version_token(
+                validate_version_token(
                     loader_version, field_name="loader_version"
                 )
         except ValueError as exc:
@@ -409,7 +409,7 @@ class ForgeInstaller(InstallerBase):
             )
 
         try:
-            _validate_version_token(build, field_name="build")
+            validate_version_token(build, field_name="build")
         except ValueError as exc:
             msg = str(exc)
             self._report(progress_callback, "failed", error=msg)

@@ -258,8 +258,8 @@ def get_mod_download_url(mod_id):
         return jsonify({"error": "mc_version parameter is required"}), 400
 
     try:
-        resolved = modrinth_client.get_mod_download_url(
-            mod_id=mod_id, mc_version=mc_version, loader=loader
+        resolved = modrinth_client.get_project_download_url(
+            project_id=mod_id, mc_version=mc_version, loader=loader
         )
     except ModrinthApiError as exc:
         return _modrinth_error_response(exc)
@@ -294,8 +294,8 @@ def install_mod(mod_id, server):
     target_path = Path(mods_folder)
 
     try:
-        resolved = modrinth_client.get_mod_download_url(
-            mod_id=mod_id, mc_version=mc_version, loader=loader
+        resolved = modrinth_client.get_project_download_url(
+            project_id=mod_id, mc_version=mc_version, loader=loader
         )
     except ModrinthApiError as exc:
         return _modrinth_error_response(exc)

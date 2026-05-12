@@ -29,10 +29,10 @@ _DOWNLOAD_CHUNK_SIZE = 65536
 # path separators, whitespace, shell metacharacters, and ``..``-only tokens.
 # Modelled on ``ModrinthClient._FILENAME_RE`` (the established pattern for
 # the same kind of trust-boundary check on user-influenced strings).
-_LOADER_VERSION_RE = re.compile(r"^[A-Za-z0-9._+\-]+$")
+LOADER_VERSION_RE = re.compile(r"^[A-Za-z0-9._+\-]+$")
 
 
-def _validate_version_token(value: str, *, field_name: str) -> str:
+def validate_version_token(value: str, *, field_name: str) -> str:
     """Reject version strings that could escape filename / subprocess contexts.
 
     ``mc_version`` arrives from user JSON (POST /api/servers); ``build`` and
@@ -51,12 +51,12 @@ def _validate_version_token(value: str, *, field_name: str) -> str:
     """
     if (
         not isinstance(value, str)
-        or not _LOADER_VERSION_RE.match(value)
+        or not LOADER_VERSION_RE.match(value)
         or value.strip(".") == ""
     ):
         raise ValueError(
             f"Invalid {field_name} {value!r}: "
-            f"must match {_LOADER_VERSION_RE.pattern} "
+            f"must match {LOADER_VERSION_RE.pattern} "
             f"and must not be a dots-only segment"
         )
     return value
@@ -128,7 +128,7 @@ def request_with_retry(
     """
     attempt = 0
     backoff = initial_backoff
-    last_exc: BaseException
+    last_exc: BaseException | None = None
     while True:
         try:
             return request_callable()
@@ -650,7 +650,7 @@ class InstallerBase(ABC):
         construction site so a poisoned ``mc_version`` / ``build`` /
         ``loader_version`` cannot escape the per-server install directory.
 
-        Defence-in-depth complement to ``_validate_version_token``: the
+        Defence-in-depth complement to ``validate_version_token``: the
         whitelist regex blocks the obvious vectors (``../``, NUL bytes,
         spaces) at the input boundary; this helper catches anything that
         slips past — symlink lookups, absolute-path segments, future

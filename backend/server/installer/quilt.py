@@ -33,7 +33,7 @@ from .base import (
     InstallResult,
     InstallStatus,
     LaunchSpec,
-    _validate_version_token,
+    validate_version_token,
 )
 
 
@@ -234,9 +234,9 @@ class QuiltInstaller(InstallerBase):
         # — Quilt's installer takes mc_version directly on the command line,
         # so this is the trust-boundary check that closes the S5 vector.
         try:
-            _validate_version_token(mc_version, field_name="mc_version")
+            validate_version_token(mc_version, field_name="mc_version")
             if loader_version is not None:
-                _validate_version_token(
+                validate_version_token(
                     loader_version, field_name="loader_version"
                 )
         except ValueError as exc:
@@ -265,7 +265,7 @@ class QuiltInstaller(InstallerBase):
             )
 
         try:
-            _validate_version_token(
+            validate_version_token(
                 installer_version, field_name="installer_version"
             )
         except ValueError as exc:

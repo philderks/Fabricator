@@ -210,11 +210,11 @@ class ModrinthClient:
         file_obj = primary_files[0] if primary_files else files[0]
         return file_obj.get("url")
 
-    def get_mod_download_url(
-        self, mod_id: str, mc_version: str, loader: str = "fabric"
+    def get_project_download_url(
+        self, project_id: str, mc_version: str, loader: str = "fabric"
     ) -> Optional[Dict[str, Any]]:
         versions = self.get_project_versions(
-            project_id=mod_id, loaders=[loader], game_versions=[mc_version]
+            project_id=project_id, loaders=[loader], game_versions=[mc_version]
         )
         best_version = self.pick_best_version(versions)
         if not best_version:

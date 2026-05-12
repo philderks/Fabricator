@@ -19,11 +19,8 @@ def get_base_path() -> str:
 
 
 def _load_dotenv() -> None:
-    """Load ``.env`` from project root (and optionally cwd). Optional dependency."""
-    try:
-        from dotenv import load_dotenv
-    except ImportError:
-        return
+    """Load ``.env`` from project root (and optionally cwd)."""
+    from dotenv import load_dotenv
     base = Path(get_base_path())
     load_dotenv(base / ".env")
     load_dotenv()
