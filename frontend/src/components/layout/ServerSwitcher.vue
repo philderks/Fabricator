@@ -2,6 +2,7 @@
 import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useServerStore } from '../../stores/server'
+import { getEffectiveStatus as statusOf } from '../../utils/getEffectiveStatus'
 
 const route = useRoute()
 const router = useRouter()
@@ -25,21 +26,9 @@ const otherServers = computed(() =>
   store.serversList.filter((s) => s.id !== currentId.value)
 )
 
-// Mirror backend _augment_with_runtime: the runtime registry only knows
-// running/stopped. For in-flight states (pending, installing, starting,
-// stopping, failed) the persisted status is authoritative — without this,
-// a server installing in a background thread would render as "stopped"
-// the moment the modal closes (smoke-test bug, fixed alongside the same
-// change in stores/server.js#pickEffectiveStatus).
-const RUNTIME_KNOWN_STATUSES = new Set(['running', 'stopped'])
-const statusOf = (s) => {
-  const persisted = s?.status
-  const runtime = s?.runtime?.status
-  if (persisted && !RUNTIME_KNOWN_STATUSES.has(persisted)) {
-    return persisted
-  }
-  return runtime || persisted || 'unknown'
-}
+// Status-display logic consolidated in utils/getEffectiveStatus (F6/CC5).
+// Historical local fallback was 'unknown' (drift); now uses the util's
+// 'pending' default, lockstep with stores/server.js + the backend pin.
 
 const dotColor = (s) => {
   switch (statusOf(s)) {

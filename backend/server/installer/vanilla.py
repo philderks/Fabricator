@@ -1,16 +1,23 @@
 """Vanilla server installer using Mojang piston-meta."""
 from __future__ import annotations
 
+import logging
 import requests
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from .base import (
+    HashVerifyError,
     InstallerBase,
     InstallResult,
     InstallStatus,
     LaunchSpec,
+    download_with_hash_verify,
+    request_with_retry,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class VanillaInstaller(InstallerBase):
@@ -40,15 +47,33 @@ class VanillaInstaller(InstallerBase):
         return "vanilla"
 
     def _fetch_manifest(self) -> Dict[str, Any]:
-        response = self.session.get(self.MANIFEST_URL, timeout=15)
-        response.raise_for_status()
-        return response.json()
+        """Fetch the Mojang piston-meta version manifest.
+
+        Retry-wrapped (B12b): piston-meta is generally rock-solid but the
+        idempotent GET pattern is the same as the loader Mavens, so we
+        absorb transient 5xx / connection-resets uniformly. ``raise_for_status``
+        + JSON parse run inside the closure so each retry gets a fresh
+        response.
+        """
+        def _do_request() -> Dict[str, Any]:
+            response = self.session.get(self.MANIFEST_URL, timeout=15)
+            response.raise_for_status()
+            return response.json()
+
+        return request_with_retry(
+            _do_request,
+            retries=3,
+            on_retry=lambda attempt, exc: logger.warning(
+                "Retrying Mojang manifest fetch (attempt %d): %s",
+                attempt, exc,
+            ),
+        )
 
     def get_minecraft_versions(self) -> List[Dict[str, Any]]:
         try:
             manifest = self._fetch_manifest()
         except requests.RequestException as exc:
-            print(f"Failed to fetch Mojang version manifest: {exc}")
+            logger.warning("Failed to fetch Mojang version manifest: %s", exc)
             return []
 
         out: List[Dict[str, Any]] = []
@@ -79,9 +104,23 @@ class VanillaInstaller(InstallerBase):
         return None
 
     def _fetch_version_meta(self, version_url: str) -> Dict[str, Any]:
-        response = self.session.get(version_url, timeout=15)
-        response.raise_for_status()
-        return response.json()
+        """Fetch a per-MC-version metadata document from piston-meta.
+
+        Retry-wrapped (B12b): same rationale as :meth:`_fetch_manifest`.
+        """
+        def _do_request() -> Dict[str, Any]:
+            response = self.session.get(version_url, timeout=15)
+            response.raise_for_status()
+            return response.json()
+
+        return request_with_retry(
+            _do_request,
+            retries=3,
+            on_retry=lambda attempt, exc: logger.warning(
+                "Retrying Mojang version-meta fetch (attempt %d): %s",
+                attempt, exc,
+            ),
+        )
 
     def _download_server_jar(
         self,
@@ -91,45 +130,44 @@ class VanillaInstaller(InstallerBase):
             "Callable[[str, Dict[str, Any]], None]"
         ] = None,
     ) -> "tuple[Optional[Path], Optional[str]]":
-        """Download the vanilla server jar and optionally verify its SHA1.
+        """Download the vanilla server jar and verify its SHA1.
+
+        Mojang's piston-meta always publishes ``downloads.server.sha1`` for
+        any version with a server JAR; the caller passes that value in via
+        ``expected_sha1`` and the helper hard-fails on mismatch.
 
         Returns ``(path, None)`` on success, or ``(None, error_message)`` on
         any failure (network error or SHA1 mismatch). The partial jar file
-        is removed on failure.
+        is removed on failure by ``download_with_hash_verify``.
         """
-        import hashlib
-
         jar_path = self.install_path / "server.jar"
-        hasher = hashlib.sha1()
-        try:
-            with self.session.get(server_url, stream=True, timeout=300) as response:
-                response.raise_for_status()
-                total_size = int(response.headers.get("Content-Length", 0))
-                downloaded = 0
-                with open(jar_path, "wb") as fh:
-                    for chunk in response.iter_content(chunk_size=65536):
-                        if chunk:
-                            fh.write(chunk)
-                            hasher.update(chunk)
-                            downloaded += len(chunk)
-                            self._report(
-                                progress_callback,
-                                "downloading_server_jar",
-                                bytes_done=downloaded,
-                                bytes_total=total_size,
-                            )
-        except requests.RequestException as exc:
-            if jar_path.exists():
-                jar_path.unlink()
-            return None, f"Failed to download vanilla server jar: {exc}"
 
-        if expected_sha1:
-            actual = hasher.hexdigest().lower()
-            if actual != expected_sha1.lower():
-                jar_path.unlink(missing_ok=True)
-                return None, (
-                    f"SHA1 checksum mismatch: expected {expected_sha1}, got {actual}"
-                )
+        def _emit(bytes_done: int, bytes_total: int) -> None:
+            self._report(
+                progress_callback,
+                "downloading_server_jar",
+                bytes_done=bytes_done,
+                bytes_total=bytes_total,
+            )
+
+        try:
+            download_with_hash_verify(
+                server_url,
+                jar_path,
+                sha1=expected_sha1,
+                session=self.session,
+                timeout=300,
+                progress_callback=_emit,
+                # B12b: retry transient 5xx / connection-resets on the JAR
+                # download. HashVerifyError is never retried.
+                retries=3,
+            )
+        except HashVerifyError as exc:
+            return None, str(exc)
+        except requests.RequestException as exc:
+            return None, f"Failed to download vanilla server jar: {exc}"
+        except OSError as exc:
+            return None, f"Failed to write vanilla server jar: {exc}"
 
         return jar_path, None
 
@@ -194,9 +232,29 @@ class VanillaInstaller(InstallerBase):
                 details={"mc_version": mc_version},
             )
 
+        # Mojang piston-meta publishes ``downloads.server.sha1`` for every
+        # version that has a server JAR. Refusing to install when the field
+        # is absent closes the integrity gap (S7) — a missing SHA1 means
+        # either piston-meta drift or a tampered manifest, neither of which
+        # is safe to silently degrade to an unverified install.
+        expected_sha1 = server_dl.get("sha1")
+        if not expected_sha1:
+            msg = (
+                f"Mojang manifest for {mc_version} did not publish a "
+                "server JAR SHA1; refusing to install without an "
+                "integrity check."
+            )
+            self._report(progress_callback, "failed", error=msg)
+            return InstallResult(
+                success=False,
+                status=InstallStatus.FAILED,
+                message=msg,
+                details={"mc_version": mc_version},
+            )
+
         jar_path, dl_error = self._download_server_jar(
             server_url,
-            expected_sha1=server_dl.get("sha1"),
+            expected_sha1=expected_sha1,
             progress_callback=progress_callback,
         )
         if not jar_path or not jar_path.exists():
@@ -222,7 +280,7 @@ class VanillaInstaller(InstallerBase):
                 "mc_version": mc_version,
                 "jar_file": str(jar_path),
                 "install_path": str(self.install_path),
-                "sha1": server_dl.get("sha1"),
+                "sha1": expected_sha1,
             },
             launch=LaunchSpec(
                 type="jar",

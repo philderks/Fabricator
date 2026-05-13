@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onUnmounted, watch } from 'vue'
+import { onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import AppSidebar from '../components/layout/AppSidebar.vue'
 import AppTopbar from '../components/layout/AppTopbar.vue'
@@ -84,10 +84,19 @@ watch(() => route.name, (name) => {
 
 // ---------- Watches ----------
 
+// F7-fixup: immediate:true makes this watcher the single source of initial
+// fetch + status polling. onMounted previously also fired refreshAll/
+// startServerStatusPolling — duplicate on cold load.
 watch(() => store.currentServerId, async (newId, oldId) => {
   if (!newId || newId === oldId) return
   stopLogPolling()
   stopServerStatusPolling()
+  // F7: clear any in-flight modpack-progress polling owned by the
+  // previous server — without this, switching mid-install would leak
+  // the old server's polling and surface its progress as the new
+  // server's. The store.modpackInstalling watcher restarts it for the
+  // new server if needed.
+  stopModpackProgressPolling()
   store.resetState()
   await store.refreshAll()
   if (shouldPollLogs(route.name)) {
@@ -95,7 +104,7 @@ watch(() => store.currentServerId, async (newId, oldId) => {
     startLogPolling()
   }
   startServerStatusPolling()
-})
+}, { immediate: true })
 
 // Drive modpack-progress polling from the store's installing flag.
 watch(() => store.modpackInstalling, (installing) => {
@@ -104,14 +113,6 @@ watch(() => store.modpackInstalling, (installing) => {
 })
 
 // ---------- Lifecycle ----------
-
-onMounted(async () => {
-  // Console / files initial-load conditions are handled by the route.name
-  // immediate-watcher above (lines 67-78). Keep onMounted focused on global
-  // initial fetch + status polling.
-  await store.refreshAll()
-  startServerStatusPolling()
-})
 
 onUnmounted(() => {
   stopLogPolling()
@@ -146,7 +147,7 @@ onUnmounted(() => {
       :show="store.showModBrowser"
       :mc-version="store.server?.version || store.serverStatus.version"
       :loader="(store.server?.loader || store.serverStatus.loader).toLowerCase()"
-      @close="store.showModBrowser = false"
+      @close="store.closeModBrowser"
       @install="store.handleInstallMod"
     />
 
@@ -154,7 +155,7 @@ onUnmounted(() => {
       :show="store.showModpackBrowser"
       :mc-version="store.server?.version || store.serverStatus.version"
       :loader="(store.server?.loader || store.serverStatus.loader).toLowerCase()"
-      @close="store.showModpackBrowser = false"
+      @close="store.closeModpackBrowser"
       @install="store.handleInstallModpack"
     />
 
@@ -176,7 +177,6 @@ onUnmounted(() => {
       :loading="store.modpackInstalling"
       @confirm="store.confirmModpackInstall"
       @cancel="store.cancelModpackInstallConfirmation"
-      @close="store.cancelModpackInstallConfirmation"
     >
       <template #extra>
         <div v-if="store.modpackInstalling" class="install-progress">
@@ -203,7 +203,6 @@ onUnmounted(() => {
       :loading="store.modpackInstalling"
       @confirm="store.confirmInstallWithMissingMods"
       @cancel="store.cancelMissingModsConfirmation"
-      @close="store.cancelMissingModsConfirmation"
     />
 
     <ModSideDecisionModal
@@ -227,7 +226,6 @@ onUnmounted(() => {
       :cancel-text="store.confirmModalData.cancelText"
       @confirm="store.confirmRemoveMod"
       @cancel="store.cancelRemoveMod"
-      @close="store.cancelRemoveMod"
     />
 
     <ConfirmModal
@@ -241,7 +239,6 @@ onUnmounted(() => {
       :loading="store.restoringBackup"
       @confirm="store.confirmRestoreBackup"
       @cancel="store.cancelRestoreBackup"
-      @close="store.cancelRestoreBackup"
     />
 
     <ConfirmModal
@@ -255,7 +252,6 @@ onUnmounted(() => {
       :loading="store.deletingBackup"
       @confirm="store.confirmDeleteBackup"
       @cancel="store.cancelDeleteBackup"
-      @close="store.cancelDeleteBackup"
     />
 
     <ConfirmModal
@@ -269,13 +265,12 @@ onUnmounted(() => {
       :loading="store.deletingServer"
       @confirm="store.confirmDeleteServer"
       @cancel="store.cancelDeleteServer"
-      @close="store.cancelDeleteServer"
     />
 
     <JavaInstallModal
       :show="store.showJavaModal"
       :mc-version="store.server?.version || ''"
-      @close="store.showJavaModal = false"
+      @close="store.closeJavaModal"
       @java-installed="store.handleJavaInstalled"
     />
   </div>

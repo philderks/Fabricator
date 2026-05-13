@@ -102,7 +102,7 @@ const onSubmit = (event) => {
         type="text"
         class="console-page__cmd-input"
         :value="store.consoleCommand"
-        @input="store.consoleCommand = $event.target.value"
+        @input="store.setConsoleCommand($event.target.value)"
         :disabled="!store.canSendCommand"
         :placeholder="store.canSendCommand ? 'Type a command and press Enter…' : 'Server not running'"
       />
@@ -166,7 +166,7 @@ const onSubmit = (event) => {
   color: var(--text-primary);
 }
 
-.console-page__filter--info.is-active   { color: var(--info, #60a5fa); }
+.console-page__filter--info.is-active   { color: var(--info); }
 .console-page__filter--warn.is-active   { color: var(--warning); }
 .console-page__filter--error.is-active  { color: var(--danger); }
 .console-page__filter--debug.is-active  { color: var(--primary); }

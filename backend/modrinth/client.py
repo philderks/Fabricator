@@ -93,7 +93,7 @@ class ModrinthClient:
                     detail = ""
 
             lowered_context = error_context.lower()
-            if status_code == 404 and ("fetch project" in lowered_context or "fetch mod" in lowered_context):
+            if status_code == 404 and "fetch project" in lowered_context:
                 message = f"{error_context}: Not found"
             elif detail:
                 message = f"{error_context}: {detail}"
@@ -104,8 +104,9 @@ class ModrinthClient:
 
             raise ModrinthApiError(message, status_code=status_code) from exc
 
-    def search_mods(
+    def search(
         self,
+        project_type: str,
         query: str = "",
         mc_version: Optional[str] = None,
         loader: Optional[str] = None,
@@ -113,7 +114,12 @@ class ModrinthClient:
         offset: int = 0,
         index: str = "downloads",
     ) -> Dict[str, Any]:
-        facets: List[List[str]] = [["project_type:mod"]]
+        """Search Modrinth for projects of the given type.
+
+        ``project_type`` is the Modrinth ``project_type`` facet value
+        (e.g. ``"mod"``, ``"modpack"``).
+        """
+        facets: List[List[str]] = [[f"project_type:{project_type}"]]
         if mc_version:
             facets.append([f"versions:{mc_version}"])
         if loader:
@@ -132,81 +138,17 @@ class ModrinthClient:
             f"{self.BASE_URL}/search",
             params=params,
             timeout=15,
-            error_context="Failed to search mods",
-        )
-        return response.json()
-
-    def search_modpacks(
-        self,
-        query: str = "",
-        mc_version: Optional[str] = None,
-        loader: Optional[str] = None,
-        limit: int = 20,
-        offset: int = 0,
-        index: str = "downloads",
-    ) -> Dict[str, Any]:
-        facets: List[List[str]] = [["project_type:modpack"]]
-        if mc_version:
-            facets.append([f"versions:{mc_version}"])
-        if loader:
-            facets.append([f"categories:{loader}"])
-
-        params = {
-            "query": query,
-            "limit": max(1, min(limit, 100)),
-            "offset": max(0, offset),
-            "index": index,
-            "facets": json.dumps(facets),
-        }
-
-        response = self._request(
-            "get",
-            f"{self.BASE_URL}/search",
-            params=params,
-            timeout=15,
-            error_context="Failed to search modpacks",
-        )
-        return response.json()
-
-    def get_mod(self, mod_id: str) -> Dict[str, Any]:
-        response = self._request(
-            "get",
-            f"{self.BASE_URL}/project/{mod_id}",
-            timeout=15,
-            error_context="Failed to fetch mod",
+            error_context=f"Failed to search {project_type}s",
         )
         return response.json()
 
     def get_project(self, project_id: str) -> Dict[str, Any]:
+        """Fetch a Modrinth project (mod, modpack, resource pack, etc.)."""
         response = self._request(
             "get",
             f"{self.BASE_URL}/project/{project_id}",
             timeout=15,
             error_context="Failed to fetch project",
-        )
-        return response.json()
-
-    def get_mod_versions(
-        self,
-        mod_id: str,
-        loaders: Optional[List[str]] = None,
-        game_versions: Optional[List[str]] = None,
-        featured: Optional[bool] = None,
-    ) -> List[Dict[str, Any]]:
-        params: Dict[str, Any] = {}
-        if loaders:
-            params["loaders"] = json.dumps(loaders)
-        if game_versions:
-            params["game_versions"] = json.dumps(game_versions)
-        if featured is not None:
-            params["featured"] = str(featured).lower()
-
-        response = self._request(
-            "get",
-            f"{self.BASE_URL}/project/{mod_id}/version",
-            params=params if params else None,
-            timeout=15,
-            error_context="Failed to fetch mod versions",
         )
         return response.json()
 
@@ -217,6 +159,7 @@ class ModrinthClient:
         game_versions: Optional[List[str]] = None,
         featured: Optional[bool] = None,
     ) -> List[Dict[str, Any]]:
+        """Fetch versions for a Modrinth project."""
         params: Dict[str, Any] = {}
         if loaders:
             params["loaders"] = json.dumps(loaders)
@@ -272,11 +215,11 @@ class ModrinthClient:
         file_obj = primary_files[0] if primary_files else files[0]
         return file_obj.get("url")
 
-    def get_mod_download_url(
-        self, mod_id: str, mc_version: str, loader: str = "fabric"
+    def get_project_download_url(
+        self, project_id: str, mc_version: str, loader: str = "fabric"
     ) -> Optional[Dict[str, Any]]:
-        versions = self.get_mod_versions(
-            mod_id=mod_id, loaders=[loader], game_versions=[mc_version]
+        versions = self.get_project_versions(
+            project_id=project_id, loaders=[loader], game_versions=[mc_version]
         )
         best_version = self.pick_best_version(versions)
         if not best_version:
@@ -1098,9 +1041,15 @@ class ModrinthClient:
         removed: List[str] = []
 
         for relative in self.MODPACK_SWITCH_PATHS:
+            # Defense-in-depth: callers today iterate MODPACK_SWITCH_PATHS
+            # directly (disjoint from PROTECTED_SERVER_PATHS, pinned by
+            # tests/test_modrinth_client.py), so this branch is currently
+            # unreachable. The guard exists so a future change adding an
+            # overlapping entry to MODPACK_SWITCH_PATHS — or a future
+            # caller passing a wider path-set — cannot silently delete
+            # world/, logs/, backups/, libraries/, or versions/.
             if relative in self.PROTECTED_SERVER_PATHS:
                 continue
-
             target = (install_root / relative).resolve()
             if not str(target).startswith(str(install_root)):
                 continue

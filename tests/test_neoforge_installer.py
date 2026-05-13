@@ -144,7 +144,7 @@ def test_install_picks_latest_stable_when_unspecified(tmp_path, fake_maven_versi
         (target_dir / "win_args.txt").write_text("@@ args\n")
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="ok", stderr="")
 
-    monkeypatch.setattr("backend.server.installer.neoforge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.neoforge.run_subprocess_streaming", fake_run)
     monkeypatch.setattr("backend.server.installer.neoforge.is_windows", lambda: False)
 
     result = inst.install("1.21.1")
@@ -179,7 +179,7 @@ def test_install_uses_set_java_exec_path_for_subprocess(tmp_path, fake_maven_ver
         (target_dir / "unix_args.txt").write_text("# args\n")
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr("backend.server.installer.neoforge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.neoforge.run_subprocess_streaming", fake_run)
     monkeypatch.setattr("backend.server.installer.neoforge.is_windows", lambda: False)
 
     result = inst.install("1.21.1")
@@ -200,7 +200,7 @@ def test_install_uses_windows_args_file_on_windows(tmp_path, fake_maven_versions
         (target_dir / "win_args.txt").write_text("@@ win args\n")
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr("backend.server.installer.neoforge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.neoforge.run_subprocess_streaming", fake_run)
     monkeypatch.setattr("backend.server.installer.neoforge.is_windows", lambda: True)
 
     result = inst.install("1.21.1")
@@ -219,7 +219,7 @@ def test_install_subprocess_failure_returns_failure(tmp_path, fake_maven_version
     def fake_run(cmd, **kwargs):
         return subprocess.CompletedProcess(args=cmd, returncode=2, stdout="", stderr="installer exploded")
 
-    monkeypatch.setattr("backend.server.installer.neoforge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.neoforge.run_subprocess_streaming", fake_run)
     monkeypatch.setattr("backend.server.installer.neoforge.is_windows", lambda: False)
 
     result = inst.install("1.21.1")
@@ -237,7 +237,7 @@ def test_install_args_file_missing_after_install_returns_failure(tmp_path, fake_
     def fake_run(cmd, **kwargs):
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr("backend.server.installer.neoforge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.neoforge.run_subprocess_streaming", fake_run)
     monkeypatch.setattr("backend.server.installer.neoforge.is_windows", lambda: False)
 
     result = inst.install("1.21.1")
@@ -280,12 +280,224 @@ def test_install_sha1_mismatch_fails(tmp_path, fake_maven_versions, monkeypatch)
     session.get.side_effect = get
     inst.session = session
 
-    monkeypatch.setattr("backend.server.installer.neoforge.subprocess.run",
+    monkeypatch.setattr("backend.server.installer.neoforge.run_subprocess_streaming",
                         lambda *a, **k: subprocess.CompletedProcess(args=[], returncode=0))
 
     result = inst.install("1.21.1")
     assert result.success is False
     assert "sha1" in result.message.lower()
+
+
+def test_install_with_config_writes_server_properties_and_returns_launch(
+    tmp_path, fake_maven_versions, monkeypatch
+):
+    """install_with_config delegates to install() and then writes server.properties.
+
+    Composition contract: success path returns the same launch spec as
+    install(), populates details["server_properties"], and writes the
+    properties file with values derived from server_config.
+    """
+    import subprocess
+    from backend.server.installer.neoforge import NeoForgeInstaller
+    inst = NeoForgeInstaller(tmp_path)
+    _patch_session(inst, maven_response=fake_maven_versions)
+
+    def fake_run(cmd, **kwargs):
+        chosen_version = "21.1.228"
+        target_dir = tmp_path / "libraries" / "net" / "neoforged" / "neoforge" / chosen_version
+        target_dir.mkdir(parents=True, exist_ok=True)
+        (target_dir / "unix_args.txt").write_text("# args\n")
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("backend.server.installer.neoforge.run_subprocess_streaming", fake_run)
+    monkeypatch.setattr("backend.server.installer.neoforge.is_windows", lambda: False)
+
+    server_config = {
+        "port": 25570,
+        "motd": "Fabricator NeoForge Test",
+        "maxPlayers": 12,
+        "difficulty": "hard",
+    }
+
+    result = inst.install_with_config("1.21.1", server_config)
+
+    assert result.success is True
+    assert result.launch is not None
+    assert result.launch.type == "args_file"
+    assert result.launch.args_file == (
+        "libraries/net/neoforged/neoforge/21.1.228/unix_args.txt"
+    )
+
+    props_path = tmp_path / "server.properties"
+    assert props_path.exists()
+    props_text = props_path.read_text()
+    assert "server-port=25570" in props_text
+    assert "motd=Fabricator NeoForge Test" in props_text
+    assert "max-players=12" in props_text
+    assert "difficulty=hard" in props_text
+
+    assert result.details is not None
+    assert result.details["server_properties"] == str(props_path)
+
+
+def test_install_with_config_failure_does_not_write_server_properties(
+    tmp_path, fake_maven_versions, monkeypatch
+):
+    """When install() fails, install_with_config short-circuits and writes no properties."""
+    import subprocess
+    from backend.server.installer.neoforge import NeoForgeInstaller
+    inst = NeoForgeInstaller(tmp_path)
+    _patch_session(inst, maven_response=fake_maven_versions)
+
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(
+            args=cmd, returncode=2, stdout="", stderr="installer crashed"
+        )
+
+    monkeypatch.setattr("backend.server.installer.neoforge.run_subprocess_streaming", fake_run)
+    monkeypatch.setattr("backend.server.installer.neoforge.is_windows", lambda: False)
+
+    result = inst.install_with_config("1.21.1", {"port": 25570})
+
+    assert result.success is False
+    # No server.properties side-effect on the failure path.
+    assert not (tmp_path / "server.properties").exists()
+
+
+def test_install_with_config_emits_progress_phases(
+    tmp_path, fake_maven_versions, monkeypatch
+):
+    """Progress callback receives the documented phase sequence in monotonic order.
+
+    Pins both membership AND ordering — a regression that emits e.g.
+    ``writing_eula`` before ``running_installer`` would silently break the
+    UI's progress bar. ``phases.index(...)`` is used so a duplicate emission
+    of the same phase still pins the FIRST occurrence's relative position.
+    """
+    import subprocess
+    from backend.server.installer.neoforge import NeoForgeInstaller
+    inst = NeoForgeInstaller(tmp_path)
+    _patch_session(inst, maven_response=fake_maven_versions)
+
+    def fake_run(cmd, **kwargs):
+        chosen_version = "21.1.228"
+        target_dir = tmp_path / "libraries" / "net" / "neoforged" / "neoforge" / chosen_version
+        target_dir.mkdir(parents=True, exist_ok=True)
+        (target_dir / "unix_args.txt").write_text("# args\n")
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("backend.server.installer.neoforge.run_subprocess_streaming", fake_run)
+    monkeypatch.setattr("backend.server.installer.neoforge.is_windows", lambda: False)
+
+    events: list[tuple[str, dict]] = []
+
+    def cb(phase, detail):
+        events.append((phase, dict(detail)))
+
+    result = inst.install_with_config("1.21.1", {"port": 25565}, progress_callback=cb)
+    assert result.success is True
+
+    phases = [phase for phase, _ in events]
+    assert phases[0] == "starting"
+    assert phases[-1] == "done"
+    assert "failed" not in phases
+
+    # Monotonic ordering of all 5 install() phases plus install_with_config's
+    # writing_eula. Each phase must appear and earlier ones must precede later.
+    expected_sequence = [
+        "starting",
+        "resolving_versions",
+        "running_installer",
+        "detecting_artifacts",
+        "writing_eula",
+    ]
+    indices = [phases.index(p) for p in expected_sequence]
+    assert indices == sorted(indices), (
+        f"phase sequence not monotonic: {list(zip(expected_sequence, indices))}\n"
+        f"all phases: {phases}"
+    )
+
+
+# ---------- B15.5a: parametrized failure-mode property ----------
+
+
+def _setup_subprocess_timeout(inst, monkeypatch):
+    """The subprocess invocation raises SubprocessTimeout."""
+    from backend.server.installer.base import SubprocessTimeout
+
+    def boom(*args, **kwargs):
+        raise SubprocessTimeout("installer wedged at 1800s")
+
+    monkeypatch.setattr("backend.server.installer.neoforge.run_subprocess_streaming", boom)
+    monkeypatch.setattr("backend.server.installer.neoforge.is_windows", lambda: False)
+
+
+def _setup_subprocess_oserror(inst, monkeypatch):
+    """The subprocess can't be invoked (e.g. java binary missing)."""
+    def boom(*args, **kwargs):
+        raise OSError("[Errno 2] No such file or directory: 'java'")
+
+    monkeypatch.setattr("backend.server.installer.neoforge.run_subprocess_streaming", boom)
+    monkeypatch.setattr("backend.server.installer.neoforge.is_windows", lambda: False)
+
+
+def _setup_empty_maven(inst, monkeypatch):
+    """Maven returns an empty version list — no loader_version resolvable."""
+    monkeypatch.setattr(inst, "_fetch_maven_versions", lambda: [])
+
+
+def _setup_unknown_mc_version(inst, monkeypatch):
+    """The requested mc_version has no NeoForge release."""
+    # Default fixture has no 1.19.4-era releases (all are 20.x+/21.x+/26.x).
+    # The install() call uses mc_version="1.19.4" so loader_version resolution fails.
+    pass
+
+
+def _setup_missing_args_file(inst, monkeypatch):
+    """Subprocess returns 0 but does not create the args_file artefact."""
+    import subprocess
+
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("backend.server.installer.neoforge.run_subprocess_streaming", fake_run)
+    monkeypatch.setattr("backend.server.installer.neoforge.is_windows", lambda: False)
+
+
+@pytest.mark.parametrize(
+    ("scenario", "setup", "mc_version", "expected_substring"),
+    [
+        ("subprocess_timeout",   _setup_subprocess_timeout,   "1.21.1", "timed out"),
+        ("subprocess_oserror",   _setup_subprocess_oserror,   "1.21.1", "invoke"),
+        ("empty_maven",          _setup_empty_maven,          "1.21.1", "could not fetch"),
+        ("unknown_mc_version",   _setup_unknown_mc_version,   "1.19.4", "1.19.4"),
+        ("missing_args_file",    _setup_missing_args_file,    "1.21.1", "args_file"),
+    ],
+)
+def test_install_with_config_failure_modes_dont_write_server_properties(
+    tmp_path, fake_maven_versions, monkeypatch, scenario, setup, mc_version, expected_substring
+):
+    """Failure-mode property: on ANY failure path, server.properties stays absent.
+
+    Pins the no-side-effect contract: a failed install_with_config must not
+    write a partial properties file that a subsequent start would pick up.
+    """
+    from backend.server.installer.neoforge import NeoForgeInstaller
+    inst = NeoForgeInstaller(tmp_path)
+    _patch_session(inst, maven_response=fake_maven_versions)
+
+    setup(inst, monkeypatch)
+
+    result = inst.install_with_config(mc_version, {"port": 25570})
+
+    assert result.success is False, f"{scenario}: install_with_config should have failed"
+    assert expected_substring.lower() in result.message.lower(), (
+        f"{scenario}: expected {expected_substring!r} in message, got {result.message!r}"
+    )
+    # Property assertion: no server.properties leak on the failure path.
+    assert not (tmp_path / "server.properties").exists(), (
+        f"{scenario}: server.properties was written on a failure path"
+    )
 
 
 def test_install_subprocess_uses_no_window_kwargs(tmp_path, fake_maven_versions, monkeypatch):
@@ -316,10 +528,43 @@ def test_install_subprocess_uses_no_window_kwargs(tmp_path, fake_maven_versions,
         "backend.server.installer.neoforge.platform_utils.subprocess_no_window_kwargs",
         lambda: SENTINEL_KW,
     )
-    monkeypatch.setattr("backend.server.installer.neoforge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.neoforge.run_subprocess_streaming", fake_run)
     monkeypatch.setattr("backend.server.installer.neoforge.is_windows", lambda: False)
 
     result = inst.install("1.21.1")
     assert result.success is True
     # The sentinel kwarg must have made it through.
     assert captured_kwargs.get("creationflags") == 0x08000000
+
+
+# ---------- B10 Path-traversal mitigation (S5) ----------
+
+
+def test_install_rejects_traversal_mc_version(tmp_path):
+    """Sicherheit S5: ../-prefixed mc_version must be rejected at boundary."""
+    from backend.server.installer.neoforge import NeoForgeInstaller
+    inst = NeoForgeInstaller(tmp_path)
+
+    result = inst.install("../../etc/passwd")
+    assert result.success is False
+    assert "mc_version" in result.message
+    assert not list(tmp_path.glob("**/*.jar"))
+
+
+def test_install_rejects_shell_metachar_loader_version(tmp_path):
+    """A caller-pinned loader_version with shell metachars must not pass."""
+    from backend.server.installer.neoforge import NeoForgeInstaller
+    inst = NeoForgeInstaller(tmp_path)
+
+    result = inst.install("1.21.1", loader_version="21.1.228 --evil")
+    assert result.success is False
+    assert "loader_version" in result.message
+
+
+def test_install_rejects_traversal_loader_version(tmp_path):
+    from backend.server.installer.neoforge import NeoForgeInstaller
+    inst = NeoForgeInstaller(tmp_path)
+
+    result = inst.install("1.21.1", loader_version="../../bad")
+    assert result.success is False
+    assert "loader_version" in result.message

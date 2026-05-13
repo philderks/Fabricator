@@ -1,5 +1,5 @@
 """Server management routes and blueprints."""
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 import os
@@ -22,6 +22,10 @@ from backend.server.java_compat import resolve_required_java, skip_java_enforcem
 from backend.server import java_manager
 from backend.server.locks import get_server_lock, try_acquire, discard_lock
 from backend.utils import platform as platform_utils
+from backend.utils.java import parse_java_major, parse_java_version_string
+from backend.utils.routes import require_server, with_server_lock
+from backend.utils.time import iso_z_from_timestamp, iso_z_now
+from backend.utils.zip import safe_extract_zip
 
 try:
     import psutil  # type: ignore
@@ -36,10 +40,15 @@ server_bp = Blueprint('server', __name__, url_prefix='/api')
 # leave those alone or it silently downgrades 'installing' to 'stopped'
 # while the install subprocess is still running, making the UI think the
 # server is ready to start while the per-server lock is still held.
+#
+# CROSS-BRANCH CONTRACT (CC5): this set is mirrored by
+# frontend/src/utils/getEffectiveStatus.js:RUNTIME_KNOWN_STATUSES. Any change
+# here requires a lockstep frontend update. The pin is enforced by
+# tests/test_runtime_status_pin.py.
 _RUNTIME_KNOWN_STATUSES = frozenset({'running', 'stopped'})
 
 
-def _cleanup_stale_statuses() -> None:
+def cleanup_stale_statuses() -> None:
     """Reset 'installing'/'starting'/'stopping' records from a previous run.
 
     Called once from create_app() — must tolerate a missing or malformed
@@ -133,7 +142,7 @@ def _serialize_file_entry(path: Path, base_path: Path | None = None) -> dict:
     return {
         'name': path.name,
         'size': stat_result.st_size,
-        'updatedAt': datetime.utcfromtimestamp(stat_result.st_mtime).isoformat() + 'Z',
+        'updatedAt': iso_z_from_timestamp(stat_result.st_mtime),
         'path': str(path),
         'relativePath': relative_path,
         'isDir': path.is_dir()
@@ -153,13 +162,6 @@ def _ensure_child_path(base: Path, child: str) -> Path:
 def _get_installer(loader: str, install_path: Path):
     """Get the appropriate installer for the given loader."""
     return get_installer_for(loader, install_path)
-
-
-def _get_install_path(server: dict) -> Path:
-    try:
-        return _registry()._resolve_install_path(server)
-    except ValueError as exc:
-        raise ValueError(str(exc)) from exc
 
 
 def _get_backups_dir(base_path: Path) -> Path:
@@ -243,7 +245,7 @@ def _build_server_properties(server: dict) -> dict:
 
 def _write_server_properties(server: dict) -> tuple[bool, str | None]:
     try:
-        install_path = _get_install_path(server)
+        install_path = _registry().resolve_install_path(server)
     except ValueError as exc:
         return False, str(exc)
 
@@ -251,7 +253,7 @@ def _write_server_properties(server: dict) -> tuple[bool, str | None]:
     props_path = install_path / 'server.properties'
     lines = [
         '# Fabricator server properties',
-        f'# Updated {datetime.utcnow().isoformat()}Z'
+        f'# Updated {iso_z_now()}',
     ]
     for key, value in properties.items():
         if isinstance(value, bool):
@@ -264,28 +266,6 @@ def _write_server_properties(server: dict) -> tuple[bool, str | None]:
         return False, f'Failed to write server.properties: {exc}'
 
     return True, None
-
-
-def _safe_extract_zip(zip_file: zipfile.ZipFile, destination: Path) -> None:
-    destination = destination.resolve()
-
-    for member in zip_file.infolist():
-        member_path = destination / member.filename
-        resolved_path = member_path.resolve()
-        try:
-            resolved_path.relative_to(destination)
-        except ValueError as exc:
-            raise ValueError(
-                f"Archive member escapes destination: {member.filename!r}"
-            ) from exc
-
-        if member.is_dir():
-            resolved_path.mkdir(parents=True, exist_ok=True)
-            continue
-
-        resolved_path.parent.mkdir(parents=True, exist_ok=True)
-        with zip_file.open(member, 'r') as source, open(resolved_path, 'wb') as target:
-            shutil.copyfileobj(source, target)
 
 
 def _java_download_url(system: str, java_major: int) -> str:
@@ -347,27 +327,6 @@ def _server_java_check_payload(server: dict) -> dict:
     }
 
 
-@server_bp.route('/status', methods=['GET'])
-def get_status():
-    return jsonify({
-        'error': 'Deprecated endpoint. Use /api/servers/<id>/metrics or other new routes.'
-    }), 410
-
-
-@server_bp.route('/start', methods=['POST'])
-def start_server_legacy():
-    return jsonify({
-        'error': 'Deprecated endpoint. Use /api/servers/<server_id>/start instead.'
-    }), 410
-
-
-@server_bp.route('/stop', methods=['POST'])
-def stop_server_legacy():
-    return jsonify({
-        'error': 'Deprecated endpoint. Use /api/servers/<server_id>/stop instead.'
-    }), 410
-
-
 @server_bp.route('/health', methods=['GET'])
 def health_check():
     return jsonify({'healthy': True})
@@ -421,12 +380,8 @@ def create_server():
 
 
 @server_bp.route('/servers/<server_id>', methods=['GET'])
-def get_server_details(server_id):
-    server = storage.get_server(server_id)
-
-    if not server:
-        return jsonify({'error': 'Server not found'}), 404
-
+@require_server
+def get_server_details(server_id, server):
     return jsonify(_augment_with_runtime(server))
 
 
@@ -438,15 +393,12 @@ def get_server_logs(server_id):
 
 
 @server_bp.route('/servers/<server_id>/files', methods=['GET'])
-def browse_server_files(server_id):
-    server = storage.get_server(server_id)
-    if not server:
-        return jsonify({'error': 'Server not found'}), 404
-
+@require_server
+def browse_server_files(server_id, server):
     relative_path = request.args.get('path', '').strip()
 
     try:
-        base_path = _get_install_path(server)
+        base_path = _registry().resolve_install_path(server)
         target_path = _ensure_child_path(base_path, relative_path) if relative_path else base_path
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
@@ -470,17 +422,14 @@ def browse_server_files(server_id):
 
 
 @server_bp.route('/servers/<server_id>/files/content', methods=['GET'])
-def get_server_file_content(server_id):
+@require_server
+def get_server_file_content(server_id, server):
     path_param = request.args.get('path', '').strip()
     if not path_param:
         return jsonify({'error': 'Path query parameter is required'}), 400
 
-    server = storage.get_server(server_id)
-    if not server:
-        return jsonify({'error': 'Server not found'}), 404
-
     try:
-        base_path = _get_install_path(server)
+        base_path = _registry().resolve_install_path(server)
         target_path = _ensure_child_path(base_path, path_param)
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
@@ -499,7 +448,9 @@ def get_server_file_content(server_id):
 
 
 @server_bp.route('/servers/<server_id>/files/content', methods=['PUT'])
-def update_server_file_content(server_id):
+@require_server
+@with_server_lock
+def update_server_file_content(server_id, server):
     data = request.get_json() or {}
     path_param = (data.get('path') or '').strip()
     content = data.get('content')
@@ -509,40 +460,27 @@ def update_server_file_content(server_id):
     if content is None:
         return jsonify({'error': 'Content is required'}), 400
 
-    server = storage.get_server(server_id)
-    if not server:
-        return jsonify({'error': 'Server not found'}), 404
-
-    lock = try_acquire(server_id)
-    if lock is None:
-        return jsonify({'error': 'Another operation is in progress for this server'}), 409
     try:
-        try:
-            base_path = _get_install_path(server)
-            target_path = _ensure_child_path(base_path, path_param)
-        except ValueError as exc:
-            return jsonify({'error': str(exc)}), 400
+        base_path = _registry().resolve_install_path(server)
+        target_path = _ensure_child_path(base_path, path_param)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
 
-        if not target_path.exists() or not target_path.is_file():
-            return jsonify({'error': 'File not found'}), 404
+    if not target_path.exists() or not target_path.is_file():
+        return jsonify({'error': 'File not found'}), 404
 
-        try:
-            with open(target_path, 'w', encoding='utf-8') as file_handle:
-                file_handle.write(content)
-        except OSError as exc:
-            return jsonify({'error': f'Failed to write file: {exc}'}), 500
+    try:
+        with open(target_path, 'w', encoding='utf-8') as file_handle:
+            file_handle.write(content)
+    except OSError as exc:
+        return jsonify({'error': f'Failed to write file: {exc}'}), 500
 
-        return jsonify({'success': True})
-    finally:
-        lock.release()
+    return jsonify({'success': True})
 
 
 @server_bp.route('/servers/<server_id>/mods', methods=['GET'])
-def list_server_mods(server_id):
-    server = storage.get_server(server_id)
-    if not server:
-        return jsonify({'error': 'Server not found'}), 404
-
+@require_server
+def list_server_mods(server_id, server):
     try:
         mods_path = _registry().resolve_mods_path(server)
     except ValueError as exc:
@@ -557,11 +495,8 @@ def list_server_mods(server_id):
 
 
 @server_bp.route('/servers/<server_id>/mods/<path:filename>', methods=['DELETE'])
-def delete_server_mod(server_id, filename):
-    server = storage.get_server(server_id)
-    if not server:
-        return jsonify({'error': 'Server not found'}), 404
-
+@require_server
+def delete_server_mod(server_id, filename, server):
     try:
         mods_path = _registry().resolve_mods_path(server)
         target = _ensure_child_path(mods_path, filename)
@@ -576,11 +511,8 @@ def delete_server_mod(server_id, filename):
 
 
 @server_bp.route('/servers/<server_id>/mods', methods=['DELETE'])
-def bulk_delete_server_mods(server_id):
-    server = storage.get_server(server_id)
-    if not server:
-        return jsonify({'error': 'Server not found'}), 404
-
+@require_server
+def bulk_delete_server_mods(server_id, server):
     data = request.get_json(silent=True) or {}
     filenames = data.get('filenames', [])
     if not isinstance(filenames, list) or not filenames:
@@ -609,13 +541,10 @@ def bulk_delete_server_mods(server_id):
 
 
 @server_bp.route('/servers/<server_id>/backups', methods=['GET'])
-def list_server_backups(server_id):
-    server = storage.get_server(server_id)
-    if not server:
-        return jsonify({'error': 'Server not found'}), 404
-
+@require_server
+def list_server_backups(server_id, server):
     try:
-        base_path = _get_install_path(server)
+        base_path = _registry().resolve_install_path(server)
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
 
@@ -629,139 +558,120 @@ def list_server_backups(server_id):
 
 
 @server_bp.route('/servers/<server_id>/backup', methods=['POST'])
-def create_server_backup(server_id):
-    server = storage.get_server(server_id)
-    if not server:
-        return jsonify({'error': 'Server not found'}), 404
+@require_server
+@with_server_lock
+def create_server_backup(server_id, server):
+    runtime_status = _registry().get_status(server_id)
+    if runtime_status.get('status') == 'running':
+        return jsonify({'error': 'Stop the server before creating a backup to avoid data corruption'}), 400
 
-    lock = try_acquire(server_id)
-    if lock is None:
-        return jsonify({'error': 'Another operation is in progress for this server'}), 409
     try:
-        runtime_status = _registry().get_status(server_id)
-        if runtime_status.get('status') == 'running':
-            return jsonify({'error': 'Stop the server before creating a backup to avoid data corruption'}), 400
+        base_path = _registry().resolve_install_path(server)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
 
-        try:
-            base_path = _get_install_path(server)
-        except ValueError as exc:
-            return jsonify({'error': str(exc)}), 400
+    backups_dir = _get_backups_dir(base_path)
+    timestamp = datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')
+    archive_path = backups_dir / f'{timestamp}.zip'
 
-        backups_dir = _get_backups_dir(base_path)
-        timestamp = datetime.utcnow().strftime('%Y%m%d-%H%M%S')
-        archive_path = backups_dir / f'{timestamp}.zip'
+    try:
+        with zipfile.ZipFile(archive_path, 'w', compression=zipfile.ZIP_DEFLATED) as zip_file:
+            for file_path in base_path.rglob('*'):
+                if backups_dir in file_path.parents or file_path == backups_dir:
+                    continue
+                if file_path.is_dir():
+                    continue
+                zip_file.write(file_path, file_path.relative_to(base_path))
+    except OSError as exc:
+        if archive_path.exists():
+            try:
+                _unlink_with_retry(archive_path)
+            except OSError:
+                pass
+        return jsonify({'error': f'Failed to create backup: {exc}'}), 500
 
-        try:
-            with zipfile.ZipFile(archive_path, 'w', compression=zipfile.ZIP_DEFLATED) as zip_file:
-                for file_path in base_path.rglob('*'):
-                    if backups_dir in file_path.parents or file_path == backups_dir:
-                        continue
-                    if file_path.is_dir():
-                        continue
-                    zip_file.write(file_path, file_path.relative_to(base_path))
-        except OSError as exc:
-            if archive_path.exists():
-                try:
-                    _unlink_with_retry(archive_path)
-                except OSError:
-                    pass
-            return jsonify({'error': f'Failed to create backup: {exc}'}), 500
-
-        return jsonify({
-            'success': True,
-            'backup': _serialize_file_entry(archive_path, backups_dir)
-        })
-    finally:
-        lock.release()
+    return jsonify({
+        'success': True,
+        'backup': _serialize_file_entry(archive_path, backups_dir)
+    })
 
 
 @server_bp.route('/servers/<server_id>/backups/<backup_id>/restore', methods=['POST'])
-def restore_server_backup(server_id, backup_id):
-    server = storage.get_server(server_id)
-    if not server:
-        return jsonify({'error': 'Server not found'}), 404
-
-    lock = try_acquire(server_id)
-    if lock is None:
-        return jsonify({'error': 'Another operation is in progress for this server'}), 409
+@require_server
+@with_server_lock
+def restore_server_backup(server_id, backup_id, server):
     try:
+        base_path = _registry().resolve_install_path(server)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    status = _registry().get_status(server_id)
+    if status.get('status') == 'running':
+        return jsonify({'error': 'Stop the server before restoring a backup'}), 400
+
+    backups_dir = _get_backups_dir(base_path)
+    try:
+        backup_path = _ensure_child_path(backups_dir, f'{backup_id}.zip')
+    except ValueError:
+        return jsonify({'error': 'Invalid backup ID'}), 400
+
+    if not backup_path.exists():
+        return jsonify({'error': 'Backup not found'}), 404
+
+    staging = base_path.parent / f".restore-{server_id}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}"
+    staging.mkdir(parents=True, exist_ok=False)
+    try:
+        with zipfile.ZipFile(backup_path, 'r') as zip_file:
+            safe_extract_zip(zip_file, staging)
+    except (OSError, zipfile.BadZipFile, ValueError) as exc:
+        shutil.rmtree(staging, ignore_errors=True)
+        return jsonify({'error': f'Failed to extract backup: {exc}'}), 400
+
+    # Preserve existing backups/ into the staged tree so it survives the swap.
+    staged_backups = staging / 'backups'
+    try:
+        if not staged_backups.exists():
+            staged_backups.mkdir(parents=True, exist_ok=True)
+        for entry in backups_dir.iterdir():
+            dest = staged_backups / entry.name
+            if dest.exists():
+                continue
+            if entry.is_dir():
+                shutil.copytree(entry, dest)
+            else:
+                shutil.copy2(entry, dest)
+    except (OSError, shutil.Error) as exc:
+        shutil.rmtree(staging, ignore_errors=True)
+        return jsonify({'error': f'Failed to preserve backups: {exc}'}), 500
+
+    # Swap: rename live dir aside, move staging in, delete old dir.
+    old_dir = base_path.parent / f".old-{server_id}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}"
+    try:
+        os.replace(base_path, old_dir)
+    except OSError as exc:
+        shutil.rmtree(staging, ignore_errors=True)
+        return jsonify({'error': f'Failed to stage restore: {exc}'}), 500
+
+    try:
+        os.replace(staging, base_path)
+    except OSError as exc:
         try:
-            base_path = _get_install_path(server)
-        except ValueError as exc:
-            return jsonify({'error': str(exc)}), 400
+            os.replace(old_dir, base_path)
+        except OSError:
+            pass
+        shutil.rmtree(staging, ignore_errors=True)
+        return jsonify({'error': f'Failed to activate restore: {exc}'}), 500
 
-        status = _registry().get_status(server_id)
-        if status.get('status') == 'running':
-            return jsonify({'error': 'Stop the server before restoring a backup'}), 400
+    shutil.rmtree(old_dir, onerror=_handle_remove_readonly)
 
-        backups_dir = _get_backups_dir(base_path)
-        try:
-            backup_path = _ensure_child_path(backups_dir, f'{backup_id}.zip')
-        except ValueError:
-            return jsonify({'error': 'Invalid backup ID'}), 400
-
-        if not backup_path.exists():
-            return jsonify({'error': 'Backup not found'}), 404
-
-        staging = base_path.parent / f".restore-{server_id}-{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}"
-        staging.mkdir(parents=True, exist_ok=False)
-        try:
-            with zipfile.ZipFile(backup_path, 'r') as zip_file:
-                _safe_extract_zip(zip_file, staging)
-        except (OSError, zipfile.BadZipFile, ValueError) as exc:
-            shutil.rmtree(staging, ignore_errors=True)
-            return jsonify({'error': f'Failed to extract backup: {exc}'}), 400
-
-        # Preserve existing backups/ into the staged tree so it survives the swap.
-        staged_backups = staging / 'backups'
-        try:
-            if not staged_backups.exists():
-                staged_backups.mkdir(parents=True, exist_ok=True)
-            for entry in backups_dir.iterdir():
-                dest = staged_backups / entry.name
-                if dest.exists():
-                    continue
-                if entry.is_dir():
-                    shutil.copytree(entry, dest)
-                else:
-                    shutil.copy2(entry, dest)
-        except (OSError, shutil.Error) as exc:
-            shutil.rmtree(staging, ignore_errors=True)
-            return jsonify({'error': f'Failed to preserve backups: {exc}'}), 500
-
-        # Swap: rename live dir aside, move staging in, delete old dir.
-        old_dir = base_path.parent / f".old-{server_id}-{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}"
-        try:
-            os.replace(base_path, old_dir)
-        except OSError as exc:
-            shutil.rmtree(staging, ignore_errors=True)
-            return jsonify({'error': f'Failed to stage restore: {exc}'}), 500
-
-        try:
-            os.replace(staging, base_path)
-        except OSError as exc:
-            try:
-                os.replace(old_dir, base_path)
-            except OSError:
-                pass
-            shutil.rmtree(staging, ignore_errors=True)
-            return jsonify({'error': f'Failed to activate restore: {exc}'}), 500
-
-        shutil.rmtree(old_dir, onerror=_handle_remove_readonly)
-
-        return jsonify({'success': True, 'message': 'Backup restored successfully'})
-    finally:
-        lock.release()
+    return jsonify({'success': True, 'message': 'Backup restored successfully'})
 
 
 @server_bp.route('/servers/<server_id>/backups/<backup_id>', methods=['DELETE'])
-def delete_server_backup(server_id, backup_id):
-    server = storage.get_server(server_id)
-    if not server:
-        return jsonify({'error': 'Server not found'}), 404
-
+@require_server
+def delete_server_backup(server_id, backup_id, server):
     try:
-        base_path = _get_install_path(server)
+        base_path = _registry().resolve_install_path(server)
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
 
@@ -783,7 +693,9 @@ def delete_server_backup(server_id, backup_id):
 
 
 @server_bp.route('/servers/<server_id>/settings', methods=['PUT'])
-def update_server_settings(server_id):
+@require_server
+@with_server_lock
+def update_server_settings(server_id, server):
     data = request.get_json()
 
     if not data:
@@ -793,80 +705,62 @@ def update_server_settings(server_id):
     for field in protected_fields:
         data.pop(field, None)
 
-    server = storage.get_server(server_id)
+    runtime_status = _registry().get_status(server_id)
+    if runtime_status.get('status') == 'running':
+        return jsonify({'error': 'Stop the server before changing settings'}), 409
+
+    server = storage.update_server(server_id, data)
 
     if not server:
         return jsonify({'error': 'Server not found'}), 404
 
-    lock = try_acquire(server_id)
-    if lock is None:
-        return jsonify({'error': 'Another operation is in progress for this server'}), 409
-    try:
-        runtime_status = _registry().get_status(server_id)
-        if runtime_status.get('status') == 'running':
-            return jsonify({'error': 'Stop the server before changing settings'}), 409
+    success, error_message = _write_server_properties(server)
+    if not success:
+        return jsonify({'error': error_message}), 500
 
-        server = storage.update_server(server_id, data)
+    _registry().invalidate(server_id)
 
-        if not server:
-            return jsonify({'error': 'Server not found'}), 404
-
-        success, error_message = _write_server_properties(server)
-        if not success:
-            return jsonify({'error': error_message}), 500
-
-        _registry().invalidate(server_id)
-
-        return jsonify(server)
-    finally:
-        lock.release()
+    return jsonify(server)
 
 
 @server_bp.route('/servers/<server_id>', methods=['DELETE'])
-def delete_server_route(server_id):
-    server = storage.get_server(server_id)
-    if not server:
-        return jsonify({'error': 'Server not found'}), 404
+@require_server
+@with_server_lock
+def delete_server_route(server_id, server):
+    # Stop running process if needed
+    _registry().stop_server(server_id)
 
-    lock = try_acquire(server_id)
-    if lock is None:
-        return jsonify({'error': 'Another operation is in progress for this server'}), 409
+    # Resolve install path to clean up files
+    install_path = None
     try:
-        # Stop running process if needed
-        _registry().stop_server(server_id)
-
-        # Resolve install path to clean up files
+        install_path = _registry().resolve_install_path(server)
+    except ValueError:
         install_path = None
+
+    # Remove server from storage
+    storage.delete_server(server_id)
+    discard_lock(server_id)
+
+    # Delete files on disk
+    removal_error = None
+    if install_path and install_path.exists():
         try:
-            install_path = _get_install_path(server)
-        except ValueError:
-            install_path = None
+            shutil.rmtree(install_path, onerror=_handle_remove_readonly)
+        except OSError as exc:
+            removal_error = str(exc)
 
-        # Remove server from storage
-        storage.delete_server(server_id)
-        discard_lock(server_id)
-
-        # Delete files on disk
-        removal_error = None
-        if install_path and install_path.exists():
-            try:
-                shutil.rmtree(install_path, onerror=_handle_remove_readonly)
-            except OSError as exc:
-                removal_error = str(exc)
-
-        response = {
-            'success': removal_error is None,
-            'message': 'Server deleted successfully' if not removal_error else 'Server removed but files could not be deleted',
-        }
-        if removal_error:
-            response['error'] = removal_error
-        return jsonify(response), 200 if removal_error is None else 500
-    finally:
-        lock.release()
+    response = {
+        'success': removal_error is None,
+        'message': 'Server deleted successfully' if not removal_error else 'Server removed but files could not be deleted',
+    }
+    if removal_error:
+        response['error'] = removal_error
+    return jsonify(response), 200 if removal_error is None else 500
 
 
 @server_bp.route('/servers/<server_id>/install', methods=['POST'])
-def install_server(server_id):
+@require_server
+def install_server(server_id, server):
     """Start the server installation asynchronously.
 
     Java guards are validated synchronously — failures return 400
@@ -875,11 +769,11 @@ def install_server(server_id):
     phase + bytes-progress into ``install_progress``. The frontend polls
     ``GET /api/servers/<id>/install/progress`` until the phase becomes
     ``done`` or ``failed``.
-    """
-    server = storage.get_server(server_id)
-    if not server:
-        return jsonify({'error': 'Server not found'}), 404
 
+    Note: this route does NOT use ``@with_server_lock`` — the worker
+    thread itself acquires the per-server RLock via ``get_server_lock``
+    (RLock is thread-bound, so the request thread can only probe it).
+    """
     # Synchronous validation (fail-fast, no thread spawn).
     loader = (server.get('loader') or '').strip().lower()
     if not loader:
@@ -889,7 +783,7 @@ def install_server(server_id):
         return jsonify({'error': 'Server has no Minecraft version configured'}), 400
 
     try:
-        install_path = _registry()._resolve_install_path(server)
+        install_path = _registry().resolve_install_path(server)
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
 
@@ -1061,15 +955,14 @@ def install_server(server_id):
 
 
 @server_bp.route('/servers/<server_id>/install/progress', methods=['GET'])
-def get_install_progress(server_id):
+@require_server
+def get_install_progress(server_id, server):
     """Return current install progress for the server.
 
     ``active`` is True iff there's an entry whose phase isn't ``done`` or
     ``failed``. Frontend polls this endpoint at ~750ms intervals until
     ``active`` flips to False.
     """
-    if not storage.get_server(server_id):
-        return jsonify({'error': 'Server not found'}), 404
     progress = install_progress.get(server_id)
     return jsonify({
         'active': install_progress.is_active(server_id),
@@ -1078,132 +971,108 @@ def get_install_progress(server_id):
 
 
 @server_bp.route('/servers/<server_id>/start', methods=['POST'])
-def start_server_by_id(server_id):
-    server = storage.get_server(server_id)
-    if not server:
-        return jsonify({'error': 'Server not found'}), 404
+@require_server
+@with_server_lock
+def start_server_by_id(server_id, server):
+    if server.get('status') == 'pending':
+        return jsonify({
+            'error': 'Server not installed yet. Call /install first.'
+        }), 400
 
-    lock = try_acquire(server_id)
-    if lock is None:
-        return jsonify({'error': 'Another operation is in progress for this server'}), 409
+    if server.get('status') == 'installing':
+        return jsonify({
+            'error': 'Server is currently installing. Please wait.'
+        }), 400
+
+    compat = resolve_required_java(server.get('version', ''))
+    required_java_major = compat.required_java if compat.enforceable else None
+    if skip_java_enforcement():
+        required_java_major = None
+
     try:
-        if server.get('status') == 'pending':
-            return jsonify({
-                'error': 'Server not installed yet. Call /install first.'
-            }), 400
-
-        if server.get('status') == 'installing':
-            return jsonify({
-                'error': 'Server is currently installing. Please wait.'
-            }), 400
-
-        compat = resolve_required_java(server.get('version', ''))
-        required_java_major = compat.required_java if compat.enforceable else None
-        if skip_java_enforcement():
-            required_java_major = None
-
-        try:
-            result = _registry().start_server(
-                server,
-                required_java_major=required_java_major
-            )
-        except ValueError as exc:
-            return jsonify({'error': str(exc)}), 400
-
-        status_value = result.get('status')
-        success = status_value == 'running'
-        updated_server = (
-            storage.update_server_status(server_id, status_value)
-            if status_value else server
+        result = _registry().start_server(
+            server,
+            required_java_major=required_java_major
         )
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
 
-        response = {
-            'success': success,
-            'message': result.get('message', ''),
-            'java_missing': result.get('java_missing', False),
-            'java_too_old': result.get('java_too_old', False),
-            'required_java': result.get('required_java', required_java_major),
-            'detected_java': result.get('detected_java'),
-            'server_java_target': result.get('server_java_target'),
-            'compatibility': compat.to_dict(),
-            'server': _augment_with_runtime(updated_server or server)
-        }
-        if required_java_major:
-            response['recommended_install'] = _build_java_recommendation(
-                platform_utils.platform_label(),
-                int(required_java_major)
-            )
-        return jsonify(response), 200 if success else 400
-    finally:
-        lock.release()
+    status_value = result.get('status')
+    success = status_value == 'running'
+    updated_server = (
+        storage.update_server_status(server_id, status_value)
+        if status_value else server
+    )
+
+    response = {
+        'success': success,
+        'message': result.get('message', ''),
+        'java_missing': result.get('java_missing', False),
+        'java_too_old': result.get('java_too_old', False),
+        'required_java': result.get('required_java', required_java_major),
+        'detected_java': result.get('detected_java'),
+        'server_java_target': result.get('server_java_target'),
+        'compatibility': compat.to_dict(),
+        'server': _augment_with_runtime(updated_server or server)
+    }
+    if required_java_major:
+        response['recommended_install'] = _build_java_recommendation(
+            platform_utils.platform_label(),
+            int(required_java_major)
+        )
+    return jsonify(response), 200 if success else 400
 
 
 @server_bp.route('/servers/<server_id>/stop', methods=['POST'])
-def stop_server_by_id(server_id):
-    server = storage.get_server(server_id)
-    if not server:
-        return jsonify({'error': 'Server not found'}), 404
+@require_server
+@with_server_lock
+def stop_server_by_id(server_id, server):
+    result = _registry().stop_server(server_id)
+    status_value = result.get('status')
+    success = status_value == 'stopped'
+    updated_server = (
+        storage.update_server_status(server_id, status_value)
+        if status_value else server
+    )
 
-    lock = try_acquire(server_id)
-    if lock is None:
-        return jsonify({'error': 'Another operation is in progress for this server'}), 409
-    try:
-        result = _registry().stop_server(server_id)
-        status_value = result.get('status')
-        success = status_value == 'stopped'
-        updated_server = (
-            storage.update_server_status(server_id, status_value)
-            if status_value else server
-        )
-
-        response = {
-            'success': success,
-            'message': result.get('message', ''),
-            'server': _augment_with_runtime(updated_server or server)
-        }
-        return jsonify(response), 200 if success else 400
-    finally:
-        lock.release()
+    response = {
+        'success': success,
+        'message': result.get('message', ''),
+        'server': _augment_with_runtime(updated_server or server)
+    }
+    return jsonify(response), 200 if success else 400
 
 
 @server_bp.route('/servers/<server_id>/restart', methods=['POST'])
-def restart_server_by_id(server_id):
-    server = storage.get_server(server_id)
-    if not server:
-        return jsonify({'error': 'Server not found'}), 404
-
-    lock = try_acquire(server_id)
-    if lock is None:
-        return jsonify({'error': 'Another operation is in progress for this server'}), 409
+@require_server
+@with_server_lock
+def restart_server_by_id(server_id, server):
     try:
-        try:
-            result = _registry().restart_server(server)
-        except (ValueError, RuntimeError) as exc:
-            return jsonify({'error': str(exc)}), 400
+        result = _registry().restart_server(server)
+    except (ValueError, RuntimeError) as exc:
+        return jsonify({'error': str(exc)}), 400
 
-        start_status = result['start'].get('status')
-        success = start_status == 'running'
-        updated_server = (
-            storage.update_server_status(server_id, start_status)
-            if start_status else server
-        )
+    start_status = result['start'].get('status')
+    success = start_status == 'running'
+    updated_server = (
+        storage.update_server_status(server_id, start_status)
+        if start_status else server
+    )
 
-        response = {
-            'success': success,
-            'message': result['start'].get('message', ''),
-            'details': result,
-            'server': _augment_with_runtime(updated_server or server)
-        }
-        return jsonify(response), 200 if success else 400
-    finally:
-        lock.release()
+    response = {
+        'success': success,
+        'message': result['start'].get('message', ''),
+        'details': result,
+        'server': _augment_with_runtime(updated_server or server)
+    }
+    return jsonify(response), 200 if success else 400
 
 
 @server_bp.route('/java/status', methods=['GET'])
 def get_java_status():
     """Return managed Java status, system Java probe and Temurin asset metadata."""
-    import subprocess
     import re
+    import subprocess
 
     system = platform_utils.platform_label()
     mc_version = request.args.get('mc_version', '').strip()
@@ -1234,17 +1103,8 @@ def get_java_status():
         version = None
         detected_major = None
         if installed:
-            match = re.search(r'version "([^"]+)"', version_output)
-            if match:
-                version = match.group(1)
-                if version.startswith('1.'):
-                    parts = version.split('.')
-                    if len(parts) > 1 and parts[1].isdigit():
-                        detected_major = int(parts[1])
-                else:
-                    major_match = re.match(r'^(\d+)', version)
-                    if major_match:
-                        detected_major = int(major_match.group(1))
+            version = parse_java_version_string(version_output)
+            detected_major = parse_java_major(version_output)
     except FileNotFoundError:
         installed = False
         version = None
@@ -1360,6 +1220,28 @@ def get_java_install_progress(task_id):
     return jsonify(task)
 
 
+@server_bp.route('/java/install/<task_id>', methods=['DELETE'])
+def cancel_java_install(task_id):
+    """Signal cancellation for an in-flight managed Java install task.
+
+    Best-effort: a Python thread cannot be hard-killed, so the worker only
+    notices the cancel between phases / between download chunks. The
+    per-request HTTP timeout bounds how long a wedged socket can keep the
+    worker alive after cancellation. Returns 404 for unknown task ids and
+    409 when the task is already in a terminal state.
+    """
+    task = java_manager.get_install_task(task_id)
+    if not task:
+        return jsonify({'error': 'Task not found'}), 404
+    cancelled = java_manager.cancel_install_task(task_id)
+    if not cancelled:
+        return jsonify({
+            'error': 'Task is already in a terminal state',
+            'status': task.get('status'),
+        }), 409
+    return jsonify(java_manager.get_install_task(task_id) or {})
+
+
 @server_bp.route('/metrics/system', methods=['GET'])
 def get_system_metrics():
     if not psutil:
@@ -1380,12 +1262,9 @@ def get_system_metrics():
 
 
 @server_bp.route('/servers/<server_id>/metrics', methods=['GET'])
-def get_server_metrics(server_id):
+@require_server
+def get_server_metrics(server_id, server):
     """Get performance metrics for a specific server."""
-    server = storage.get_server(server_id)
-    if not server:
-        return jsonify({'error': 'Server not found'}), 404
-
     runtime = _registry().get_status(server_id) or {}
 
     metrics = {
@@ -1421,16 +1300,13 @@ def get_loader_loader_versions(loader):
 
 
 @server_bp.route('/servers/<server_id>/console', methods=['POST'])
-def send_console_command(server_id):
+@require_server
+def send_console_command(server_id, server):
     data = request.get_json() or {}
     command = (data.get('command') or '').strip()
 
     if not command:
         return jsonify({'error': 'Command is required'}), 400
-
-    server = storage.get_server(server_id)
-    if not server:
-        return jsonify({'error': 'Server not found'}), 404
 
     result = _registry().send_command(server_id, command)
     status_code = 200 if result.get('success') else 400

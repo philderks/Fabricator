@@ -1,4 +1,5 @@
 """Minecraft server management service."""
+import logging
 import os
 import re
 import subprocess
@@ -7,10 +8,14 @@ import time
 from typing import Iterable, List, Optional
 
 from backend.utils import platform as platform_utils
+from backend.utils.java import parse_java_major
 try:
     import psutil  # type: ignore
 except ImportError:  # pragma: no cover - optional dependency fallback
     psutil = None
+
+
+logger = logging.getLogger(__name__)
 
 
 class ServerManager:
@@ -21,7 +26,7 @@ class ServerManager:
     _PLAYER_JOIN_RE = re.compile(r'\[.*?INFO\]: (.+) joined the game')
     _PLAYER_LEAVE_RE = re.compile(r'\[.*?INFO\]: (.+) left the game')
 
-    def __init__(self, command: Optional[Iterable[str]] = None, cwd: Optional[str] = None):
+    def __init__(self, cwd: str, command: Optional[Iterable[str]] = None):
         env_command = os.environ.get("SERVER_COMMAND")
         parsed_env_command: Optional[List[str]] = None
         if env_command:
@@ -30,7 +35,7 @@ class ServerManager:
         self.command = self._parse_command(command or parsed_env_command) or self._split_command(
             self.DEFAULT_COMMAND
         )
-        self.cwd = cwd or os.path.join(os.getcwd(), "server")
+        self.cwd = cwd
         self._memory_limit_bytes = self._extract_memory_limit_bytes(self.command)
         self._process: Optional[subprocess.Popen] = None
         self._ps_process: Optional["psutil.Process"] = None  # type: ignore[name-defined]
@@ -106,23 +111,6 @@ class ServerManager:
         with open(eula_path, "w", encoding="utf-8") as eula_file:
             eula_file.write("eula=true\n")
 
-    @staticmethod
-    def _resolve_java_major(version_output: str) -> Optional[int]:
-        match = re.search(r'version "([^"]+)"', version_output)
-        if not match:
-            return None
-        raw = match.group(1).strip()
-        # Legacy Java 8 format is 1.8.x, where major version is 8.
-        if raw.startswith("1."):
-            parts = raw.split(".")
-            if len(parts) > 1 and parts[1].isdigit():
-                return int(parts[1])
-            return None
-        major_match = re.match(r"^(\d+)", raw)
-        if not major_match:
-            return None
-        return int(major_match.group(1))
-
     def _java_executable(self) -> str:
         if self.command and isinstance(self.command[0], str) and self.command[0].strip():
             return self.command[0]
@@ -160,7 +148,7 @@ class ServerManager:
                 "java_missing": False,
             }
 
-        major_version = self._resolve_java_major(version_output)
+        major_version = parse_java_major(version_output)
         if major_version is None:
             return {
                 "available": False,
@@ -241,6 +229,7 @@ class ServerManager:
 
             return True, "Server started"
         except Exception as exc:
+            logger.exception("Failed to start server process")
             self._process = None
             return False, f"Failed to start server: {exc}"
 
@@ -310,7 +299,10 @@ class ServerManager:
                         self._process.stdin.write("stop\n")
                         self._process.stdin.flush()
                     except Exception:
-                        pass
+                        logger.warning(
+                            "Failed to write 'stop' command to server stdin",
+                            exc_info=True,
+                        )
 
                 proc.terminate()
                 proc.wait(timeout=5)
@@ -391,6 +383,7 @@ class ServerManager:
                 stdin.write(command.strip() + "\n")
                 stdin.flush()
             except Exception as exc:  # pragma: no cover - best effort logging
+                logger.exception("Failed to send command to server")
                 return {
                     "success": False,
                     "message": f"Failed to send command: {exc}"

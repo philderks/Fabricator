@@ -91,6 +91,7 @@ import { ref, computed, watch } from 'vue'
 import BaseModal from './BaseModal.vue'
 import AppButton from '../ui/AppButton.vue'
 import { getModDetails, searchMods } from '../../api/modrinth'
+import { pLimit, withBackoff } from '../../api/throttle'
 
 const props = defineProps({
   show: { type: Boolean, required: true },
@@ -107,6 +108,7 @@ const checks = ref({})
 const checkingAll = ref(false)
 const checkedCount = ref(0)
 const apiError = ref('')
+const inflightController = ref(null)
 
 const unresolvedCount = computed(() =>
   props.mods.reduce((count, mod) => {
@@ -154,7 +156,7 @@ function deriveSearchQuery(path) {
   return base || fileName
 }
 
-async function checkModViaApi(mod) {
+async function checkModViaApi(mod, { signal } = {}) {
   const path = mod?.path || ''
   const query = deriveSearchQuery(path)
   checks.value = {
@@ -169,7 +171,7 @@ async function checkModViaApi(mod) {
       loader: props.loader || '',
       limit: 5,
       offset: 0
-    })
+    }, { signal })
 
     const hits = Array.isArray(search?.hits) ? search.hits : []
     if (!hits.length) {
@@ -182,7 +184,7 @@ async function checkModViaApi(mod) {
 
     const projectId = hits[0].project_id
     const projectTitle = hits[0].title || hits[0].slug || projectId
-    const details = await getModDetails(projectId)
+    const details = await getModDetails(projectId, { signal })
     const serverSide = String(details?.server_side || '').toLowerCase()
 
     let recommendation = ''
@@ -201,6 +203,16 @@ async function checkModViaApi(mod) {
       [path]: { state: 'done', message: '', recommendation, serverSide, projectTitle }
     }
   } catch (error) {
+    // Intentional cancellation (modal close) — drop the row back to idle and
+    // do NOT surface an "API check failed" message; that's reserved for
+    // actual API errors so the UX stays honest.
+    if (error?.name === 'AbortError') {
+      checks.value = {
+        ...checks.value,
+        [path]: { state: 'idle', message: '', recommendation: '', serverSide: '', projectTitle: '' }
+      }
+      return
+    }
     checks.value = {
       ...checks.value,
       [path]: { state: 'error', message: error?.message || 'API check failed.', recommendation: '', serverSide: '', projectTitle: '' }
@@ -210,7 +222,12 @@ async function checkModViaApi(mod) {
 
 async function checkSingleViaApi(mod) {
   apiError.value = ''
-  await checkModViaApi(mod)
+  // Single-row checks ride the modal's shared abort controller so a modal
+  // close cancels them too. A fresh controller is created lazily.
+  if (!inflightController.value) {
+    inflightController.value = new AbortController()
+  }
+  await checkModViaApi(mod, { signal: inflightController.value.signal })
 }
 
 async function checkAllViaApi() {
@@ -221,13 +238,34 @@ async function checkAllViaApi() {
     return
   }
 
+  // Fresh controller per run — old aborted controllers can't be reused.
+  inflightController.value = new AbortController()
+  const signal = inflightController.value.signal
+  const localLimiter = pLimit(4)
+
   checkingAll.value = true
   checkedCount.value = 0
   try {
-    for (const mod of props.mods) {
-      await checkModViaApi(mod)
-      checkedCount.value += 1
-    }
+    const tasks = props.mods.map((mod) =>
+      localLimiter(
+        () => withBackoff(
+          () => checkModViaApi(mod, { signal }),
+          { signal, retries: 3 }
+        ),
+        { signal }
+      ).then(
+        () => { checkedCount.value += 1 },
+        (error) => {
+          // Limiter/withBackoff abort just stops the row; don't crash the run.
+          if (error?.name !== 'AbortError') {
+            // checkModViaApi already records per-row error state; we just
+            // need to advance the progress counter so the UI doesn't stall.
+            checkedCount.value += 1
+          }
+        }
+      )
+    )
+    await Promise.allSettled(tasks)
   } finally {
     checkingAll.value = false
   }
@@ -237,6 +275,9 @@ function handleCancel() {
   if (props.loading) {
     return
   }
+  // Cancel any in-flight API checks BEFORE we tear down state so their
+  // rejections don't race state resets.
+  inflightController.value?.abort()
   emit('cancel')
   emit('close')
 }
@@ -271,6 +312,13 @@ function resetSelections() {
 
 watch(() => props.show, (value) => {
   if (value) {
+    resetSelections()
+  } else {
+    // Modal closed via X / overlay / parent toggle — abort first, then
+    // reset so in-flight check promises rejecting AbortError can't write
+    // back into freshly-reset row state.
+    inflightController.value?.abort()
+    inflightController.value = null
     resetSelections()
   }
 })

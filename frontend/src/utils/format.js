@@ -1,9 +1,21 @@
-export function formatBackupTime(timestamp) {
-  const date = new Date(timestamp)
-  if (Number.isNaN(date.getTime())) {
-    return 'Unknown'
-  }
-  return date.toLocaleString()
+/**
+ * Compact number formatter — produces "1.2M" / "3.4K" style for large counts.
+ * Used by mod/modpack download displays. Returns "0" for falsy input.
+ */
+export function formatNumber(num) {
+  if (!num) return '0'
+  if (num >= 1_000_000) return (num / 1_000_000).toFixed(1) + 'M'
+  if (num >= 1_000) return (num / 1_000).toFixed(1) + 'K'
+  return num.toString()
+}
+
+/**
+ * Length-bounded text truncation with ellipsis. Defaults to 100 chars.
+ * Returns '' for falsy input.
+ */
+export function truncate(text, length = 100) {
+  if (!text) return ''
+  return text.length > length ? `${text.slice(0, length)}...` : text
 }
 
 export function formatFileSize(bytes) {

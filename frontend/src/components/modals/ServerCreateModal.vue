@@ -261,7 +261,7 @@
                     <p>{{ pack.description || 'No description provided.' }}</p>
                   </div>
                 </div>
-                <span class="modpack-meta">{{ formatDownloads(pack.downloads || 0) }} downloads</span>
+                <span class="modpack-meta">{{ formatNumber(pack.downloads || 0) }} downloads</span>
               </button>
             </div>
 
@@ -551,7 +551,8 @@ import { createServer, installServer, getLoaderGameVersions, getJavaStatus, getS
 import ModSideDecisionModal from './ModSideDecisionModal.vue'
 import { installModpack, resolveProjectVersion } from '../../api/modrinth'
 import { useToast } from '../../composables/useToast'
-import { useModpackImport, formatDownloads } from '../../composables/useModpackImport'
+import { useModpackImport } from '../../composables/useModpackImport'
+import { formatNumber } from '../../utils/format'
 
 export default {
   name: 'ServerCreateModal',
@@ -572,7 +573,7 @@ export default {
   emits: ['close', 'create'],
   setup() {
     const toast = useToast()
-    return { toast, formatDownloads }
+    return { toast, formatNumber }
   },
   data() {
     return {
@@ -587,7 +588,6 @@ export default {
       installPollResolver: null,     // Promise resolve fn so handleInstallClose can release a mid-install await
       installCreatedServerId: null,  // server.id that the install ran against (for retry)
       versionsLoading: false,
-      javaRequirementLoading: false,
       imp: null,
       showJavaModal: false,
       pendingJavaMcVersion: '',
@@ -763,10 +763,6 @@ export default {
       this.imp.clearSelection()
     },
 
-    formatNumber(value) {
-      return formatDownloads(value)
-    },
-
     async validateSelectedModpackCompatibility() {
       if (this.formData.setupMode !== 'modpack' || !this.selectedModpack) {
         return true
@@ -860,7 +856,6 @@ export default {
         return
       }
 
-      this.javaRequirementLoading = true
       try {
         this.javaStatus = await getJavaStatus({
           mcVersion: this.formData.version,
@@ -870,8 +865,6 @@ export default {
       } catch (error) {
         console.error('Failed to resolve Java requirement:', error)
         this.javaRequirementWarning = 'Could not verify Java requirement right now.'
-      } finally {
-        this.javaRequirementLoading = false
       }
     },
 

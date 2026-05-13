@@ -80,21 +80,12 @@ export function useToast() {
     }
   }
 
-  /**
-   * Clear all toasts
-   */
-  const clearAll = () => {
-    toasts.value = []
-  }
-
   return {
     toasts,
-    showToast,
     success,
     error,
     warning,
     info,
-    removeToast,
-    clearAll
+    removeToast
   }
 }

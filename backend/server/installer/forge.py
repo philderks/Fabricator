@@ -23,9 +23,9 @@ Versions API: https://files.minecraftforge.net/net/minecraftforge/forge/promotio
 """
 from __future__ import annotations
 
+import logging
 import re
 import requests
-import subprocess
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -33,11 +33,20 @@ from backend.utils import platform as platform_utils
 from backend.utils.platform import is_windows
 
 from .base import (
+    HashVerifyError,
     InstallerBase,
     InstallResult,
     InstallStatus,
     LaunchSpec,
+    SubprocessTimeout,
+    validate_version_token,
+    download_with_hash_verify,
+    request_with_retry,
+    run_subprocess_streaming,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 # Promotion-key shape: "<mc>-latest" or "<mc>-recommended".
@@ -73,13 +82,29 @@ class ForgeInstaller(InstallerBase):
     # ---------- Version listing ----------
 
     def _fetch_promotions(self) -> Dict[str, str]:
-        """Return the flat ``<mc>-channel → build`` dict, or empty on error."""
-        try:
+        """Return the flat ``<mc>-channel → build`` dict, or empty on error.
+
+        Wrapped in :func:`request_with_retry` because Forge Maven has been
+        historically wobbly (transient 5xx / connection resets during peak
+        Modrinth traffic). The GET is idempotent, so retrying with backoff is
+        safe.
+        """
+        def _do_request() -> Dict[str, Any]:
             response = self.session.get(self.PROMOTIONS_URL, timeout=15)
             response.raise_for_status()
-            payload = response.json()
-        except requests.RequestException as exc:
-            print(f"Failed to fetch Forge promotions: {exc}")
+            return response.json()
+
+        try:
+            payload = request_with_retry(
+                _do_request,
+                retries=3,
+                on_retry=lambda attempt, exc: logger.warning(
+                    "Retrying Forge promotions fetch (attempt %d): %s",
+                    attempt, exc,
+                ),
+            )
+        except requests.RequestException:
+            logger.exception("Failed to fetch Forge promotions")
             return {}
         return dict(payload.get("promos") or {})
 
@@ -165,15 +190,51 @@ class ForgeInstaller(InstallerBase):
         return self._installer_jar_url(mc_version, build) + ".sha1"
 
     def _fetch_expected_sha1(self, mc_version: str, build: str) -> Optional[str]:
-        try:
+        """Resolve the expected installer-jar SHA1 from Forge Maven.
+
+        Defensive parse (B12b): an empty body, whitespace-only body, or
+        non-hex / wrong-length token returns ``None`` deterministically. The
+        previous implementation relied on ``IndexError`` from ``split()[0]``
+        on an empty body — silently caught by a broad ``except (..., IndexError)``
+        — so a flaky Maven response would degrade to "no integrity check" with
+        no visibility. Now every shape that isn't a real 40-char hex SHA-1
+        returns ``None`` via the explicit branches, and the caller (Forge:
+        WARN-and-proceed; NeoForge: hard-fail) decides the policy.
+
+        Retry-wrapped (B12b): the ``.sha1`` URL has been observed to flap
+        with transient 5xx during Forge Maven incidents. Idempotent GET → safe.
+        """
+        def _do_request() -> requests.Response:
             response = self.session.get(
                 self._installer_jar_sha1_url(mc_version, build), timeout=15
             )
             response.raise_for_status()
-            text = (response.text or "").strip().split()[0].lower()
-            return text if len(text) == 40 else None
-        except (requests.RequestException, IndexError):
+            return response
+
+        try:
+            response = request_with_retry(
+                _do_request,
+                retries=3,
+                on_retry=lambda attempt, exc: logger.warning(
+                    "Retrying Forge SHA1 fetch for %s-%s (attempt %d): %s",
+                    mc_version, build, attempt, exc,
+                ),
+            )
+        except requests.RequestException:
             return None
+
+        text = (response.text or "").strip()
+        if not text:
+            return None
+        parts = text.split()
+        if not parts:
+            return None
+        sha1_token = parts[0].lower()
+        if len(sha1_token) != 40 or not all(
+            c in "0123456789abcdef" for c in sha1_token
+        ):
+            return None
+        return sha1_token
 
     def _download_installer_jar(
         self,
@@ -183,53 +244,71 @@ class ForgeInstaller(InstallerBase):
             "Callable[[str, Dict[str, Any]], None]"
         ] = None,
     ) -> "tuple[Optional[Path], Optional[str]]":
-        """Download and SHA1-verify the installer JAR.
+        """Download and SHA1-verify the installer JAR via the shared helper.
+
+        Atomic-write: ``download_with_hash_verify`` streams to a sibling
+        ``.tmp`` file and ``os.replace``'s only on hash-gate success — a
+        crashed download leaves no partial JAR for the next install pass to
+        mistake for a complete artefact (B12a tempfile-pattern fix).
+
+        Forge's ``.sha1`` URL can legitimately be unavailable (transient 404,
+        legacy promotions). For Forge the policy is WARN-and-proceed (parity
+        with the pre-B12a behaviour); the empty-body robustness for the SHA1
+        endpoint is tracked as B12b. Hard-fail-on-missing-SHA1 lives only on
+        the NeoForge path because NeoForge installer JARs are always invoked
+        as ``java -jar``.
 
         Returns ``(path, None)`` on success or ``(None, error_message)``.
         """
-        import hashlib
+        # mc_version/build are pre-validated at the install() boundary; this
+        # extra resolve()+relative_to() is defence-in-depth — if a future
+        # caller bypasses install() and reaches _download_installer_jar
+        # directly, the helper still rejects path-escape attempts.
+        target = self._resolve_within_install_path(
+            f"forge-{mc_version}-{build}-installer.jar"
+        )
 
-        target = self.install_path / f"forge-{mc_version}-{build}-installer.jar"
-        hasher = hashlib.sha1()
-        try:
-            with self.session.get(
-                self._installer_jar_url(mc_version, build), stream=True, timeout=300
-            ) as response:
-                response.raise_for_status()
-                total_size = int(response.headers.get("Content-Length", 0))
-                downloaded = 0
-                with open(target, "wb") as fh:
-                    for chunk in response.iter_content(chunk_size=65536):
-                        if chunk:
-                            fh.write(chunk)
-                            hasher.update(chunk)
-                            downloaded += len(chunk)
-                            self._report(
-                                progress_callback,
-                                "downloading_installer",
-                                bytes_done=downloaded,
-                                bytes_total=total_size,
-                            )
-        except requests.RequestException as exc:
-            target.unlink(missing_ok=True)
-            return None, f"Failed to download Forge installer: {exc}"
-
-        self._report(progress_callback, "verifying")
+        # Resolve the expected SHA1 BEFORE the (large) JAR download so the
+        # helper can stream-verify in a single pass. None ⇒ proceed without
+        # an integrity check (warn loudly).
         expected_sha1 = self._fetch_expected_sha1(mc_version, build)
         if not expected_sha1:
-            print(
-                f"WARNING: Forge installer SHA1 unavailable for "
-                f"{mc_version}-{build} — proceeding without integrity check."
+            logger.warning(
+                "Forge installer SHA1 unavailable for %s-%s "
+                "— proceeding without integrity check.",
+                mc_version,
+                build,
             )
-        if expected_sha1:
-            actual = hasher.hexdigest().lower()
-            if actual != expected_sha1:
-                target.unlink(missing_ok=True)
-                return None, (
-                    f"SHA1 checksum mismatch for installer JAR: "
-                    f"expected {expected_sha1}, got {actual}"
-                )
 
+        def _emit(bytes_done: int, bytes_total: int) -> None:
+            self._report(
+                progress_callback,
+                "downloading_installer",
+                bytes_done=bytes_done,
+                bytes_total=bytes_total,
+            )
+
+        try:
+            # No ``retries=`` here: Forge's SHA1 lookup is WARN-and-proceed
+            # (see ``_fetch_expected_sha1`` — missing-hash is not fatal), so
+            # single-attempt parity with pre-B12a behaviour is intentional.
+            # NeoForge sets ``retries=3`` because its hash is mandatory.
+            download_with_hash_verify(
+                self._installer_jar_url(mc_version, build),
+                target,
+                sha1=expected_sha1,
+                session=self.session,
+                timeout=300,
+                progress_callback=_emit,
+            )
+        except HashVerifyError as exc:
+            return None, str(exc)
+        except requests.RequestException as exc:
+            return None, f"Failed to download Forge installer: {exc}"
+        except OSError as exc:
+            return None, f"Failed to write Forge installer: {exc}"
+
+        self._report(progress_callback, "verifying")
         return target, None
 
     def _detect_launch_artifact(
@@ -243,14 +322,16 @@ class ForgeInstaller(InstallerBase):
         """
         # Modern: libraries/net/minecraftforge/forge/<mc>-<build>/{unix,win}_args.txt
         args_filename = "win_args.txt" if is_windows() else "unix_args.txt"
-        modern_args = (
-            self.install_path / "libraries" / "net" / "minecraftforge"
-            / "forge" / f"{mc_version}-{build}" / args_filename
+        modern_args = self._resolve_within_install_path(
+            "libraries", "net", "minecraftforge",
+            "forge", f"{mc_version}-{build}", args_filename,
         )
         if modern_args.exists():
             return LaunchSpec(
                 type="args_file",
-                args_file=modern_args.relative_to(self.install_path).as_posix(),
+                args_file=modern_args.relative_to(
+                    self.install_path.resolve()
+                ).as_posix(),
                 jvm_args=[],
                 program_args=["nogui"],
             )
@@ -261,7 +342,7 @@ class ForgeInstaller(InstallerBase):
             f"forge-{mc_version}-{build}.jar",
             f"forge-{mc_version}-{build}-universal.jar",
         ):
-            candidate = self.install_path / candidate_name
+            candidate = self._resolve_within_install_path(candidate_name)
             if candidate.exists():
                 return LaunchSpec(
                     type="jar",
@@ -282,6 +363,27 @@ class ForgeInstaller(InstallerBase):
     ) -> InstallResult:
         self._report(progress_callback, "starting")
         self._ensure_install_dir()
+
+        # Whitelist mc_version (user-controlled JSON) and any caller-pinned
+        # loader_version BEFORE they land in filenames or subprocess args.
+        # The build value resolved from promotions is validated immediately
+        # below — Forge's promotions JSON is third-party so we treat it as
+        # untrusted at the same trust-boundary.
+        try:
+            mc_version = validate_version_token(mc_version, field_name="mc_version")
+            if loader_version is not None:
+                loader_version = validate_version_token(
+                    loader_version, field_name="loader_version"
+                )
+        except ValueError as exc:
+            msg = str(exc)
+            self._report(progress_callback, "failed", error=msg)
+            return InstallResult(
+                success=False,
+                status=InstallStatus.FAILED,
+                message=msg,
+                details={"mc_version": mc_version},
+            )
 
         self._report(progress_callback, "resolving_versions")
         promos = self._fetch_promotions()
@@ -306,6 +408,18 @@ class ForgeInstaller(InstallerBase):
                 details={"mc_version": mc_version},
             )
 
+        try:
+            build = validate_version_token(build, field_name="build")
+        except ValueError as exc:
+            msg = str(exc)
+            self._report(progress_callback, "failed", error=msg)
+            return InstallResult(
+                success=False,
+                status=InstallStatus.FAILED,
+                message=msg,
+                details={"mc_version": mc_version, "loader_version": build},
+            )
+
         installer_jar, dl_error = self._download_installer_jar(
             mc_version, build, progress_callback=progress_callback
         )
@@ -326,21 +440,25 @@ class ForgeInstaller(InstallerBase):
         # behaviour to write into a `server/` subdirectory. Forge's installer
         # writes to cwd by default today, but the explicit path is robust to
         # future changes.
+        #
+        # Streaming runner (B12a): forwards each stdout/stderr line live to
+        # ``logger.info`` instead of buffering tens of MB of verbose Forge
+        # output in RAM, and on timeout it kills + drains the child rather
+        # than leaving a zombie ``java`` process behind.
         java_cmd = self.java_exec or "java"
         self._report(progress_callback, "running_installer")
         try:
-            completed = subprocess.run(
+            completed = run_subprocess_streaming(
                 [
                     java_cmd, "-jar", str(installer_jar),
                     "--installServer", str(self.install_path),
                 ],
-                cwd=str(self.install_path),
-                capture_output=True,
-                text=True,
+                cwd=Path(self.install_path),
                 timeout=1800,
+                on_line=lambda line: logger.info("forge-installer: %s", line),
                 **platform_utils.subprocess_no_window_kwargs(),
             )
-        except subprocess.TimeoutExpired as exc:
+        except SubprocessTimeout as exc:
             msg = f"Forge installer timed out: {exc}"
             self._report(progress_callback, "failed", error=msg)
             return InstallResult(
@@ -360,8 +478,13 @@ class ForgeInstaller(InstallerBase):
             )
 
         if completed.returncode != 0:
+            # Streaming logger already forwarded every line; for the
+            # InstallResult message we surface the last few lines to give
+            # the UI a concrete failure hint without dumping megabytes.
             tail = (completed.stderr or completed.stdout or "").strip().splitlines()
-            tail_str = tail[-1] if tail else f"returncode {completed.returncode}"
+            tail_str = (
+                " | ".join(tail[-3:]) if tail else f"returncode {completed.returncode}"
+            )
             msg = f"Forge installer failed: {tail_str}"
             self._report(progress_callback, "failed", error=msg)
             return InstallResult(

@@ -21,18 +21,13 @@ def setup_paths() -> None:
     """Ensure cwd is a stable, writable location for the bundled exe.
 
     On Windows the .exe is often launched from Downloads or another transient
-    folder, so we cd into %APPDATA%\\Fabricator instead. On POSIX deployments
-    the install script controls the working directory, so we mirror the
-    executable location as before.
+    folder, so we cd into %APPDATA%\\Fabricator. On POSIX bundled runs we cd
+    into ~/.fabricator (the same path appdata_dir() now returns for POSIX).
     """
     if not getattr(sys, 'frozen', False):
         return
     from backend.utils.platform import appdata_dir
-    target = appdata_dir()
-    if target is not None:
-        os.chdir(target)
-    else:
-        os.chdir(os.path.dirname(sys.executable))
+    os.chdir(appdata_dir())
 
 
 # ============================================
@@ -71,11 +66,8 @@ def create_tray_icon(port: int, on_quit_callback):
 
     def on_open_data_folder(icon, item):  # pylint: disable=unused-argument
         from backend.utils.platform import appdata_dir
-        target = appdata_dir()
-        if target is None:
-            return
         try:
-            os.startfile(str(target))  # type: ignore[attr-defined]
+            os.startfile(str(appdata_dir()))  # type: ignore[attr-defined]
         except OSError as exc:
             print(f"Could not open data folder: {exc}")
 
@@ -83,8 +75,9 @@ def create_tray_icon(port: int, on_quit_callback):
         icon.stop()
         on_quit_callback()
 
-    # "Open Data Folder" is Windows-only because (a) the tray itself is most
-    # commonly used on Windows and (b) appdata_dir() returns None on POSIX.
+    # "Open Data Folder" is Windows-only because the action uses os.startfile
+    # (Windows-only). On POSIX appdata_dir() does return a real path now, but
+    # opening it portably would need xdg-open / `open` and is out of scope.
     from backend.utils.platform import is_windows
     menu_items = [pystray.MenuItem('🌐 Open in Browser', on_open_browser, default=True)]
     if is_windows():

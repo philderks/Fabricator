@@ -122,11 +122,17 @@
 </template>
 
 <script setup>
+// Q: structural lookalike to ModBrowserModal (search-bar → results-grid →
+// empty-state → footer + matching prop shape `show`/`mcVersion`/`loader`).
+// formatNumber + truncate already share `utils/format.js` (F4). A full
+// `useResourceBrowser` composable extraction is EXCLUDED (H3 cluster /
+// CC7 Setup-API migration); track in FINDINGS.md if revisited.
 import { ref, computed, watch } from 'vue'
 import BaseModal from './BaseModal.vue'
 import SearchResultCard from '../ui/SearchResultCard.vue'
 import AppButton from '../ui/AppButton.vue'
 import { useModpackImport } from '../../composables/useModpackImport'
+import { formatNumber, truncate } from '../../utils/format'
 
 const props = defineProps({
   show: { type: Boolean, required: true },
@@ -176,19 +182,6 @@ function confirmInstall() {
   })
 }
 
-function truncate(text, length = 100) {
-  if (!text) {
-    return ''
-  }
-  return text.length > length ? `${text.slice(0, length)}...` : text
-}
-
-function formatNumber(num) {
-  if (!num) return '0'
-  if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M'
-  if (num >= 1000) return (num / 1000).toFixed(1) + 'K'
-  return num.toString()
-}
 
 // Modrinth tags loader compatibility as ordinary categories ('fabric',
 // 'forge', 'neoforge', 'quilt'). Multi-loader packs are tagged with all

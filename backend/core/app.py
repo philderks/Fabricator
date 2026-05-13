@@ -3,7 +3,7 @@ import os
 import sys
 from pathlib import Path
 
-from flask import Flask, jsonify, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
 from backend.core.config import get_config
@@ -19,11 +19,8 @@ def get_base_path() -> str:
 
 
 def _load_dotenv() -> None:
-    """Load ``.env`` from project root (and optionally cwd). Optional dependency."""
-    try:
-        from dotenv import load_dotenv
-    except ImportError:
-        return
+    """Load ``.env`` from project root (and optionally cwd)."""
+    from dotenv import load_dotenv
     base = Path(get_base_path())
     load_dotenv(base / ".env")
     load_dotenv()
@@ -49,8 +46,16 @@ def create_app() -> Flask:
 
     # One-time startup cleanup: flip stale 'installing'/'starting' statuses
     # left over from a previous run. Tolerates a missing/malformed index.
-    from backend.server.routes import _cleanup_stale_statuses
-    _cleanup_stale_statuses()
+    from backend.server.routes import cleanup_stale_statuses
+    cleanup_stale_statuses()
+
+    @app.route(
+        "/api/<path:_>",
+        methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    )
+    def api_not_found(_):
+        """Return JSON (not the SPA's HTML) for unknown /api/... paths."""
+        return jsonify({"error": "endpoint not found", "path": request.path}), 404
 
     @app.route("/", defaults={"path": ""})
     @app.route("/<path:path>")

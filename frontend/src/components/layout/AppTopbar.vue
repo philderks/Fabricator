@@ -41,10 +41,10 @@ const ROUTE_TITLE = {
 
 const pageTitle = computed(() => ROUTE_TITLE[route.name] || '')
 
-const pillStatus = computed(() => {
-  const allowed = ['running', 'stopped', 'pending', 'installing', 'failed', 'unknown']
-  return allowed.includes(props.serverStatus.status) ? props.serverStatus.status : 'unknown'
-})
+// StatusPill.vue owns the allowlist via its prop validator and falls back
+// to STATUS_META.unknown for unknown values — gating it here would just
+// duplicate that logic (F6/CC5).
+const pillStatus = computed(() => props.serverStatus.status || 'unknown')
 
 const pillSub = computed(() => {
   const loader = props.serverStatus.loader

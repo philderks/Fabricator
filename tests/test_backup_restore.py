@@ -1,8 +1,8 @@
 """C2: Backup restore must be atomic — failure leaves the live tree intact.
 
-Also covers M3: `_safe_extract_zip` must reject members whose resolved path
-escapes the destination (the prior `startswith` check lets /var/lib/xy
-through when destination is /var/lib/x).
+Also covers M3: ``safe_extract_zip`` must reject members whose resolved
+path escapes the destination (the prior ``startswith`` check lets
+``/var/lib/xy`` through when destination is ``/var/lib/x``).
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ def test_safe_extract_zip_rejects_prefix_sibling_escape(tmp_path):
     The legacy startswith check would wrongly allow this because the string
     "xy/..." starts with "x".
     """
-    from backend.server.routes import _safe_extract_zip
+    from backend.utils.zip import safe_extract_zip
 
     destination = tmp_path / "x"
     destination.mkdir()
@@ -31,14 +31,14 @@ def test_safe_extract_zip_rejects_prefix_sibling_escape(tmp_path):
 
     with zipfile.ZipFile(archive, "r") as zf:
         with pytest.raises((ValueError, RuntimeError)):
-            _safe_extract_zip(zf, destination)
+            safe_extract_zip(zf, destination)
 
     assert not (sibling / "evil.jar").exists()
 
 
 def test_safe_extract_zip_rejects_absolute_path(tmp_path):
     """Members with absolute paths must not escape the destination."""
-    from backend.server.routes import _safe_extract_zip
+    from backend.utils.zip import safe_extract_zip
 
     destination = tmp_path / "x"
     destination.mkdir()
@@ -49,7 +49,7 @@ def test_safe_extract_zip_rejects_absolute_path(tmp_path):
 
     with zipfile.ZipFile(archive, "r") as zf:
         with pytest.raises((ValueError, RuntimeError)):
-            _safe_extract_zip(zf, destination)
+            safe_extract_zip(zf, destination)
 
 
 def _seed_server(tmp_servers_root, populate_files=True):

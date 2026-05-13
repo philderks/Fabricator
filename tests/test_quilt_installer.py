@@ -159,7 +159,7 @@ def test_install_resolves_installer_version_from_maven_metadata(
         (tmp_path / "quilt-server-launch.jar").write_bytes(b"PKquilt-launch")
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="ok", stderr="")
 
-    monkeypatch.setattr("backend.server.installer.quilt.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.quilt.run_subprocess_streaming", fake_run)
 
     result = inst.install("1.21.4")
 
@@ -188,7 +188,7 @@ def test_install_returns_jar_launchspec(tmp_path, fake_game_versions, monkeypatc
     def fake_run(cmd, **kwargs):
         (tmp_path / "quilt-server-launch.jar").write_bytes(b"PKquilt")
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
-    monkeypatch.setattr("backend.server.installer.quilt.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.quilt.run_subprocess_streaming", fake_run)
 
     result = inst.install("1.21.4")
     assert result.success is True
@@ -217,7 +217,7 @@ def test_install_uses_set_java_exec_path_for_subprocess(
         captured["cmd"] = cmd
         (tmp_path / "quilt-server-launch.jar").write_bytes(b"PKquilt")
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
-    monkeypatch.setattr("backend.server.installer.quilt.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.quilt.run_subprocess_streaming", fake_run)
 
     result = inst.install("1.21.4")
     assert result.success is True
@@ -244,7 +244,7 @@ def test_install_subprocess_uses_no_window_kwargs(
         "backend.server.installer.quilt.platform_utils.subprocess_no_window_kwargs",
         lambda: SENTINEL_KW,
     )
-    monkeypatch.setattr("backend.server.installer.quilt.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.quilt.run_subprocess_streaming", fake_run)
 
     result = inst.install("1.21.4")
     assert result.success is True
@@ -261,7 +261,7 @@ def test_install_subprocess_failure_returns_failure(
 
     def fake_run(cmd, **kwargs):
         return subprocess.CompletedProcess(args=cmd, returncode=2, stdout="", stderr="installer exploded")
-    monkeypatch.setattr("backend.server.installer.quilt.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.quilt.run_subprocess_streaming", fake_run)
 
     result = inst.install("1.21.4")
     assert result.success is False
@@ -280,7 +280,7 @@ def test_install_launcher_jar_missing_returns_failure(
     def fake_run(cmd, **kwargs):
         # Don't create the launcher jar — simulate a malformed install.
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
-    monkeypatch.setattr("backend.server.installer.quilt.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.quilt.run_subprocess_streaming", fake_run)
 
     result = inst.install("1.21.4")
     assert result.success is False
@@ -319,7 +319,7 @@ def test_install_sha1_mismatch_fails(tmp_path, fake_game_versions, monkeypatch):
     def fake_run(*a, **k):
         subprocess_called["hit"] = True
         return subprocess.CompletedProcess(args=[], returncode=0)
-    monkeypatch.setattr("backend.server.installer.quilt.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.quilt.run_subprocess_streaming", fake_run)
 
     result = inst.install("1.21.4")
     assert result.success is False
@@ -353,3 +353,107 @@ def test_install_unknown_installer_version_falls_back(
     result = inst.install("1.21.4")
     assert result.success is False
     assert "installer" in result.message.lower()
+
+
+# ---------- B10 Path-traversal mitigation (S5) ----------
+
+
+def test_install_rejects_traversal_mc_version(tmp_path):
+    """Sicherheit S5: ../-prefixed mc_version must be rejected before reaching
+    the Quilt installer subprocess (where it would have landed in
+    ``install server <mc_version>`` directly).
+    """
+    from backend.server.installer.quilt import QuiltInstaller
+    inst = QuiltInstaller(tmp_path)
+
+    result = inst.install("../../etc/passwd")
+    assert result.success is False
+    assert "mc_version" in result.message
+    assert not list(tmp_path.glob("**/*.jar"))
+
+
+def test_install_rejects_shell_metachar_mc_version(tmp_path):
+    from backend.server.installer.quilt import QuiltInstaller
+    inst = QuiltInstaller(tmp_path)
+
+    result = inst.install("1.21.4 --evil")
+    assert result.success is False
+    assert "mc_version" in result.message
+
+
+def test_install_rejects_traversal_loader_version(tmp_path):
+    """Caller-pinned loader_version is also whitelisted at the boundary."""
+    from backend.server.installer.quilt import QuiltInstaller
+    inst = QuiltInstaller(tmp_path)
+
+    result = inst.install("1.21.4", loader_version="../../bad")
+    assert result.success is False
+    assert "loader_version" in result.message
+
+
+def test_install_passes_loader_version_to_subprocess(
+    tmp_path, fake_game_versions, monkeypatch
+):
+    """User-pinned loader_version must land in the installer CLI as
+    ``--loader-version=X.Y.Z``. Without this, the ServerCreateModal
+    selector has no effect and the installer silently picks latest.
+    """
+    import subprocess
+    from backend.server.installer.quilt import QuiltInstaller
+    inst = QuiltInstaller(tmp_path)
+    _patch_session(inst, game_versions=fake_game_versions)
+
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        (tmp_path / "quilt-server-launch.jar").write_bytes(b"PKquilt")
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("backend.server.installer.quilt.run_subprocess_streaming", fake_run)
+
+    result = inst.install("1.21.4", loader_version="0.20.0")
+
+    assert result.success is True
+    assert "--loader-version=0.20.0" in captured["cmd"]
+
+
+def test_install_without_loader_version_omits_flag(
+    tmp_path, fake_game_versions, monkeypatch
+):
+    """Default path (loader_version=None) must NOT inject --loader-version=...
+    — preserves the existing 'latest stable loader' behaviour where the
+    Quilt installer auto-selects.
+    """
+    import subprocess
+    from backend.server.installer.quilt import QuiltInstaller
+    inst = QuiltInstaller(tmp_path)
+    _patch_session(inst, game_versions=fake_game_versions)
+
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        (tmp_path / "quilt-server-launch.jar").write_bytes(b"PKquilt")
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("backend.server.installer.quilt.run_subprocess_streaming", fake_run)
+
+    result = inst.install("1.21.4")
+
+    assert result.success is True
+    assert not any(arg.startswith("--loader-version=") for arg in captured["cmd"])
+
+
+def test_install_rejects_shell_metachar_loader_version(tmp_path):
+    """Sicherheit S5: shell-metacharacter loader_version (semicolon + space)
+    must be rejected by validate_version_token BEFORE it could land in the
+    --loader-version= subprocess arg. Complements the traversal test —
+    this covers the command-injection vector specifically.
+    """
+    from backend.server.installer.quilt import QuiltInstaller
+    inst = QuiltInstaller(tmp_path)
+
+    result = inst.install("1.21.4", loader_version="0.20.0; rm -rf /")
+    assert result.success is False
+    assert "loader_version" in result.message
