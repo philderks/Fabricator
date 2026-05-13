@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onUnmounted, ref } from 'vue'
 import AppButton from '../../components/ui/AppButton.vue'
 import Panel from '../../components/ui/Panel.vue'
 import ConfirmModal from '../../components/modals/ConfirmModal.vue'
@@ -39,6 +39,13 @@ const handleDiscardCancel = () => {
     discardResolver = null
   }
 }
+
+onUnmounted(() => {
+  if (discardResolver) {
+    discardResolver(false)
+    discardResolver = null
+  }
+})
 
 const onFileClick = async (entry) => {
   if (!(await confirmDiscardChanges())) return
@@ -234,7 +241,6 @@ const onCopyPath = async () => {
       cancel-text="Keep editing"
       @confirm="handleDiscardConfirm"
       @cancel="handleDiscardCancel"
-      @close="handleDiscardCancel"
     />
   </div>
 </template>

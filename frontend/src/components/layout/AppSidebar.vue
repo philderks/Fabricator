@@ -178,7 +178,13 @@ onMounted(async () => {
   scheduleNextPoll()
 })
 
-onUnmounted(stopUpdatePoll)
+onUnmounted(() => {
+  stopUpdatePoll()
+  if (updateConfirmResolver) {
+    updateConfirmResolver(false)
+    updateConfirmResolver = null
+  }
+})
 </script>
 
 <template>
@@ -276,7 +282,6 @@ onUnmounted(stopUpdatePoll)
       cancel-text="Cancel"
       @confirm="handleUpdateConfirm"
       @cancel="handleUpdateCancel"
-      @close="handleUpdateCancel"
     />
   </aside>
 </template>

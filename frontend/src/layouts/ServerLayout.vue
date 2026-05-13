@@ -177,7 +177,6 @@ onUnmounted(() => {
       :loading="store.modpackInstalling"
       @confirm="store.confirmModpackInstall"
       @cancel="store.cancelModpackInstallConfirmation"
-      @close="store.cancelModpackInstallConfirmation"
     >
       <template #extra>
         <div v-if="store.modpackInstalling" class="install-progress">
@@ -204,7 +203,6 @@ onUnmounted(() => {
       :loading="store.modpackInstalling"
       @confirm="store.confirmInstallWithMissingMods"
       @cancel="store.cancelMissingModsConfirmation"
-      @close="store.cancelMissingModsConfirmation"
     />
 
     <ModSideDecisionModal
@@ -228,7 +226,6 @@ onUnmounted(() => {
       :cancel-text="store.confirmModalData.cancelText"
       @confirm="store.confirmRemoveMod"
       @cancel="store.cancelRemoveMod"
-      @close="store.cancelRemoveMod"
     />
 
     <ConfirmModal
@@ -242,7 +239,6 @@ onUnmounted(() => {
       :loading="store.restoringBackup"
       @confirm="store.confirmRestoreBackup"
       @cancel="store.cancelRestoreBackup"
-      @close="store.cancelRestoreBackup"
     />
 
     <ConfirmModal
@@ -256,7 +252,6 @@ onUnmounted(() => {
       :loading="store.deletingBackup"
       @confirm="store.confirmDeleteBackup"
       @cancel="store.cancelDeleteBackup"
-      @close="store.cancelDeleteBackup"
     />
 
     <ConfirmModal
@@ -270,7 +265,6 @@ onUnmounted(() => {
       :loading="store.deletingServer"
       @confirm="store.confirmDeleteServer"
       @cancel="store.cancelDeleteServer"
-      @close="store.cancelDeleteServer"
     />
 
     <JavaInstallModal
