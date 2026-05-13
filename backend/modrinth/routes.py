@@ -55,6 +55,13 @@ def _modrinth_error_response(exc: ModrinthApiError):
 
 
 def _parse_bool(value, default: bool = False) -> bool:
+    """Parse a flexible bool from JSON values (None/bool/int/float/str).
+
+    Note: as of B6, whitespace-stripping is delegated to ``bool_from_str`` —
+    leading/trailing whitespace in the input is now treated as a no-op
+    (``'  true  '`` parses to ``True``). Benign behavior change vs. the
+    pre-B6 strict-match implementation.
+    """
     if value is None:
         return default
     if isinstance(value, bool):
@@ -284,6 +291,14 @@ def get_mod_download_url(mod_id):
 @require_server(source='body')
 @with_server_lock(source='body')
 def install_mod(mod_id, server):
+    # 4xx fan-out order (post-B14a, pinned by tests/test_modrinth_routes_4xx_order.py):
+    # 1. 400 missing server_id           (@require_server source='body')
+    # 2. 404 server not found            (@require_server)
+    # 3. 409 lock busy                   (@with_server_lock)
+    # 4. 400 missing mc_version          (handler body)
+    # 5. 400 mods_folder override        (handler body)
+    # 6. 400 mods-folder resolve error   (handler body, _resolve_mods_folder ValueError)
+    # 7. 404 no resolved version         (handler body)
     data = request.get_json() or {}
     mc_version = data.get('mc_version')
     loader = data.get('loader', 'fabric')

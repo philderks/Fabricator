@@ -105,6 +105,8 @@ def request_with_retry(
     Retries on:
         * ``requests.ConnectionError`` and ``requests.Timeout`` — transient
           network-side conditions (DNS hiccup, TCP reset, idle-socket timeout).
+        * ``requests.exceptions.ChunkedEncodingError`` — mid-stream chunked
+          transfer hiccups; transient, parity with ConnectionError/Timeout.
         * ``requests.HTTPError`` if ``response.status_code`` is retryable per
           :func:`_is_retryable_status` (5xx + 408 + 429).
 
@@ -143,7 +145,11 @@ def request_with_retry(
             if attempt >= retries:
                 raise
             last_exc = exc
-        except (requests.ConnectionError, requests.Timeout) as exc:
+        except (
+            requests.ConnectionError,
+            requests.Timeout,
+            requests.exceptions.ChunkedEncodingError,
+        ) as exc:
             if attempt >= retries:
                 raise
             last_exc = exc

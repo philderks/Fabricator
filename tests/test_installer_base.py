@@ -1084,6 +1084,21 @@ def test_request_with_retry_retries_on_connection_error_then_succeeds(monkeypatc
     assert attempts == [1, 2]
 
 
+def test_request_with_retry_retries_on_chunked_encoding_error(monkeypatch):
+    """requests.exceptions.ChunkedEncodingError (mid-stream hiccup) retries."""
+    monkeypatch.setattr("backend.server.installer.base.time.sleep", lambda _: None)
+    attempts = []
+
+    def flaky():
+        attempts.append(len(attempts) + 1)
+        if len(attempts) == 1:
+            raise requests.exceptions.ChunkedEncodingError("mid-stream hiccup")
+        return "ok"
+
+    assert request_with_retry(flaky, retries=3, initial_backoff=0) == "ok"
+    assert attempts == [1, 2]
+
+
 def test_request_with_retry_retries_on_timeout(monkeypatch):
     """requests.Timeout is part of the retry whitelist."""
     monkeypatch.setattr("backend.server.installer.base.time.sleep", lambda _: None)
