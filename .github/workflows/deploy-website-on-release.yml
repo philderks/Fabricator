@@ -1,15 +1,17 @@
 name: Trigger Fabricator website deploy on release
 
 on:
-  release:
+  workflow_run:
+    workflows: ["Build & Release"]
     types:
-      - published
+      - completed
   workflow_dispatch:
 
 jobs:
   trigger-cloudflare-pages-deploy:
     name: Trigger Cloudflare Pages deploy hook
     runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     steps:
       - name: Validate deploy hook secret is configured
         env:
@@ -24,7 +26,7 @@ jobs:
       - name: Trigger Cloudflare Pages deployment
         env:
           DEPLOY_HOOK_URL: ${{ secrets.CLOUDFLARE_PAGES_DEPLOY_HOOK_URL }}
-          RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
+          RELEASE_TAG: ${{ github.event.workflow_run.head_branch || github.ref_name }}
         run: |
           echo "Triggering Cloudflare Pages deploy for release: $RELEASE_TAG"
           curl --fail --show-error --silent \

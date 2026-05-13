@@ -9,3 +9,6 @@ requires-python = ">=3.11"
 
 [project.scripts]
 fabricator = "tools.cli:cli"
+
+[tool.setuptools]
+packages = ["tools"]

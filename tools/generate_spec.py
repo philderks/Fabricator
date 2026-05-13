@@ -76,6 +76,7 @@ a = Analysis(
         'PIL.ImageDraw',
         'requests',
         'psutil',
+        'tomli',
     ],
     hookspath=[],
     hooksconfig={{}},
