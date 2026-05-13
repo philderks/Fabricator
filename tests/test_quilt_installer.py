@@ -389,3 +389,71 @@ def test_install_rejects_traversal_loader_version(tmp_path):
     result = inst.install("1.21.4", loader_version="../../bad")
     assert result.success is False
     assert "loader_version" in result.message
+
+
+def test_install_passes_loader_version_to_subprocess(
+    tmp_path, fake_game_versions, monkeypatch
+):
+    """User-pinned loader_version must land in the installer CLI as
+    ``--loader-version=X.Y.Z``. Without this, the ServerCreateModal
+    selector has no effect and the installer silently picks latest.
+    """
+    import subprocess
+    from backend.server.installer.quilt import QuiltInstaller
+    inst = QuiltInstaller(tmp_path)
+    _patch_session(inst, game_versions=fake_game_versions)
+
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        (tmp_path / "quilt-server-launch.jar").write_bytes(b"PKquilt")
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("backend.server.installer.quilt.run_subprocess_streaming", fake_run)
+
+    result = inst.install("1.21.4", loader_version="0.20.0")
+
+    assert result.success is True
+    assert "--loader-version=0.20.0" in captured["cmd"]
+
+
+def test_install_without_loader_version_omits_flag(
+    tmp_path, fake_game_versions, monkeypatch
+):
+    """Default path (loader_version=None) must NOT inject --loader-version=...
+    — preserves the existing 'latest stable loader' behaviour where the
+    Quilt installer auto-selects.
+    """
+    import subprocess
+    from backend.server.installer.quilt import QuiltInstaller
+    inst = QuiltInstaller(tmp_path)
+    _patch_session(inst, game_versions=fake_game_versions)
+
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        (tmp_path / "quilt-server-launch.jar").write_bytes(b"PKquilt")
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("backend.server.installer.quilt.run_subprocess_streaming", fake_run)
+
+    result = inst.install("1.21.4")
+
+    assert result.success is True
+    assert not any(arg.startswith("--loader-version=") for arg in captured["cmd"])
+
+
+def test_install_rejects_shell_metachar_loader_version(tmp_path):
+    """Sicherheit S5: shell-metacharacter loader_version (semicolon + space)
+    must be rejected by validate_version_token BEFORE it could land in the
+    --loader-version= subprocess arg. Complements the traversal test —
+    this covers the command-injection vector specifically.
+    """
+    from backend.server.installer.quilt import QuiltInstaller
+    inst = QuiltInstaller(tmp_path)
+
+    result = inst.install("1.21.4", loader_version="0.20.0; rm -rf /")
+    assert result.success is False
+    assert "loader_version" in result.message

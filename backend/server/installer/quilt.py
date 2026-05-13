@@ -311,16 +311,17 @@ class QuiltInstaller(InstallerBase):
         install_dir = self._resolve_within_install_path()
         java_cmd = self.java_exec or "java"
         self._report(progress_callback, "running_installer")
-        # Streaming runner (B12a parity): forwards each stdout/stderr line live
-        # to ``logger.info`` and guarantees a clean kill + drain on timeout.
+        installer_cmd = [
+            java_cmd, "-jar", str(installer_jar),
+            "install", "server", mc_version,
+            "--download-server",
+            f"--install-dir={install_dir}",
+        ]
+        if loader_version is not None:
+            installer_cmd.append(f"--loader-version={loader_version}")
         try:
             completed = run_subprocess_streaming(
-                [
-                    java_cmd, "-jar", str(installer_jar),
-                    "install", "server", mc_version,
-                    "--download-server",
-                    f"--install-dir={install_dir}",
-                ],
+                installer_cmd,
                 cwd=Path(self.install_path),
                 timeout=1800,
                 on_line=lambda line: logger.info("quilt-installer: %s", line),
