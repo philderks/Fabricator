@@ -65,7 +65,7 @@ Fabricator/
 
 ## 📡 API Dokumentation
 
-### Server Management
+### Health Check
 
 #### `GET /api/health`
 Health Check Endpoint.

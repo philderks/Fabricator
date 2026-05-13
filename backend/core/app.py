@@ -3,7 +3,7 @@ import os
 import sys
 from pathlib import Path
 
-from flask import Flask, jsonify, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
 from backend.core.config import get_config
@@ -48,6 +48,14 @@ def create_app() -> Flask:
     # left over from a previous run. Tolerates a missing/malformed index.
     from backend.server.routes import cleanup_stale_statuses
     cleanup_stale_statuses()
+
+    @app.route(
+        "/api/<path:_>",
+        methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    )
+    def api_not_found(_):
+        """Return JSON (not the SPA's HTML) for unknown /api/... paths."""
+        return jsonify({"error": "endpoint not found", "path": request.path}), 404
 
     @app.route("/", defaults={"path": ""})
     @app.route("/<path:path>")
