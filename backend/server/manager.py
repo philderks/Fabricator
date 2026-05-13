@@ -26,7 +26,7 @@ class ServerManager:
     _PLAYER_JOIN_RE = re.compile(r'\[.*?INFO\]: (.+) joined the game')
     _PLAYER_LEAVE_RE = re.compile(r'\[.*?INFO\]: (.+) left the game')
 
-    def __init__(self, command: Optional[Iterable[str]] = None, cwd: Optional[str] = None):
+    def __init__(self, cwd: str, command: Optional[Iterable[str]] = None):
         env_command = os.environ.get("SERVER_COMMAND")
         parsed_env_command: Optional[List[str]] = None
         if env_command:
@@ -35,7 +35,7 @@ class ServerManager:
         self.command = self._parse_command(command or parsed_env_command) or self._split_command(
             self.DEFAULT_COMMAND
         )
-        self.cwd = cwd or os.path.join(os.getcwd(), "server")
+        self.cwd = cwd
         self._memory_limit_bytes = self._extract_memory_limit_bytes(self.command)
         self._process: Optional[subprocess.Popen] = None
         self._ps_process: Optional["psutil.Process"] = None  # type: ignore[name-defined]
