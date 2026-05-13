@@ -98,7 +98,7 @@ export default {
       default: false
     }
   },
-  emits: ['confirm', 'cancel', 'close'],
+  emits: ['confirm', 'cancel'],
   computed: {
     confirmButtonVariant() {
       if (this.type === 'danger') return 'danger';
@@ -115,7 +115,6 @@ export default {
     handleCancel() {
       if (!this.loading) {
         this.$emit('cancel');
-        this.$emit('close');
       }
     }
   }

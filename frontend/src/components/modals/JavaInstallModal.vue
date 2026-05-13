@@ -319,8 +319,12 @@ const startDownload = async () => {
 
 const pollProgress = async () => {
   if (!taskId.value) return
+  // Capture the active taskId before the await so we can detect a reset /
+  // re-open mid-flight (state race) and bail without trampling fresh state.
+  const localTaskId = taskId.value
   try {
-    const task = await getJavaInstallProgress(taskId.value)
+    const task = await getJavaInstallProgress(localTaskId)
+    if (taskId.value !== localTaskId) return
     downloaded.value = task.downloaded || 0
     total.value = task.total || total.value
     if (task.status === 'error') {
@@ -337,15 +341,14 @@ const pollProgress = async () => {
     if (task.status === 'done') {
       clearPoll()
       javaPath.value = task.java_path || ''
-      if (state.value === 'downloading' || state.value === 'confirming_install') {
-        // Edge case: install finished before user confirmed. Treat confirm as
-        // already-accepted and jump to done.
-        state.value = 'done'
-      } else if (state.value === 'installing') {
-        state.value = 'done'
-      }
+      // `error` is terminal; every other state (downloading,
+      // confirming_install, installing, and the rare done re-poll) transitions
+      // forward to `done`.
+      if (state.value === 'error') return
+      state.value = 'done'
     }
   } catch (err) {
+    if (taskId.value !== localTaskId) return
     clearPoll()
     errorMessage.value = err?.message || 'Lost contact with the install task.'
     state.value = 'error'
@@ -382,6 +385,18 @@ watch(
     } else {
       clearPoll()
     }
+  }
+)
+
+// Refresh status when the target Minecraft version changes mid-modal — the
+// required-Java major may shift. Skips initial fire (no `immediate: true`)
+// to avoid double-trigger with the `show` watcher above.
+watch(
+  () => props.mcVersion,
+  () => {
+    if (!props.show) return
+    clearPoll()
+    loadStatus()
   }
 )
 

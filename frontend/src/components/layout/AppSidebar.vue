@@ -2,6 +2,7 @@
 import { computed, inject, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import ServerSwitcher from './ServerSwitcher.vue'
+import ConfirmModal from '../modals/ConfirmModal.vue'
 import { version as appVersion } from '../../../package.json'
 import { getUpdateStatus, triggerUpdate } from '../../api/servers'
 import { useToast } from '../../composables/useToast'
@@ -50,7 +51,11 @@ const updateState = ref({
 const updateTriggering = ref(false)
 /** 0 idle, 1 armed after trigger, 2 saw inProgress true (avoids toast if job never starts). */
 const updateOutcomeWatch = ref(0)
-let updateStatusIntervalId = null
+// setTimeout handle (was setInterval + recursive-rearm, which created a
+// fresh interval on every fire — wasteful and made the "double-mount" claim
+// in F7 hard to reason about). Switched to setTimeout-recursive so one
+// timer is in flight at any moment.
+let updateStatusTimeoutId = null
 
 watch(
   () => updateState.value.inProgress,
@@ -86,12 +91,19 @@ const loadUpdateState = async () => {
 }
 
 const scheduleNextPoll = () => {
-  if (updateStatusIntervalId) clearInterval(updateStatusIntervalId)
+  if (updateStatusTimeoutId) clearTimeout(updateStatusTimeoutId)
   const interval = updateState.value.inProgress ? POLL_INTERVAL_ACTIVE : POLL_INTERVAL_IDLE
-  updateStatusIntervalId = setInterval(async () => {
+  updateStatusTimeoutId = setTimeout(async () => {
     await loadUpdateState()
     scheduleNextPoll()
   }, interval)
+}
+
+const stopUpdatePoll = () => {
+  if (updateStatusTimeoutId) {
+    clearTimeout(updateStatusTimeoutId)
+    updateStatusTimeoutId = null
+  }
 }
 
 const updateAvailable = computed(() =>
@@ -109,11 +121,37 @@ const updateVersionLabel = computed(() => {
   return v ? String(v) : ''
 })
 
+// In-app modal-based confirm (CC6: no window.confirm). The runUpdate flow
+// is the only consumer here, so we keep state local instead of pushing it
+// into the store — the promise-resolve pattern lets us preserve the
+// `await confirmed` shape of the original window.confirm call.
+const showUpdateConfirm = ref(false)
+let updateConfirmResolver = null
+
+const requestUpdateConfirmation = () => new Promise((resolve) => {
+  updateConfirmResolver = resolve
+  showUpdateConfirm.value = true
+})
+
+const handleUpdateConfirm = () => {
+  showUpdateConfirm.value = false
+  if (updateConfirmResolver) {
+    updateConfirmResolver(true)
+    updateConfirmResolver = null
+  }
+}
+
+const handleUpdateCancel = () => {
+  showUpdateConfirm.value = false
+  if (updateConfirmResolver) {
+    updateConfirmResolver(false)
+    updateConfirmResolver = null
+  }
+}
+
 const runUpdate = async () => {
   if (!updateAvailable.value || updateTriggering.value) return
-  const confirmed = window.confirm(
-    'Run Fabricator update now? The service may restart briefly while preserving server data and config.'
-  )
+  const confirmed = await requestUpdateConfirmation()
   if (!confirmed) return
 
   updateTriggering.value = true
@@ -141,9 +179,10 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  if (updateStatusIntervalId) {
-    clearInterval(updateStatusIntervalId)
-    updateStatusIntervalId = null
+  stopUpdatePoll()
+  if (updateConfirmResolver) {
+    updateConfirmResolver(false)
+    updateConfirmResolver = null
   }
 })
 </script>
@@ -232,6 +271,18 @@ onUnmounted(() => {
         <span class="app-sidebar__update-ver">{{ updateVersionLabel }}</span>
       </component>
     </div>
+
+    <ConfirmModal
+      :show="showUpdateConfirm"
+      title="Run Fabricator update?"
+      message="Run Fabricator update now?"
+      description="The service may restart briefly while preserving server data and config."
+      type="warning"
+      confirm-text="Run update"
+      cancel-text="Cancel"
+      @confirm="handleUpdateConfirm"
+      @cancel="handleUpdateCancel"
+    />
   </aside>
 </template>
 

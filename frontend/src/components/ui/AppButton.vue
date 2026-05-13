@@ -76,7 +76,7 @@ defineEmits(['click'])
 
 .app-btn--primary {
   background: var(--primary);
-  color: #ffffff;
+  color: var(--text-on-primary);
 }
 
 .app-btn--primary:hover:not(:disabled) {
@@ -96,7 +96,7 @@ defineEmits(['click'])
 
 .app-btn--danger {
   background: var(--danger);
-  color: #ffffff;
+  color: var(--text-on-primary);
 }
 
 .app-btn--danger:hover:not(:disabled) {

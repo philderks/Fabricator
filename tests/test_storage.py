@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+
+
+_ISO_Z_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{6})?Z")
 
 
 def test_save_servers_uses_temp_and_replace(tmp_servers_root):
@@ -103,6 +107,24 @@ def test_legacy_migration_does_not_destroy_source_file(tmp_path, monkeypatch):
     assert fresh_target.exists(), "Migration should have populated the configured path"
     assert json.loads(legacy_path.read_text(encoding="utf-8")) == \
            json.loads(fresh_target.read_text(encoding="utf-8"))
+
+
+def test_update_server_sets_updatedAt_in_iso_z_wire_format(tmp_servers_root):
+    """``updatedAt`` is pinned to ``YYYY-MM-DDTHH:MM:SS[.ffffff]Z``.
+
+    Frontend renders this string verbatim — drift would break the
+    consumer surface in lockstep with backend.
+    """
+    import importlib
+    import backend.server.storage as storage
+    importlib.reload(storage)
+
+    storage.save_servers([{"id": "srv_iso", "name": "Demo", "status": "stopped"}])
+    updated = storage.update_server("srv_iso", {"name": "Renamed"})
+    assert updated is not None
+    assert _ISO_Z_RE.fullmatch(updated["updatedAt"]), (
+        f"updatedAt not ISO-Z: {updated['updatedAt']!r}"
+    )
 
 
 def test_save_cleans_up_tmp_on_json_failure(tmp_servers_root, monkeypatch):

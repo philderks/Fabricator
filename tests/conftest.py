@@ -12,9 +12,34 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
+@pytest.fixture(autouse=True)
+def _clear_platform_caches():
+    """Reset platform-level ``lru_cache``s before each test.
+
+    ``appdata_dir``, ``arch_label``, and ``_system_name`` are cached for
+    process-lifetime. Tests that monkey-patch HOME, APPDATA,
+    FABRICATOR_APPDATA, or the platform-name need a clean slate; without
+    this fixture a stale cache from a previous test could leak into the
+    next one and silently produce wrong paths or arch labels.
+    """
+    from backend.utils.platform import appdata_dir, arch_label, _system_name
+    appdata_dir.cache_clear()
+    arch_label.cache_clear()
+    _system_name.cache_clear()
+    yield
+    appdata_dir.cache_clear()
+    arch_label.cache_clear()
+    _system_name.cache_clear()
+
+
 @pytest.fixture
 def tmp_servers_root(tmp_path, monkeypatch):
-    """Redirect SERVERS_ROOT + SERVER_INDEX_FILE + JAVA_ROOT to a temp dir.
+    """Redirect server/index/java roots to a temp dir.
+
+    Sets the env vars ``SERVER_ROOT`` (-> ``Config.SERVERS_ROOT``),
+    ``SERVER_INDEX_FILE`` (-> ``Config.SERVERS_FILE``) and ``JAVA_ROOT``
+    (-> ``Config.JAVA_ROOT``). The env-var name and the Python attribute
+    differ for ``SERVER_ROOT``/``SERVERS_ROOT`` — see ``core/config.py``.
 
     After Task 1, Config reads env vars at instance construction time, so
     monkeypatch.setenv alone is sufficient — no direct attribute writes.
@@ -35,7 +60,7 @@ def app(tmp_servers_root):
     """Return a Flask app configured against the temp servers root."""
     # Clear the registry singleton between tests.
     import backend.server.registry as registry_mod
-    registry_mod._registry = None
+    registry_mod.reset_for_tests()
 
     from backend.core.app import create_app
     app = create_app()

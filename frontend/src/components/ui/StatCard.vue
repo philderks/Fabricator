@@ -16,10 +16,6 @@ defineProps({
     type: String,
     default: 'default',
     validator: (v) => ['default', 'success', 'primary', 'warning', 'danger'].includes(v)
-  },
-  highlight: {
-    type: Boolean,
-    default: false
   }
 })
 </script>
@@ -27,7 +23,7 @@ defineProps({
 <template>
   <div class="stat-card">
     <div class="stat-card__label">{{ label }}</div>
-    <div class="stat-card__value" :class="[`stat-card__value--${highlight ? 'success' : accent}`]">
+    <div class="stat-card__value" :class="`stat-card__value--${accent}`">
       <span>{{ value }}</span>
       <span v-if="unit" class="stat-card__unit">{{ unit }}</span>
     </div>

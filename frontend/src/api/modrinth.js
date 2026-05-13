@@ -17,14 +17,14 @@ import { get, post } from './client'
  * @param {number} params.offset - Pagination offset (default: 0)
  * @returns {Promise<Object>} Search results with hits array
  */
-export async function searchMods({ 
-  query = '', 
-  version = '', 
-  loader = '', 
+export async function searchMods({
+  query = '',
+  version = '',
+  loader = '',
   sort = 'relevance',
   limit = 20,
-  offset = 0 
-}) {
+  offset = 0
+}, options = {}) {
   return get('/api/modrinth/search', {
     query,
     mc_version: version,
@@ -32,7 +32,7 @@ export async function searchMods({
     index: sort,
     limit,
     offset
-  })
+  }, { signal: options.signal })
 }
 
 /**
@@ -40,8 +40,8 @@ export async function searchMods({
  * @param {string} modId - Modrinth mod ID or slug
  * @returns {Promise<Object>} Mod details
  */
-export async function getModDetails(modId) {
-  return get(`/api/modrinth/mod/${modId}`)
+export async function getModDetails(modId, options = {}) {
+  return get(`/api/modrinth/mod/${modId}`, {}, { signal: options.signal })
 }
 
 /**
@@ -52,8 +52,8 @@ export async function getModDetails(modId) {
  * @param {string} filters.loader - Mod loader
  * @returns {Promise<Array>} List of available versions
  */
-export async function getModVersions(modId, filters = {}) {
-  return get(`/api/modrinth/mod/${modId}/versions`, filters)
+export async function getModVersions(modId, filters = {}, options = {}) {
+  return get(`/api/modrinth/mod/${modId}/versions`, filters, { signal: options.signal })
 }
 
 /**

@@ -24,7 +24,13 @@ import {
   saveServerFile
 } from '../api/servers'
 import { useToast } from '../composables/useToast'
-import { enrichInstalledModsWithModrinth } from '../utils/enrichInstalledModsModrinth'
+import {
+  enrichInstalledModsWithModrinth,
+  invalidateModrinthMetaCache
+} from '../utils/enrichInstalledModsModrinth'
+// Status-display logic consolidated in utils/getEffectiveStatus (F6/CC5);
+// keep alias for the existing call sites in this file.
+import { getEffectiveStatus as pickEffectiveStatus } from '../utils/getEffectiveStatus'
 
 const MODPACK_STAGE_LABELS = {
   starting: 'Starting install...',
@@ -46,30 +52,6 @@ function isTextFile(path) {
   const segments = path.toLowerCase().split('.')
   const extension = segments.pop() || ''
   return TEXT_FILE_EXTENSIONS.has(extension)
-}
-
-// Statuses the runtime registry can authoritatively replace.
-// Mirror of backend _augment_with_runtime's _RUNTIME_KNOWN_STATUSES.
-const RUNTIME_KNOWN_STATUSES = new Set(['running', 'stopped'])
-
-/**
- * Pick the effective status for display, mirroring the backend rule.
- *
- * The runtime registry tracks ServerManager processes; it only knows
- * "running" or "stopped". For in-flight states owned by a route handler
- * (pending, installing, starting, stopping, failed) the persisted status
- * is authoritative and must NOT be overwritten by the registry's
- * default "stopped". Without this, a server actively installing in a
- * background thread would display as "stopped" the moment the modal
- * closes — exactly the bug from the smoke test.
- */
-function pickEffectiveStatus(server) {
-  const persisted = server?.status
-  const runtime = server?.runtime?.status
-  if (persisted && !RUNTIME_KNOWN_STATUSES.has(persisted)) {
-    return persisted
-  }
-  return runtime || persisted || 'pending'
 }
 
 export const useServerStore = defineStore('server', () => {
@@ -246,7 +228,7 @@ export const useServerStore = defineStore('server', () => {
         online: server.value?.runtime?.players?.online ?? 0,
         max: server.value?.maxPlayers ?? server.value?.runtime?.players?.max ?? 0
       },
-      tps: server.value?.runtime?.tps ?? 20
+      tps: server.value?.runtime?.tps ?? null
     }
   })
 
@@ -341,8 +323,12 @@ export const useServerStore = defineStore('server', () => {
       if (Array.isArray(list)) {
         serversList.value = list
       }
-    } catch {
+      return { ok: true }
+    } catch (error) {
       // Failure-safe: keep last-known-good state. Switcher pseudo-entry handles empty list.
+      // Returns a tuple so opt-in callers (e.g. Servers.vue) can surface the
+      // error UI; internal callers ignore the return value.
+      return { ok: false, error }
     }
   }
 
@@ -380,7 +366,7 @@ export const useServerStore = defineStore('server', () => {
     modsLoading.value = true
     try {
       const files = await getInstalledMods(currentServerId.value)
-      installedMods.value = files.map((file) => ({
+      const base = files.map((file) => ({
         name: file.name,
         filename: file.name,
         displayTitle: null,
@@ -393,7 +379,11 @@ export const useServerStore = defineStore('server', () => {
         source: 'Local',
         category: 'Mods Folder'
       }))
-      void enrichInstalledModsWithModrinth(installedMods.value)
+      installedMods.value = base
+      // F11/S9: enrich returns a NEW list (does not mutate in place); await
+      // it so the icon/title fields render in a single deterministic patch
+      // rather than appearing piecemeal via mutated refs.
+      installedMods.value = await enrichInstalledModsWithModrinth(base)
     } catch (error) {
       console.error('Failed to load mods:', error)
       toast.error('Failed to load installed mods', 'Error')
@@ -566,9 +556,13 @@ export const useServerStore = defineStore('server', () => {
   }
 
   function openModBrowser() { showModBrowser.value = true }
+  function closeModBrowser() { showModBrowser.value = false }
   function openModpackBrowser() { showModpackBrowser.value = true }
+  function closeModpackBrowser() { showModpackBrowser.value = false }
+  function closeJavaModal() { showJavaModal.value = false }
   function openDeleteServerModal() { showDeleteServerModal.value = true }
   function cancelDeleteServer() { showDeleteServerModal.value = false }
+  function setConsoleCommand(value) { consoleCommand.value = value }
 
   function goToConsole()  { router.push({ name: 'ServerConsole',  params: { id: currentServerId.value } }) }
   function goToFiles()    { router.push({ name: 'ServerFiles',    params: { id: currentServerId.value } }) }
@@ -775,8 +769,12 @@ export const useServerStore = defineStore('server', () => {
       await confirmBulkRemoveMods()
       return
     }
+    const filename = modToRemove.value.filename || modToRemove.value.name
     try {
-      await removeMod(currentServerId.value, modToRemove.value.filename || modToRemove.value.name)
+      await removeMod(currentServerId.value, filename)
+      // Drop cache entry so re-list doesn't show stale metadata if a
+      // different jar with the same filename ever lands later.
+      invalidateModrinthMetaCache(filename)
       toast.success(`${modToRemove.value.name} removed`, 'Mod Removed')
       await loadMods()
     } catch (error) {
@@ -849,13 +847,19 @@ export const useServerStore = defineStore('server', () => {
     bulkDeleting.value = true
     try {
       await bulkRemoveMods(currentServerId.value, filenames)
+      for (const fn of filenames) {
+        invalidateModrinthMetaCache(fn)
+      }
       toast.success(`${filenames.length} mod${filenames.length === 1 ? '' : 's'} removed`, 'Mods Removed')
-      selectedModPaths.value = new Set()
       await loadMods()
     } catch (error) {
       console.error('Failed to bulk remove mods:', error)
       toast.error('Failed to remove selected mods', 'Error')
     } finally {
+      // F9: clear selection in finally — success AND failure both invalidate
+      // the previous selection (some mods may have been deleted on the
+      // server before an error mid-batch). User re-selects from fresh state.
+      selectedModPaths.value = new Set()
       bulkDeleting.value = false
       showConfirmModal.value = false
       modToRemove.value = null
@@ -1057,6 +1061,10 @@ export const useServerStore = defineStore('server', () => {
     hasFileChanges,
     isDirtySettings,
     // Actions
+    closeModBrowser,
+    closeModpackBrowser,
+    closeJavaModal,
+    setConsoleCommand,
     loadServers,
     loadServer,
     loadMods,

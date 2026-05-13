@@ -38,7 +38,7 @@ def test_create_app_runs_stale_status_cleanup(tmp_servers_root):
 
     # Clear singleton + build app.
     import backend.server.registry as registry_mod
-    registry_mod._registry = None
+    registry_mod.reset_for_tests()
     from backend.core.app import create_app
 
     create_app()
@@ -52,7 +52,7 @@ def test_create_app_runs_stale_status_cleanup(tmp_servers_root):
 def test_registry_lazy_until_used(tmp_servers_root):
     """The registry singleton must not exist until something asks for it."""
     import backend.server.registry as registry_mod
-    registry_mod._registry = None
+    registry_mod.reset_for_tests()
 
     # Import routes module — should not construct the registry.
     for mod in list(sys.modules):

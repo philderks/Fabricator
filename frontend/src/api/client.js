@@ -37,7 +37,7 @@ function extractErrorMessageFromBody(rawBody) {
 
 /**
  * Make an API request with error handling
- * @param {string} endpoint - API endpoint (e.g., '/api/status')
+ * @param {string} endpoint - API endpoint (e.g., '/api/servers')
  * @param {Object} options - Fetch options
  * @returns {Promise<any>} Response data
  * @throws {ApiError} If request fails
@@ -80,11 +80,17 @@ export async function apiRequest(endpoint, options = {}) {
     
     return data
   } catch (error) {
+    // Propagate AbortError untouched so callers can distinguish intentional
+    // cancellation from real failures (don't toast/log abort as an error).
+    if (error?.name === 'AbortError') {
+      throw error
+    }
+
     // Re-throw ApiError as-is
     if (error instanceof ApiError) {
       throw error
     }
-    
+
     // Network or other errors
     throw new ApiError(
       error.message || 'Network error occurred',
@@ -96,13 +102,19 @@ export async function apiRequest(endpoint, options = {}) {
 
 /**
  * GET request helper
+ *
+ * @param {string} endpoint
+ * @param {Object} [params] - query parameters
+ * @param {Object} [options] - request options
+ * @param {AbortSignal} [options.signal] - forwarded to fetch for cancellation
  */
-export function get(endpoint, params = {}) {
+export function get(endpoint, params = {}, options = {}) {
   const queryString = new URLSearchParams(params).toString()
   const url = queryString ? `${endpoint}?${queryString}` : endpoint
-  
+
   return apiRequest(url, {
-    method: 'GET'
+    method: 'GET',
+    signal: options.signal
   })
 }
 

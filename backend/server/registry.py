@@ -154,7 +154,7 @@ class ServerProcessRegistry:
             pass
         return candidate
 
-    def _resolve_install_path(self, server: Dict[str, object]) -> Path:
+    def resolve_install_path(self, server: Dict[str, object]) -> Path:
         server_id = server.get('id')
         if not server_id:
             raise ValueError('Server entry is missing an id')
@@ -176,7 +176,7 @@ class ServerProcessRegistry:
             if manager:
                 return manager
 
-            install_path = self._resolve_install_path(server)
+            install_path = self.resolve_install_path(server)
             command = self._build_command(server)
             manager = ServerManager(command=command, cwd=str(install_path))
             self._instances[server_id] = manager
@@ -244,7 +244,7 @@ class ServerProcessRegistry:
         return {'stop': stop_result, 'start': start_result}
 
     def resolve_mods_path(self, server: Dict[str, object]) -> Path:
-        install_path = self._resolve_install_path(server)
+        install_path = self.resolve_install_path(server)
         mods_path = install_path / 'mods'
         mods_path.mkdir(parents=True, exist_ok=True)
         return mods_path
@@ -285,3 +285,15 @@ def get_server_process_registry() -> ServerProcessRegistry:
             config = get_config()
             _registry = ServerProcessRegistry(config.SERVERS_ROOT)
     return _registry
+
+
+def reset_for_tests() -> None:
+    """Reset the singleton registry — for test isolation only.
+
+    Tests that build a fresh ``create_app()`` need a clean registry so the
+    new ``Config.SERVERS_ROOT`` takes effect. Production code must never
+    call this; the module-global ``_registry`` stays private.
+    """
+    global _registry
+    with _registry_lock:
+        _registry = None

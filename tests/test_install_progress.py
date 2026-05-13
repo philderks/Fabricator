@@ -6,10 +6,14 @@ when concrete loaders start emitting; T1 treats phase strings as opaque.
 """
 from __future__ import annotations
 
+import re
 import threading
 import time
 
 from backend.server.install_progress import update, get, clear, is_active
+
+
+_ISO_Z_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{6})?Z")
 
 
 def setup_function(_):
@@ -96,6 +100,17 @@ def test_concurrent_updates_do_not_corrupt_store():
     assert get("srv_test_1")["bytes_done"] == 199
     assert get("srv_test_1")["phase"] == "downloading_installer"
     assert get("srv_test_2")["bytes_done"] == 199
+
+
+def test_updated_at_matches_iso_z_wire_format():
+    """``updated_at`` wire format is pinned: ``YYYY-MM-DDTHH:MM:SS[.ffffff]Z``.
+
+    Mirror in the frontend renders this string verbatim — drift to e.g.
+    ``+00:00`` suffix or naive ISO would break the consumer surface.
+    """
+    update("srv_test_1", phase="starting")
+    ts = get("srv_test_1")["updated_at"]
+    assert _ISO_Z_RE.fullmatch(ts), f"updated_at not ISO-Z: {ts!r}"
 
 
 def test_install_base_install_signature_accepts_progress_callback():

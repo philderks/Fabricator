@@ -70,11 +70,6 @@ def stop():
     """Stop the Fabricator service (graceful shutdown attempt first)."""
     click.echo("Stopping Fabricator...")
 
-    try:
-        requests.post(f"{API_BASE}/api/stop", timeout=10)
-    except Exception:
-        pass
-
     rc = _systemctl("stop")
     if rc == 0:
         click.echo(click.style("Fabricator stopped successfully.", fg="green"))

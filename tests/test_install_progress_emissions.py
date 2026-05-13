@@ -242,7 +242,7 @@ def test_quilt_install_emits_subprocess_phases(tmp_path, monkeypatch):
     def fake_run(cmd, **kwargs):
         (tmp_path / "quilt-server-launch.jar").write_bytes(b"PK")
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
-    monkeypatch.setattr("backend.server.installer.quilt.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.quilt.run_subprocess_streaming", fake_run)
 
     events = []
     result = inst.install("1.21.4", progress_callback=_record(events))
@@ -308,7 +308,7 @@ def test_quilt_download_installer_bytes_monotonic(tmp_path, monkeypatch):
     def fake_run(cmd, **kwargs):
         (tmp_path / "quilt-server-launch.jar").write_bytes(b"PK")
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
-    monkeypatch.setattr("backend.server.installer.quilt.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.quilt.run_subprocess_streaming", fake_run)
 
     events = []
     result = inst.install("1.21.4", progress_callback=_record(events))
@@ -350,7 +350,7 @@ def test_neoforge_install_emits_phases_in_order(tmp_path, monkeypatch):
         target.mkdir(parents=True, exist_ok=True)
         (target / "unix_args.txt").write_text("# args\n")
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
-    monkeypatch.setattr("backend.server.installer.neoforge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.neoforge.run_subprocess_streaming", fake_run)
     monkeypatch.setattr("backend.server.installer.neoforge.is_windows", lambda: False)
 
     events = []
@@ -416,7 +416,7 @@ def test_neoforge_download_installer_bytes_monotonic(tmp_path, monkeypatch):
         target.mkdir(parents=True, exist_ok=True)
         (target / "unix_args.txt").write_text("# args\n")
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
-    monkeypatch.setattr("backend.server.installer.neoforge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.neoforge.run_subprocess_streaming", fake_run)
     monkeypatch.setattr("backend.server.installer.neoforge.is_windows", lambda: False)
 
     events = []
@@ -462,7 +462,7 @@ def test_forge_install_emits_phases_in_order(tmp_path, monkeypatch):
         target.mkdir(parents=True, exist_ok=True)
         (target / "unix_args.txt").write_text("# args\n")
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
-    monkeypatch.setattr("backend.server.installer.forge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.forge.run_subprocess_streaming", fake_run)
     monkeypatch.setattr("backend.server.installer.forge.is_windows", lambda: False)
 
     events = []
@@ -528,7 +528,7 @@ def test_forge_download_installer_bytes_monotonic(tmp_path, monkeypatch):
         target.mkdir(parents=True, exist_ok=True)
         (target / "unix_args.txt").write_text("# args\n")
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
-    monkeypatch.setattr("backend.server.installer.forge.subprocess.run", fake_run)
+    monkeypatch.setattr("backend.server.installer.forge.run_subprocess_streaming", fake_run)
     monkeypatch.setattr("backend.server.installer.forge.is_windows", lambda: False)
 
     events = []

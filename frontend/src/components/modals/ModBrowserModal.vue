@@ -159,6 +159,7 @@ import {
 } from '../../api/modrinth'
 import { useServerStore } from '../../stores/server'
 import { installedJarMatchesBrowseHit, installedJarMatchesProjectRef } from '../../utils/modrinthJarMatch'
+import { formatNumber, truncate } from '../../utils/format'
 
 export default {
   name: 'ModBrowserModal',
@@ -201,7 +202,8 @@ export default {
       modVersionCache: {},
       versionFilterExpanded: false,
       showDependencyModal: false,
-      pendingDependencyContext: null
+      pendingDependencyContext: null,
+      loadVersionsInflight: false
     };
   },
   computed: {
@@ -261,6 +263,11 @@ export default {
       }
     },
     async loadVersions() {
+      // Dedup guard — protects against concurrent calls (e.g. created() hook
+      // + open + loader-change races) without affecting any user-visible
+      // spinner state.
+      if (this.loadVersionsInflight) return
+      this.loadVersionsInflight = true
       try {
         const versions = await getGameVersions()
         const normalized = (versions || [])
@@ -314,6 +321,8 @@ export default {
       } catch (error) {
         console.error('Failed to load game versions:', error)
         this.availableVersions = []
+      } finally {
+        this.loadVersionsInflight = false
       }
     },
 
@@ -535,21 +544,13 @@ export default {
       console.log('Selected mod:', mod);
     },
 
-    truncate(text, length) {
-      if (!text) return '';
-      return text.length > length ? text.substring(0, length) + '...' : text;
-    },
+    truncate,
 
-    formatNumber(num) {
-      if (!num) return '0';
-      if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
-      if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
-      return num.toString();
-    },
+    formatNumber,
 
     formatModMeta(mod) {
       const parts = []
-      if (mod.downloads) parts.push(`${this.formatNumber(mod.downloads)} downloads`)
+      if (mod.downloads) parts.push(`${formatNumber(mod.downloads)} downloads`)
       if (mod.categories && mod.categories.length) {
         parts.push(mod.categories[0])
       } else if (mod.loaders && mod.loaders.length) {
@@ -629,6 +630,7 @@ export default {
         this.searchQuery = '';
         this.results = [];
         this.versionFilterExpanded = false;
+        this.modVersionCache = {};
         this.cancelCompatibilityInstall()
         this.cancelDependencyInstall()
       }
@@ -645,6 +647,8 @@ export default {
     },
     loader(newVal) {
       this.selectedLoader = (newVal || 'fabric').toLowerCase()
+      // Parent loader change invalidates per-loader compat cache entries.
+      this.modVersionCache = {}
     }
   }
 }

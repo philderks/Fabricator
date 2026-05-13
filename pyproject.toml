@@ -1,7 +1,11 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "fabricator"
 version = "0.0.0"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 
 [project.scripts]
 fabricator = "tools.cli:cli"

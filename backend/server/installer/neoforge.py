@@ -1,20 +1,29 @@
 """NeoForge server installer using the NeoForged Maven repo + installer JAR."""
 from __future__ import annotations
 
+import logging
 import re
-import subprocess
 import requests
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .base import (
+    HashVerifyError,
     InstallerBase,
     InstallResult,
     InstallStatus,
     LaunchSpec,
+    SubprocessTimeout,
+    validate_version_token,
+    download_with_hash_verify,
+    request_with_retry,
+    run_subprocess_streaming,
 )
 from backend.utils import platform as platform_utils
 from backend.utils.platform import is_windows
+
+
+logger = logging.getLogger(__name__)
 
 
 _VERSION_SUFFIX_RE = re.compile(r"-(beta|rc\d*|pre\d*)$", re.IGNORECASE)
@@ -61,14 +70,30 @@ class NeoForgeInstaller(InstallerBase):
     # ---------- Version listing ----------
 
     def _fetch_maven_versions(self) -> List[str]:
-        try:
+        """Return the NeoForged Maven version list, ``[]`` on hard failure.
+
+        Retry-wrapped (B12b): NeoForged Maven shares the same transient-5xx
+        pattern as the Forge Maven; idempotent GET so retry-with-backoff is
+        safe.
+        """
+        def _do_request() -> Dict[str, Any]:
             response = self.session.get(self.MAVEN_VERSIONS_URL, timeout=15)
             response.raise_for_status()
-            payload = response.json()
-            return list(payload.get("versions") or [])
+            return response.json()
+
+        try:
+            payload = request_with_retry(
+                _do_request,
+                retries=3,
+                on_retry=lambda attempt, exc: logger.warning(
+                    "Retrying NeoForge Maven versions fetch (attempt %d): %s",
+                    attempt, exc,
+                ),
+            )
         except requests.RequestException as exc:
-            print(f"Failed to fetch NeoForge versions: {exc}")
+            logger.warning("Failed to fetch NeoForge versions: %s", exc)
             return []
+        return list(payload.get("versions") or [])
 
     @staticmethod
     def _split_version(neoforge_version: str) -> Tuple[Optional[List[int]], bool]:
@@ -213,15 +238,43 @@ class NeoForgeInstaller(InstallerBase):
         return self._installer_jar_url(loader_version) + ".sha1"
 
     def _fetch_expected_sha1(self, loader_version: str) -> Optional[str]:
-        try:
+        """Resolve the expected installer-jar SHA1 from NeoForged Maven.
+
+        Same defensive empty-body / non-hex parse as
+        :meth:`ForgeInstaller._fetch_expected_sha1` (B12b). Retry-wrapped on
+        transient 5xx because Maven outages are observed in the wild.
+        """
+        def _do_request() -> requests.Response:
             response = self.session.get(
                 self._installer_jar_sha1_url(loader_version), timeout=15
             )
             response.raise_for_status()
-            text = (response.text or "").strip().split()[0].lower()
-            return text if len(text) == 40 else None
-        except (requests.RequestException, IndexError):
+            return response
+
+        try:
+            response = request_with_retry(
+                _do_request,
+                retries=3,
+                on_retry=lambda attempt, exc: logger.warning(
+                    "Retrying NeoForge SHA1 fetch for %s (attempt %d): %s",
+                    loader_version, attempt, exc,
+                ),
+            )
+        except requests.RequestException:
             return None
+
+        text = (response.text or "").strip()
+        if not text:
+            return None
+        parts = text.split()
+        if not parts:
+            return None
+        sha1_token = parts[0].lower()
+        if len(sha1_token) != 40 or not all(
+            c in "0123456789abcdef" for c in sha1_token
+        ):
+            return None
+        return sha1_token
 
     def _download_installer_jar(
         self,
@@ -232,61 +285,76 @@ class NeoForgeInstaller(InstallerBase):
     ) -> "tuple[Optional[Path], Optional[str]]":
         """Download and SHA1-verify the installer JAR.
 
+        S7 hardening (B11): the SHA1 must be available BEFORE the download,
+        and a missing SHA1 hard-fails the install instead of silently
+        degrading to an unverified payload — NeoForge installer JARs are
+        ``java -jar`` payloads, so an unverified install equals arbitrary
+        code execution from the Maven path.
+
         Returns ``(path, None)`` on success or ``(None, error_message)``.
         """
-        import hashlib
+        # loader_version is pre-validated at the install() boundary; this
+        # extra resolve()+relative_to() is defence-in-depth.
+        target = self._resolve_within_install_path(
+            f"neoforge-{loader_version}-installer.jar"
+        )
 
-        target = self.install_path / f"neoforge-{loader_version}-installer.jar"
-        hasher = hashlib.sha1()
-        try:
-            with self.session.get(
-                self._installer_jar_url(loader_version), stream=True, timeout=300
-            ) as response:
-                response.raise_for_status()
-                total_size = int(response.headers.get("Content-Length", 0))
-                downloaded = 0
-                with open(target, "wb") as fh:
-                    for chunk in response.iter_content(chunk_size=65536):
-                        if chunk:
-                            fh.write(chunk)
-                            hasher.update(chunk)
-                            downloaded += len(chunk)
-                            self._report(
-                                progress_callback,
-                                "downloading_installer",
-                                bytes_done=downloaded,
-                                bytes_total=total_size,
-                            )
-        except requests.RequestException as exc:
-            target.unlink(missing_ok=True)
-            return None, f"Failed to download NeoForge installer: {exc}"
-
-        self._report(progress_callback, "verifying")
+        # Resolve the expected SHA1 first so we can hard-fail before doing
+        # the (potentially large) JAR download. A None return from
+        # ``_fetch_expected_sha1`` (transient 404 / Maven hiccup / endpoint
+        # drift) aborts the install instead of skipping verification.
         expected_sha1 = self._fetch_expected_sha1(loader_version)
         if not expected_sha1:
-            print(
-                f"WARNING: NeoForge installer SHA1 unavailable for "
-                f"{loader_version} — proceeding without integrity check."
+            return None, (
+                f"Could not retrieve NeoForge installer SHA1 for "
+                f"{loader_version} from Maven; refusing to install without "
+                f"an integrity check."
             )
-        if expected_sha1:
-            actual = hasher.hexdigest().lower()
-            if actual != expected_sha1:
-                target.unlink(missing_ok=True)
-                return None, (
-                    f"SHA1 checksum mismatch for installer JAR: "
-                    f"expected {expected_sha1}, got {actual}"
-                )
 
+        def _emit(bytes_done: int, bytes_total: int) -> None:
+            self._report(
+                progress_callback,
+                "downloading_installer",
+                bytes_done=bytes_done,
+                bytes_total=bytes_total,
+            )
+
+        try:
+            download_with_hash_verify(
+                self._installer_jar_url(loader_version),
+                target,
+                sha1=expected_sha1,
+                session=self.session,
+                timeout=300,
+                progress_callback=_emit,
+                # B12b: retry transient 5xx / connection-resets on the JAR
+                # download. HashVerifyError is never retried (cryptographic
+                # mismatch is non-transient by definition).
+                retries=3,
+            )
+        except HashVerifyError as exc:
+            return None, str(exc)
+        except requests.RequestException as exc:
+            return None, f"Failed to download NeoForge installer: {exc}"
+        except OSError as exc:
+            return None, f"Failed to write NeoForge installer: {exc}"
+
+        self._report(progress_callback, "verifying")
         return target, None
 
     def _detect_args_file(self, loader_version: str) -> Optional[Path]:
-        """Return the platform-specific args file produced by --installServer."""
-        base = (
-            self.install_path / "libraries" / "net" / "neoforged"
-            / "neoforge" / loader_version
-        )
+        """Return the platform-specific args file produced by --installServer.
+
+        ``loader_version`` is pre-validated at the install() boundary, so the
+        path build is trusted; the resolve()+relative_to() check inside
+        ``_resolve_within_install_path`` keeps callers honest if they reach
+        this method without going through install() first.
+        """
         filename = "win_args.txt" if is_windows() else "unix_args.txt"
-        candidate = base / filename
+        candidate = self._resolve_within_install_path(
+            "libraries", "net", "neoforged", "neoforge",
+            loader_version, filename,
+        )
         return candidate if candidate.exists() else None
 
     def install(
@@ -299,6 +367,27 @@ class NeoForgeInstaller(InstallerBase):
     ) -> InstallResult:
         self._report(progress_callback, "starting")
         self._ensure_install_dir()
+
+        # Whitelist user-controlled mc_version (and any caller-pinned
+        # loader_version) BEFORE they land in filenames or subprocess args.
+        # Auto-resolved loader_version from Maven is validated immediately
+        # after lookup — Maven's payload is third-party and treated as
+        # untrusted at the same trust-boundary.
+        try:
+            mc_version = validate_version_token(mc_version, field_name="mc_version")
+            if loader_version is not None:
+                loader_version = validate_version_token(
+                    loader_version, field_name="loader_version"
+                )
+        except ValueError as exc:
+            msg = str(exc)
+            self._report(progress_callback, "failed", error=msg)
+            return InstallResult(
+                success=False,
+                status=InstallStatus.FAILED,
+                message=msg,
+                details={"mc_version": mc_version},
+            )
 
         # Resolve loader_version if not pinned.
         self._report(progress_callback, "resolving_versions")
@@ -322,6 +411,22 @@ class NeoForgeInstaller(InstallerBase):
                     message=msg,
                     details={"mc_version": mc_version},
                 )
+            try:
+                loader_version = validate_version_token(
+                    loader_version, field_name="loader_version"
+                )
+            except ValueError as exc:
+                msg = str(exc)
+                self._report(progress_callback, "failed", error=msg)
+                return InstallResult(
+                    success=False,
+                    status=InstallStatus.FAILED,
+                    message=msg,
+                    details={
+                        "mc_version": mc_version,
+                        "loader_version": loader_version,
+                    },
+                )
 
         # Download the installer JAR.
         installer_jar, dl_error = self._download_installer_jar(
@@ -342,18 +447,23 @@ class NeoForgeInstaller(InstallerBase):
         # self.java_exec (set by the route via set_java_exec) so the
         # subprocess uses Fabricator's managed Java / per-server javaPath
         # override, not whatever ``java`` happens to be first on PATH.
+        #
+        # Streaming runner (B12a): forwards each stdout/stderr line live to
+        # ``logger.info`` and guarantees a clean kill + drain on timeout —
+        # the previous ``subprocess.run(..., timeout=1800)`` raised
+        # ``TimeoutExpired`` but could leave the child JVM running and pipes
+        # attached, producing a zombie process under load.
         java_cmd = self.java_exec or "java"
         self._report(progress_callback, "running_installer")
         try:
-            completed = subprocess.run(
+            completed = run_subprocess_streaming(
                 [java_cmd, "-jar", str(installer_jar), "--installServer"],
-                cwd=str(self.install_path),
-                capture_output=True,
-                text=True,
+                cwd=Path(self.install_path),
                 timeout=1800,
+                on_line=lambda line: logger.info("neoforge-installer: %s", line),
                 **platform_utils.subprocess_no_window_kwargs(),
             )
-        except subprocess.TimeoutExpired as exc:
+        except SubprocessTimeout as exc:
             msg = f"NeoForge installer timed out: {exc}"
             self._report(progress_callback, "failed", error=msg)
             return InstallResult(
@@ -373,8 +483,12 @@ class NeoForgeInstaller(InstallerBase):
             )
 
         if completed.returncode != 0:
+            # Streaming logger already forwarded every line; surface the last
+            # few for the InstallResult message without dumping megabytes.
             tail = (completed.stderr or completed.stdout or "").strip().splitlines()
-            tail_str = tail[-1] if tail else f"returncode {completed.returncode}"
+            tail_str = (
+                " | ".join(tail[-3:]) if tail else f"returncode {completed.returncode}"
+            )
             msg = f"NeoForge installer failed: {tail_str}"
             self._report(progress_callback, "failed", error=msg)
             return InstallResult(
@@ -405,7 +519,9 @@ class NeoForgeInstaller(InstallerBase):
                 details={"mc_version": mc_version, "loader_version": loader_version},
             )
 
-        relative_args_file = args_file_path.relative_to(self.install_path).as_posix()
+        relative_args_file = args_file_path.relative_to(
+            self.install_path.resolve()
+        ).as_posix()
 
         self._report(progress_callback, "writing_eula")
         self._write_eula(accepted=True)

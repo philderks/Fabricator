@@ -2,11 +2,12 @@
 import { ref, onMounted, inject } from 'vue'
 import { useRouter } from 'vue-router'
 import AppButton from '../components/ui/AppButton.vue'
-import { getServers } from '../api/servers'
 import { useToast } from '../composables/useToast'
+import { useServerStore } from '../stores/server'
 
 const router = useRouter()
 const toast = useToast()
+const store = useServerStore()
 
 const loading = ref(true)
 const errorMessage = ref(null)
@@ -18,21 +19,24 @@ const showCreateModal = inject('showCreateModal', ref(false))
 const loadServers = async () => {
   loading.value = true
   errorMessage.value = null
-  try {
-    const data = await getServers()
-    if (data.length > 0) {
-      // Skip the empty state entirely — there's no list view here anymore,
-      // so anyone landing on `/` with at least one server gets sent to the
-      // first server's overview.
-      router.replace({ name: 'ServerOverview', params: { id: data[0].id } })
-    }
-  } catch (error) {
-    console.error('Failed to load servers:', error)
-    errorMessage.value = error?.message || 'Failed to load servers'
+  const result = await store.loadServers()
+  if (!result.ok) {
+    console.error('Failed to load servers:', result.error)
+    errorMessage.value = result.error?.message || 'Failed to load servers'
     toast.error('Failed to load servers', 'Error')
-  } finally {
     loading.value = false
+    return
   }
+  const list = store.serversList
+  if (list.length > 0) {
+    // Skip the empty state entirely — there's no list view here anymore,
+    // so anyone landing on `/` with at least one server gets sent to the
+    // first server's overview. Early-return to avoid touching `loading`
+    // on a component the router is about to unmount (F9 race-fix).
+    router.replace({ name: 'ServerOverview', params: { id: list[0].id } })
+    return
+  }
+  loading.value = false
 }
 
 onMounted(() => {

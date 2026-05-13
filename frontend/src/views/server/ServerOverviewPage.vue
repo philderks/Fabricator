@@ -2,7 +2,6 @@
 import { computed } from 'vue'
 import StatCard from '../../components/ui/StatCard.vue'
 import Panel from '../../components/ui/Panel.vue'
-import IconArrowRight from '../../components/ui/IconArrowRight.vue'
 import { installedModDisplayName, installedModInitial } from '../../utils/installedModDisplay'
 import { useServerStore } from '../../stores/server'
 
@@ -33,7 +32,7 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
     <section class="overview-page__stats">
       <StatCard label="Players" :value="store.serverStatus.players.online" :unit="store.serverStatus.players.max ? `/${store.serverStatus.players.max}` : ''" />
       <StatCard label="Uptime" :value="store.serverStatus.uptime" />
-      <StatCard label="TPS" :value="store.serverStatus.tps" :accent="store.serverStatus.status === 'running' ? 'success' : 'default'" />
+      <StatCard label="TPS" :value="store.serverStatus.tps ?? '—'" :accent="store.serverStatus.status === 'running' ? 'success' : 'default'" />
       <StatCard label="Mods" :value="store.installedMods.length" :accent="store.installedMods.length > 0 ? 'primary' : 'default'" />
     </section>
 
@@ -66,7 +65,7 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
           <template #action>
             <a class="overview-page__panel-link" @click.prevent="store.goToConsole">
               Console
-              <IconArrowRight />
+              <svg class="icon-arrow-right" width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 6H7.5M7.5 3.25l3.25 2.75L7.5 8.75" /></svg>
             </a>
           </template>
           <div class="overview-page__logs">
@@ -83,7 +82,7 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
           <template #action>
             <a class="overview-page__panel-link" @click.prevent="store.goToMods">
               Manage
-              <IconArrowRight />
+              <svg class="icon-arrow-right" width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 6H7.5M7.5 3.25l3.25 2.75L7.5 8.75" /></svg>
             </a>
           </template>
           <div v-if="!modPreview.length" class="overview-page__empty">No mods installed.</div>
@@ -122,7 +121,7 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
             </button>
             <button type="button" class="overview-page__qa" @click="store.goToSettings">
               <span class="overview-page__qa-title">World</span>
-              <span class="overview-page__qa-sub">World config</span>
+              <span class="overview-page__qa-sub">Manage in settings</span>
             </button>
           </div>
         </Panel>
@@ -382,5 +381,11 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
 .overview-page__qa-sub {
   font-size: var(--text-xs);
   color: var(--text-disabled);
+}
+
+.icon-arrow-right {
+  flex-shrink: 0;
+  display: block;
+  vertical-align: middle;
 }
 </style>
