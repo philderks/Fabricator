@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Callable, List, Optional, Dict, Any, TypeVar
+from typing import Callable, List, Dict, Any, TypeVar
 
 import requests
 
@@ -93,7 +93,7 @@ def request_with_retry(
     initial_backoff: float = 0.5,
     backoff_factor: float = 2.0,
     max_backoff: float = 8.0,
-    on_retry: Optional[Callable[[int, BaseException], None]] = None,
+    on_retry: Callable[[int, BaseException], None] | None = None,
 ) -> T:
     """Run ``request_callable`` with exponential backoff for transient errors.
 
@@ -174,11 +174,11 @@ class SubprocessTimeout(Exception):
 def run_subprocess_streaming(
     args: List[str],
     *,
-    cwd: Optional[Path] = None,
-    env: Optional[Dict[str, str]] = None,
-    timeout: Optional[int] = None,
-    on_line: Optional[Callable[[str], None]] = None,
-    on_stderr_line: Optional[Callable[[str], None]] = None,
+    cwd: Path | None = None,
+    env: Dict[str, str] | None = None,
+    timeout: int | None = None,
+    on_line: Callable[[str], None] | None = None,
+    on_stderr_line: Callable[[str], None] | None = None,
     poll_interval: float = 0.1,
     **subprocess_kwargs: Any,
 ) -> subprocess.CompletedProcess:
@@ -230,7 +230,7 @@ def run_subprocess_streaming(
     stdout_lines: List[str] = []
     stderr_lines: List[str] = []
 
-    def _pump(pipe, sink: List[str], cb: Optional[Callable[[str], None]]) -> None:
+    def _pump(pipe, sink: List[str], cb: Callable[[str], None] | None) -> None:
         try:
             for raw_line in iter(pipe.readline, ""):
                 # Strip the trailing newline from the callback view but
@@ -261,7 +261,7 @@ def run_subprocess_streaming(
     stdout_thread.start()
     stderr_thread.start()
 
-    deadline: Optional[float] = (
+    deadline: float | None = (
         time.monotonic() + timeout if timeout is not None else None
     )
     timed_out = False
@@ -315,12 +315,12 @@ def download_with_hash_verify(
     url: str,
     target: Path,
     *,
-    sha1: Optional[str] = None,
-    sha512: Optional[str] = None,
-    session: Optional[requests.Session] = None,
+    sha1: str | None = None,
+    sha512: str | None = None,
+    session: requests.Session | None = None,
     timeout: int = 60,
     chunk_size: int = _DOWNLOAD_CHUNK_SIZE,
-    progress_callback: Optional["Callable[[int, int], None]"] = None,
+    progress_callback: 'Callable[[int, int], None] | None' = None,
     retries: int = 0,
 ) -> None:
     """Download ``url`` to ``target`` and verify the body hash.
@@ -477,10 +477,10 @@ class LaunchSpec:
           Use ``args_file`` field.
     """
     type: str
-    jar: Optional[str] = None
+    jar: str | None = None
     jvm_args: List[str] = field(default_factory=list)
     program_args: List[str] = field(default_factory=list)
-    args_file: Optional[str] = None
+    args_file: str | None = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -498,9 +498,9 @@ class InstallResult:
     success: bool
     status: InstallStatus
     message: str
-    server_jar: Optional[Path] = None
-    details: Optional[Dict[str, Any]] = None
-    launch: Optional[LaunchSpec] = None
+    server_jar: Path | None = None
+    details: Dict[str, Any] | None = None
+    launch: LaunchSpec | None = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -549,7 +549,7 @@ class InstallerBase(ABC):
             install_path: Directory where server will be installed
         """
         self.install_path = Path(install_path)
-        self.java_exec: Optional[str] = None
+        self.java_exec: str | None = None
 
     @property
     @abstractmethod
@@ -571,7 +571,7 @@ class InstallerBase(ABC):
         """
         return False
 
-    def set_java_exec(self, path: Optional[str]) -> None:
+    def set_java_exec(self, path: str | None) -> None:
         """Hand over the resolved Java executable path.
 
         Used by the install route for installers that invoke Java
@@ -588,7 +588,7 @@ class InstallerBase(ABC):
 
     def _report(
         self,
-        callback: Optional["Callable[[str, Dict[str, Any]], None]"],
+        callback: 'Callable[[str, Dict[str, Any]], None] | None',
         phase: str,
         **detail: Any,
     ) -> None:
@@ -610,7 +610,7 @@ class InstallerBase(ABC):
             pass
 
     @abstractmethod
-    def get_available_versions(self, mc_version: Optional[str] = None) -> List[Dict[str, Any]]:
+    def get_available_versions(self, mc_version: str | None = None) -> List[Dict[str, Any]]:
         """Get loader-native version metadata for ``mc_version``.
 
         Shape is loader-specific — the frontend treats this payload opaquely
@@ -637,10 +637,8 @@ class InstallerBase(ABC):
     def install(
         self,
         mc_version: str,
-        loader_version: Optional[str] = None,
-        progress_callback: Optional[
-            "Callable[[str, Dict[str, Any]], None]"
-        ] = None,
+        loader_version: str | None = None,
+        progress_callback: 'Callable[[str, Dict[str, Any]], None] | None' = None,
     ) -> InstallResult:
         """Install the server.
 
