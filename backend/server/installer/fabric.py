@@ -222,7 +222,7 @@ class FabricInstaller(InstallerBase):
             )
 
         try:
-            print(f"Downloading Fabric server from: {url}")
+            logger.info("Downloading Fabric server from: %s", url)
             download_with_hash_verify(
                 url,
                 jar_path,
@@ -234,7 +234,7 @@ class FabricInstaller(InstallerBase):
                 timeout=120,
                 progress_callback=_emit,
             )
-            print(f"\nDownloaded: {jar_path}")
+            logger.info("Downloaded: %s", jar_path)
             return jar_path
         except HashVerifyError:
             # Defensive: cannot trigger today (no hash passed in), but if
@@ -268,7 +268,7 @@ class FabricInstaller(InstallerBase):
             InstallResult with success status and details
         """
         self._report(progress_callback, "starting")
-        print(f"Installing Fabric server for MC {mc_version}")
+        logger.info("Installing Fabric server for MC %s", mc_version)
 
         # Ensure install directory exists
         self._ensure_install_dir()
@@ -276,7 +276,7 @@ class FabricInstaller(InstallerBase):
         # Get loader version if not specified
         self._report(progress_callback, "resolving_versions")
         if not loader_version:
-            print("Fetching latest stable loader version...")
+            logger.info("Fetching latest stable loader version...")
             loader_version = self._get_latest_loader_version(mc_version)
             if not loader_version:
                 msg = f"Could not find Fabric loader for MC {mc_version}"
@@ -288,11 +288,11 @@ class FabricInstaller(InstallerBase):
                     details={"mc_version": mc_version}
                 )
 
-        print(f"Using loader version: {loader_version}")
+        logger.info("Using loader version: %s", loader_version)
 
         # Get installer version if not specified
         if not installer_version:
-            print("Fetching latest stable installer version...")
+            logger.info("Fetching latest stable installer version...")
             installer_version = self._get_latest_installer_version()
             if not installer_version:
                 msg = (
@@ -307,10 +307,10 @@ class FabricInstaller(InstallerBase):
                     details={"mc_version": mc_version, "loader_version": loader_version}
                 )
 
-        print(f"Using installer version: {installer_version}")
+        logger.info("Using installer version: %s", installer_version)
 
         # Download server JAR
-        print("Downloading server JAR...")
+        logger.info("Downloading server JAR...")
         jar_path = self._download_server_jar(
             mc_version,
             loader_version,
@@ -342,7 +342,7 @@ class FabricInstaller(InstallerBase):
             pass
 
         # Write eula.txt
-        print("Writing eula.txt...")
+        logger.info("Writing eula.txt...")
         self._report(progress_callback, "writing_eula")
         self._write_eula(accepted=True)
 
@@ -399,7 +399,7 @@ class FabricInstaller(InstallerBase):
             return result
         
         # Generate and write server.properties
-        print("Writing server.properties...")
+        logger.info("Writing server.properties...")
         properties = self.generate_server_properties(server_config)
         self._write_server_properties(properties)
         

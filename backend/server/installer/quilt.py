@@ -80,7 +80,7 @@ class QuiltInstaller(InstallerBase):
             response.raise_for_status()
             payload = response.json()
         except requests.RequestException as exc:
-            print(f"Failed to fetch Quilt game versions: {exc}")
+            logger.warning("Failed to fetch Quilt game versions: %s", exc)
             return []
 
         out: List[Dict[str, Any]] = []
@@ -136,7 +136,7 @@ class QuiltInstaller(InstallerBase):
             response.raise_for_status()
             text = response.text or ""
         except requests.RequestException as exc:
-            print(f"Failed to fetch Quilt installer maven-metadata: {exc}")
+            logger.warning("Failed to fetch Quilt installer maven-metadata: %s", exc)
             return None
         match = _MAVEN_RELEASE_RE.search(text)
         if not match:
@@ -208,9 +208,9 @@ class QuiltInstaller(InstallerBase):
         self._report(progress_callback, "verifying")
         expected_sha1 = self._fetch_expected_sha1(installer_version)
         if not expected_sha1:
-            print(
-                f"WARNING: Quilt installer SHA1 unavailable for "
-                f"{installer_version} — proceeding without integrity check."
+            logger.warning(
+                "Quilt installer SHA1 unavailable for %s - proceeding without integrity check.",
+                installer_version,
             )
         if expected_sha1:
             actual = hasher.hexdigest().lower()
