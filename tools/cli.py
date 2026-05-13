@@ -1,4 +1,5 @@
 """Fabricator CLI — system-level commands for managing the Fabricator service."""
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -11,6 +12,11 @@ APP_DIR = f"{INSTALL_DIR}/app"
 VERSION_FILE = f"{APP_DIR}/.fabricator_version"
 INSTALL_SCRIPT = f"{APP_DIR}/tools/install.sh"
 SERVICE_NAME = "fabricator"
+SYSTEMD_UNIT = f"/etc/systemd/system/{SERVICE_NAME}.service"
+DATA_DIR = "/var/lib/fabricator"
+CONFIG_DIR = "/etc/fabricator"
+SERVICE_USER = "fabricator"
+API_BASE = "http://localhost:5000"
 GITHUB_API = "https://api.github.com/repos/philderks/Fabricator/releases/latest"
 
 
@@ -104,3 +110,197 @@ def update():
     else:
         click.echo(click.style("Update failed. Check output above for details.", fg="red"))
         sys.exit(result.returncode)
+
+
+# ---------------------------------------------------------------------------
+# status
+# ---------------------------------------------------------------------------
+
+def _collect_status() -> dict:
+    """Return a dict with systemd state and Flask/API reachability info."""
+    result = subprocess.run(
+        ["systemctl", "is-active", SERVICE_NAME],
+        capture_output=True,
+        text=True,
+    )
+    systemd_state = result.stdout.strip() or "unknown"
+
+    flask_up = False
+    api_status_code: int | None = None
+    api_body: dict | None = None
+
+    try:
+        resp = requests.get(f"{API_BASE}/api/status", timeout=5)
+        flask_up = True
+        api_status_code = resp.status_code
+        try:
+            api_body = resp.json()
+        except Exception:
+            api_body = None
+    except Exception:
+        pass
+
+    return {
+        "systemd_state": systemd_state,
+        "flask_up": flask_up,
+        "api_status_code": api_status_code,
+        "api_body": api_body,
+    }
+
+
+def _render_status(data: dict) -> None:
+    """Print a human-readable status summary."""
+    state = data["systemd_state"]
+    state_color = "green" if state == "active" else "red"
+    click.echo(f"Service:  {click.style(state, fg=state_color)}")
+
+    if not data["flask_up"]:
+        click.echo(f"Flask:    {click.style('down', fg='red')}")
+        return
+
+    click.echo(f"Flask:    {click.style('up', fg='green')}")
+
+    body = data.get("api_body") or {}
+    mc_keys = {"players", "tps", "uptime"}
+    mc_data = {k: v for k, v in body.items() if k in mc_keys}
+
+    if mc_data:
+        for key, value in mc_data.items():
+            click.echo(f"  {key}: {value}")
+    else:
+        code = data.get("api_status_code")
+        click.echo(f"  (API returned HTTP {code} — no Minecraft data available)")
+
+
+@cli.command()
+@click.option(
+    "--json", "as_json",
+    is_flag=True,
+    help="Output raw JSON instead of formatted text.",
+)
+def status(as_json: bool) -> None:
+    """Show the systemd service state and Flask/Minecraft API status."""
+    data = _collect_status()
+    if as_json:
+        click.echo(json.dumps(data))
+    else:
+        _render_status(data)
+
+
+# ---------------------------------------------------------------------------
+# version
+# ---------------------------------------------------------------------------
+
+def _collect_version() -> dict:
+    """Return a dict with the installed version string (or null)."""
+    return {"version": _get_local_version()}
+
+
+def _render_version(data: dict) -> None:
+    """Print the installed version in a human-readable form."""
+    ver = data["version"]
+    if ver:
+        click.echo(f"Fabricator {ver}")
+    else:
+        click.echo(
+            click.style(
+                f"Version unknown — version file not found at {VERSION_FILE}",
+                fg="yellow",
+            )
+        )
+
+
+@cli.command()
+@click.option(
+    "--json", "as_json",
+    is_flag=True,
+    help="Output raw JSON instead of formatted text.",
+)
+def version(as_json: bool) -> None:
+    """Print the installed Fabricator version read from the version marker file."""
+    data = _collect_version()
+    if as_json:
+        click.echo(json.dumps(data))
+    else:
+        _render_version(data)
+
+
+# ---------------------------------------------------------------------------
+# uninstall
+# ---------------------------------------------------------------------------
+
+def _uninstall_step(label: str, *cmd: str) -> None:
+    """Run a single removal step, printing progress and tolerating failures."""
+    click.echo(f"  {label}...", nl=False)
+    try:
+        result = subprocess.run(list(cmd), capture_output=True, text=True)
+        if result.returncode == 0:
+            click.echo(click.style(" done", fg="green"))
+        else:
+            msg = (result.stderr or result.stdout).strip()
+            click.echo(
+                click.style(f" warning: {msg or 'non-zero exit'}", fg="yellow")
+            )
+    except Exception as exc:
+        click.echo(click.style(f" warning: {exc}", fg="yellow"))
+
+
+@cli.command()
+def uninstall() -> None:
+    """Remove Fabricator, its data, config, systemd unit, and service user."""
+    confirmation = click.prompt(
+        "This will remove Fabricator and all its data. Type 'yes' to continue"
+    )
+    if confirmation.strip().lower() != "yes":
+        click.echo("Aborted.")
+        return
+
+    click.echo("\nUninstalling Fabricator...")
+
+    _uninstall_step("Stopping service",    "systemctl", "stop",    SERVICE_NAME)
+    _uninstall_step("Disabling service",   "systemctl", "disable", SERVICE_NAME)
+    _uninstall_step("Removing app files",  "rm", "-rf", INSTALL_DIR)
+    _uninstall_step("Removing data dir",   "rm", "-rf", DATA_DIR)
+    _uninstall_step("Removing config dir", "rm", "-rf", CONFIG_DIR)
+    _uninstall_step("Removing service user", "userdel", SERVICE_USER)
+    _uninstall_step("Removing systemd unit", "rm", "-f", SYSTEMD_UNIT)
+    _uninstall_step("Reloading systemd",   "systemctl", "daemon-reload")
+
+    click.echo(click.style("\nFabricator uninstalled.", fg="green"))
+
+
+# ---------------------------------------------------------------------------
+# help
+# ---------------------------------------------------------------------------
+
+def _collect_help() -> list[dict]:
+    """Return a list of {command, description} dicts for all registered commands."""
+    return [
+        {"command": name, "description": cmd.get_short_help_str()}
+        for name, cmd in sorted(cli.commands.items())
+    ]
+
+
+def _render_help(data: list[dict]) -> None:
+    """Print a formatted table of all commands and their descriptions."""
+    if not data:
+        return
+    width = max(len(item["command"]) for item in data)
+    click.echo("Commands:")
+    for item in data:
+        click.echo(f"  {item['command']:<{width}}  {item['description']}")
+
+
+@cli.command(name="help")
+@click.option(
+    "--json", "as_json",
+    is_flag=True,
+    help="Output raw JSON instead of formatted text.",
+)
+def help_cmd(as_json: bool) -> None:
+    """Show a summary of every available command and what it does."""
+    data = _collect_help()
+    if as_json:
+        click.echo(json.dumps(data))
+    else:
+        _render_help(data)
