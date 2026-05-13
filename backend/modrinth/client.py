@@ -1036,6 +1036,15 @@ class ModrinthClient:
         removed: List[str] = []
 
         for relative in self.MODPACK_SWITCH_PATHS:
+            # Defense-in-depth: callers today iterate MODPACK_SWITCH_PATHS
+            # directly (disjoint from PROTECTED_SERVER_PATHS, pinned by
+            # tests/test_modrinth_client.py), so this branch is currently
+            # unreachable. The guard exists so a future change adding an
+            # overlapping entry to MODPACK_SWITCH_PATHS — or a future
+            # caller passing a wider path-set — cannot silently delete
+            # world/, logs/, backups/, libraries/, or versions/.
+            if relative in self.PROTECTED_SERVER_PATHS:
+                continue
             target = (install_root / relative).resolve()
             if not str(target).startswith(str(install_root)):
                 continue

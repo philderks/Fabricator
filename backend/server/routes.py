@@ -164,13 +164,6 @@ def _get_installer(loader: str, install_path: Path):
     return get_installer_for(loader, install_path)
 
 
-def _get_install_path(server: dict) -> Path:
-    try:
-        return _registry().resolve_install_path(server)
-    except ValueError as exc:
-        raise ValueError(str(exc)) from exc
-
-
 def _get_backups_dir(base_path: Path) -> Path:
     backups_dir = base_path / 'backups'
     backups_dir.mkdir(parents=True, exist_ok=True)
@@ -252,7 +245,7 @@ def _build_server_properties(server: dict) -> dict:
 
 def _write_server_properties(server: dict) -> tuple[bool, str | None]:
     try:
-        install_path = _get_install_path(server)
+        install_path = _registry().resolve_install_path(server)
     except ValueError as exc:
         return False, str(exc)
 
@@ -405,7 +398,7 @@ def browse_server_files(server_id, server):
     relative_path = request.args.get('path', '').strip()
 
     try:
-        base_path = _get_install_path(server)
+        base_path = _registry().resolve_install_path(server)
         target_path = _ensure_child_path(base_path, relative_path) if relative_path else base_path
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
@@ -436,7 +429,7 @@ def get_server_file_content(server_id, server):
         return jsonify({'error': 'Path query parameter is required'}), 400
 
     try:
-        base_path = _get_install_path(server)
+        base_path = _registry().resolve_install_path(server)
         target_path = _ensure_child_path(base_path, path_param)
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
@@ -468,7 +461,7 @@ def update_server_file_content(server_id, server):
         return jsonify({'error': 'Content is required'}), 400
 
     try:
-        base_path = _get_install_path(server)
+        base_path = _registry().resolve_install_path(server)
         target_path = _ensure_child_path(base_path, path_param)
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
@@ -551,7 +544,7 @@ def bulk_delete_server_mods(server_id, server):
 @require_server
 def list_server_backups(server_id, server):
     try:
-        base_path = _get_install_path(server)
+        base_path = _registry().resolve_install_path(server)
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
 
@@ -573,7 +566,7 @@ def create_server_backup(server_id, server):
         return jsonify({'error': 'Stop the server before creating a backup to avoid data corruption'}), 400
 
     try:
-        base_path = _get_install_path(server)
+        base_path = _registry().resolve_install_path(server)
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
 
@@ -608,7 +601,7 @@ def create_server_backup(server_id, server):
 @with_server_lock
 def restore_server_backup(server_id, backup_id, server):
     try:
-        base_path = _get_install_path(server)
+        base_path = _registry().resolve_install_path(server)
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
 
@@ -678,7 +671,7 @@ def restore_server_backup(server_id, backup_id, server):
 @require_server
 def delete_server_backup(server_id, backup_id, server):
     try:
-        base_path = _get_install_path(server)
+        base_path = _registry().resolve_install_path(server)
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
 
@@ -740,7 +733,7 @@ def delete_server_route(server_id, server):
     # Resolve install path to clean up files
     install_path = None
     try:
-        install_path = _get_install_path(server)
+        install_path = _registry().resolve_install_path(server)
     except ValueError:
         install_path = None
 
