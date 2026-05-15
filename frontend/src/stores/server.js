@@ -15,10 +15,6 @@ import {
   updateServerSettings,
   sendServerCommand,
   browseServerFiles,
-  createBackup,
-  getBackups,
-  restoreBackup,
-  deleteBackup,
   deleteServer,
   getServerFile,
   saveServerFile
@@ -88,16 +84,8 @@ export const useServerStore = defineStore('server', () => {
   const actionState = ref({ start: false, stop: false, restart: false })
   const consoleCommand = ref('')
   const commandSending = ref(false)
-  const backups = ref([])
-  const backupLoading = ref(false)
   const fileBrowser = ref({ currentPath: '', entries: [], loading: false, error: null })
   const fileEditor = ref({ path: null, content: '', originalContent: '', loading: false, saving: false, error: null })
-  const backupToRestore = ref(null)
-  const showBackupRestoreModal = ref(false)
-  const restoringBackup = ref(false)
-  const backupToDelete = ref(null)
-  const showBackupDeleteModal = ref(false)
-  const deletingBackup = ref(false)
   const showDeleteServerModal = ref(false)
   const deletingServer = ref(false)
   const modpackProgress = ref(null)
@@ -405,94 +393,8 @@ export const useServerStore = defineStore('server', () => {
     }
   }
 
-  async function loadBackups() {
-    backupLoading.value = true
-    try {
-      backups.value = await getBackups(currentServerId.value)
-    } catch (error) {
-      console.error('Failed to load backups:', error)
-      toast.error('Failed to load backups', 'Backups')
-    } finally {
-      backupLoading.value = false
-    }
-  }
-
   async function refreshAll() {
-    await Promise.all([loadServer(), loadMods(), loadBackups()])
-  }
-
-  async function createBackupAction() {
-    if (backupLoading.value) return
-    backupLoading.value = true
-    try {
-      await createBackup(currentServerId.value)
-      toast.success('Backup created successfully', 'Backups')
-      await loadBackups()
-      // On success, navigate to wherever the backups list lives. Currently
-      // the Files page; revisit if backups get their own route.
-      router.push({ name: 'ServerFiles', params: { id: currentServerId.value } })
-    } catch (error) {
-      console.error('Failed to create backup:', error)
-      toast.error(error.message || 'Failed to create backup', 'Backups')
-    } finally {
-      backupLoading.value = false
-    }
-  }
-
-  function requestRestoreBackup(backup) {
-    backupToRestore.value = backup
-    showBackupRestoreModal.value = true
-  }
-
-  async function confirmRestoreBackup() {
-    if (!backupToRestore.value) return
-    restoringBackup.value = true
-    try {
-      const backupId = backupToRestore.value.relativePath.replace(/\.zip$/i, '')
-      await restoreBackup(currentServerId.value, backupId)
-      toast.success('Backup restored successfully', 'Backups')
-      await Promise.all([openFileBrowser(), loadMods()])
-    } catch (error) {
-      console.error('Failed to restore backup:', error)
-      toast.error(error.message || 'Failed to restore backup', 'Backups')
-    } finally {
-      restoringBackup.value = false
-      showBackupRestoreModal.value = false
-      backupToRestore.value = null
-    }
-  }
-
-  function cancelRestoreBackup() {
-    showBackupRestoreModal.value = false
-    backupToRestore.value = null
-  }
-
-  function requestDeleteBackup(backup) {
-    backupToDelete.value = backup
-    showBackupDeleteModal.value = true
-  }
-
-  async function confirmDeleteBackup() {
-    if (!backupToDelete.value) return
-    deletingBackup.value = true
-    try {
-      const backupId = backupToDelete.value.relativePath.replace(/\.zip$/i, '')
-      await deleteBackup(currentServerId.value, backupId)
-      toast.success('Backup deleted', 'Backups')
-      await loadBackups()
-    } catch (error) {
-      console.error('Failed to delete backup:', error)
-      toast.error(error.message || 'Failed to delete backup', 'Backups')
-    } finally {
-      deletingBackup.value = false
-      showBackupDeleteModal.value = false
-      backupToDelete.value = null
-    }
-  }
-
-  function cancelDeleteBackup() {
-    showBackupDeleteModal.value = false
-    backupToDelete.value = null
+    await Promise.all([loadServer(), loadMods()])
   }
 
   async function openFileBrowser(path = '') {
@@ -566,6 +468,7 @@ export const useServerStore = defineStore('server', () => {
 
   function goToConsole()  { router.push({ name: 'ServerConsole',  params: { id: currentServerId.value } }) }
   function goToFiles()    { router.push({ name: 'ServerFiles',    params: { id: currentServerId.value } }) }
+  function goToBackups()  { router.push({ name: 'ServerBackups',  params: { id: currentServerId.value } }) }
   function goToSettings() { router.push({ name: 'ServerSettings', params: { id: currentServerId.value } }) }
   function goToMods()     { router.push({ name: 'ServerMods',     params: { id: currentServerId.value } }) }
 
@@ -950,19 +853,15 @@ export const useServerStore = defineStore('server', () => {
     serverSettings.value = null
     installedMods.value = []
     logs.value = { stdout: [], stderr: [], running: false }
-    backups.value = []
     fileBrowser.value = { currentPath: '', entries: [], loading: false, error: null }
     fileEditor.value = { path: null, content: '', originalContent: '', loading: false, saving: false, error: null }
     modSearch.value = ''
     modToRemove.value = null
     selectedModPaths.value = new Set()
     bulkDeleting.value = false
-    backupToRestore.value = null
-    backupToDelete.value = null
     serverLoading.value = true
     modsLoading.value = false
     logsLoading.value = false
-    backupLoading.value = false
     installLoading.value = false
     modpackInstalling.value = false
     modpackProgress.value = null
@@ -984,10 +883,6 @@ export const useServerStore = defineStore('server', () => {
     confirmModalData.value = {}
     consoleCommand.value = ''
     commandSending.value = false
-    showBackupRestoreModal.value = false
-    restoringBackup.value = false
-    showBackupDeleteModal.value = false
-    deletingBackup.value = false
     showDeleteServerModal.value = false
     deletingServer.value = false
   }
@@ -1019,16 +914,8 @@ export const useServerStore = defineStore('server', () => {
     actionState,
     consoleCommand,
     commandSending,
-    backups,
-    backupLoading,
     fileBrowser,
     fileEditor,
-    backupToRestore,
-    showBackupRestoreModal,
-    restoringBackup,
-    backupToDelete,
-    showBackupDeleteModal,
-    deletingBackup,
     showDeleteServerModal,
     deletingServer,
     modpackProgress,
@@ -1069,15 +956,7 @@ export const useServerStore = defineStore('server', () => {
     loadServer,
     loadMods,
     loadLogs,
-    loadBackups,
     refreshAll,
-    createBackupAction,
-    requestRestoreBackup,
-    confirmRestoreBackup,
-    cancelRestoreBackup,
-    requestDeleteBackup,
-    confirmDeleteBackup,
-    cancelDeleteBackup,
     openFileBrowser,
     enterFileEntry,
     goUpDirectory,
@@ -1091,6 +970,7 @@ export const useServerStore = defineStore('server', () => {
     confirmDeleteServer,
     goToConsole,
     goToFiles,
+    goToBackups,
     goToSettings,
     goToMods,
     handleInstallMod,

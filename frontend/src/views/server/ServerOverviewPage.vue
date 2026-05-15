@@ -107,9 +107,9 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
 
         <Panel title="Quick actions">
           <div class="overview-page__qa-grid">
-            <button type="button" class="overview-page__qa" :disabled="store.backupLoading" @click="store.createBackupAction">
-              <span class="overview-page__qa-title">{{ store.backupLoading ? 'Creating…' : 'Backup' }}</span>
-              <span class="overview-page__qa-sub">Create snapshot</span>
+            <button type="button" class="overview-page__qa" @click="store.goToBackups">
+              <span class="overview-page__qa-title">Backups</span>
+              <span class="overview-page__qa-sub">Manage snapshots</span>
             </button>
             <button type="button" class="overview-page__qa" @click="store.goToConsole">
               <span class="overview-page__qa-title">Console</span>
