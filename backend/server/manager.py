@@ -366,6 +366,51 @@ class ServerManager:
             "running": running
         }
 
+    def wait_for_log(
+        self,
+        pattern: "re.Pattern[str] | str",
+        timeout: float = 60.0,
+        poll_interval: float = 0.1,
+    ) -> bool:
+        """Wait for a log line matching ``pattern`` to appear after now.
+
+        Snapshots ``len(self._stdout_buffer)`` under the lock, then polls
+        every ``poll_interval`` seconds for any newly-appended stdout line
+        that matches. Lines already in the buffer at call time are ignored
+        — callers want confirmation of an action they just triggered (e.g.
+        ``save-all flush``), not the historical state.
+
+        Returns True on match, False on timeout. Uses ``time.monotonic``
+        so a wall-clock jump (NTP adjust, suspend/resume) doesn't extend
+        or truncate the wait.
+        """
+        if isinstance(pattern, str):
+            pattern = re.compile(pattern)
+
+        with self._lock:
+            start_index = len(self._stdout_buffer)
+
+        deadline = time.monotonic() + max(0.0, timeout)
+        while time.monotonic() < deadline:
+            with self._lock:
+                # Snapshot the slice under the lock so the streaming
+                # thread can't truncate-then-resize the buffer mid-iter.
+                pending = self._stdout_buffer[start_index:]
+                start_index = len(self._stdout_buffer)
+            for line in pending:
+                if pattern.search(line):
+                    return True
+            time.sleep(poll_interval)
+
+        # One final sweep — covers the race where the matching line
+        # arrives after the last poll-sleep but before timeout.
+        with self._lock:
+            pending = self._stdout_buffer[start_index:]
+        for line in pending:
+            if pattern.search(line):
+                return True
+        return False
+
     def send_command(self, command: str) -> dict:
         """Send a console command to the running server process."""
         if not command.strip():

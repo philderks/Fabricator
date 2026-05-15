@@ -72,6 +72,9 @@ class Config:
         self.JAVA_ROOT = os.environ.get(
             "JAVA_ROOT", self._default_java_root()
         )
+        self.BACKUPS_DIR = os.environ.get(
+            "BACKUPS_DIR", self._default_backups_dir()
+        )
 
         # CORS — parsed and validated at construction time. Raises ValueError
         # on '*' or on any entry that is not an http(s) origin.
@@ -91,6 +94,9 @@ class Config:
 
     def _default_java_root(self) -> str:
         return str(appdata_dir() / "java")
+
+    def _default_backups_dir(self) -> str:
+        return str(appdata_dir() / "backups")
 
 
 class DevelopmentConfig(Config):
@@ -116,6 +122,9 @@ class ProductionConfig(Config):
 
     def _default_java_root(self) -> str:
         return "/var/lib/fabricator/java"
+
+    def _default_backups_dir(self) -> str:
+        return "/var/lib/fabricator/backups"
 
 
 _CONFIG_CLASSES = {

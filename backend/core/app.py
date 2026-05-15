@@ -10,6 +10,8 @@ from backend.core.config import get_config
 from backend.server.routes import server_bp
 from backend.modrinth.routes import modrinth_bp
 from backend.system.routes import system_bp
+from backend.backups.routes import backups_bp
+from backend.backups.scheduler import init_scheduler
 
 def get_base_path() -> str:
     """Return base path that works in dev and when frozen with PyInstaller."""
@@ -43,11 +45,19 @@ def create_app() -> Flask:
     app.register_blueprint(server_bp)
     app.register_blueprint(modrinth_bp)
     app.register_blueprint(system_bp)
+    app.register_blueprint(backups_bp)
 
     # One-time startup cleanup: flip stale 'installing'/'starting' statuses
     # left over from a previous run. Tolerates a missing/malformed index.
     from backend.server.routes import cleanup_stale_statuses
     cleanup_stale_statuses()
+
+    # Boot the backup scheduler AFTER stale-status cleanup so any
+    # config we re-register doesn't try to fire against a server that
+    # was just transitioned out of 'installing'. Idempotent across
+    # double-init (Werkzeug debug-reload, repeated create_app() in
+    # tests) and gated by FABRICATOR_DISABLE_SCHEDULER=1.
+    init_scheduler(app)
 
     @app.route(
         "/api/<path:_>",
