@@ -161,7 +161,7 @@ def run_backup(
 def run_adhoc_backup_async(
     server_id: str,
     *,
-    storage_path_str: str,
+    storage_path_str: Optional[str] = None,
     compress: bool = True,
     flush: bool = True,
     shutdown: bool = False,
@@ -204,7 +204,7 @@ def run_adhoc_backup_async(
 def run_adhoc_backup(
     server_id: str,
     *,
-    storage_path_str: str,
+    storage_path_str: Optional[str] = None,
     compress: bool = True,
     flush: bool = True,
     shutdown: bool = False,
@@ -215,6 +215,7 @@ def run_adhoc_backup(
 
     The snapshot is recorded with ``configId: null``. Retention is not
     applied — ad-hoc backups are managed manually by the user.
+    ``storage_path_str=None`` falls back to ``<install_path>/backups``.
     """
     if job_id is None:
         job_id = f"bjb_{uuid.uuid4().hex[:12]}"
@@ -234,12 +235,16 @@ def run_adhoc_backup(
 
     registry = get_server_process_registry()
     try:
-        registry.resolve_install_path(server)
+        install_path = registry.resolve_install_path(server)
     except ValueError as exc:
         progress.update(job_id, phase="failed", error=str(exc))
         raise
 
-    storage_path = Path(storage_path_str).expanduser().resolve()
+    storage_path = (
+        Path(storage_path_str).expanduser().resolve()
+        if storage_path_str
+        else install_path / "backups"
+    )
 
     # Synthetic cfg that satisfies all helpers (_build_archive uses
     # cfg['id'] directly for the staging dir name, so it must be set).

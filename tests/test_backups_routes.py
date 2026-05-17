@@ -293,16 +293,25 @@ def test_quick_backup_returns_202_with_job_id(client, env, monkeypatch, tmp_path
     assert body["job_id"].startswith("bjb_")
 
 
-def test_quick_backup_missing_storage_path_returns_400(client, env):
-    """storagePath is required — missing or blank must yield 400."""
+def test_quick_backup_omitting_storage_path_uses_default(client, env, monkeypatch, tmp_path):
+    """Omitting storagePath is valid — backend falls back to <install>/backups."""
+    import backend.backups.service as svc
+
     _seed_server(env["tmp"], "srv_quick2")
+
+    from unittest.mock import MagicMock
+    fake_registry = MagicMock()
+    fake_registry.resolve_install_path.return_value = env["tmp"] / "servers" / "srv_quick2"
+    fake_registry.get_status.return_value = {"status": "stopped"}
+    fake_registry.get_manager.return_value = None
+    monkeypatch.setattr(svc, "get_server_process_registry", lambda: fake_registry)
 
     resp = client.post(
         "/api/servers/srv_quick2/backup-quick",
         json={"compress": True},
     )
-    assert resp.status_code == 400
-    assert "storagePath" in resp.get_json().get("error", "")
+    assert resp.status_code == 202, resp.get_json()
+    assert resp.get_json()["job_id"].startswith("bjb_")
 
 
 def test_quick_backup_unknown_server_returns_404(client, env):

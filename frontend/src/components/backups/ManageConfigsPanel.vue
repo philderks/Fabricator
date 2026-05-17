@@ -137,13 +137,13 @@ function onClose() {
                 </template>
               </FormField>
 
-              <FormField label="Storage path" hint="Directory where archive files are written.">
+              <FormField label="Storage path (optional)" hint="Leave empty to use the server's default backup folder.">
                 <template #default="{ id, describedBy }">
                   <input
                     :id="id"
                     v-model="draft.storagePath"
                     type="text"
-                    placeholder="/var/fabricator/backups/daily"
+                    placeholder="/absolute/path/to/backups"
                     :aria-describedby="describedBy"
                   />
                 </template>

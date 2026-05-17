@@ -237,9 +237,7 @@ def run_quick_backup(server_id, server):
     if not isinstance(payload, dict):
         return jsonify({"error": "Request body must be a JSON object"}), 400
 
-    storage_path = (payload.get("storagePath") or "").strip()
-    if not storage_path:
-        return jsonify({"error": "Field 'storagePath' is required"}), 400
+    storage_path = (payload.get("storagePath") or "").strip() or None
 
     compress = bool(payload.get("compress", True))
     flush = bool(payload.get("flush", True))
@@ -317,10 +315,9 @@ def _validate_config_payload(
         return None
 
     if not partial:
-        for key in ("name", "storagePath"):
-            err = _check_required(key)
-            if err:
-                return err
+        err = _check_required("name")
+        if err:
+            return err
     else:
         for key in ("name", "storagePath"):
             if key in data:

@@ -268,10 +268,6 @@ export const useBackupsStore = defineStore('backups', () => {
       draftError.value = 'Name is required.'
       return
     }
-    if (!payload.storagePath) {
-      draftError.value = 'Storage path is required.'
-      return
-    }
     savingConfig.value = true
     draftError.value = null
     try {

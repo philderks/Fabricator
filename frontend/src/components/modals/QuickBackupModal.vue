@@ -38,13 +38,8 @@ watch(
 const jobActive = computed(() => props.activeJob?.active)
 
 function onConfirm() {
-  const path = storagePath.value.trim()
-  if (!path) {
-    localError.value = 'Storage path is required.'
-    return
-  }
   localError.value = null
-  emit('confirm', { storagePath: path, compress: compress.value, flush: flush.value, shutdown: shutdown.value })
+  emit('confirm', { storagePath: storagePath.value.trim(), compress: compress.value, flush: flush.value, shutdown: shutdown.value })
 }
 
 function onCancel() {
@@ -67,7 +62,7 @@ function onCancel() {
       </p>
 
       <div class="quick-backup-modal__field">
-        <label class="quick-backup-modal__label" for="qb-storage-path">Storage path</label>
+        <label class="quick-backup-modal__label" for="qb-storage-path">Storage path (optional)</label>
         <input
           id="qb-storage-path"
           v-model="storagePath"
@@ -77,7 +72,7 @@ function onCancel() {
           :disabled="jobActive"
           @keydown.enter="onConfirm"
         />
-        <span class="quick-backup-modal__hint">Absolute path where the .tar archive will be written.</span>
+        <span class="quick-backup-modal__hint">Leave empty to use the server's default backup folder.</span>
       </div>
 
       <div class="quick-backup-modal__toggles">
@@ -108,7 +103,7 @@ function onCancel() {
       <AppButton
         variant="primary"
         size="md"
-        :disabled="!storagePath.trim() || jobActive"
+        :disabled="jobActive"
         :loading="jobActive"
         @click="onConfirm"
       >
