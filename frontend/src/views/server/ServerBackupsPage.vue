@@ -1,7 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, watch } from 'vue'
 import AppButton from '../../components/ui/AppButton.vue'
-import Panel from '../../components/ui/Panel.vue'
 import BackupStatsStrip from '../../components/backups/BackupStatsStrip.vue'
 import SnapshotsTable from '../../components/backups/SnapshotsTable.vue'
 import ManageConfigsPanel from '../../components/backups/ManageConfigsPanel.vue'
@@ -28,28 +27,7 @@ const configsById = computed(() => {
   return map
 })
 
-const hasConfigs = computed(() => store.configs.length > 0)
-const hasSnapshots = computed(() => store.snapshots.length > 0)
 const filtered = computed(() => store.filteredSnapshots)
-
-const runDisabled = computed(() => {
-  if (!hasConfigs.value) return true
-  if (store.runningConfigId) return true
-  if (store.activeJob?.active) return true
-  return false
-})
-
-const defaultConfigId = computed(() => {
-  if (!store.configs.length) return null
-  const enabled = store.configs.find((c) => c.schedule?.enabled)
-  return enabled ? enabled.id : store.configs[0].id
-})
-
-const busyConfigId = computed(() => {
-  if (store.runningConfigId) return store.runningConfigId
-  if (store.activeJob?.active && store.activeJob?.kind === 'backup') return store.activeJob.configId
-  return null
-})
 
 const busySnapshotId = computed(() => {
   if (store.activeJob?.active && store.activeJob?.kind === 'restore') return store.activeJob.snapshotId
@@ -63,12 +41,6 @@ const activeJobLabel = computed(() => {
   const kind = job.kind === 'restore' ? 'Restore' : 'Backup'
   return `${kind} · ${phase.replace(/_/g, ' ')}`
 })
-
-function backupNow() {
-  if (runDisabled.value) return
-  const target = defaultConfigId.value
-  if (target) store.runBackup(target)
-}
 
 function onRestoreRequest(snapshot) {
   store.requestRestoreSnapshot(snapshot)
@@ -118,23 +90,14 @@ onUnmounted(() => {
         </p>
       </div>
       <div class="backups-page__top-actions">
-        <AppButton variant="ghost" size="md" @click="store.openCreateConfig()">Manage configs</AppButton>
+        <AppButton variant="ghost" size="md" @click="store.openCreateConfig()">Schedules</AppButton>
         <AppButton
-          variant="ghost"
+          variant="primary"
           size="md"
           :disabled="store.activeJob?.active"
           @click="store.openQuickBackupModal()"
         >
           Quick backup
-        </AppButton>
-        <AppButton
-          variant="primary"
-          size="md"
-          :disabled="runDisabled"
-          :loading="Boolean(store.runningConfigId) || (store.activeJob?.active && store.activeJob?.kind === 'backup')"
-          @click="backupNow"
-        >
-          Back up now
         </AppButton>
       </div>
     </header>
@@ -172,16 +135,8 @@ onUnmounted(() => {
       </ul>
     </div>
 
-    <!-- No configs prompt -->
-    <Panel v-if="!hasConfigs && !store.configsLoading" :padded="true" title="Get started">
-      <div class="backups-page__empty">
-        <p>You don't have any backup configs yet. Create one to schedule and run backups.</p>
-        <AppButton variant="primary" size="md" @click="store.openCreateConfig()">Create backup config</AppButton>
-      </div>
-    </Panel>
-
     <!-- Filters + search -->
-    <div v-if="hasConfigs || hasSnapshots" class="backups-page__filters">
+    <div class="backups-page__filters">
       <div class="backups-page__type-pills" role="tablist" aria-label="Filter by type">
         <button
           v-for="opt in TYPE_FILTERS"
@@ -220,7 +175,6 @@ onUnmounted(() => {
     </div>
 
     <SnapshotsTable
-      v-if="hasConfigs || hasSnapshots"
       :snapshots="filtered"
       :configs-by-id="configsById"
       :server-id="serverStore.currentServerId"
@@ -419,19 +373,6 @@ onUnmounted(() => {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--text-secondary);
-}
-
-.backups-page__empty {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-3);
-  font-size: var(--text-sm);
-  color: var(--text-muted);
-}
-
-.backups-page__empty p {
-  margin: 0;
 }
 
 .backups-page__filters {

@@ -18,7 +18,7 @@ const emit = defineEmits(['close', 'request-delete-config'])
 const store = useBackupsStore()
 
 const isEditing = computed(() => Boolean(store.editingConfigId))
-const heading = computed(() => (isEditing.value ? 'Edit backup config' : 'New backup config'))
+const heading = computed(() => (isEditing.value ? 'Edit schedule' : 'New schedule'))
 
 const sortedConfigs = computed(() => store.sortedConfigs)
 const draft = computed(() => store.draft)
@@ -57,7 +57,7 @@ function onClose() {
     <div v-if="props.show" class="manage-panel__overlay" @click.self="onClose">
       <aside class="manage-panel" role="dialog" aria-label="Manage backup configs">
         <header class="manage-panel__header">
-          <h2 class="manage-panel__title">Manage backup configs</h2>
+          <h2 class="manage-panel__title">Backup schedules</h2>
           <button
             type="button"
             class="manage-panel__close"
@@ -113,15 +113,24 @@ function onClose() {
           <section class="manage-panel__editor">
             <header class="manage-panel__editor-header">
               <h3>{{ heading }}</h3>
-              <AppButton
-                v-if="isEditing"
-                variant="ghost"
-                size="sm"
-                :disabled="store.savingConfig || store.deletingConfig"
-                @click="onDelete"
-              >
-                Delete config
-              </AppButton>
+              <div v-if="isEditing" class="manage-panel__editor-actions">
+                <AppButton
+                  variant="ghost"
+                  size="sm"
+                  :disabled="store.activeJob?.active || !!store.runningConfigId || store.savingConfig || store.deletingConfig"
+                  @click="store.runBackup(store.editingConfigId)"
+                >
+                  Run now
+                </AppButton>
+                <AppButton
+                  variant="ghost"
+                  size="sm"
+                  :disabled="store.savingConfig || store.deletingConfig"
+                  @click="onDelete"
+                >
+                  Delete
+                </AppButton>
+              </div>
             </header>
 
             <form class="manage-panel__form" @submit.prevent="onSave">
@@ -185,16 +194,13 @@ function onClose() {
 
               <fieldset class="manage-panel__schedule">
                 <legend>Schedule</legend>
-                <ToggleRow v-model="draft.schedule.enabled" label="Enable scheduled backups" />
-
-                <div class="manage-panel__form-row" :class="{ 'is-dimmed': !draft.schedule.enabled }">
+                <div class="manage-panel__form-row">
                   <FormField label="Frequency">
                     <template #default="{ id, describedBy }">
                       <select
                         :id="id"
                         v-model.number="draft.schedule.frequencyHours"
                         :aria-describedby="describedBy"
-                        :disabled="!draft.schedule.enabled"
                       >
                         <option v-for="hours in store.frequencyPresets" :key="hours" :value="hours">
                           {{ hours === 1 ? 'Every hour' : hours === 24 ? 'Daily' : hours === 168 ? 'Weekly' : `Every ${hours}h` }}
@@ -209,7 +215,6 @@ function onClose() {
                         :id="id"
                         v-model="draft.schedule.timeOfDay"
                         type="time"
-                        :disabled="!draft.schedule.enabled"
                         :aria-describedby="describedBy"
                       />
                     </template>
@@ -433,6 +438,11 @@ function onClose() {
   font-size: var(--text-sm);
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.manage-panel__editor-actions {
+  display: flex;
+  gap: var(--space-2);
 }
 
 .manage-panel__form {

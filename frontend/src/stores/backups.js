@@ -44,7 +44,7 @@ const DEFAULT_CONFIG_DRAFT = () => ({
   compress: true,
   exclusions: '',
   schedule: {
-    enabled: false,
+    enabled: true,
     frequencyHours: 24,
     timeOfDay: '03:00'
   }
