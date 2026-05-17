@@ -260,6 +260,7 @@ onUnmounted(() => {
     <QuickBackupModal
       :show="store.showQuickBackupModal"
       :active-job="store.activeJob"
+      :default-storage-path="store.defaultStoragePath"
       @confirm="store.runQuickBackup"
       @cancel="store.closeQuickBackupModal()"
     />

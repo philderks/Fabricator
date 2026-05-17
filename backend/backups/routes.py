@@ -31,6 +31,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from flask import Blueprint, jsonify, request, send_file
 
 from backend.backups import progress, restore, scheduler, service, storage
+from backend.server.registry import get_server_process_registry
 from backend.utils.routes import require_server
 from backend.utils.strings import bool_from_str
 
@@ -208,6 +209,13 @@ def backup_summary(server_id, server):
     next_runs.sort(key=lambda x: x["next_run_time"])
     next_run = next_runs[0] if next_runs else None
 
+    try:
+        registry = get_server_process_registry()
+        install_path = registry.resolve_install_path(server)
+        default_storage_path = str(install_path / "backups")
+    except Exception:
+        default_storage_path = None
+
     return jsonify(
         {
             "total_snapshots": len(backup_snapshots),
@@ -215,6 +223,7 @@ def backup_summary(server_id, server):
             "last_snapshot": last_snapshot,
             "next_run": next_run,
             "configs_count": len(configs),
+            "defaultStoragePath": default_storage_path,
         }
     )
 

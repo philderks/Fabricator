@@ -239,9 +239,11 @@ export const useBackupsStore = defineStore('backups', () => {
 
   // ---------- Manage Configs panel ----------
 
+  const defaultStoragePath = computed(() => summary.value?.defaultStoragePath || '')
+
   function openCreateConfig() {
     editingConfigId.value = null
-    draft.value = DEFAULT_CONFIG_DRAFT()
+    draft.value = { ...DEFAULT_CONFIG_DRAFT(), storagePath: defaultStoragePath.value }
     draftError.value = null
     showManagePanel.value = true
   }
@@ -632,6 +634,7 @@ export const useBackupsStore = defineStore('backups', () => {
     sortedConfigs,
     snapshotsByConfigId,
     filteredSnapshots,
+    defaultStoragePath,
     // constants
     frequencyPresets: FREQUENCY_PRESETS,
     // actions

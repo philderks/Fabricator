@@ -11,6 +11,10 @@ const props = defineProps({
   activeJob: {
     type: Object,
     default: null
+  },
+  defaultStoragePath: {
+    type: String,
+    default: ''
   }
 })
 
@@ -26,7 +30,7 @@ watch(
   () => props.show,
   (open) => {
     if (open) {
-      storagePath.value = ''
+      storagePath.value = props.defaultStoragePath
       compress.value = true
       flush.value = true
       shutdown.value = false
