@@ -54,8 +54,9 @@ export async function getBackupSummary(serverId) {
  * fetching keeps the browser in charge of the streamed download and gives
  * us `as_attachment=True` semantics for free.
  */
-export function snapshotDownloadUrl(serverId, snapshotId) {
-  return `/api/servers/${serverId}/snapshots/${snapshotId}/download`
+export function snapshotDownloadUrl(serverId, snapshotId, format = 'tar') {
+  const base = `/api/servers/${serverId}/snapshots/${snapshotId}/download`
+  return format === 'zip' ? `${base}?format=zip` : base
 }
 
 /** Delete a snapshot archive (file + record). */

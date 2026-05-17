@@ -66,9 +66,9 @@ function typeLabel(type) {
   return 'Backup'
 }
 
-function downloadHref(snap) {
+function downloadHref(snap, format = 'tar') {
   if (!props.serverId) return '#'
-  return snapshotDownloadUrl(props.serverId, snap.id)
+  return snapshotDownloadUrl(props.serverId, snap.id, format)
 }
 </script>
 
@@ -76,7 +76,8 @@ function downloadHref(snap) {
   <Panel :padded="false">
     <div v-if="props.loading && !hasRows" class="snapshots-table__state">Loading snapshots…</div>
     <div v-else-if="!hasRows" class="snapshots-table__state">No snapshots yet.</div>
-    <table v-else class="snapshots-table">
+    <div v-else class="snapshots-table__scroll">
+    <table class="snapshots-table">
       <thead>
         <tr>
           <th class="snapshots-table__th-status">Status</th>
@@ -134,7 +135,7 @@ function downloadHref(snap) {
               </button>
               <a
                 class="snapshots-table__action"
-                :href="downloadHref(snap)"
+                :href="downloadHref(snap, 'tar')"
                 :title="'Download ' + (snap.fileName || snap.id)"
                 download
               >
@@ -142,7 +143,15 @@ function downloadHref(snap) {
                   <path d="M7 1.5v8M3.5 6L7 9.5 10.5 6"/>
                   <path d="M2 12h10"/>
                 </svg>
-                <span>Download</span>
+                <span>.tar</span>
+              </a>
+              <a
+                class="snapshots-table__action snapshots-table__action--secondary"
+                :href="downloadHref(snap, 'zip')"
+                title="Download as .zip (Windows-friendly)"
+                download
+              >
+                <span>.zip</span>
               </a>
               <button
                 type="button"
@@ -161,6 +170,7 @@ function downloadHref(snap) {
         </tr>
       </tbody>
     </table>
+    </div>
   </Panel>
 </template>
 
@@ -172,9 +182,15 @@ function downloadHref(snap) {
   color: var(--text-muted);
 }
 
+.snapshots-table__scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .snapshots-table {
   width: 100%;
   border-collapse: collapse;
+  min-width: 480px;
 }
 
 .snapshots-table thead th {
@@ -326,6 +342,45 @@ function downloadHref(snap) {
 .snapshots-table__action--danger:hover:not(:disabled) {
   color: var(--danger);
   border-color: var(--danger);
+}
+
+.snapshots-table__action--secondary {
+  color: var(--text-disabled);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* Progressive column hiding keeps the actions column always reachable */
+@media (max-width: 900px) {
+  .snapshots-table__th-duration,
+  .snapshots-table__td-duration {
+    display: none;
+  }
+}
+
+@media (max-width: 700px) {
+  .snapshots-table__th-config,
+  .snapshots-table__td-config,
+  .snapshots-table__th-size,
+  .snapshots-table__td-size {
+    display: none;
+  }
+}
+
+@media (max-width: 540px) {
+  .snapshots-table__th-type,
+  .snapshots-table__td-type,
+  .snapshots-table__th-created,
+  .snapshots-table__td-created {
+    display: none;
+  }
+}
+
+/* Always show actions — make them visible without hover on touch screens */
+@media (hover: none) {
+  .snapshots-table__actions {
+    visibility: visible;
+  }
 }
 
 .snapshots-table__action svg {

@@ -25,10 +25,14 @@ in a follow-up banner. The brief is explicit on this: no silent orphans.
 from __future__ import annotations
 
 import logging
+import shutil
+import tarfile
+import tempfile
+import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from flask import Blueprint, jsonify, request, send_file
+from flask import Blueprint, after_this_request, jsonify, request, send_file
 
 from backend.backups import progress, restore, scheduler, service, storage
 from backend.server.registry import get_server_process_registry
@@ -174,6 +178,21 @@ def download_snapshot(server_id, server, snapshot_id):
     file_path = snapshot.get("filePath")
     if not file_path or not Path(file_path).exists():
         return jsonify({"error": "Archive file not found on disk"}), 404
+
+    fmt = request.args.get("format", "tar").lower()
+    if fmt == "zip":
+        zip_path, zip_name = _convert_to_zip(Path(file_path))
+
+        @after_this_request
+        def _cleanup(response):
+            try:
+                zip_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return response
+
+        return send_file(zip_path, as_attachment=True, download_name=zip_name)
+
     return send_file(
         file_path,
         as_attachment=True,
@@ -408,3 +427,53 @@ def _is_within(path: Path, root: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _convert_to_zip(tar_path: Path) -> Tuple[Path, str]:
+    """Repack a backup .tar (flat or hybrid) into a flat .zip for browser download.
+
+    Hybrid archives (outer tar → data.tar.gz + worlds.tar) are unpacked two
+    levels deep so the zip contains a plain directory tree. World region files
+    are stored uncompressed (ZIP_STORED) because they are already
+    DEFLATE-compressed by Minecraft; everything else uses ZIP_DEFLATED.
+    """
+    tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+    try:
+        with (
+            zipfile.ZipFile(tmp, "w", allowZip64=True) as zf,
+            tarfile.open(tar_path, "r") as outer,
+        ):
+            names = outer.getnames()
+            if "data.tar.gz" in names and "worlds.tar" in names:
+                _zip_from_inner(zf, outer, "data.tar.gz", "r:gz", zipfile.ZIP_DEFLATED)
+                _zip_from_inner(zf, outer, "worlds.tar", "r:", zipfile.ZIP_STORED)
+            else:
+                for m in outer.getmembers():
+                    if not m.isfile():
+                        continue
+                    info = zipfile.ZipInfo(m.name)
+                    info.compress_type = zipfile.ZIP_DEFLATED
+                    with outer.extractfile(m) as src, zf.open(info, "w") as dst:
+                        shutil.copyfileobj(src, dst)
+    finally:
+        tmp.close()
+    return Path(tmp.name), tar_path.stem + ".zip"
+
+
+def _zip_from_inner(
+    zf: zipfile.ZipFile,
+    outer: tarfile.TarFile,
+    member_name: str,
+    inner_mode: str,
+    compress_type: int,
+) -> None:
+    """Extract an inner tar from *outer* and add its files to *zf*."""
+    raw = outer.extractfile(member_name)
+    with tarfile.open(fileobj=raw, mode=inner_mode) as inner:
+        for m in inner.getmembers():
+            if not m.isfile():
+                continue
+            info = zipfile.ZipInfo(m.name)
+            info.compress_type = compress_type
+            with inner.extractfile(m) as src, zf.open(info, "w") as dst:
+                shutil.copyfileobj(src, dst)
