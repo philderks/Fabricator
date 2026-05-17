@@ -33,6 +33,7 @@ const emit = defineEmits(['restore', 'delete'])
 const hasRows = computed(() => props.snapshots.length > 0)
 
 function configName(configId) {
+  if (configId === null || configId === undefined) return 'Manual'
   return props.configsById[configId]?.name || '—'
 }
 

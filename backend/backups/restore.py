@@ -156,7 +156,7 @@ def run_restore(
 
     registry = get_server_process_registry()
     install_path = registry.resolve_install_path(server)
-    safety_storage = _resolve_storage_path(cfg)
+    safety_storage = storage.resolve_config_storage_path(cfg)
     safety_storage.mkdir(parents=True, exist_ok=True)
 
     server_lock = get_server_lock(server_id)
@@ -284,22 +284,6 @@ def run_restore(
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-
-def _resolve_storage_path(cfg: Dict[str, Any]) -> Path:
-    """Mirror the resolution in service.py — kept inline to avoid an
-    inter-module import cycle (restore is invoked from routes; service
-    is invoked from routes; importing service from restore for this
-    one-liner would entangle the two).
-    """
-    raw = (cfg.get("storagePath") or "").strip()
-    if raw:
-        return Path(raw).expanduser().resolve()
-    server_id = cfg.get("serverId")
-    server = server_storage.get_server(server_id) if server_id else None
-    if server:
-        install_path = get_server_process_registry().resolve_install_path(server)
-        return install_path / "backups"
-    raise ValueError("Config has no storagePath and no resolvable serverId")
 
 
 def _write_safety_snapshot(

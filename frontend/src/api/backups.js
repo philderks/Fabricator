@@ -72,6 +72,15 @@ export async function runBackupConfig(serverId, configId) {
 }
 
 /**
+ * Trigger a one-off backup with no pre-existing config.
+ * `storagePath` is required; the rest default on the backend.
+ * Returns `{ job_id }`.
+ */
+export async function runQuickBackup(serverId, { storagePath, compress = true, flush = true, shutdown = false }) {
+  return post(`/api/servers/${serverId}/backup-quick`, { storagePath, compress, flush, shutdown })
+}
+
+/**
  * Trigger a restore from an existing snapshot.
  * `mode` is one of `"in_place"` (overlay copy) or `"reset"` (atomic swap).
  * Returns `{ job_id }`.

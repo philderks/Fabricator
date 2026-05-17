@@ -230,6 +230,32 @@ def run_backup_now(server_id, server, config_id):
     return jsonify({"success": True, "job_id": job_id}), 202
 
 
+@backups_bp.route("/servers/<server_id>/backup-quick", methods=["POST"])
+@require_server
+def run_quick_backup(server_id, server):
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+
+    storage_path = (payload.get("storagePath") or "").strip()
+    if not storage_path:
+        return jsonify({"error": "Field 'storagePath' is required"}), 400
+
+    compress = bool(payload.get("compress", True))
+    flush = bool(payload.get("flush", True))
+    shutdown = bool(payload.get("shutdown", False))
+
+    job_id = service.run_adhoc_backup_async(
+        server_id,
+        storage_path_str=storage_path,
+        compress=compress,
+        flush=flush,
+        shutdown=shutdown,
+        trigger="manual",
+    )
+    return jsonify({"success": True, "job_id": job_id}), 202
+
+
 @backups_bp.route(
     "/servers/<server_id>/snapshots/<snapshot_id>/restore", methods=["POST"]
 )

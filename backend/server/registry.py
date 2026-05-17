@@ -256,6 +256,11 @@ class ServerProcessRegistry:
             return {'stdout': [], 'stderr': [], 'running': False, 'message': 'Server is not running'}
         return manager.tail_logs(limit)
 
+    def get_manager(self, server_id: str) -> Optional[ServerManager]:
+        """Return the live ServerManager for ``server_id``, or None."""
+        with self._lock:
+            return self._instances.get(str(server_id))
+
     def send_command(self, server_id: str, command: str) -> Dict[str, object]:
         with self._lock:
             manager = self._instances.get(server_id)

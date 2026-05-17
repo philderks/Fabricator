@@ -33,7 +33,8 @@ full sequence end-to-end and pushes phase updates into
 - **Retention.** ``cfg["maxSnapshots"] > 0`` slices the snapshot list
   for *this* config (not this server) by ``createdAt`` desc, unlinks the
   excess archive files and drops their records. Retention runs on
-  manual AND scheduled runs (the brief was explicit on this).
+  manual AND scheduled runs (the brief was explicit on this). Ad-hoc
+  backups (``config_id=None``) skip retention entirely.
 
 The per-server RLock from :mod:`backend.server.locks` is held across
 the whole run so a manual Start/Stop can't race the staging copy.
@@ -105,14 +106,11 @@ def run_backup(
     trigger: str = "manual",
     job_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Run the full backup sequence synchronously.
+    """Run the full backup sequence for a saved config synchronously.
 
     Returns a snapshot record on success. On failure, records a
     failed-status snapshot entry (best-effort) and re-raises the
     exception so the worker thread can mark progress as failed.
-
-    Phase updates flow into :mod:`backend.backups.progress` keyed by
-    ``job_id`` (auto-generated when not supplied).
     """
     if job_id is None:
         job_id = f"bjb_{uuid.uuid4().hex[:12]}"
@@ -147,7 +145,146 @@ def run_backup(
         progress.update(job_id, phase="failed", error=str(exc))
         raise
 
-    storage_path = _resolve_storage_path(cfg)
+    storage_path = storage.resolve_config_storage_path(cfg)
+
+    return _execute_backup(
+        server_id,
+        server,
+        cfg,
+        storage_path,
+        config_id=config_id,
+        trigger=trigger,
+        job_id=job_id,
+    )
+
+
+def run_adhoc_backup_async(
+    server_id: str,
+    *,
+    storage_path_str: str,
+    compress: bool = True,
+    flush: bool = True,
+    shutdown: bool = False,
+    trigger: str = "manual",
+) -> str:
+    """Spawn a daemon thread for an ad-hoc backup; return its job_id."""
+    job_id = f"bjb_{uuid.uuid4().hex[:12]}"
+    progress.update(
+        job_id,
+        phase="starting",
+        job_id=job_id,
+        kind="backup",
+        config_id=None,
+        trigger=trigger,
+    )
+
+    def _runner() -> None:
+        try:
+            run_adhoc_backup(
+                server_id,
+                storage_path_str=storage_path_str,
+                compress=compress,
+                flush=flush,
+                shutdown=shutdown,
+                trigger=trigger,
+                job_id=job_id,
+            )
+        except Exception as exc:  # pragma: no cover - belt and braces
+            logger.exception("Unhandled error in ad-hoc backup worker")
+            progress.update(job_id, phase="failed", error=str(exc))
+
+    threading.Thread(
+        target=_runner,
+        name=f"backup-adhoc-{server_id}",
+        daemon=True,
+    ).start()
+    return job_id
+
+
+def run_adhoc_backup(
+    server_id: str,
+    *,
+    storage_path_str: str,
+    compress: bool = True,
+    flush: bool = True,
+    shutdown: bool = False,
+    trigger: str = "manual",
+    job_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Run a one-off backup with no pre-existing config synchronously.
+
+    The snapshot is recorded with ``configId: null``. Retention is not
+    applied — ad-hoc backups are managed manually by the user.
+    """
+    if job_id is None:
+        job_id = f"bjb_{uuid.uuid4().hex[:12]}"
+        progress.update(
+            job_id,
+            phase="starting",
+            job_id=job_id,
+            kind="backup",
+            config_id=None,
+            trigger=trigger,
+        )
+
+    server = server_storage.get_server(server_id)
+    if not server:
+        progress.update(job_id, phase="failed", error="Server not found")
+        raise ValueError(f"Server {server_id!r} not found")
+
+    registry = get_server_process_registry()
+    try:
+        registry.resolve_install_path(server)
+    except ValueError as exc:
+        progress.update(job_id, phase="failed", error=str(exc))
+        raise
+
+    storage_path = Path(storage_path_str).expanduser().resolve()
+
+    # Synthetic cfg that satisfies all helpers (_build_archive uses
+    # cfg['id'] directly for the staging dir name, so it must be set).
+    cfg: Dict[str, Any] = {
+        "id": job_id,
+        "name": "manual",
+        "compress": compress,
+        "flush": flush,
+        "shutdown": shutdown,
+        "exclusions": [],
+        "maxSnapshots": 0,
+    }
+
+    return _execute_backup(
+        server_id,
+        server,
+        cfg,
+        storage_path,
+        config_id=None,
+        trigger=trigger,
+        job_id=job_id,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _execute_backup(
+    server_id: str,
+    server: Dict[str, Any],
+    cfg: Dict[str, Any],
+    storage_path: Path,
+    *,
+    config_id: Optional[str],
+    trigger: str,
+    job_id: str,
+) -> Dict[str, Any]:
+    """Core backup sequence: lock → flush/stop → archive → record → retain → restart.
+
+    Both ``run_backup`` (config-based) and ``run_adhoc_backup`` (no config)
+    delegate here. ``config_id=None`` skips retention and records the
+    snapshot with a null configId.
+    """
     storage_path.mkdir(parents=True, exist_ok=True)
 
     server_lock = get_server_lock(server_id)
@@ -155,12 +292,13 @@ def run_backup(
     start_time = time.monotonic()
     was_running = False
     warnings: List[str] = []
+    registry = get_server_process_registry()
     try:
         was_running = _flush_and_maybe_stop(
             server_id, server, cfg, registry, job_id, warnings
         )
         archive_path, size_bytes = _build_archive(
-            install_path=install_path,
+            install_path=registry.resolve_install_path(server),
             storage_path=storage_path,
             cfg=cfg,
             server=server,
@@ -184,7 +322,8 @@ def run_backup(
             },
         )
 
-        _apply_retention(server_id, config_id, cfg)
+        if config_id is not None:
+            _apply_retention(server_id, config_id, cfg)
     except Exception as exc:
         logger.exception("Backup failed for config %s", config_id)
         try:
@@ -225,31 +364,6 @@ def run_backup(
         server_lock.release()
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
-def _resolve_storage_path(cfg: Dict[str, Any]) -> Path:
-    """Return the ``storagePath`` from the config as an absolute Path.
-
-    Empty or missing → default to ``<install_path>/backups`` (matches
-    where the legacy ``/api/servers/<id>/backup`` route used to write).
-    Resolved against the current server's install dir at call time so a
-    server move is picked up automatically.
-    """
-    raw = (cfg.get("storagePath") or "").strip()
-    if raw:
-        return Path(raw).expanduser().resolve()
-
-    server_id = cfg.get("serverId")
-    server = server_storage.get_server(server_id) if server_id else None
-    if server:
-        install_path = get_server_process_registry().resolve_install_path(server)
-        return install_path / "backups"
-    raise ValueError("Config has no storagePath and no resolvable serverId")
-
-
 def _flush_and_maybe_stop(
     server_id: str,
     server: Dict[str, Any],
@@ -266,7 +380,7 @@ def _flush_and_maybe_stop(
         progress.update(job_id, phase="flushing")
         send_result = registry.send_command(server_id, "save-all flush")
         if send_result.get("success"):
-            manager = registry._instances.get(server_id)  # noqa: SLF001
+            manager = registry.get_manager(server_id)
             matched = False
             if manager is not None:
                 matched = manager.wait_for_log(
@@ -325,13 +439,11 @@ def _build_archive(
 
         progress.update(job_id, phase="archiving")
         compress = bool(cfg.get("compress", True))
+        archive_name = f"{config_slug}-{timestamp}.tar"
+        staged_archive = staging_root / archive_name
         if compress:
-            archive_name = f"{config_slug}-{timestamp}.tar"
-            staged_archive = staging_root / archive_name
             _write_hybrid_archive(copy_root, staged_archive, server)
         else:
-            archive_name = f"{config_slug}-{timestamp}.tar"
-            staged_archive = staging_root / archive_name
             with tarfile.open(staged_archive, "w") as tf:
                 _add_directory(tf, copy_root, arcname="")
 

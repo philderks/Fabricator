@@ -7,6 +7,7 @@ import SnapshotsTable from '../../components/backups/SnapshotsTable.vue'
 import ManageConfigsPanel from '../../components/backups/ManageConfigsPanel.vue'
 import RestoreModeModal from '../../components/modals/RestoreModeModal.vue'
 import DeleteBackupConfigModal from '../../components/modals/DeleteBackupConfigModal.vue'
+import QuickBackupModal from '../../components/modals/QuickBackupModal.vue'
 import ConfirmModal from '../../components/modals/ConfirmModal.vue'
 import { useBackupsStore } from '../../stores/backups'
 import { useServerStore } from '../../stores/server'
@@ -28,6 +29,7 @@ const configsById = computed(() => {
 })
 
 const hasConfigs = computed(() => store.configs.length > 0)
+const hasSnapshots = computed(() => store.snapshots.length > 0)
 const filtered = computed(() => store.filteredSnapshots)
 
 const runDisabled = computed(() => {
@@ -118,6 +120,14 @@ onUnmounted(() => {
       <div class="backups-page__top-actions">
         <AppButton variant="ghost" size="md" @click="store.openCreateConfig()">Manage configs</AppButton>
         <AppButton
+          variant="ghost"
+          size="md"
+          :disabled="store.activeJob?.active"
+          @click="store.openQuickBackupModal()"
+        >
+          Quick backup
+        </AppButton>
+        <AppButton
           variant="primary"
           size="md"
           :disabled="runDisabled"
@@ -171,7 +181,7 @@ onUnmounted(() => {
     </Panel>
 
     <!-- Filters + search -->
-    <div v-if="hasConfigs" class="backups-page__filters">
+    <div v-if="hasConfigs || hasSnapshots" class="backups-page__filters">
       <div class="backups-page__type-pills" role="tablist" aria-label="Filter by type">
         <button
           v-for="opt in TYPE_FILTERS"
@@ -191,6 +201,7 @@ onUnmounted(() => {
         aria-label="Filter by config"
       >
         <option value="all">All configs</option>
+        <option value="__manual__">Manual (no config)</option>
         <option v-for="c in store.sortedConfigs" :key="c.id" :value="c.id">{{ c.name }}</option>
       </select>
 
@@ -209,7 +220,7 @@ onUnmounted(() => {
     </div>
 
     <SnapshotsTable
-      v-if="hasConfigs"
+      v-if="hasConfigs || hasSnapshots"
       :snapshots="filtered"
       :configs-by-id="configsById"
       :server-id="serverStore.currentServerId"
@@ -243,6 +254,14 @@ onUnmounted(() => {
       :loading="store.deletingConfig"
       @confirm="store.confirmDeleteConfig"
       @cancel="store.cancelDeleteConfig()"
+    />
+
+    <!-- Quick backup modal (config-free one-off) -->
+    <QuickBackupModal
+      :show="store.showQuickBackupModal"
+      :active-job="store.activeJob"
+      @confirm="store.runQuickBackup"
+      @cancel="store.closeQuickBackupModal()"
     />
 
     <!-- Snapshot delete confirmation (simple) -->

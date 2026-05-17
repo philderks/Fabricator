@@ -23,6 +23,7 @@ import {
   getBackupSummary,
   deleteSnapshot,
   runBackupConfig,
+  runQuickBackup as runQuickBackupApi,
   restoreSnapshot,
   getBackupJob
 } from '../api/backups'
@@ -131,6 +132,9 @@ export const useBackupsStore = defineStore('backups', () => {
   const snapshotToDelete = ref(null)
   const showDeleteSnapshotModal = ref(false)
   const deletingSnapshot = ref(false)
+
+  // Quick-backup modal (config-free one-off backup)
+  const showQuickBackupModal = ref(false)
 
   // Active job tracking (one in-flight backup/restore per view at a time)
   // `targetConfigId` and `targetSnapshotId` are nullable hints used by the
@@ -382,6 +386,43 @@ export const useBackupsStore = defineStore('backups', () => {
     }
   }
 
+  // ---------- Quick backup (no config) ----------
+
+  function openQuickBackupModal() {
+    showQuickBackupModal.value = true
+  }
+
+  function closeQuickBackupModal() {
+    if (activeJob.value?.active) return
+    showQuickBackupModal.value = false
+  }
+
+  async function runQuickBackup({ storagePath, compress, flush, shutdown }) {
+    if (!serverId.value) return
+    try {
+      const res = await runQuickBackupApi(serverId.value, { storagePath, compress, flush, shutdown })
+      const jobId = res?.job_id
+      if (!jobId) {
+        toast.error('Quick backup did not return a job id', 'Backups')
+        return
+      }
+      activeJob.value = {
+        id: jobId,
+        kind: 'backup',
+        configId: null,
+        snapshotId: null,
+        active: true,
+        phase: 'starting'
+      }
+      showQuickBackupModal.value = false
+      startJobPolling()
+      toast.info('Quick backup started', 'Backups')
+    } catch (err) {
+      console.error('Failed to start quick backup:', err)
+      toast.error(err?.message || 'Failed to start quick backup', 'Backups')
+    }
+  }
+
   // ---------- Restore ----------
 
   function requestRestoreSnapshot(snapshot) {
@@ -522,7 +563,8 @@ export const useBackupsStore = defineStore('backups', () => {
   const filteredSnapshots = computed(() => {
     const q = search.value.trim().toLowerCase()
     return snapshots.value.filter((snap) => {
-      if (configFilter.value !== 'all' && snap.configId !== configFilter.value) return false
+      if (configFilter.value === '__manual__' && snap.configId !== null) return false
+      if (configFilter.value !== 'all' && configFilter.value !== '__manual__' && snap.configId !== configFilter.value) return false
       if (typeFilter.value !== 'all' && snap.type !== typeFilter.value) return false
       if (!q) return true
       const fields = [snap.fileName, snap.message, configById(snap.configId)?.name].filter(Boolean)
@@ -551,6 +593,7 @@ export const useBackupsStore = defineStore('backups', () => {
     snapshotToDelete.value = null
     showDeleteSnapshotModal.value = false
     deletingSnapshot.value = false
+    showQuickBackupModal.value = false
     activeJob.value = null
     runningConfigId.value = null
     search.value = ''
@@ -577,6 +620,7 @@ export const useBackupsStore = defineStore('backups', () => {
     showDeleteConfigModal,
     configToDelete,
     deletingConfig,
+    showQuickBackupModal,
     showRestoreModal,
     snapshotToRestore,
     snapshotToDelete,
@@ -608,6 +652,9 @@ export const useBackupsStore = defineStore('backups', () => {
     confirmDeleteConfig,
     dismissRetainedFilesBanner,
     runBackup,
+    openQuickBackupModal,
+    closeQuickBackupModal,
+    runQuickBackup,
     requestRestoreSnapshot,
     cancelRestore,
     confirmRestore,

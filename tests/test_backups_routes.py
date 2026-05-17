@@ -258,3 +258,57 @@ def test_restore_invalid_mode_returns_400(client, env):
 def test_backup_jobs_polling_returns_404_for_unknown(client, env):
     resp = client.get("/api/backup-jobs/bjr_does_not_exist")
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Quick backup (config-free)
+# ---------------------------------------------------------------------------
+
+
+def test_quick_backup_returns_202_with_job_id(client, env, monkeypatch, tmp_path):
+    """POST /backup-quick with a valid storagePath returns 202 + job_id."""
+    import backend.backups.service as svc
+
+    _seed_server(env["tmp"], "srv_quick1")
+
+    from unittest.mock import MagicMock
+    fake_registry = MagicMock()
+    fake_registry.resolve_install_path.return_value = env["tmp"] / "servers" / "srv_quick1"
+    fake_registry.get_status.return_value = {"status": "stopped"}
+    fake_registry.get_manager.return_value = None
+    monkeypatch.setattr(svc, "get_server_process_registry", lambda: fake_registry)
+
+    resp = client.post(
+        "/api/servers/srv_quick1/backup-quick",
+        json={
+            "storagePath": str(tmp_path / "quick-store"),
+            "compress": False,
+            "flush": False,
+            "shutdown": False,
+        },
+    )
+    assert resp.status_code == 202, resp.get_json()
+    body = resp.get_json()
+    assert body["success"] is True
+    assert body["job_id"].startswith("bjb_")
+
+
+def test_quick_backup_missing_storage_path_returns_400(client, env):
+    """storagePath is required — missing or blank must yield 400."""
+    _seed_server(env["tmp"], "srv_quick2")
+
+    resp = client.post(
+        "/api/servers/srv_quick2/backup-quick",
+        json={"compress": True},
+    )
+    assert resp.status_code == 400
+    assert "storagePath" in resp.get_json().get("error", "")
+
+
+def test_quick_backup_unknown_server_returns_404(client, env):
+    """Unknown server_id must yield 404 via @require_server."""
+    resp = client.post(
+        "/api/servers/srv_does_not_exist/backup-quick",
+        json={"storagePath": "/tmp/x"},
+    )
+    assert resp.status_code == 404

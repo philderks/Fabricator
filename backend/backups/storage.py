@@ -41,7 +41,10 @@ File shape::
           "sizeBytes": 0,
           "durationSeconds": 0.0,
           "status": "success|warning|error",
-          "message": "..."
+          "message": "...",
+          "sourceSnapshotId": "snp_... | null",
+          "safetySnapshotId": "snp_... | null",
+          "mode": "in_place|reset|null"
         }
       ]
     }
@@ -60,6 +63,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from backend.core.config import get_config
+from backend.server import storage as server_storage
+from backend.server.registry import get_server_process_registry
 from backend.utils.time import iso_z_now
 
 
@@ -341,6 +346,9 @@ def record_snapshot(server_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
         "durationSeconds": data.get("durationSeconds"),
         "status": data.get("status") or "success",
         "message": data.get("message"),
+        "sourceSnapshotId": data.get("sourceSnapshotId"),
+        "safetySnapshotId": data.get("safetySnapshotId"),
+        "mode": data.get("mode"),
     }
     with _get_server_lock(server_id):
         doc = _read_file(server_id)
@@ -446,6 +454,22 @@ def all_configs() -> List[Dict[str, Any]]:
         for cfg in doc.get("configs") or []:
             results.append(dict(cfg))
     return results
+
+
+def resolve_config_storage_path(cfg: Dict[str, Any]) -> Path:
+    """Return the resolved storage ``Path`` for a backup config.
+
+    Empty or missing ``storagePath`` → ``<install_path>/backups``.
+    """
+    raw = (cfg.get("storagePath") or "").strip()
+    if raw:
+        return Path(raw).expanduser().resolve()
+    sid = cfg.get("serverId")
+    server = server_storage.get_server(sid) if sid else None
+    if server:
+        install_path = get_server_process_registry().resolve_install_path(server)
+        return install_path / "backups"
+    raise ValueError("Config has no storagePath and no resolvable serverId")
 
 
 def reset_for_tests() -> None:

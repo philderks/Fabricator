@@ -81,7 +81,7 @@ def _fake_registry(install_path: Path, *, running: bool = False):
     registry.send_command.return_value = {"success": True}
     manager = MagicMock()
     manager.wait_for_log.return_value = True
-    registry._instances = {}
+    registry.get_manager.return_value = None  # no live manager by default
     return registry, manager
 
 
@@ -150,7 +150,7 @@ def test_flush_warning_does_not_abort_backup(
 
     registry, manager = _fake_registry(install, running=True)
     manager.wait_for_log.return_value = False  # simulate timeout
-    registry._instances["srv_b2"] = manager
+    registry.get_manager.return_value = manager
     monkeypatch.setattr(
         service, "get_server_process_registry", lambda: registry
     )
@@ -303,3 +303,58 @@ def test_failure_records_error_snapshot_and_reraises(
 
     snapshots = storage.list_snapshots("srv_b5", config_id=cfg["id"])
     assert any(s["status"] == "error" for s in snapshots)
+
+
+def test_adhoc_backup_creates_archive_with_null_config_id(
+    backups_env, monkeypatch, tmp_path
+):
+    """Ad-hoc backup records configId=None and produces a real archive."""
+    service = backups_env["service"]
+    tmp = backups_env["tmp"]
+
+    install = _seed_server(tmp, "srv_adhoc1")
+    storage_dir = tmp_path / "adhoc-store"
+
+    registry, _ = _fake_registry(install, running=False)
+    monkeypatch.setattr(service, "get_server_process_registry", lambda: registry)
+
+    snapshot = service.run_adhoc_backup(
+        "srv_adhoc1",
+        storage_path_str=str(storage_dir),
+        compress=False,
+        flush=False,
+        shutdown=False,
+    )
+
+    assert snapshot["configId"] is None
+    assert snapshot["status"] == "success"
+    archive_path = Path(snapshot["filePath"])
+    assert archive_path.exists()
+    assert archive_path.parent == storage_dir
+    with tarfile.open(archive_path, "r") as tf:
+        names = tf.getnames()
+    assert any(n.startswith("world") for n in names)
+
+
+def test_adhoc_backup_async_returns_job_id(backups_env, monkeypatch, tmp_path):
+    """run_adhoc_backup_async returns a bjb_ job id and seeds progress."""
+    service = backups_env["service"]
+    import backend.backups.progress as progress
+    tmp = backups_env["tmp"]
+
+    install = _seed_server(tmp, "srv_adhoc2")
+    registry, _ = _fake_registry(install, running=False)
+    monkeypatch.setattr(service, "get_server_process_registry", lambda: registry)
+
+    job_id = service.run_adhoc_backup_async(
+        "srv_adhoc2",
+        storage_path_str=str(tmp_path / "adhoc2-store"),
+        compress=False,
+        flush=False,
+        shutdown=False,
+    )
+
+    assert job_id.startswith("bjb_")
+    state = progress.get(job_id)
+    assert state["kind"] == "backup"
+    assert state["config_id"] is None
