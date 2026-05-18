@@ -1,11 +1,20 @@
 <script setup>
 import { computed } from 'vue'
+import { useRoute } from 'vue-router'
 import StatCard from '../../components/ui/StatCard.vue'
 import Panel from '../../components/ui/Panel.vue'
 import { installedModDisplayName, installedModInitial } from '../../utils/installedModDisplay'
 import { useServerStore } from '../../stores/server'
 
+const route = useRoute()
 const store = useServerStore()
+
+/** Matches sidebar Backups nav — always derive :id from the URL to avoid store/route drift. */
+const backupsRouteLocation = computed(() => {
+  const raw = route.params.id
+  const id = typeof raw === 'string' ? raw : raw?.[0]
+  return id ? { name: 'ServerBackups', params: { id } } : null
+})
 
 const RECENT_LOG_PREVIEW_LINES = 16
 
@@ -107,7 +116,20 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
 
         <Panel title="Quick actions">
           <div class="overview-page__qa-grid">
-            <button type="button" class="overview-page__qa" @click="store.goToBackups">
+            <router-link
+              v-if="backupsRouteLocation"
+              class="overview-page__qa"
+              :to="backupsRouteLocation"
+            >
+              <span class="overview-page__qa-title">Backups</span>
+              <span class="overview-page__qa-sub">Manage snapshots</span>
+            </router-link>
+            <button
+              v-else
+              type="button"
+              class="overview-page__qa"
+              disabled
+            >
               <span class="overview-page__qa-title">Backups</span>
               <span class="overview-page__qa-sub">Manage snapshots</span>
             </button>
@@ -354,6 +376,7 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
   color: inherit;
   font-family: inherit;
   text-align: left;
+  text-decoration: none;
   cursor: pointer;
   transition: border-color 0.15s ease;
 }
