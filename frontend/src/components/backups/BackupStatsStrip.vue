@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import StatCard from '../ui/StatCard.vue'
-import { formatFileSize } from '../../utils/format'
+import { formatFileSize, formatTimestamp } from '../../utils/format'
 
 const props = defineProps({
   summary: {
@@ -14,26 +14,19 @@ const props = defineProps({
   }
 })
 
-function formatTimestamp(iso) {
-  if (!iso) return '—'
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return '—'
-  return date.toLocaleString()
-}
-
-const totalCount = computed(() => props.summary?.totalCount ?? 0)
+const totalCount = computed(() => props.summary?.total_snapshots ?? 0)
 const totalBytes = computed(() => {
-  const bytes = props.summary?.totalBytes
+  const bytes = props.summary?.total_size_bytes
   if (typeof bytes !== 'number') return '—'
   return formatFileSize(bytes)
 })
 const lastSnapshotLabel = computed(() => {
-  const last = props.summary?.lastSnapshot
+  const last = props.summary?.last_snapshot
   if (!last?.createdAt) return '—'
   return formatTimestamp(last.createdAt)
 })
 const nextRunLabel = computed(() => {
-  const next = props.summary?.nextRunAt
+  const next = props.summary?.next_run?.next_run_time
   if (!next) return '—'
   return formatTimestamp(next)
 })
@@ -44,7 +37,7 @@ const nextRunLabel = computed(() => {
     <StatCard label="Snapshots" :value="totalCount" :accent="totalCount > 0 ? 'primary' : 'default'" />
     <StatCard label="Total size" :value="totalBytes" />
     <StatCard label="Last snapshot" :value="lastSnapshotLabel" />
-    <StatCard label="Next scheduled" :value="nextRunLabel" :accent="props.summary?.nextRunAt ? 'success' : 'default'" />
+    <StatCard label="Next scheduled" :value="nextRunLabel" :accent="props.summary?.next_run ? 'success' : 'default'" />
   </section>
 </template>
 
