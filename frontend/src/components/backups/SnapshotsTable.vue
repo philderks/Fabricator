@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import Panel from '../ui/Panel.vue'
-import { formatFileSize } from '../../utils/format'
+import { formatFileSize, formatTimestamp } from '../../utils/format'
 import { snapshotDownloadUrl } from '../../api/backups'
 
 const props = defineProps({
@@ -35,13 +35,6 @@ const hasRows = computed(() => props.snapshots.length > 0)
 function configName(configId) {
   if (configId === null || configId === undefined) return 'Manual'
   return props.configsById[configId]?.name || '—'
-}
-
-function formatTimestamp(iso) {
-  if (!iso) return '—'
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return '—'
-  return date.toLocaleString()
 }
 
 function formatDuration(seconds) {

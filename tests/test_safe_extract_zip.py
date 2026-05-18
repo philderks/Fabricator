@@ -1,12 +1,4 @@
-"""``safe_extract_zip`` path-traversal guards.
-
-The legacy ``/api/servers/<id>/backup*`` route tests that used to live
-in this file were removed in lockstep with the routes themselves (the
-new backup manager package owns that surface now — see
-``test_backups_*.py``). The remaining tests pin the path-traversal
-guard that both the new backup-manager restore and any third-party zip
-extractor in the codebase rely on.
-"""
+"""Path-traversal guards for ``backend.utils.zip.safe_extract_zip``."""
 from __future__ import annotations
 
 import zipfile

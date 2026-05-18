@@ -49,7 +49,6 @@ import shutil
 import tarfile
 import threading
 import time
-import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -75,7 +74,7 @@ _STOP_WAIT_SECONDS = 120.0
 
 def run_backup_async(config_id: str, *, trigger: str = "manual") -> str:
     """Spawn a daemon thread to run the backup; return its job_id."""
-    job_id = f"bjb_{uuid.uuid4().hex[:12]}"
+    job_id = progress.generate_job_id("bjb")
     progress.update(
         job_id,
         phase="starting",
@@ -113,7 +112,7 @@ def run_backup(
     exception so the worker thread can mark progress as failed.
     """
     if job_id is None:
-        job_id = f"bjb_{uuid.uuid4().hex[:12]}"
+        job_id = progress.generate_job_id("bjb")
         progress.update(
             job_id,
             phase="starting",
@@ -168,7 +167,7 @@ def run_adhoc_backup_async(
     trigger: str = "manual",
 ) -> str:
     """Spawn a daemon thread for an ad-hoc backup; return its job_id."""
-    job_id = f"bjb_{uuid.uuid4().hex[:12]}"
+    job_id = progress.generate_job_id("bjb")
     progress.update(
         job_id,
         phase="starting",
@@ -218,7 +217,7 @@ def run_adhoc_backup(
     ``storage_path_str=None`` falls back to ``<install_path>/backups``.
     """
     if job_id is None:
-        job_id = f"bjb_{uuid.uuid4().hex[:12]}"
+        job_id = progress.generate_job_id("bjb")
         progress.update(
             job_id,
             phase="starting",

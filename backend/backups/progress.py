@@ -28,6 +28,7 @@ backend restarts mid-job and the in-memory dict is wiped.
 from __future__ import annotations
 
 import threading
+import uuid
 from typing import Any, Dict
 
 from backend.utils.time import iso_z_now
@@ -78,6 +79,11 @@ def is_active(job_id: str, /) -> bool:
         if not phase:
             return False
         return phase not in _TERMINAL_PHASES
+
+
+def generate_job_id(prefix: str) -> str:
+    """Return a unique job ID with the given prefix, e.g. ``bjb_<12-hex>``."""
+    return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
 
 def reset_for_tests() -> None:

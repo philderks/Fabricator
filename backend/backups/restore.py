@@ -66,7 +66,7 @@ def run_restore_async(snapshot_id: str, *, mode: str) -> str:
     if not server_id:
         raise ValueError(f"Snapshot {snapshot_id!r} not found")
 
-    job_id = f"bjr_{uuid.uuid4().hex[:12]}"
+    job_id = progress.generate_job_id("bjr")
     progress.update(
         job_id,
         phase="starting",
@@ -106,7 +106,7 @@ def run_restore(
     if mode not in VALID_MODES:
         raise ValueError(f"Invalid restore mode {mode!r}")
     if job_id is None:
-        job_id = f"bjr_{uuid.uuid4().hex[:12]}"
+        job_id = progress.generate_job_id("bjr")
         progress.update(
             job_id,
             phase="starting",
