@@ -18,6 +18,13 @@ export function truncate(text, length = 100) {
   return text.length > length ? `${text.slice(0, length)}...` : text
 }
 
+export function formatTimestamp(iso) {
+  if (!iso) return '—'
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return '—'
+  return date.toLocaleString()
+}
+
 export function formatFileSize(bytes) {
   if (!Number.isFinite(bytes)) {
     return '—'

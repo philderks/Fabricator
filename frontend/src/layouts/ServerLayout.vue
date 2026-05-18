@@ -229,32 +229,6 @@ onUnmounted(() => {
     />
 
     <ConfirmModal
-      :show="store.showBackupRestoreModal"
-      title="Restore Backup"
-      :message="store.backupToRestore ? `Restore ${store.backupToRestore.name}?` : ''"
-      description="Restoring will overwrite the current world and configs. Make sure the server is stopped."
-      type="warning"
-      confirm-text="Restore"
-      cancel-text="Cancel"
-      :loading="store.restoringBackup"
-      @confirm="store.confirmRestoreBackup"
-      @cancel="store.cancelRestoreBackup"
-    />
-
-    <ConfirmModal
-      :show="store.showBackupDeleteModal"
-      title="Delete Backup"
-      :message="store.backupToDelete ? `Delete ${store.backupToDelete.name}?` : ''"
-      description="This backup will be permanently deleted. This action cannot be undone."
-      type="danger"
-      confirm-text="Delete"
-      cancel-text="Cancel"
-      :loading="store.deletingBackup"
-      @confirm="store.confirmDeleteBackup"
-      @cancel="store.cancelDeleteBackup"
-    />
-
-    <ConfirmModal
       :show="store.showDeleteServerModal"
       title="Delete Server"
       message="Delete this server permanently?"

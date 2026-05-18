@@ -293,18 +293,31 @@ class ServerManager:
                 return {"status": "stopped", "message": "Server is not running"}
 
             proc = self._process
-            try:
-                if self._process.stdin and not self._process.stdin.closed:
-                    try:
-                        self._process.stdin.write("stop\n")
-                        self._process.stdin.flush()
-                    except Exception:
-                        logger.warning(
-                            "Failed to write 'stop' command to server stdin",
-                            exc_info=True,
-                        )
+            stdout_thread = self._stdout_thread
+            stderr_thread = self._stderr_thread
+            self._process = None
+            self._ps_process = None
+            self._players.clear()
+            self._stdout_thread = None
+            self._stderr_thread = None
 
-                proc.terminate()
+        # Lock released so stream threads can still acquire it while draining
+        # shutdown log lines (e.g. player-disconnect events logged on shutdown).
+        try:
+            if proc.stdin and not proc.stdin.closed:
+                try:
+                    proc.stdin.write("stop\n")
+                    proc.stdin.flush()
+                except Exception:
+                    logger.warning(
+                        "Failed to write 'stop' command to server stdin",
+                        exc_info=True,
+                    )
+
+            proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            proc.terminate()
+            try:
                 proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 proc.kill()
@@ -312,18 +325,13 @@ class ServerManager:
                     proc.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     pass
-            finally:
-                self._process = None
-                self._ps_process = None
-                self._players.clear()
-                if self._stdout_thread:
-                    self._stdout_thread.join(timeout=2)
-                    self._stdout_thread = None
-                if self._stderr_thread:
-                    self._stderr_thread.join(timeout=2)
-                    self._stderr_thread = None
+        finally:
+            if stdout_thread:
+                stdout_thread.join(timeout=5)
+            if stderr_thread:
+                stderr_thread.join(timeout=5)
 
-            return {"status": "stopped", "message": "Server stopped"}
+        return {"status": "stopped", "message": "Server stopped"}
 
     @property
     def is_running(self) -> bool:
@@ -365,6 +373,51 @@ class ServerManager:
             "stderr": stderr,
             "running": running
         }
+
+    def wait_for_log(
+        self,
+        pattern: "re.Pattern[str] | str",
+        timeout: float = 60.0,
+        poll_interval: float = 0.1,
+    ) -> bool:
+        """Wait for a log line matching ``pattern`` to appear after now.
+
+        Snapshots ``len(self._stdout_buffer)`` under the lock, then polls
+        every ``poll_interval`` seconds for any newly-appended stdout line
+        that matches. Lines already in the buffer at call time are ignored
+        — callers want confirmation of an action they just triggered (e.g.
+        ``save-all flush``), not the historical state.
+
+        Returns True on match, False on timeout. Uses ``time.monotonic``
+        so a wall-clock jump (NTP adjust, suspend/resume) doesn't extend
+        or truncate the wait.
+        """
+        if isinstance(pattern, str):
+            pattern = re.compile(pattern)
+
+        with self._lock:
+            start_index = len(self._stdout_buffer)
+
+        deadline = time.monotonic() + max(0.0, timeout)
+        while time.monotonic() < deadline:
+            with self._lock:
+                # Snapshot the slice under the lock so the streaming
+                # thread can't truncate-then-resize the buffer mid-iter.
+                pending = self._stdout_buffer[start_index:]
+                start_index = len(self._stdout_buffer)
+            for line in pending:
+                if pattern.search(line):
+                    return True
+            time.sleep(poll_interval)
+
+        # One final sweep — covers the race where the matching line
+        # arrives after the last poll-sleep but before timeout.
+        with self._lock:
+            pending = self._stdout_buffer[start_index:]
+        for line in pending:
+            if pattern.search(line):
+                return True
+        return False
 
     def send_command(self, command: str) -> dict:
         """Send a console command to the running server process."""

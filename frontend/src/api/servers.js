@@ -169,44 +169,6 @@ export async function bulkRemoveMods(serverId, filenames) {
 }
 
 /**
- * Create a server backup
- * @param {string|number} serverId - Server ID
- * @returns {Promise<Object>} Backup creation result
- */
-export async function createBackup(serverId) {
-  return post(`/api/servers/${serverId}/backup`)
-}
-
-/**
- * Get list of server backups
- * @param {string|number} serverId - Server ID
- * @returns {Promise<Array>} List of backups
- */
-export async function getBackups(serverId) {
-  return get(`/api/servers/${serverId}/backups`)
-}
-
-/**
- * Restore server from backup
- * @param {string|number} serverId - Server ID
- * @param {string} backupId - Backup ID
- * @returns {Promise<Object>} Restore result
- */
-export async function restoreBackup(serverId, backupId) {
-  return post(`/api/servers/${serverId}/backups/${backupId}/restore`)
-}
-
-/**
- * Delete a server backup
- * @param {string|number} serverId - Server ID
- * @param {string} backupId - Backup ID (filename without .zip)
- * @returns {Promise<Object>} Deletion result
- */
-export async function deleteBackup(serverId, backupId) {
-  return del(`/api/servers/${serverId}/backups/${backupId}`)
-}
-
-/**
  * Get server performance metrics
  * @param {string|number} serverId - Server ID
  * @returns {Promise<Object>} Performance metrics (CPU, RAM, TPS, etc.)
