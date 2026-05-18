@@ -1,12 +1,10 @@
 """Server management routes and blueprints."""
-from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 import os
 import shutil
 import stat
 import threading
-import zipfile
 
 from flask import Blueprint, jsonify, request
 
@@ -25,7 +23,6 @@ from backend.utils import platform as platform_utils
 from backend.utils.java import parse_java_major, parse_java_version_string
 from backend.utils.routes import require_server, with_server_lock
 from backend.utils.time import iso_z_from_timestamp, iso_z_now
-from backend.utils.zip import safe_extract_zip
 
 try:
     import psutil  # type: ignore
@@ -162,12 +159,6 @@ def _ensure_child_path(base: Path, child: str) -> Path:
 def _get_installer(loader: str, install_path: Path):
     """Get the appropriate installer for the given loader."""
     return get_installer_for(loader, install_path)
-
-
-def _get_backups_dir(base_path: Path) -> Path:
-    backups_dir = base_path / 'backups'
-    backups_dir.mkdir(parents=True, exist_ok=True)
-    return backups_dir
 
 
 def _build_server_properties(server: dict) -> dict:
@@ -540,158 +531,6 @@ def bulk_delete_server_mods(server_id, server):
     return jsonify({'success': True, 'deleted': deleted, 'errors': errors})
 
 
-@server_bp.route('/servers/<server_id>/backups', methods=['GET'])
-@require_server
-def list_server_backups(server_id, server):
-    try:
-        base_path = _registry().resolve_install_path(server)
-    except ValueError as exc:
-        return jsonify({'error': str(exc)}), 400
-
-    backups_dir = _get_backups_dir(base_path)
-    backups = [
-        _serialize_file_entry(path, backups_dir)
-        for path in backups_dir.glob('*.zip')
-    ]
-    backups.sort(key=lambda entry: entry['updatedAt'], reverse=True)
-    return jsonify(backups)
-
-
-@server_bp.route('/servers/<server_id>/backup', methods=['POST'])
-@require_server
-@with_server_lock
-def create_server_backup(server_id, server):
-    runtime_status = _registry().get_status(server_id)
-    if runtime_status.get('status') == 'running':
-        return jsonify({'error': 'Stop the server before creating a backup to avoid data corruption'}), 400
-
-    try:
-        base_path = _registry().resolve_install_path(server)
-    except ValueError as exc:
-        return jsonify({'error': str(exc)}), 400
-
-    backups_dir = _get_backups_dir(base_path)
-    timestamp = datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')
-    archive_path = backups_dir / f'{timestamp}.zip'
-
-    try:
-        with zipfile.ZipFile(archive_path, 'w', compression=zipfile.ZIP_DEFLATED) as zip_file:
-            for file_path in base_path.rglob('*'):
-                if backups_dir in file_path.parents or file_path == backups_dir:
-                    continue
-                if file_path.is_dir():
-                    continue
-                zip_file.write(file_path, file_path.relative_to(base_path))
-    except OSError as exc:
-        if archive_path.exists():
-            try:
-                _unlink_with_retry(archive_path)
-            except OSError:
-                pass
-        return jsonify({'error': f'Failed to create backup: {exc}'}), 500
-
-    return jsonify({
-        'success': True,
-        'backup': _serialize_file_entry(archive_path, backups_dir)
-    })
-
-
-@server_bp.route('/servers/<server_id>/backups/<backup_id>/restore', methods=['POST'])
-@require_server
-@with_server_lock
-def restore_server_backup(server_id, backup_id, server):
-    try:
-        base_path = _registry().resolve_install_path(server)
-    except ValueError as exc:
-        return jsonify({'error': str(exc)}), 400
-
-    status = _registry().get_status(server_id)
-    if status.get('status') == 'running':
-        return jsonify({'error': 'Stop the server before restoring a backup'}), 400
-
-    backups_dir = _get_backups_dir(base_path)
-    try:
-        backup_path = _ensure_child_path(backups_dir, f'{backup_id}.zip')
-    except ValueError:
-        return jsonify({'error': 'Invalid backup ID'}), 400
-
-    if not backup_path.exists():
-        return jsonify({'error': 'Backup not found'}), 404
-
-    staging = base_path.parent / f".restore-{server_id}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}"
-    staging.mkdir(parents=True, exist_ok=False)
-    try:
-        with zipfile.ZipFile(backup_path, 'r') as zip_file:
-            safe_extract_zip(zip_file, staging)
-    except (OSError, zipfile.BadZipFile, ValueError) as exc:
-        shutil.rmtree(staging, ignore_errors=True)
-        return jsonify({'error': f'Failed to extract backup: {exc}'}), 400
-
-    # Preserve existing backups/ into the staged tree so it survives the swap.
-    staged_backups = staging / 'backups'
-    try:
-        if not staged_backups.exists():
-            staged_backups.mkdir(parents=True, exist_ok=True)
-        for entry in backups_dir.iterdir():
-            dest = staged_backups / entry.name
-            if dest.exists():
-                continue
-            if entry.is_dir():
-                shutil.copytree(entry, dest)
-            else:
-                shutil.copy2(entry, dest)
-    except (OSError, shutil.Error) as exc:
-        shutil.rmtree(staging, ignore_errors=True)
-        return jsonify({'error': f'Failed to preserve backups: {exc}'}), 500
-
-    # Swap: rename live dir aside, move staging in, delete old dir.
-    old_dir = base_path.parent / f".old-{server_id}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}"
-    try:
-        os.replace(base_path, old_dir)
-    except OSError as exc:
-        shutil.rmtree(staging, ignore_errors=True)
-        return jsonify({'error': f'Failed to stage restore: {exc}'}), 500
-
-    try:
-        os.replace(staging, base_path)
-    except OSError as exc:
-        try:
-            os.replace(old_dir, base_path)
-        except OSError:
-            pass
-        shutil.rmtree(staging, ignore_errors=True)
-        return jsonify({'error': f'Failed to activate restore: {exc}'}), 500
-
-    shutil.rmtree(old_dir, onerror=_handle_remove_readonly)
-
-    return jsonify({'success': True, 'message': 'Backup restored successfully'})
-
-
-@server_bp.route('/servers/<server_id>/backups/<backup_id>', methods=['DELETE'])
-@require_server
-def delete_server_backup(server_id, backup_id, server):
-    try:
-        base_path = _registry().resolve_install_path(server)
-    except ValueError as exc:
-        return jsonify({'error': str(exc)}), 400
-
-    backups_dir = _get_backups_dir(base_path)
-    try:
-        backup_path = _ensure_child_path(backups_dir, f'{backup_id}.zip')
-    except ValueError:
-        return jsonify({'error': 'Invalid backup ID'}), 400
-
-    if not backup_path.exists():
-        return jsonify({'error': 'Backup not found'}), 404
-
-    try:
-        _unlink_with_retry(backup_path)
-    except OSError as exc:
-        return jsonify({'error': f'Failed to delete backup: {exc}'}), 500
-
-    return jsonify({'success': True, 'message': 'Backup deleted successfully'})
-
-
 @server_bp.route('/servers/<server_id>/settings', methods=['PUT'])
 @require_server
 @with_server_lock
@@ -737,7 +576,24 @@ def delete_server_route(server_id, server):
     except ValueError:
         install_path = None
 
-    # Remove server from storage
+    # Remove every scheduled backup for this server BEFORE we forget it,
+    # then drop the per-server backups JSON file. Defensive: importing
+    # the backups package lazily here avoids dragging APScheduler into
+    # cold-import code paths that don't otherwise need it (e.g. the
+    # PyInstaller bundle starting up without the scheduler enabled).
+    try:
+        from backend.backups import storage as backups_storage
+        from backend.backups import scheduler as backups_scheduler
+
+        for cfg in backups_storage.list_configs(server_id):
+            cfg_id = cfg.get('id')
+            if cfg_id:
+                backups_scheduler.remove_job(cfg_id)
+        backups_storage.delete_server_file(server_id)
+    except Exception:
+        # Backup cleanup is best-effort — never block server deletion.
+        pass
+
     storage.delete_server(server_id)
     discard_lock(server_id)
 

@@ -21,6 +21,7 @@ const ALL_NAV_ITEMS = [
   { name: 'ServerConsole',  label: 'Console',  icon: 'console'  },
   { name: 'ServerMods',     label: 'Mods',     icon: 'mods'     },
   { name: 'ServerFiles',    label: 'Files',    icon: 'files'    },
+  { name: 'ServerBackups',  label: 'Backups',  icon: 'backups'  },
   { name: 'ServerSettings', label: 'Settings', icon: 'settings' }
 ]
 
@@ -243,6 +244,11 @@ onUnmounted(() => {
           </template>
           <template v-else-if="item.icon === 'files'">
             <path d="M2 3.5A1.5 1.5 0 013.5 2h3l1.5 2H12a1.5 1.5 0 011.5 1.5v7A1.5 1.5 0 0112 14H3.5A1.5 1.5 0 012 12.5v-9z"/>
+          </template>
+          <template v-else-if="item.icon === 'backups'">
+            <rect x="1.5" y="3" width="12" height="3" rx="0.6"/>
+            <path d="M2.5 6v6.5A1 1 0 003.5 13.5h8A1 1 0 0012.5 12.5V6"/>
+            <path d="M6 8.5h3"/>
           </template>
           <template v-else-if="item.icon === 'settings'">
             <path d="M11.5 8.9L13.4 8.9L13.4 6.2L11.5 6.1L10.7 4.8L11.6 3.1L9.3 1.8L8.2 3.4L6.8 3.4L5.8 1.8L3.4 3.1L4.3 4.8L3.6 6.1L1.7 6.2L1.7 8.9L3.6 8.9L4.3 10.2L3.4 11.9L5.8 13.2L6.8 11.6L8.2 11.6L9.3 13.2L11.6 11.9L10.7 10.2Z"/>
