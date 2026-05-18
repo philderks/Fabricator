@@ -790,9 +790,6 @@ export const useServerStore = defineStore('server', () => {
     } finally {
       actionState.value[action] = false
       await loadServer()
-      if (action === 'stop') {
-        logs.value = { stdout: [], stderr: [], running: false }
-      }
       if (action === 'start' || action === 'restart') {
         await loadLogs()
       }

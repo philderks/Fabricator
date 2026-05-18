@@ -881,22 +881,39 @@ def start_server_by_id(server_id, server):
 
 @server_bp.route('/servers/<server_id>/stop', methods=['POST'])
 @require_server
-@with_server_lock
 def stop_server_by_id(server_id, server):
-    result = _registry().stop_server(server_id)
-    status_value = result.get('status')
-    success = status_value == 'stopped'
-    updated_server = (
-        storage.update_server_status(server_id, status_value)
-        if status_value else server
-    )
+    current_status = server.get('status')
 
-    response = {
-        'success': success,
-        'message': result.get('message', ''),
-        'server': _augment_with_runtime(updated_server or server)
-    }
-    return jsonify(response), 200 if success else 400
+    if current_status == 'stopping':
+        return jsonify({
+            'success': True,
+            'message': 'Server is already stopping',
+            'server': _augment_with_runtime(server),
+        }), 200
+
+    if current_status != 'running':
+        result = _registry().stop_server(server_id)
+        status_value = result.get('status', 'stopped')
+        updated_server = storage.update_server_status(server_id, status_value) or server
+        return jsonify({
+            'success': True,
+            'message': result.get('message', ''),
+            'server': _augment_with_runtime(updated_server),
+        }), 200
+
+    updated_server = storage.update_server_status(server_id, 'stopping') or server
+
+    def _stop_worker():
+        result = _registry().stop_server(server_id)
+        storage.update_server_status(server_id, result.get('status', 'stopped'))
+
+    threading.Thread(target=_stop_worker, daemon=True).start()
+
+    return jsonify({
+        'success': True,
+        'message': 'Server is stopping',
+        'server': _augment_with_runtime(updated_server),
+    }), 200
 
 
 @server_bp.route('/servers/<server_id>/restart', methods=['POST'])
