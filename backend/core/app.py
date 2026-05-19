@@ -11,6 +11,7 @@ from backend.server.routes import server_bp
 from backend.modrinth.routes import modrinth_bp
 from backend.system.routes import system_bp
 from backend.backups.routes import backups_bp
+from backend.server.players.routes import players_bp
 from backend.backups.scheduler import init_scheduler
 
 def get_base_path() -> str:
@@ -46,6 +47,7 @@ def create_app() -> Flask:
     app.register_blueprint(modrinth_bp)
     app.register_blueprint(system_bp)
     app.register_blueprint(backups_bp)
+    app.register_blueprint(players_bp)
 
     # One-time startup cleanup: flip stale 'installing'/'starting' statuses
     # left over from a previous run. Tolerates a missing/malformed index.
