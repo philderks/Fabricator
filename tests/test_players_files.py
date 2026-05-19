@@ -8,7 +8,6 @@ Covers:
   - offline-UUID derivation (Java UUID.nameUUIDFromBytes equivalence)
 """
 import json
-import threading
 import time
 import uuid
 from pathlib import Path

@@ -7,7 +7,6 @@ persistent surfaces as a normal decode error.
 """
 import hashlib
 import json
-import logging
 import os
 import tempfile
 import time
@@ -16,9 +15,12 @@ from pathlib import Path
 from typing import Iterable, List, Optional, Union
 
 
-logger = logging.getLogger(__name__)
-
 JsonList = List[dict]
+
+
+class NotAJsonList(ValueError):
+    """Raised when the file decoded successfully but is not a JSON list."""
+
 
 _RETRY_DELAY_SECONDS = 0.05
 
@@ -56,10 +58,8 @@ def read_json_list(server_dir: Union[str, Path], relative: str) -> JsonList:
 def _decode_list(path: Path) -> JsonList:
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, list):
-        raise json.JSONDecodeError(
-            f"Expected list in {path.name}, got {type(data).__name__}",
-            doc=str(data),
-            pos=0,
+        raise NotAJsonList(
+            f"Expected list in {path.name}, got {type(data).__name__}"
         )
     return data
 
