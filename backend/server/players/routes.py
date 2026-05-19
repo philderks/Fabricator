@@ -45,7 +45,7 @@ def _validate_name(raw: Optional[str]):
 def _validate_reason(raw):
     if raw is None or raw == "":
         return None, None
-    if not isinstance(raw, str) or "\n" in raw or len(raw) > _MAX_REASON_LEN:
+    if not isinstance(raw, str) or any(c < " " for c in raw) or len(raw) > _MAX_REASON_LEN:
         return None, (
             jsonify({"error": f"Reason must be a single line ≤ {_MAX_REASON_LEN} chars"}),
             400,

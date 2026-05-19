@@ -151,7 +151,7 @@ export const usePlayersStore = defineStore('players', () => {
       const result = await api.addOp(id, name, level)
       ops.value = ops.value.map(e =>
         e === optimistic
-          ? { name: result.name, uuid: result.uuid || null, level: result.level }
+          ? { name: result.name, uuid: result.uuid || null, level: result.level ?? level }
           : e
       )
     } catch (e) {
