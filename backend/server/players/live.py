@@ -22,7 +22,11 @@ def list_online(registry, server: Dict[str, Any]) -> List[dict]:
     if not manager:
         return []
 
-    install_path = registry.resolve_install_path(server)
+    try:
+        install_path = registry.resolve_install_path(server)
+    except (ValueError, OSError):
+        # Misconfigured server entry — return the player snapshot without UUIDs.
+        install_path = None
 
     # Snapshot inside the lock to avoid iteration-mid-mutation.
     with manager._lock:  # noqa: SLF001 — mirrors existing in-module locking
@@ -31,7 +35,7 @@ def list_online(registry, server: Dict[str, Any]) -> List[dict]:
     # Resolve any missing UUIDs from the cache (no network) outside the lock.
     enriched: List[OnlinePlayer] = []
     for player in snapshot:
-        if player.uuid is None:
+        if player.uuid is None and install_path is not None:
             cached = mojang.lookup_cached(install_path, player.name)
             if cached:
                 # Backfill under the lock so a parallel reader sees a
