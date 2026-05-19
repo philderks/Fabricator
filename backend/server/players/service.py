@@ -14,8 +14,6 @@ from typing import Any, Dict, Optional
 
 from backend.server.players import files as players_files
 from backend.server.players.mojang import (
-    MojangUnavailable,
-    PlayerNotFound,
     resolve_name as mojang_resolve_name,
 )
 
@@ -98,7 +96,7 @@ def op_player(registry, server, name: str, level: int = 4) -> dict:
     server_id = str(server["id"])
     if _is_running(registry, server_id):
         _send(registry, server_id, f"op {name}")
-        return {"name": name, "level": level}
+        return {"name": name}  # level is not applied at runtime (vanilla op takes no level)
 
     install_path = _install_path(registry, server)
     uid = _resolve_uuid_for_addition(install_path, server, name)
