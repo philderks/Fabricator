@@ -376,6 +376,9 @@ class ServerManager:
                 ram_info["limitMB"] = round(ram_limit / (1024 ** 2), 2)
                 ram_info["limitGB"] = round(ram_limit / (1024 ** 3), 3)
             status["ram"] = ram_info
+        cpu_percent = self._get_cpu_percent()
+        if cpu_percent is not None:
+            status["cpu"] = cpu_percent
         if self._process and running:
             status["pid"] = self._process.pid
         with self._lock:
@@ -474,7 +477,9 @@ class ServerManager:
             return self._ps_process
 
         try:
-            self._ps_process = psutil.Process(self._process.pid)
+            ps = psutil.Process(self._process.pid)
+            ps.cpu_percent(interval=None)  # Prime the baseline; first call always returns 0.0
+            self._ps_process = ps
         except (psutil.Error, ProcessLookupError):  # pragma: no cover - psutil errors
             self._ps_process = None
         return self._ps_process
@@ -485,6 +490,16 @@ class ServerManager:
             return None
         try:
             return process.memory_info().rss
+        except (psutil.Error, ProcessLookupError):
+            self._ps_process = None
+            return None
+
+    def _get_cpu_percent(self) -> Optional[float]:
+        process = self._get_psutil_process()
+        if not process:
+            return None
+        try:
+            return round(process.cpu_percent(interval=None), 1)
         except (psutil.Error, ProcessLookupError):
             self._ps_process = None
             return None
