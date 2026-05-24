@@ -80,6 +80,29 @@ main() {
         error "systemctl not found. This installer currently requires systemd."
     fi
 
+    check_python_version() {
+      local min_major=3
+      local min_minor=11
+
+      # Find python3 and get its version
+      if ! command -v python3 &>/dev/null; then
+        error "Python 3 not found. Please install Python ${min_major}.${min_minor} or newer."
+        exit 1
+      fi
+
+      local py_major py_minor
+      py_major=$(python3 -c "import sys; print(sys.version_info.major)")
+      py_minor=$(python3 -c "import sys; print(sys.version_info.minor)")
+
+      if [[ "$py_major" -lt "$min_major" ]] || { [[ "$py_major" -eq "$min_major" ]] && [[ "$py_minor" -lt "$min_minor" ]]; }; then
+        warn "Python ${py_major}.${py_minor} detected — Fabricator requires Python ${min_major}.${min_minor}+."
+        warn "On Ubuntu 22.04: sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt install python3.11"
+        error "Aborting: Python version requirement not met."
+      fi
+
+      info "Python ${py_major}.${py_minor} ✓"
+    }
+
     # 1) Detect distro (via /etc/os-release)
     if [ -f /etc/os-release ]; then
         . /etc/os-release
@@ -106,6 +129,8 @@ main() {
         warn "Unsupported or unknown Linux distro (ID=${ID:-unknown})."
         error "Supported so far: Debian/Ubuntu, Arch, Fedora-family."
     fi
+
+    check_python_version
 
     _skip_os_packages=false
     case "$FABRICATOR_SKIP_OS_PACKAGES" in
