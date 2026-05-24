@@ -4,6 +4,7 @@ import WhitelistPanel from '../../components/players/WhitelistPanel.vue'
 import OpsPanel from '../../components/players/OpsPanel.vue'
 import BansPanel from '../../components/players/BansPanel.vue'
 import KnownPlayersPanel from '../../components/players/KnownPlayersPanel.vue'
+import OnlinePlayersPanel from '../../components/players/OnlinePlayersPanel.vue'
 import StatCard from '../../components/ui/StatCard.vue'
 import AppButton from '../../components/ui/AppButton.vue'
 import { usePlayersStore } from '../../stores/players'
@@ -154,6 +155,8 @@ async function executeKick(name) {
 
     <!-- All Players tab -->
     <div v-if="activeTab === 'all'" class="players-tab-content">
+      <OnlinePlayersPanel v-if="store.isRunning" />
+
       <div class="players-stats">
         <StatCard label="Online now" :value="onlineCount" accent="success" />
         <StatCard label="Known players" :value="knownCount" />
