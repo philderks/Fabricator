@@ -49,6 +49,14 @@ async function onToggleActive(value) {
     toast.error(e.message || 'Failed to toggle whitelist', 'Whitelist')
   }
 }
+
+async function onToggleEnforce(value) {
+  try {
+    await store.toggleEnforceWhitelist(value)
+  } catch (e) {
+    toast.error(e.message || 'Failed to update enforce-whitelist', 'Whitelist')
+  }
+}
 </script>
 
 <template>
@@ -64,14 +72,14 @@ async function onToggleActive(value) {
         v-else
         label="Enforce whitelist"
         :model-value="store.enforceWhitelist"
-        :disabled="true"
+        @update:model-value="onToggleEnforce"
       />
       <p class="whitelist-toggle-hint">
         <template v-if="serverStore.serverStatus?.status === 'running'">
           Runtime whitelist on/off. Resets to the persisted setting on next start.
         </template>
         <template v-else>
-          Persisted setting. Edit in Settings while the server is stopped.
+          Persisted setting — written to server.properties immediately.
         </template>
       </p>
     </div>

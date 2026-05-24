@@ -1,10 +1,12 @@
 """HTTP routes for the player-management feature."""
 import logging
 import re
+from pathlib import Path
 from typing import Optional
 
 from flask import Blueprint, jsonify, request
 
+from backend.server import storage
 from backend.server.players import files as players_files
 from backend.server.players import live as players_live
 from backend.server.players import service as players_service
@@ -27,6 +29,7 @@ def _registry():
 
 
 _NAME_RE = re.compile(r"^[A-Za-z0-9_]{1,16}$")
+_IP_RE = re.compile(r"^(\d{1,3}|\*)\.(\d{1,3}|\*)\.(\d{1,3}|\*)\.(\d{1,3}|\*)$")
 _MAX_REASON_LEN = 256
 
 
@@ -53,6 +56,15 @@ def _validate_reason(raw):
     return raw, None
 
 
+def _validate_ip(raw: Optional[str]):
+    if not isinstance(raw, str) or not _IP_RE.match(raw):
+        return None, (
+            jsonify({"error": "Invalid IP address — use IPv4 or a wildcard like 192.168.*"}),
+            400,
+        )
+    return raw, None
+
+
 def _validate_level(raw):
     try:
         level = int(raw)
@@ -73,11 +85,13 @@ def get_state(server_id, server):
     whitelist = players_files.read_json_list(install_path, players_service.WHITELIST_FILE)
     ops = players_files.read_json_list(install_path, players_service.OPS_FILE)
     bans = players_files.read_json_list(install_path, players_service.BANS_FILE)
+    ip_bans = players_files.read_json_list(install_path, players_service.BANS_IP_FILE)
     known = players_files.read_json_list(install_path, "usercache.json")
     return jsonify({
         "whitelist": whitelist,
         "ops": ops,
         "bans": bans,
+        "ipBans": ip_bans,
         "knownPlayers": known,
         "whitelistActive": _whitelist_active_cache.get(registry, server),
         "enforceWhitelist": bool(server.get("enforceWhitelist", False)),
@@ -217,13 +231,78 @@ def bans_remove(server_id, server):
 @require_server
 @with_server_lock
 def kick(server_id, server):
-    name, err = _validate_name((request.get_json() or {}).get("name"))
+    data = request.get_json() or {}
+    name, err = _validate_name(data.get("name"))
     if err:
         return err
-    return _execute(players_service.kick_player, _registry(), server, name)
+    reason, err = _validate_reason(data.get("reason"))
+    if err:
+        return err
+    return _execute(players_service.kick_player, _registry(), server, name, reason=reason)
 
 
-# ---------- helper ----------------------------------------------------
+# ---------- IP bans ---------------------------------------------------
+
+@players_bp.route("/servers/<server_id>/players/bans/ip", methods=["POST"])
+@require_server
+@with_server_lock
+def ip_bans_add(server_id, server):
+    data = request.get_json() or {}
+    ip, err = _validate_ip(data.get("ip"))
+    if err:
+        return err
+    reason, err = _validate_reason(data.get("reason"))
+    if err:
+        return err
+    return _execute(players_service.ban_ip, _registry(), server, ip, reason=reason)
+
+
+@players_bp.route("/servers/<server_id>/players/bans/ip", methods=["DELETE"])
+@require_server
+@with_server_lock
+def ip_bans_remove(server_id, server):
+    ip, err = _validate_ip((request.get_json() or {}).get("ip"))
+    if err:
+        return err
+    return _execute(players_service.unban_ip, _registry(), server, ip)
+
+
+# ---------- enforceWhitelist (stopped-server persisted toggle) ---------
+
+@players_bp.route("/servers/<server_id>/players/whitelist/enforce", methods=["PATCH"])
+@require_server
+@with_server_lock
+def whitelist_enforce(server_id, server):
+    registry = _registry()
+    if registry.get_status(server_id).get("status") == "running":
+        return jsonify({
+            "error": "Use whitelist/active to toggle the whitelist at runtime.",
+        }), 409
+    active = bool((request.get_json() or {}).get("active"))
+    storage.update_server(server_id, {"enforceWhitelist": active})
+    install_path = registry.resolve_install_path(server)
+    _patch_server_property(install_path, "enforce-whitelist", active)
+    return jsonify({"enforceWhitelist": active})
+
+
+# ---------- helpers ---------------------------------------------------
+
+def _patch_server_property(install_path: Path, key: str, value) -> None:
+    """Update (or insert) a single key=value line in server.properties in-place."""
+    str_value = str(value).lower() if isinstance(value, bool) else str(value)
+    props_path = install_path / "server.properties"
+    if props_path.exists():
+        lines = props_path.read_text(encoding="utf-8").splitlines()
+        for i, line in enumerate(lines):
+            stripped = line.split("=", 1)[0].strip()
+            if stripped == key:
+                lines[i] = f"{key}={str_value}"
+                props_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                return
+        # Key not found — append it.
+        lines.append(f"{key}={str_value}")
+        props_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
 
 def _execute(fn, *args, **kwargs):
     try:

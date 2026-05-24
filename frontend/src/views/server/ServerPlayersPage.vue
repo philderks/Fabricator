@@ -117,6 +117,21 @@ function initials(name) {
 async function safe(fn) {
   try { await fn() } catch (e) { toast.error(e.message || 'Operation failed') }
 }
+
+// ── Kick with reason ───────────────────────────────────────────────────────
+const kickTarget = ref(null)  // player name being kicked
+const kickReason = ref('')
+
+function startKick(name) {
+  kickTarget.value = name
+  kickReason.value = ''
+}
+
+async function executeKick(name) {
+  await safe(() => store.kick(name, kickReason.value.trim() || null))
+  kickTarget.value = null
+  kickReason.value = ''
+}
 </script>
 
 <template>
@@ -169,7 +184,20 @@ async function safe(fn) {
           <span v-if="p.isOp" class="role-badge role-badge--op">OP L{{ p.opLevel }}</span>
           <span v-else-if="p.isBanned" class="role-badge role-badge--banned">Banned</span>
           <div class="all-player-row__actions">
-            <AppButton v-if="p.isOnline" variant="ghost" size="sm" @click="safe(() => store.kick(p.name))">Kick</AppButton>
+            <template v-if="p.isOnline && kickTarget === p.name">
+              <input
+                v-model="kickReason"
+                class="kick-reason-input"
+                type="text"
+                placeholder="Kick reason…"
+                maxlength="256"
+                @keydown.enter.prevent="executeKick(p.name)"
+                @keydown.escape="kickTarget = null"
+              />
+              <AppButton variant="danger" size="sm" @click="executeKick(p.name)">Kick</AppButton>
+              <AppButton variant="ghost" size="sm" @click="kickTarget = null">✕</AppButton>
+            </template>
+            <AppButton v-else-if="p.isOnline" variant="ghost" size="sm" @click="startKick(p.name)">Kick</AppButton>
             <AppButton v-if="p.isBanned" variant="ghost" size="sm" @click="safe(() => store.removeBan(p.name))">Unban</AppButton>
             <AppButton v-else variant="danger" size="sm" @click="safe(() => store.addBan(p.name, null))">Ban</AppButton>
           </div>
@@ -409,4 +437,18 @@ async function safe(fn) {
   font-size: var(--text-sm);
   color: var(--text-disabled);
 }
+
+/* ── Inline kick reason input ── */
+.kick-reason-input {
+  height: 26px;
+  width: 140px;
+  padding: 0 var(--space-2);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--text-xs);
+}
+.kick-reason-input:focus { outline: none; border-color: var(--danger); }
 </style>

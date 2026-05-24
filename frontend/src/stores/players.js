@@ -29,6 +29,7 @@ export const usePlayersStore = defineStore('players', () => {
   const whitelist = ref([])
   const ops = ref([])
   const bans = ref([])
+  const ipBans = ref([])
   const knownPlayers = ref([])
   const online = ref([])
   const whitelistActive = ref(false)
@@ -57,6 +58,7 @@ export const usePlayersStore = defineStore('players', () => {
       whitelist.value = state.whitelist || []
       ops.value = state.ops || []
       bans.value = state.bans || []
+      ipBans.value = state.ipBans || []
       knownPlayers.value = state.knownPlayers || []
       whitelistActive.value = !!state.whitelistActive
       enforceWhitelist.value = !!state.enforceWhitelist
@@ -216,16 +218,54 @@ export const usePlayersStore = defineStore('players', () => {
     }
   }
 
-  async function kick(name) {
-    await api.kickPlayer(currentServerId.value, name)
+  async function kick(name, reason = null) {
+    await api.kickPlayer(currentServerId.value, name, reason)
     // No optimistic update — Minecraft will emit a leave line that updates
     // _players naturally, and the next /online poll reflects it.
+  }
+
+  async function addIpBan(ip, reason = null) {
+    const id = currentServerId.value
+    const optimistic = { ip, reason }
+    ipBans.value = [...ipBans.value, optimistic]
+    try {
+      const result = await api.banIp(id, ip, reason || null)
+      ipBans.value = ipBans.value.map(e => e === optimistic ? result : e)
+    } catch (e) {
+      ipBans.value = ipBans.value.filter(e => e !== optimistic)
+      throw e
+    }
+  }
+
+  async function removeIpBan(ip) {
+    const before = ipBans.value
+    ipBans.value = ipBans.value.filter(
+      e => (e.ip || '').toLowerCase() !== ip.toLowerCase()
+    )
+    try {
+      await api.unbanIp(currentServerId.value, ip)
+    } catch (e) {
+      ipBans.value = before
+      throw e
+    }
+  }
+
+  async function toggleEnforceWhitelist(active) {
+    const previous = enforceWhitelist.value
+    enforceWhitelist.value = active
+    try {
+      await api.setEnforceWhitelist(currentServerId.value, active)
+    } catch (e) {
+      enforceWhitelist.value = previous
+      throw e
+    }
   }
 
   function resetState() {
     whitelist.value = []
     ops.value = []
     bans.value = []
+    ipBans.value = []
     knownPlayers.value = []
     online.value = []
     whitelistActive.value = false
@@ -239,6 +279,7 @@ export const usePlayersStore = defineStore('players', () => {
     whitelist,
     ops,
     bans,
+    ipBans,
     knownPlayers,
     online,
     whitelistActive,
@@ -257,11 +298,14 @@ export const usePlayersStore = defineStore('players', () => {
     addWhitelist,
     removeWhitelist,
     toggleWhitelistActive,
+    toggleEnforceWhitelist,
     addOp,
     setOpLevel,
     removeOp,
     addBan,
     removeBan,
+    addIpBan,
+    removeIpBan,
     kick,
     resetState
   }

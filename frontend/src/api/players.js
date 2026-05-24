@@ -46,6 +46,18 @@ export async function unbanPlayer(serverId, name) {
   return del(`/api/servers/${serverId}/players/bans`, { name })
 }
 
-export async function kickPlayer(serverId, name) {
-  return post(`/api/servers/${serverId}/players/kick`, { name })
+export async function kickPlayer(serverId, name, reason = null) {
+  return post(`/api/servers/${serverId}/players/kick`, { name, ...(reason ? { reason } : {}) })
+}
+
+export async function banIp(serverId, ip, reason = null) {
+  return post(`/api/servers/${serverId}/players/bans/ip`, { ip, ...(reason ? { reason } : {}) })
+}
+
+export async function unbanIp(serverId, ip) {
+  return del(`/api/servers/${serverId}/players/bans/ip`, { ip })
+}
+
+export async function setEnforceWhitelist(serverId, active) {
+  return patch(`/api/servers/${serverId}/players/whitelist/enforce`, { active })
 }

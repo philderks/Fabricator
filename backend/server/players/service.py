@@ -21,6 +21,7 @@ from backend.server.players.mojang import (
 WHITELIST_FILE = "whitelist.json"
 OPS_FILE = "ops.json"
 BANS_FILE = "banned-players.json"
+BANS_IP_FILE = "banned-ips.json"
 
 
 class ServerStateError(Exception):
@@ -178,12 +179,56 @@ def unban_player(registry, server, name: str) -> dict:
 
 # ----------------- kick (running-only) -----------------------------------
 
-def kick_player(registry, server, name: str) -> dict:
+def kick_player(registry, server, name: str, reason: Optional[str] = None) -> dict:
     server_id = str(server["id"])
     if not _is_running(registry, server_id):
         raise ServerStateError("kick requires a running server")
-    _send(registry, server_id, f"kick {name}")
-    return {"name": name}
+    command = f"kick {name} {reason}" if reason else f"kick {name}"
+    _send(registry, server_id, command)
+    return {"name": name, "reason": reason}
+
+
+# ----------------- IP bans -----------------------------------------------
+
+def ban_ip(registry, server, ip: str, reason: Optional[str] = None) -> dict:
+    server_id = str(server["id"])
+    if _is_running(registry, server_id):
+        command = f"ban-ip {ip}" if not reason else f"ban-ip {ip} {reason}"
+        _send(registry, server_id, command)
+        return {"ip": ip, "reason": reason}
+
+    install_path = _install_path(registry, server)
+    entries = players_files.read_json_list(install_path, BANS_IP_FILE)
+    existing = next((e for e in entries if str(e.get("ip", "")).lower() == ip.lower()), None)
+    payload = {
+        "ip": ip,
+        "created": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S %z"),
+        "source": "Fabricator",
+        "expires": "forever",
+        "reason": reason or "Banned by an operator.",
+    }
+    if existing:
+        existing.update(payload)
+    else:
+        entries.append(payload)
+    players_files.write_json_list(install_path, BANS_IP_FILE, entries)
+    return {"ip": ip, "reason": reason}
+
+
+def unban_ip(registry, server, ip: str) -> dict:
+    server_id = str(server["id"])
+    if _is_running(registry, server_id):
+        _send(registry, server_id, f"pardon-ip {ip}")
+        return {"ip": ip}
+
+    install_path = _install_path(registry, server)
+    entries = players_files.read_json_list(install_path, BANS_IP_FILE)
+    entry = next((e for e in entries if str(e.get("ip", "")).lower() == ip.lower()), None)
+    if not entry:
+        raise PlayerNotInList(ip)
+    entries.remove(entry)
+    players_files.write_json_list(install_path, BANS_IP_FILE, entries)
+    return {"ip": ip}
 
 
 # ----------------- whitelist active cache --------------------------------
