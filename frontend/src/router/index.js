@@ -4,6 +4,7 @@ import Servers from '../views/Servers.vue'
 import ServerLayout from '../layouts/ServerLayout.vue'
 import ServerOverviewPage from '../views/server/ServerOverviewPage.vue'
 import ServerConsolePage from '../views/server/ServerConsolePage.vue'
+import ServerPlayersPage from '../views/server/ServerPlayersPage.vue'
 import ServerModsPage from '../views/server/ServerModsPage.vue'
 import ServerFilesPage from '../views/server/ServerFilesPage.vue'
 import ServerBackupsPage from '../views/server/ServerBackupsPage.vue'
@@ -24,6 +25,7 @@ const routes = [
       { path: '', redirect: { name: 'ServerOverview' } },
       { path: 'overview', name: 'ServerOverview', component: ServerOverviewPage },
       { path: 'console',  name: 'ServerConsole',  component: ServerConsolePage },
+      { path: 'players',  name: 'ServerPlayers',  component: ServerPlayersPage },
       { path: 'mods',     name: 'ServerMods',     component: ServerModsPage },
       { path: 'files',    name: 'ServerFiles',    component: ServerFilesPage },
       { path: 'backups',  name: 'ServerBackups',  component: ServerBackupsPage },

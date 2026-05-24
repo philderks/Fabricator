@@ -25,9 +25,12 @@ const ramPercent = computed(() => {
   if (!m.total) return 0
   return Math.round((m.used / m.total) * 100)
 })
-const cpuDisplay = computed(() => {
+const cpuPercent = computed(() => {
   const cpu = store.server?.runtime?.cpu
-  return typeof cpu === 'number' ? `${cpu}%` : '—'
+  return typeof cpu === 'number' ? Math.min(100, Math.round(cpu)) : null
+})
+const cpuDisplay = computed(() => {
+  return cpuPercent.value !== null ? `${cpuPercent.value}%` : '—'
 })
 const recentLogLines = computed(() => {
   const lines = store.logs.stdout || []
@@ -41,7 +44,7 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
     <section class="overview-page__stats">
       <StatCard label="Players" :value="store.serverStatus.players.online" :unit="store.serverStatus.players.max ? `/${store.serverStatus.players.max}` : ''" />
       <StatCard label="Uptime" :value="store.serverStatus.uptime" />
-      <StatCard label="TPS" :value="store.serverStatus.tps ?? '—'" :accent="store.serverStatus.status === 'running' ? 'success' : 'default'" />
+      <StatCard label="Version" :value="store.serverStatus.version" />
       <StatCard label="Mods" :value="store.installedMods.length" :accent="store.installedMods.length > 0 ? 'primary' : 'default'" />
     </section>
 
@@ -59,13 +62,18 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
             <div class="overview-page__perf-row">
               <span class="overview-page__perf-label">RAM</span>
               <span class="overview-page__perf-value">{{ ramUsedDisplay }} / {{ ramTotalDisplay }} GB</span>
+              <span class="overview-page__perf-pct">{{ ramPercent }}%</span>
             </div>
             <div class="overview-page__bar">
               <div class="overview-page__bar-fill" :style="{ width: ramPercent + '%' }"></div>
             </div>
-            <div class="overview-page__perf-meta">
-              <span>{{ ramPercent }}%</span>
-              <span>CPU {{ cpuDisplay }}</span>
+            <div class="overview-page__perf-row">
+              <span class="overview-page__perf-label">CPU</span>
+              <span class="overview-page__perf-value">{{ cpuDisplay }}</span>
+              <span class="overview-page__perf-pct">{{ cpuPercent !== null ? cpuPercent + '%' : '' }}</span>
+            </div>
+            <div class="overview-page__bar">
+              <div class="overview-page__bar-fill overview-page__bar-fill--cpu" :style="{ width: (cpuPercent ?? 0) + '%' }"></div>
             </div>
           </div>
         </Panel>
@@ -211,17 +219,27 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
 
 .overview-page__perf-row {
   display: flex;
-  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-2);
   font-size: var(--text-sm);
   color: var(--text-muted);
 }
 
 .overview-page__perf-label {
   color: var(--text-secondary);
+  flex-shrink: 0;
+  min-width: 2.5rem;
 }
 
 .overview-page__perf-value {
   color: var(--text-secondary);
+  flex: 1;
+}
+
+.overview-page__perf-pct {
+  color: var(--text-disabled);
+  font-size: var(--text-xs);
+  flex-shrink: 0;
 }
 
 .overview-page__bar {
@@ -238,11 +256,9 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
   transition: width 0.3s ease;
 }
 
-.overview-page__perf-meta {
-  display: flex;
-  justify-content: space-between;
-  font-size: var(--text-xs);
-  color: var(--text-disabled);
+.overview-page__bar-fill--cpu {
+  background: var(--accent, var(--primary));
+  opacity: 0.75;
 }
 
 .overview-page__panel-link {
