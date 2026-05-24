@@ -195,3 +195,121 @@ def test_whitelist_active_set_persists_within_same_run(install):
     server["enforceWhitelist"] = False
     cache.set(reg, server, True)
     assert cache.get(reg, server) is True
+
+
+# ---------- kick with reason -----------------------------------------------
+
+def test_running_kick_with_reason_appends_reason_to_command(install):
+    reg = _registry_for(install, "running", started_at=100.0)
+    result = players_service.kick_player(reg, _server(), "Linus", reason="griefing")
+    assert reg.sent_commands == ["kick Linus griefing"]
+    assert result == {"name": "Linus", "reason": "griefing"}
+
+
+def test_running_kick_without_reason_sends_bare_command(install):
+    reg = _registry_for(install, "running", started_at=100.0)
+    result = players_service.kick_player(reg, _server(), "Linus")
+    assert reg.sent_commands == ["kick Linus"]
+    assert result["reason"] is None
+
+
+def test_running_kick_empty_reason_treated_as_no_reason(install):
+    # reason=None and reason="" should both produce a bare kick command
+    reg = _registry_for(install, "running", started_at=100.0)
+    players_service.kick_player(reg, _server(), "Linus", reason=None)
+    assert reg.sent_commands == ["kick Linus"]
+
+
+# ---------- IP bans — running path ----------------------------------------
+
+def test_running_ip_ban_no_reason_sends_bare_command(install):
+    reg = _registry_for(install, "running", started_at=100.0)
+    result = players_service.ban_ip(reg, _server(), "1.2.3.4")
+    assert reg.sent_commands == ["ban-ip 1.2.3.4"]
+    assert result == {"ip": "1.2.3.4", "reason": None}
+
+
+def test_running_ip_ban_with_reason_appends_reason(install):
+    reg = _registry_for(install, "running", started_at=100.0)
+    players_service.ban_ip(reg, _server(), "1.2.3.4", reason="spamming")
+    assert reg.sent_commands == ["ban-ip 1.2.3.4 spamming"]
+
+
+def test_running_ip_ban_wildcard_address(install):
+    reg = _registry_for(install, "running", started_at=100.0)
+    players_service.ban_ip(reg, _server(), "192.168.*.*")
+    assert reg.sent_commands == ["ban-ip 192.168.*.*"]
+
+
+def test_running_ip_unban_sends_pardon_ip_command(install):
+    reg = _registry_for(install, "running", started_at=100.0)
+    result = players_service.unban_ip(reg, _server(), "1.2.3.4")
+    assert reg.sent_commands == ["pardon-ip 1.2.3.4"]
+    assert result == {"ip": "1.2.3.4"}
+
+
+# ---------- IP bans — stopped path ----------------------------------------
+
+def test_stopped_ip_ban_writes_entry_to_file(install):
+    reg = _registry_for(install, "stopped")
+    players_service.ban_ip(reg, _server(), "1.2.3.4", reason="hacking")
+    entries = players_files.read_json_list(install, "banned-ips.json")
+    assert len(entries) == 1
+    assert entries[0]["ip"] == "1.2.3.4"
+    assert entries[0]["reason"] == "hacking"
+
+
+def test_stopped_ip_ban_sets_required_minecraft_fields(install):
+    reg = _registry_for(install, "stopped")
+    players_service.ban_ip(reg, _server(), "10.0.0.1")
+    entry = players_files.read_json_list(install, "banned-ips.json")[0]
+    assert entry["source"] == "Fabricator"
+    assert entry["expires"] == "forever"
+    assert "created" in entry
+    # Default reason when none supplied
+    assert entry["reason"] == "Banned by an operator."
+
+
+def test_stopped_ip_ban_updates_existing_entry(install):
+    """Re-banning the same IP updates the existing record rather than duplicating."""
+    reg = _registry_for(install, "stopped")
+    players_files.write_json_list(install, "banned-ips.json", [
+        {"ip": "1.2.3.4", "reason": "old reason", "source": "Server",
+         "expires": "forever", "created": "2020-01-01 00:00:00 +0000"},
+    ])
+    players_service.ban_ip(reg, _server(), "1.2.3.4", reason="new reason")
+    entries = players_files.read_json_list(install, "banned-ips.json")
+    assert len(entries) == 1
+    assert entries[0]["reason"] == "new reason"
+    assert entries[0]["source"] == "Fabricator"
+
+
+def test_stopped_ip_ban_case_insensitive_dedup(install):
+    """IP comparison is case-insensitive (IPv6 hex may differ in case)."""
+    reg = _registry_for(install, "stopped")
+    players_files.write_json_list(install, "banned-ips.json", [
+        {"ip": "1.2.3.4", "reason": "x", "source": "S",
+         "expires": "forever", "created": "2020-01-01 00:00:00 +0000"},
+    ])
+    players_service.ban_ip(reg, _server(), "1.2.3.4")
+    assert len(players_files.read_json_list(install, "banned-ips.json")) == 1
+
+
+def test_stopped_ip_unban_removes_entry(install):
+    reg = _registry_for(install, "stopped")
+    players_files.write_json_list(install, "banned-ips.json", [
+        {"ip": "1.2.3.4", "reason": "griefing", "source": "S",
+         "expires": "forever", "created": "2020-01-01 00:00:00 +0000"},
+        {"ip": "5.6.7.8", "reason": "spam", "source": "S",
+         "expires": "forever", "created": "2020-01-01 00:00:00 +0000"},
+    ])
+    players_service.unban_ip(reg, _server(), "1.2.3.4")
+    remaining = players_files.read_json_list(install, "banned-ips.json")
+    assert len(remaining) == 1
+    assert remaining[0]["ip"] == "5.6.7.8"
+
+
+def test_stopped_ip_unban_missing_entry_raises(install):
+    reg = _registry_for(install, "stopped")
+    with pytest.raises(players_service.PlayerNotInList):
+        players_service.unban_ip(reg, _server(), "9.9.9.9")
