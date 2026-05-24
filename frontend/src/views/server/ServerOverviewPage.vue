@@ -44,7 +44,7 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
     <section class="overview-page__stats">
       <StatCard label="Players" :value="store.serverStatus.players.online" :unit="store.serverStatus.players.max ? `/${store.serverStatus.players.max}` : ''" />
       <StatCard label="Uptime" :value="store.serverStatus.uptime" />
-      <StatCard label="TPS" :value="store.serverStatus.tps ?? '—'" :accent="store.serverStatus.status === 'running' ? 'success' : 'default'" />
+      <StatCard label="Version" :value="store.serverStatus.version" />
       <StatCard label="Mods" :value="store.installedMods.length" :accent="store.installedMods.length > 0 ? 'primary' : 'default'" />
     </section>
 
