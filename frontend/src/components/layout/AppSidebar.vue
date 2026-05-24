@@ -19,6 +19,7 @@ const hasServerContext = computed(() => Boolean(serverId.value))
 const ALL_NAV_ITEMS = [
   { name: 'ServerOverview', label: 'Overview', icon: 'overview' },
   { name: 'ServerConsole',  label: 'Console',  icon: 'console'  },
+  { name: 'ServerPlayers',  label: 'Players',  icon: 'players'  },
   { name: 'ServerMods',     label: 'Mods',     icon: 'mods'     },
   { name: 'ServerFiles',    label: 'Files',    icon: 'files'    },
   { name: 'ServerBackups',  label: 'Backups',  icon: 'backups'  },
@@ -237,6 +238,10 @@ onUnmounted(() => {
             <rect x="1" y="2" width="13" height="11" rx="1.5"/>
             <path d="M4 5.5l2.5 2L4 9.5"/>
             <path d="M8 9.5h3"/>
+          </template>
+          <template v-else-if="item.icon === 'players'">
+            <circle cx="7.5" cy="5" r="2.5" />
+            <path d="M3 13c0-2.5 2-4.5 4.5-4.5S12 10.5 12 13" />
           </template>
           <template v-else-if="item.icon === 'mods'">
             <path d="M7.5 1L13 4.5v6L7.5 14 2 10.5v-6L7.5 1z"/>

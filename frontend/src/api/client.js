@@ -139,6 +139,16 @@ export function put(endpoint, data = {}) {
 }
 
 /**
+ * PATCH request helper
+ */
+export function patch(endpoint, data = {}) {
+  return apiRequest(endpoint, {
+    method: 'PATCH',
+    body: JSON.stringify(data)
+  })
+}
+
+/**
  * DELETE request helper
  */
 export function del(endpoint, data) {

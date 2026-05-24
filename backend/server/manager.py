@@ -18,6 +18,23 @@ except ImportError:  # pragma: no cover - optional dependency fallback
 logger = logging.getLogger(__name__)
 
 
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Dict
+
+
+@dataclass
+class OnlinePlayer:
+    """Represents a player currently connected to a running server.
+
+    `uuid` is populated lazily by the players service when /online is served —
+    the stdout-stream loop only sees names and must not block on HTTP lookups.
+    """
+    name: str
+    joined_at: datetime
+    uuid: Optional[str] = None
+
+
 class ServerManager:
     """Manages the lifecycle of a Minecraft server process."""
 
@@ -43,7 +60,7 @@ class ServerManager:
         self._stderr_thread: Optional[threading.Thread] = None
         self._stdout_buffer: List[str] = []
         self._stderr_buffer: List[str] = []
-        self._players: set = set()
+        self._players: Dict[str, OnlinePlayer] = {}
         self._lock = threading.Lock()
 
     def _parse_command(self, command: Optional[Iterable[str]]) -> Optional[List[str]]:
@@ -179,13 +196,17 @@ class ServerManager:
                     del buffer[: len(buffer) - self.MAX_LOG_LINES]
                 join_match = self._PLAYER_JOIN_RE.search(line)
                 if join_match:
+                    name = join_match.group(1)
                     with self._lock:
-                        self._players.add(join_match.group(1))
+                        self._players[name] = OnlinePlayer(
+                            name=name,
+                            joined_at=datetime.now(timezone.utc),
+                        )
                 else:
                     leave_match = self._PLAYER_LEAVE_RE.search(line)
                     if leave_match:
                         with self._lock:
-                            self._players.discard(leave_match.group(1))
+                            self._players.pop(leave_match.group(1), None)
                 print(line, end="")
             pipe.close()
 
