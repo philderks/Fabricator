@@ -7,9 +7,11 @@ import ConfirmModal from '../modals/ConfirmModal.vue'
 import PlayerRow from './PlayerRow.vue'
 import { usePlayersStore } from '../../stores/players'
 import { useServerStore } from '../../stores/server'
+import { useToast } from '../../composables/useToast'
 
 const store = usePlayersStore()
 const serverStore = useServerStore()
+const toast = useToast()
 
 const nameInput = ref('')
 const submitting = ref(false)
@@ -23,7 +25,7 @@ async function submitAdd() {
     await store.addWhitelist(name)
     nameInput.value = ''
   } catch (e) {
-    console.error(e)
+    toast.error(e.message || 'Failed to add to whitelist', 'Whitelist')
   } finally {
     submitting.value = false
   }
@@ -34,7 +36,7 @@ async function confirmRemove() {
   try {
     await store.removeWhitelist(removeTarget.value.name)
   } catch (e) {
-    console.error(e)
+    toast.error(e.message || 'Failed to remove from whitelist', 'Whitelist')
   } finally {
     removeTarget.value = null
   }
@@ -44,7 +46,7 @@ async function onToggleActive(value) {
   try {
     await store.toggleWhitelistActive(value)
   } catch (e) {
-    console.error(e)
+    toast.error(e.message || 'Failed to toggle whitelist', 'Whitelist')
   }
 }
 </script>

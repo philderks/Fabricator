@@ -6,9 +6,11 @@ import ConfirmModal from '../modals/ConfirmModal.vue'
 import PlayerRow from './PlayerRow.vue'
 import { usePlayersStore } from '../../stores/players'
 import { useServerStore } from '../../stores/server'
+import { useToast } from '../../composables/useToast'
 
 const store = usePlayersStore()
 const serverStore = useServerStore()
+const toast = useToast()
 
 const nameInput = ref('')
 const levelInput = ref(4)
@@ -29,7 +31,7 @@ async function submitAdd() {
     nameInput.value = ''
     levelInput.value = 4
   } catch (e) {
-    console.error(e)
+    toast.error(e.message || 'Failed to add operator', 'Operators')
   } finally {
     submitting.value = false
   }
@@ -37,7 +39,11 @@ async function submitAdd() {
 
 async function changeLevel(op, level) {
   if (isRunning.value) return  // disabled in template; defensive guard
-  try { await store.setOpLevel(op.name, Number(level)) } catch (e) { console.error(e) }
+  try {
+    await store.setOpLevel(op.name, Number(level))
+  } catch (e) {
+    toast.error(e.message || 'Failed to change op level', 'Operators')
+  }
 }
 
 async function confirmRemove() {
@@ -45,7 +51,7 @@ async function confirmRemove() {
   try {
     await store.removeOp(removeTarget.value.name)
   } catch (e) {
-    console.error(e)
+    toast.error(e.message || 'Failed to remove operator', 'Operators')
   } finally {
     removeTarget.value = null
   }

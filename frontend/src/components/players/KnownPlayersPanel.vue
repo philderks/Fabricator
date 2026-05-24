@@ -4,8 +4,10 @@ import Panel from '../ui/Panel.vue'
 import AppButton from '../ui/AppButton.vue'
 import PlayerRow from './PlayerRow.vue'
 import { usePlayersStore } from '../../stores/players'
+import { useToast } from '../../composables/useToast'
 
 const store = usePlayersStore()
+const toast = useToast()
 
 const expanded = ref(false)
 const search = ref('')
@@ -19,7 +21,7 @@ const filtered = computed(() => {
 const title = computed(() => `Known players (${store.knownPlayers.length})`)
 
 async function safe(fn) {
-  try { await fn() } catch (e) { console.error(e) }
+  try { await fn() } catch (e) { toast.error(e.message || 'Operation failed') }
 }
 </script>
 

@@ -5,8 +5,10 @@ import AppButton from '../ui/AppButton.vue'
 import ConfirmModal from '../modals/ConfirmModal.vue'
 import PlayerRow from './PlayerRow.vue'
 import { usePlayersStore } from '../../stores/players'
+import { useToast } from '../../composables/useToast'
 
 const store = usePlayersStore()
+const toast = useToast()
 
 const nameInput = ref('')
 const reasonInput = ref('')
@@ -22,7 +24,7 @@ async function submitAdd() {
     nameInput.value = ''
     reasonInput.value = ''
   } catch (e) {
-    console.error(e)
+    toast.error(e.message || 'Failed to ban player', 'Bans')
   } finally {
     submitting.value = false
   }
@@ -33,7 +35,7 @@ async function confirmUnban() {
   try {
     await store.removeBan(removeTarget.value.name)
   } catch (e) {
-    console.error(e)
+    toast.error(e.message || 'Failed to unban player', 'Bans')
   } finally {
     removeTarget.value = null
   }

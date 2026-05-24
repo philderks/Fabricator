@@ -3,13 +3,16 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import WhitelistPanel from '../../components/players/WhitelistPanel.vue'
 import OpsPanel from '../../components/players/OpsPanel.vue'
 import BansPanel from '../../components/players/BansPanel.vue'
+import KnownPlayersPanel from '../../components/players/KnownPlayersPanel.vue'
 import StatCard from '../../components/ui/StatCard.vue'
 import AppButton from '../../components/ui/AppButton.vue'
 import { usePlayersStore } from '../../stores/players'
 import { useServerStore } from '../../stores/server'
+import { useToast } from '../../composables/useToast'
 
 const store = usePlayersStore()
 const serverStore = useServerStore()
+const toast = useToast()
 
 onMounted(async () => {
   await store.loadAll()
@@ -112,7 +115,7 @@ function initials(name) {
 }
 
 async function safe(fn) {
-  try { await fn() } catch (e) { console.error(e) }
+  try { await fn() } catch (e) { toast.error(e.message || 'Operation failed') }
 }
 </script>
 
@@ -166,6 +169,7 @@ async function safe(fn) {
           <span v-if="p.isOp" class="role-badge role-badge--op">OP L{{ p.opLevel }}</span>
           <span v-else-if="p.isBanned" class="role-badge role-badge--banned">Banned</span>
           <div class="all-player-row__actions">
+            <AppButton v-if="p.isOnline" variant="ghost" size="sm" @click="safe(() => store.kick(p.name))">Kick</AppButton>
             <AppButton v-if="p.isBanned" variant="ghost" size="sm" @click="safe(() => store.removeBan(p.name))">Unban</AppButton>
             <AppButton v-else variant="danger" size="sm" @click="safe(() => store.addBan(p.name, null))">Ban</AppButton>
           </div>
@@ -174,9 +178,18 @@ async function safe(fn) {
       </ul>
     </div>
 
-    <WhitelistPanel v-else-if="activeTab === 'whitelist'" />
-    <OpsPanel v-else-if="activeTab === 'operators'" />
-    <BansPanel v-else-if="activeTab === 'banned'" />
+    <template v-else-if="activeTab === 'whitelist'">
+      <WhitelistPanel />
+      <KnownPlayersPanel />
+    </template>
+    <template v-else-if="activeTab === 'operators'">
+      <OpsPanel />
+      <KnownPlayersPanel />
+    </template>
+    <template v-else-if="activeTab === 'banned'">
+      <BansPanel />
+      <KnownPlayersPanel />
+    </template>
   </div>
 </template>
 
