@@ -1,10 +1,11 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import StatCard from '../../components/ui/StatCard.vue'
 import Panel from '../../components/ui/Panel.vue'
 import { installedModDisplayName, installedModInitial } from '../../utils/installedModDisplay'
 import { useServerStore } from '../../stores/server'
+import { getPlayitStatus } from '../../api/playit'
 
 const route = useRoute()
 const store = useServerStore()
@@ -37,15 +38,91 @@ const recentLogLines = computed(() => {
   return lines.slice(-RECENT_LOG_PREVIEW_LINES)
 })
 const modPreview = computed(() => store.installedMods.slice(0, 4))
+
+// ─── playit.gg Public IP ─────────────────────────────────────────────────────
+
+const playit = ref({ status: 'stopped', address: null, claim_url: null })
+const copied = ref(false)
+
+let _playitTimer   = null
+let _copyTimeout   = null
+
+const playitConnected = computed(
+  () => playit.value.status === 'connected' && playit.value.address !== null
+)
+
+async function _fetchPlayitStatus() {
+  try {
+    playit.value = await getPlayitStatus()
+  } catch {
+    // Network hiccup — keep stale state; don't flash an absent card.
+  }
+}
+
+function copyAddress() {
+  const addr = playit.value.address
+  if (!addr) return
+  navigator.clipboard.writeText(addr).then(() => {
+    copied.value = true
+    if (_copyTimeout) clearTimeout(_copyTimeout)
+    _copyTimeout = setTimeout(() => {
+      copied.value = false
+      _copyTimeout = null
+    }, 2000)
+  }).catch(() => { /* clipboard unavailable — silent */ })
+}
+
+onMounted(async () => {
+  await _fetchPlayitStatus()
+  _playitTimer = setInterval(_fetchPlayitStatus, 30_000)
+})
+
+onUnmounted(() => {
+  clearInterval(_playitTimer)
+  if (_copyTimeout) clearTimeout(_copyTimeout)
+})
 </script>
 
 <template>
   <div class="overview-page">
-    <section class="overview-page__stats">
+    <section class="overview-page__stats" :class="{ 'overview-page__stats--five': playitConnected }">
       <StatCard label="Players" :value="store.serverStatus.players.online" :unit="store.serverStatus.players.max ? `/${store.serverStatus.players.max}` : ''" />
       <StatCard label="Uptime" :value="store.serverStatus.uptime" />
       <StatCard label="Version" :value="store.serverStatus.version" />
       <StatCard label="Mods" :value="store.installedMods.length" :accent="store.installedMods.length > 0 ? 'primary' : 'default'" />
+
+      <!-- Public IP card — only rendered when the playit tunnel is live -->
+      <div v-if="playitConnected" class="stat-playit">
+        <div class="stat-playit__label">
+          <!-- Globe icon -->
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="2" y1="12" x2="22" y2="12"/>
+            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+          </svg>
+          Public IP
+        </div>
+        <div class="stat-playit__value">
+          <span class="stat-playit__addr" :title="playit.address">{{ playit.address }}</span>
+          <button
+            class="stat-playit__copy"
+            :class="{ 'stat-playit__copy--confirmed': copied }"
+            type="button"
+            :aria-label="copied ? 'Copied!' : 'Copy address'"
+            @click="copyAddress"
+          >
+            <!-- Clipboard icon — shown by default -->
+            <svg v-if="!copied" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="9" y="2" width="6" height="4" rx="1"/>
+              <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+            </svg>
+            <!-- Check icon — shown for 2 s after copy -->
+            <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+          </button>
+        </div>
+      </div>
     </section>
 
     <Panel v-if="store.activeModpack" title="Active modpack">
@@ -175,6 +252,11 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-3);
   min-width: 0;
+}
+
+/* Expands to 5 equal columns when the Public IP card is present */
+.overview-page__stats--five {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .overview-page__modpack {
@@ -426,5 +508,82 @@ const modPreview = computed(() => store.installedMods.slice(0, 4))
   flex-shrink: 0;
   display: block;
   vertical-align: middle;
+}
+
+/* ─── Public IP (playit) stat card ─────────────────────────────────────── */
+/* Matches StatCard's visual design token-for-token; built inline because
+   StatCard has no slot for icons or interactive controls. */
+
+.stat-playit {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  min-width: 0;
+}
+
+.stat-playit__label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-disabled);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: var(--space-2);
+}
+
+.stat-playit__value {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.stat-playit__addr {
+  /* Smaller than StatCard's 22px value — the address is long text, not a number */
+  font-size: var(--text-sm);
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  letter-spacing: -0.2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+
+.stat-playit__copy {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+}
+
+.stat-playit__copy:hover {
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border-color: var(--border-color);
+}
+
+.stat-playit__copy:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Confirmed state: briefly tint the check green */
+.stat-playit__copy--confirmed {
+  color: var(--success);
 }
 </style>
