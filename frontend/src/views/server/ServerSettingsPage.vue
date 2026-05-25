@@ -1,10 +1,11 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import AppButton from '../../components/ui/AppButton.vue'
 import FormField from '../../components/ui/FormField.vue'
 import Panel from '../../components/ui/Panel.vue'
 import ToggleRow from '../../components/ui/ToggleRow.vue'
 import { useServerStore } from '../../stores/server'
+import { getPlayitStatus, startPlayit, stopPlayit } from '../../api/playit'
 
 const store = useServerStore()
 
@@ -46,6 +47,72 @@ const onReset = () => {
   if (!store.canEditSettings) return
   store.resetSettings()
 }
+
+// ─── playit.gg tunnel ────────────────────────────────────────────────────────
+
+const playitEnabled  = ref(false)
+const playitStatus   = ref('stopped')   // stopped|starting|claiming|connected|error
+const playitAddress  = ref(null)
+const playitClaimUrl = ref(null)
+
+let _playitTimer = null
+
+async function _fetchPlayitStatus() {
+  try {
+    const data = await getPlayitStatus()
+    playitStatus.value   = data.status
+    playitAddress.value  = data.address   ?? null
+    playitClaimUrl.value = data.claim_url ?? null
+    // Keep the toggle in sync with live process state.
+    playitEnabled.value  = ['starting', 'claiming', 'connected'].includes(data.status)
+  } catch {
+    // Silent — a network hiccup should not crash the settings page.
+  }
+}
+
+function _startPolling() {
+  if (_playitTimer) return
+  _playitTimer = setInterval(_fetchPlayitStatus, 3000)
+}
+
+function _stopPolling() {
+  if (_playitTimer) {
+    clearInterval(_playitTimer)
+    _playitTimer = null
+  }
+}
+
+async function onPlayitToggle(enabled) {
+  // Optimistically reflect intent immediately.
+  playitEnabled.value = enabled
+  try {
+    if (enabled) {
+      await startPlayit()
+      _startPolling()
+    } else {
+      await stopPlayit()
+      _stopPolling()
+      playitStatus.value   = 'stopped'
+      playitAddress.value  = null
+      playitClaimUrl.value = null
+    }
+  } catch (err) {
+    // Revert the optimistic update so the UI stays truthful.
+    playitEnabled.value = !enabled
+    console.error('[playit] toggle failed:', err)
+  }
+}
+
+onMounted(async () => {
+  await _fetchPlayitStatus()
+  if (playitEnabled.value) {
+    _startPolling()
+  }
+})
+
+onUnmounted(() => {
+  _stopPolling()
+})
 </script>
 
 <template>
@@ -885,6 +952,68 @@ const onReset = () => {
       </div>
     </Panel>
 
+    <Panel title="Network">
+      <!-- playit.gg tunnel row ─────────────────────────────────────────────
+           Layout: description text on the left, status dot + toggle on the
+           right.  The toggle is built inline (same HTML/CSS as ToggleRow)
+           so the status dot can sit flush beside the switch without fighting
+           ToggleRow's internal justify-content: space-between layout.
+      ──────────────────────────────────────────────────────────────────── -->
+      <div class="playit-row">
+        <div class="playit-row__text">
+          <span class="playit-row__label">playit.gg tunnel</span>
+          <span class="playit-row__desc">
+            Make your server public without port forwarding. No port forwarding required.
+          </span>
+        </div>
+
+        <div class="playit-row__controls">
+          <!-- Status dot: grey=stopped, orange=starting|claiming, green=connected, red=error -->
+          <span
+            class="playit-dot"
+            :class="`playit-dot--${playitStatus}`"
+            :title="playitStatus"
+            aria-hidden="true"
+          ></span>
+
+          <!-- Toggle switch — visually identical to ToggleRow's switch -->
+          <label class="playit-switch">
+            <input
+              type="checkbox"
+              role="switch"
+              :aria-label="'playit.gg tunnel'"
+              :checked="playitEnabled"
+              @change="onPlayitToggle($event.target.checked)"
+            />
+            <span class="playit-switch__track" aria-hidden="true">
+              <span class="playit-switch__thumb"></span>
+            </span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Claim banner: shown while the agent is waiting for account linking -->
+      <Transition name="playit-banner">
+        <div
+          v-if="playitStatus === 'claiming' && playitClaimUrl"
+          class="playit-claim"
+          role="status"
+        >
+          <p class="playit-claim__text">
+            One more step — link your playit.gg account to activate the tunnel
+          </p>
+          <a
+            :href="playitClaimUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="playit-claim__btn"
+          >
+            Claim agent →
+          </a>
+        </div>
+      </Transition>
+    </Panel>
+
     <Panel title="Danger zone">
       <div class="settings-page__danger">
         <p class="settings-page__danger-text">Deleting a server removes its files and backups. This cannot be undone.</p>
@@ -1155,5 +1284,186 @@ const onReset = () => {
   font-size: var(--text-sm);
   color: var(--text-muted);
   line-height: var(--leading-normal);
+}
+
+/* ─── playit.gg Network row ─────────────────────────────────────────────── */
+
+.playit-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  /* Match ToggleRow's vertical rhythm */
+  padding: var(--space-3) 0;
+}
+
+.playit-row__text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  flex: 1;
+}
+
+.playit-row__label {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-primary);
+  line-height: var(--leading-tight);
+}
+
+.playit-row__desc {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: var(--leading-normal);
+}
+
+.playit-row__controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+/* Status dot ───────────────────────────────────────────────────────────── */
+
+.playit-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-disabled);        /* grey — stopped (default) */
+  transition: background-color 200ms ease;
+}
+
+.playit-dot--starting,
+.playit-dot--claiming {
+  background: var(--warning);              /* orange — negotiating */
+}
+
+.playit-dot--connected {
+  background: var(--success);             /* green — tunnel live */
+}
+
+.playit-dot--error {
+  background: var(--danger);              /* red — process failed */
+}
+
+/* Toggle switch — pixel-for-pixel match with ToggleRow's switch ─────────── */
+
+.playit-switch {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.playit-switch input {
+  /* Visually hidden but still accessible */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.playit-switch__track {
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-pill);
+  position: relative;
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.playit-switch__thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: var(--text-muted);
+  border-radius: 50%;
+  transition: transform 160ms ease, background-color 160ms ease;
+}
+
+.playit-switch input:checked + .playit-switch__track {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.playit-switch input:checked + .playit-switch__track .playit-switch__thumb {
+  transform: translateX(18px);
+  background: var(--text-primary);
+}
+
+.playit-switch input:focus-visible + .playit-switch__track {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Claim banner ─────────────────────────────────────────────────────────── */
+
+.playit-claim {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklch, var(--primary) 8%, transparent);
+}
+
+.playit-claim__text {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: var(--leading-normal);
+}
+
+.playit-claim__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 6px 14px;
+  background: var(--primary);
+  color: var(--text-on-primary);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  font-family: inherit;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 0.15s ease;
+  flex-shrink: 0;
+}
+
+.playit-claim__btn:hover {
+  background: var(--primary-dark);
+}
+
+.playit-claim__btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Banner enter/leave transition */
+.playit-banner-enter-active,
+.playit-banner-leave-active {
+  transition: opacity 200ms ease, transform 200ms ease;
+}
+
+.playit-banner-enter-from,
+.playit-banner-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 </style>
