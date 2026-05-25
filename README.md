@@ -117,6 +117,10 @@ SERVER_INDEX_FILE=/var/lib/fabricator/servers.json
 
 # Optional: comma-separated origins for a separate dev UI or external frontends (no *)
 # CORS_ORIGINS=https://dashboard.example.com
+
+# playit.gg tunnel agent — set to "true" to start the agent automatically on boot.
+# The agent creates a public tunnel so the server is reachable without port-forwarding.
+PLAYIT_ENABLED=false
 ```
 
 Managed Java runtimes are stored under `/var/lib/fabricator/java` by default when `FLASK_ENV=production`.

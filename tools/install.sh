@@ -317,6 +317,9 @@ PORT=5000
 FLASK_ENV=production
 SERVER_ROOT=${DATA_DIR}/servers
 SERVER_INDEX_FILE=${DATA_DIR}/servers.json
+
+# playit.gg tunnel agent — set to "true" to start automatically on boot.
+PLAYIT_ENABLED=false
 EOF
         $SUDO chown root:fabricator "$ENV_FILE"
         $SUDO chmod 0640 "$ENV_FILE"
