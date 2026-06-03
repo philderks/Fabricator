@@ -123,6 +123,15 @@ SERVER_INDEX_FILE=/var/lib/fabricator/servers.json
 PLAYIT_ENABLED=false
 ```
 
+The playit tunnel is opt-in and ships separately from the main installer. Install the
+agent binary with the standalone script, then enable it:
+
+```bash
+sudo ./tools/install-playit.sh        # downloads /usr/bin/playit for this architecture
+# then set PLAYIT_ENABLED=true above (or toggle it in Server → Settings → Network)
+sudo systemctl restart fabricator
+```
+
 Managed Java runtimes are stored under `/var/lib/fabricator/java` by default when `FLASK_ENV=production`.
 
 After editing, restart the service:

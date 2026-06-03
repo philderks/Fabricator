@@ -22,6 +22,8 @@ from playit import (  # noqa: E402
     start as playit_start_agent,
     stop as playit_stop_agent,
     get_status as playit_get_status,
+    is_enabled as playit_is_enabled,
+    set_enabled as playit_set_enabled,
 )
 
 
@@ -178,15 +180,18 @@ def _register_playit_routes(app) -> None:  # type: ignore[type-arg]
     def playit_start():
         """Start the playit agent (no-op if already running).
 
-        Returns ``{"ok": true}`` immediately; status transitions are
+        Persists the enabled state so the tunnel auto-starts after a restart,
+        then returns ``{"ok": true}`` immediately; status transitions are
         observable via ``GET /api/playit/status``.
         """
+        playit_set_enabled(True)
         playit_start_agent()
         return jsonify({"ok": True})
 
     @app.route("/api/playit/stop", methods=["POST"])
     def playit_stop():
-        """Stop the playit agent and reset status to ``stopped``."""
+        """Stop the playit agent, persist the disabled state, and reset status."""
+        playit_set_enabled(False)
         playit_stop_agent()
         return jsonify({"ok": True})
 
@@ -205,8 +210,10 @@ def main() -> None:
     config = get_config()
 
     # Wire playit routes onto the Flask app and optionally auto-start the agent.
+    # is_enabled() honours the persisted toggle first, falling back to the
+    # PLAYIT_ENABLED env var for fresh/env-driven installs.
     _register_playit_routes(app)
-    if os.environ.get("PLAYIT_ENABLED", "").strip().lower() == "true":
+    if playit_is_enabled():
         playit_start_agent()
 
     def shutdown() -> None:

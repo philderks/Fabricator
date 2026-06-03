@@ -31,6 +31,12 @@ logger = logging.getLogger(__name__)
 _PLAYIT_BIN = "/usr/bin/playit"
 _SECRET_FILE = "/var/lib/fabricator/playit.toml"
 
+# Persisted desired-state flag. Written by set_enabled() so a tunnel turned on
+# from the dashboard survives a service restart. Lives alongside the secret in
+# the data dir, which the fabricator service user can write (the env file is
+# root-owned 0640 and therefore not writable by the app).
+_STATE_FILE = "/var/lib/fabricator/playit.enabled"
+
 _RE_CLAIM_URL = re.compile(r"claim_url=(\S+)")
 _RE_ADDRESS   = re.compile(r"(\S+\.ply\.gg:\d+)")
 
@@ -71,13 +77,24 @@ def start() -> None:
             logger.info("playit: no secret file found at %s — agent will emit a claim URL", _SECRET_FILE)
 
         logger.info("playit: launching %s", " ".join(cmd))
-        _proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,   # merge stderr into stdout
-            text=True,
-            preexec_fn=os.setsid,       # new process group so we can kill the tree
-        )
+        try:
+            _proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,   # merge stderr into stdout
+                text=True,
+                preexec_fn=os.setsid,       # new process group so we can kill the tree
+            )
+        except (FileNotFoundError, OSError) as exc:
+            # Most commonly the binary is missing — install it with
+            # tools/install-playit.sh. Surface this as the "error" state
+            # instead of letting it bubble out of the start() call site.
+            logger.error("playit: failed to launch agent %s: %s", _PLAYIT_BIN, exc)
+            _proc      = None
+            _status    = "error"
+            _address   = None
+            _claim_url = None
+            return
 
         _status    = "starting"
         _address   = None
@@ -128,6 +145,39 @@ def get_status() -> dict:
             "address":   _address,
             "claim_url": _claim_url,
         }
+
+
+def is_enabled() -> bool:
+    """Return whether the tunnel should be running.
+
+    The persisted state file written by :func:`set_enabled` is authoritative
+    when present; otherwise we fall back to the ``PLAYIT_ENABLED`` environment
+    variable so existing env-driven installs keep their behaviour.
+    """
+    try:
+        with open(_STATE_FILE, encoding="utf-8") as fh:
+            return fh.read().strip().lower() == "true"
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        logger.warning("playit: could not read state file %s: %s", _STATE_FILE, exc)
+    return os.environ.get("PLAYIT_ENABLED", "").strip().lower() == "true"
+
+
+def set_enabled(enabled: bool) -> None:
+    """Persist the desired tunnel state so it survives a service restart.
+
+    Best-effort: if the data dir is not writable (e.g. a dev run outside the
+    systemd service) we log a warning and leave the env-var fallback in place
+    rather than failing the request.
+    """
+    try:
+        os.makedirs(os.path.dirname(_STATE_FILE), exist_ok=True)
+        with open(_STATE_FILE, "w", encoding="utf-8") as fh:
+            fh.write("true" if enabled else "false")
+        logger.info("playit: persisted enabled=%s to %s", enabled, _STATE_FILE)
+    except OSError as exc:
+        logger.warning("playit: could not persist state to %s: %s", _STATE_FILE, exc)
 
 
 # ---------------------------------------------------------------------------
