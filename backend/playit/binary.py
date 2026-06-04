@@ -55,6 +55,25 @@ def enabled_state_path() -> Path:
     return runtime_dir() / "playit.enabled"
 
 
+def runtime_dir_writable() -> bool:
+    """True if the runtime dir is writable, or could be created (its nearest
+    existing ancestor is writable). Non-mutating.
+
+    Used at startup to warn early when the playit runtime dir isn't usable —
+    the common dev case is PLAYIT_RUNTIME_DIR unset, so it defaults to
+    /var/lib/fabricator/playit, which a non-service user can't create. Without
+    a writable dir the tunnel can't persist its secret after a claim and the
+    agent silently shows offline on playit.gg.
+    """
+    probe = runtime_dir()
+    while not probe.exists():
+        parent = probe.parent
+        if parent == probe:          # reached the filesystem root, nothing exists
+            return False
+        probe = parent
+    return os.access(probe, os.W_OK)
+
+
 def _first_executable(*candidates: str) -> Optional[str]:
     for c in candidates:
         if os.access(c, os.X_OK):

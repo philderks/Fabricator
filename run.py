@@ -149,6 +149,24 @@ def main() -> None:
     app = create_app()
     config = get_config()
 
+    # Warn early when the playit runtime dir isn't writable. In dev (no systemd)
+    # PLAYIT_RUNTIME_DIR is often unset, so it defaults to
+    # /var/lib/fabricator/playit — which the dev user can't create. Without a
+    # writable dir the tunnel can't save its secret after a claim and silently
+    # shows offline on playit.gg, so surface it up front.
+    try:
+        from backend.utils.platform import is_windows
+        from backend.playit import binary as playit_binary
+        if not is_windows() and not playit_binary.runtime_dir_writable():
+            logger.warning(
+                "playit: runtime dir %s is not writable — the tunnel can't save "
+                "its secret and will show offline. Set PLAYIT_RUNTIME_DIR to a "
+                "writable path (e.g. PLAYIT_RUNTIME_DIR=$HOME/.fabricator-playit).",
+                playit_binary.runtime_dir(),
+            )
+    except Exception as exc:
+        logger.debug("playit runtime-dir pre-check skipped: %s", exc)
+
     # Auto-start the playit tunnel if enabled. agent.is_enabled() honours the
     # persisted desired-state file first (so a tunnel toggled on from the
     # dashboard survives a restart), falling back to the PLAYIT_ENABLED env

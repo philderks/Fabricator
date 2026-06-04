@@ -627,6 +627,25 @@ def test_binary_verified_reflects_env(agent, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# runtime_dir_writable — startup pre-check that warns when the dir is unusable
+# ---------------------------------------------------------------------------
+
+def test_runtime_dir_writable_true_for_creatable_dir(monkeypatch, tmp_path):
+    """A not-yet-existing dir under a writable ancestor counts as writable."""
+    from backend.playit import binary as b
+    monkeypatch.setenv("PLAYIT_RUNTIME_DIR", str(tmp_path / "sub" / "playit"))
+    assert b.runtime_dir_writable() is True
+
+
+def test_runtime_dir_writable_false_when_no_writable_ancestor(monkeypatch, tmp_path):
+    """No writable ancestor → not usable (the dev /var/lib/fabricator case)."""
+    from backend.playit import binary as b
+    monkeypatch.setenv("PLAYIT_RUNTIME_DIR", str(tmp_path / "x" / "y"))
+    monkeypatch.setattr(b.os, "access", lambda *a, **k: False)
+    assert b.runtime_dir_writable() is False
+
+
+# ---------------------------------------------------------------------------
 # Exchange-stdout parser — playit-cli v1.0.5 emits a reminder loop, the
 # secret only appears as the trailing line on success. Verified against the
 # live v1.0.5 binary on 2026-05-29 (see plan F).
