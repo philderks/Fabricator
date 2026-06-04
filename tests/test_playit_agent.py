@@ -244,6 +244,54 @@ def test_existing_secret_skips_claim_bootstrap(agent, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Secret-write failure (e.g. unwritable runtime dir) must surface an error,
+# not hang at "claiming" with the daemon never starting.
+# ---------------------------------------------------------------------------
+
+def test_claim_secret_write_failure_surfaces_error(agent, tmp_path):
+    """If the secret can't be persisted, surface a clear error instead of
+    leaving the UI stuck on 'claiming'. Regression: a PermissionError from an
+    unwritable runtime dir used to kill the lifecycle thread silently."""
+    fake_exchange = MagicMock(spec=subprocess.Popen)
+    fake_exchange.communicate.return_value = (SECRET_MARKER, "")
+    fake_exchange.returncode = 0
+    fake_exchange.poll.return_value = None
+
+    daemon_spawned = [0]
+
+    def fake_popen(cmd, **kwargs):
+        if "claim" in cmd:
+            return fake_exchange
+        daemon_spawned[0] += 1
+        return _make_fake_daemon_proc([])
+
+    def fake_run_cli(*args, **kwargs):
+        if args[1] == "generate":
+            return _make_completed(stdout=CLAIM_CODE + "\n")
+        if args[1] == "url":
+            return _make_completed(stdout=CLAIM_URL + "\n")
+        raise AssertionError(f"unexpected run_cli: {args}")
+
+    def boom(*a, **k):
+        raise PermissionError(13, "Permission denied")
+
+    with patch("backend.playit.binary.find_daemon", return_value="/fake/playit"), \
+         patch("backend.playit.binary.find_cli",    return_value="/fake/playit-cli"), \
+         patch("backend.playit.binary.run_cli",     side_effect=fake_run_cli), \
+         patch("subprocess.Popen",                  side_effect=fake_popen), \
+         patch.object(agent, "_atomic_write_secret", side_effect=boom):
+        agent.start()
+        assert _wait_for(lambda: agent.get_status()["status"] == "error", timeout=3.0), \
+            f"never surfaced error; got {agent.get_status()}"
+
+    status = agent.get_status()
+    assert "could not save the playit secret" in (status["error_reason"] or "")
+    assert "PLAYIT_RUNTIME_DIR" in (status["error_reason"] or "")
+    assert daemon_spawned[0] == 0, "daemon must not spawn when the secret wasn't saved"
+    assert not (tmp_path / "playit.toml").exists()
+
+
+# ---------------------------------------------------------------------------
 # CANCEL-DURING-CLAIM — security-critical: tunnel must NOT come up after stop()
 # ---------------------------------------------------------------------------
 

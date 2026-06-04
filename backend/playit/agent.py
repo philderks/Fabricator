@@ -493,6 +493,23 @@ def _run_exchange_popen(my_gen: int, code: str, secret: Path) -> bool:
 
     try:
         _atomic_write_secret(secret, secret_token)
+    except OSError as exc:
+        # Typically the runtime dir isn't writable — common in dev when
+        # PLAYIT_RUNTIME_DIR is unset and the default /var/lib/fabricator/playit
+        # doesn't exist / isn't owned by the current user. Surface it instead
+        # of letting the lifecycle thread die and leaving the UI stuck on
+        # "claiming" forever (the daemon never starts → playit.gg shows the
+        # agent offline with no hint why).
+        with _lock:
+            if my_gen != _gen:
+                return False
+            _status = "error"
+            _error_reason = (
+                f"could not save the playit secret to {secret.parent} "
+                f"({exc.__class__.__name__}) — make sure that directory is "
+                "writable, or set PLAYIT_RUNTIME_DIR to a writable path."
+            )
+        return False
     finally:
         secret_token = None
 
