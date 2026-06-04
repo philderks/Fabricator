@@ -3,7 +3,6 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import StatCard from '../../components/ui/StatCard.vue'
 import Panel from '../../components/ui/Panel.vue'
-import AppButton from '../../components/ui/AppButton.vue'
 import { installedModDisplayName, installedModInitial } from '../../utils/installedModDisplay'
 import { useServerStore } from '../../stores/server'
 import { usePlayitStore } from '../../stores/playit'
@@ -41,20 +40,21 @@ const recentLogLines = computed(() => {
 })
 const modPreview = computed(() => store.installedMods.slice(0, 4))
 
-// ─── playit.gg — state from the shared Pinia store ──────────────────────────
+// ─── playit.gg — Public-IP stat card (per-server, derived from the store) ────
+// The full tunnel UI lives in the per-server playit.gg tab; here we only show
+// an at-a-glance address card for THIS server's matched tunnel.
+
+const playitTunnel = computed(() => playit.tunnelForPort(store.server?.port))
+const playitLive = computed(() =>
+  Boolean(playitTunnel.value?.address && !playitTunnel.value?.disabled_reason)
+)
 
 const copied = ref(false)
 let _copyTimeout = null
 let _unsubscribePlayit = null
 
-const showPlayitPanel = computed(() => !playit.isUnsupported)
-
-function startPlayitFlow() {
-  playit.start()
-}
-
 function copyAddress() {
-  const addr = playit.address
+  const addr = playitTunnel.value?.address
   if (!addr) return
   navigator.clipboard.writeText(addr).then(() => {
     copied.value = true
@@ -81,14 +81,14 @@ onUnmounted(() => {
 
 <template>
   <div class="overview-page">
-    <section class="overview-page__stats" :class="{ 'overview-page__stats--five': playit.isConnected }">
+    <section class="overview-page__stats" :class="{ 'overview-page__stats--five': playitLive }">
       <StatCard label="Players" :value="store.serverStatus.players.online" :unit="store.serverStatus.players.max ? `/${store.serverStatus.players.max}` : ''" />
       <StatCard label="Uptime" :value="store.serverStatus.uptime" />
       <StatCard label="Version" :value="store.serverStatus.version" />
       <StatCard label="Mods" :value="store.installedMods.length" :accent="store.installedMods.length > 0 ? 'primary' : 'default'" />
 
-      <!-- Public IP card — only rendered when the playit tunnel is live -->
-      <div v-if="playit.isConnected" class="stat-playit">
+      <!-- Public IP card — only rendered when THIS server's tunnel is live -->
+      <div v-if="playitLive" class="stat-playit">
         <div class="stat-playit__label">
           <!-- Globe icon -->
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -99,7 +99,7 @@ onUnmounted(() => {
           Public IP
         </div>
         <div class="stat-playit__value">
-          <span class="stat-playit__addr" :title="playit.address">{{ playit.address }}</span>
+          <span class="stat-playit__addr" :title="playitTunnel.address">{{ playitTunnel.address }}</span>
           <button
             class="stat-playit__copy"
             :class="{ 'stat-playit__copy--confirmed': copied }"
@@ -125,152 +125,6 @@ onUnmounted(() => {
       <div class="overview-page__modpack">
         <span class="overview-page__modpack-name">{{ store.activeModpack.name || store.activeModpack.projectId }}</span>
         <span class="overview-page__modpack-version">{{ store.activeModpack.version }}</span>
-      </div>
-    </Panel>
-
-    <!-- playit.gg onboarding ─────────────────────────────────────────────────
-         Progressive-disclosure states. error_reason gets a prominent banner;
-         Reset is always available in error and claiming so the user is never
-         stuck reusing a secret tied to a maxed-out / wrong account.
-    ──────────────────────────────────────────────────────────────────────── -->
-    <Panel v-if="showPlayitPanel" title="Public access">
-      <!-- State: stopped → benefit-framed CTA -->
-      <div v-if="!playit.isActive && !playit.isError" class="playit-onboarding">
-        <div class="playit-onboarding__text">
-          <p class="playit-onboarding__lead">
-            Make your server reachable for friends without router setup.
-          </p>
-          <p class="playit-onboarding__sub">
-            playit.gg creates a public tunnel — no port forwarding, no firewall changes.
-          </p>
-        </div>
-        <AppButton variant="primary" @click="startPlayitFlow">Set up playit.gg</AppButton>
-      </div>
-
-      <!-- State: error → prominent banner with reason + two actions -->
-      <div v-else-if="playit.isError" class="playit-error-state">
-        <div class="playit-error-banner" role="alert">
-          <svg class="playit-error-banner__icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="12" cy="12" r="10"/>
-            <line x1="12" y1="8" x2="12" y2="12"/>
-            <line x1="12" y1="16" x2="12.01" y2="16"/>
-          </svg>
-          <div class="playit-error-banner__text">
-            <p class="playit-error-banner__title">playit.gg tunnel failed</p>
-            <p class="playit-error-banner__reason">{{ playit.errorReason || 'No further details — check the playit.gg dashboard.' }}</p>
-          </div>
-        </div>
-        <div class="playit-error-state__actions">
-          <AppButton variant="ghost" @click="startPlayitFlow">Try again</AppButton>
-          <AppButton variant="primary" @click="playit.reset">Use different account</AppButton>
-        </div>
-      </div>
-
-      <!-- State: claiming → URL stays surfaced for the whole user-action window -->
-      <div v-else-if="playit.isClaiming && playit.claimUrl" class="playit-claiming">
-        <div class="playit-claiming__step">
-          <span class="playit-claiming__num">1</span>
-          <span>Open the link below and sign in to (or sign up for) playit.gg</span>
-        </div>
-        <a
-          :href="playit.claimUrl"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="playit-claiming__link"
-        >
-          {{ playit.claimUrl }}
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-            <polyline points="15 3 21 3 21 9"/>
-            <line x1="10" y1="14" x2="21" y2="3"/>
-          </svg>
-        </a>
-        <div class="playit-claiming__step">
-          <span class="playit-claiming__num">2</span>
-          <span>Approve this agent on the playit.gg page — the tunnel will activate automatically.</span>
-        </div>
-        <div class="playit-claiming__actions">
-          <button type="button" class="playit-claiming__cancel" @click="playit.stop">
-            Cancel setup
-          </button>
-          <button type="button" class="playit-claiming__cancel" @click="playit.reset">
-            Use different account
-          </button>
-        </div>
-      </div>
-
-      <!-- State: connected → quiet confirmation (full card lives in stats row) -->
-      <div v-else-if="playit.isConnected" class="playit-confirmed">
-        <span class="playit-confirmed__dot" aria-hidden="true"></span>
-        <span class="playit-confirmed__text">
-          Tunnel active. Share the address above with your players.
-        </span>
-        <button type="button" class="playit-confirmed__reset" @click="playit.reset">
-          Reset
-        </button>
-      </div>
-
-      <!-- State: needs_tunnel → actionable, NOT an error. Agent is connected
-           but no tunnel has been allocated in the playit.gg dashboard. -->
-      <div v-else-if="playit.isNeedsTunnel" class="playit-info">
-        <div class="playit-info__body">
-          <p class="playit-info__title">Agent connected — almost there</p>
-          <p class="playit-info__text">
-            Your playit.gg account has no tunnels yet. Create one (Minecraft, free tier
-            is enough) and it'll show up here automatically.
-          </p>
-        </div>
-        <div class="playit-info__actions">
-          <a
-            href="https://playit.gg/account"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="playit-info__link"
-          >
-            Open playit.gg dashboard ↗
-          </a>
-          <button type="button" class="playit-confirmed__reset" @click="playit.reset">
-            Use different account
-          </button>
-        </div>
-      </div>
-
-      <!-- State: running → daemon healthy but no usable address right now
-           (rundata transient unreachable, or post-spawn pre-first-poll). The
-           tunnel may still be live on playit's side; we just lack confirmation.
-           NEUTRAL, NOT an error — no red. -->
-      <div v-else-if="playit.isRunning" class="playit-info">
-        <div class="playit-info__body">
-          <p class="playit-info__title">Tunnel running</p>
-          <p class="playit-info__text">
-            The public address isn't visible here right now. You can find it
-            in your playit.gg dashboard.
-          </p>
-        </div>
-        <div class="playit-info__actions">
-          <a
-            href="https://playit.gg/account"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="playit-info__link"
-          >
-            Open playit.gg dashboard ↗
-          </a>
-          <button type="button" class="playit-confirmed__reset" @click="playit.stop">
-            Stop tunnel
-          </button>
-        </div>
-      </div>
-
-      <!-- State: starting → very brief, "connecting…" while the daemon comes up
-           and the first rundata poll is on its way (~1.5s). After that we
-           transition to running / connected / needs_tunnel / error. -->
-      <div v-else class="playit-starting">
-        <span class="playit-starting__dot" aria-hidden="true"></span>
-        <span class="playit-starting__text">Connecting tunnel…</span>
-        <button type="button" class="playit-confirmed__reset" @click="playit.stop">
-          Cancel
-        </button>
       </div>
     </Panel>
 
@@ -727,285 +581,5 @@ onUnmounted(() => {
 /* Confirmed state: briefly tint the check green */
 .stat-playit__copy--confirmed {
   color: var(--success);
-}
-
-/* ─── playit onboarding panel (Public access) ─────────────────────────── */
-
-.playit-onboarding {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  justify-content: space-between;
-}
-
-.playit-onboarding__text {
-  flex: 1;
-  min-width: 0;
-}
-
-.playit-onboarding__lead {
-  margin: 0 0 var(--space-1) 0;
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--text-primary);
-  line-height: var(--leading-tight);
-}
-
-.playit-onboarding__sub {
-  margin: 0;
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-  line-height: var(--leading-normal);
-}
-
-/* Error state — prominent banner, full row, with two action buttons. */
-.playit-error-state {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-
-.playit-error-banner {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--danger);
-  border-radius: var(--radius-sm);
-  background: color-mix(in oklch, var(--danger) 10%, transparent);
-}
-
-.playit-error-banner__icon {
-  flex-shrink: 0;
-  color: var(--danger);
-  margin-top: 1px;
-}
-
-.playit-error-banner__text {
-  min-width: 0;
-}
-
-.playit-error-banner__title {
-  margin: 0 0 var(--space-1) 0;
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--text-primary);
-  line-height: var(--leading-tight);
-}
-
-.playit-error-banner__reason {
-  margin: 0;
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-  line-height: var(--leading-normal);
-  word-wrap: break-word;
-}
-
-.playit-error-state__actions {
-  display: flex;
-  gap: var(--space-3);
-  flex-wrap: wrap;
-}
-
-/* Claiming — three rows: step 1, link, step 2 */
-.playit-claiming {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-
-.playit-claiming__step {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-  line-height: var(--leading-normal);
-}
-
-.playit-claiming__num {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: var(--primary);
-  color: var(--text-on-primary);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.playit-claiming__link {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  margin-left: 34px;          /* aligns with step text (22px num + 12px gap) */
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--primary);
-  border-radius: var(--radius-sm);
-  background: color-mix(in oklch, var(--primary) 6%, transparent);
-  color: var(--primary);
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  font-weight: 500;
-  text-decoration: none;
-  word-break: break-all;
-  transition: background 0.12s ease;
-}
-
-.playit-claiming__link:hover {
-  background: color-mix(in oklch, var(--primary) 12%, transparent);
-}
-
-.playit-claiming__link:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 2px;
-}
-
-.playit-claiming__actions {
-  display: flex;
-  gap: var(--space-4);
-  margin-left: 34px;
-}
-
-.playit-claiming__cancel {
-  background: transparent;
-  border: none;
-  padding: 0;
-  font: inherit;
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-  cursor: pointer;
-  text-decoration: underline;
-}
-
-.playit-claiming__cancel:hover {
-  color: var(--text-secondary);
-}
-
-/* Confirmed — tunnel active */
-.playit-confirmed {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-}
-
-.playit-confirmed__dot,
-.playit-starting__dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.playit-confirmed__dot {
-  background: var(--success);
-}
-
-.playit-starting__dot {
-  background: var(--warning);
-  animation: playit-pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes playit-pulse {
-  0%, 100% { opacity: 0.5; }
-  50%      { opacity: 1; }
-}
-
-.playit-confirmed__text {
-  flex: 1;
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-  line-height: var(--leading-normal);
-}
-
-.playit-confirmed__reset {
-  background: transparent;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  padding: 4px 10px;
-  font: inherit;
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: color 0.12s ease, border-color 0.12s ease;
-}
-
-.playit-confirmed__reset:hover {
-  color: var(--text-secondary);
-  border-color: var(--text-muted);
-}
-
-/* Starting — quiet "connecting…" with a cancel escape */
-.playit-starting {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  font-size: var(--text-sm);
-  color: var(--text-muted);
-}
-
-.playit-starting__text {
-  flex: 1;
-}
-
-/* Info — neutral states (running, needs_tunnel). NO danger styling. */
-.playit-info {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  justify-content: space-between;
-}
-
-.playit-info__body {
-  flex: 1;
-  min-width: 0;
-}
-
-.playit-info__title {
-  margin: 0 0 var(--space-1) 0;
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--text-primary);
-  line-height: var(--leading-tight);
-}
-
-.playit-info__text {
-  margin: 0;
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-  line-height: var(--leading-normal);
-}
-
-.playit-info__actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  flex-shrink: 0;
-}
-
-.playit-info__link {
-  display: inline-flex;
-  align-items: center;
-  padding: 6px 14px;
-  background: var(--primary);
-  color: var(--text-on-primary);
-  border-radius: var(--radius-md);
-  font-size: var(--text-sm);
-  font-weight: 500;
-  text-decoration: none;
-  white-space: nowrap;
-  transition: background 0.15s ease;
-}
-
-.playit-info__link:hover {
-  background: var(--primary-dark);
-}
-
-.playit-info__link:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 2px;
 }
 </style>
