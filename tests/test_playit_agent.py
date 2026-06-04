@@ -491,6 +491,43 @@ def test_reset_with_no_secret_file_is_idempotent(agent):
 
 
 # ---------------------------------------------------------------------------
+# Persistent enabled-state (folded in from colleague's commit, adapted to
+# the backend/playit/ layout — survives a service restart)
+# ---------------------------------------------------------------------------
+
+def test_is_enabled_defaults_false_without_state_or_env(agent, monkeypatch):
+    monkeypatch.delenv("PLAYIT_ENABLED", raising=False)
+    assert agent.is_enabled() is False
+
+
+def test_is_enabled_falls_back_to_env_var(agent, monkeypatch):
+    monkeypatch.setenv("PLAYIT_ENABLED", "true")
+    assert agent.is_enabled() is True
+    monkeypatch.setenv("PLAYIT_ENABLED", "false")
+    assert agent.is_enabled() is False
+
+
+def test_set_enabled_persists_and_overrides_env(agent, monkeypatch, tmp_path):
+    """The state file is authoritative over the env var."""
+    monkeypatch.setenv("PLAYIT_ENABLED", "false")
+    agent.set_enabled(True)
+    assert (tmp_path / "playit.enabled").read_text().strip() == "true"
+    assert agent.is_enabled() is True            # file wins over env=false
+
+    agent.set_enabled(False)
+    assert agent.is_enabled() is False           # file wins over... still false
+
+
+def test_stop_persists_disabled_so_restart_stays_down(agent, monkeypatch):
+    """A deliberately stopped tunnel must not auto-start after restart, even
+    when PLAYIT_ENABLED=true in the environment."""
+    monkeypatch.setenv("PLAYIT_ENABLED", "true")
+    agent.stop()
+    assert agent.is_enabled() is False, \
+        "stop() must persist disabled-state to override an enabled env var"
+
+
+# ---------------------------------------------------------------------------
 # Platform guard
 # ---------------------------------------------------------------------------
 

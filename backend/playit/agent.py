@@ -138,6 +138,35 @@ def get_status() -> dict:
         }
 
 
+def is_enabled() -> bool:
+    """Whether the tunnel should be running. The persisted state file written
+    by set_enabled() is authoritative when present; otherwise fall back to the
+    PLAYIT_ENABLED env var so env-driven installs keep working.
+
+    Used by run.py auto-start so a tunnel toggled on from the dashboard
+    survives a service restart.
+    """
+    try:
+        return playit_binary.enabled_state_path().read_text().strip().lower() == "true"
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        logger.warning("playit: could not read enabled-state file: %s", exc)
+    return os.environ.get("PLAYIT_ENABLED", "").strip().lower() == "true"
+
+
+def set_enabled(enabled: bool) -> None:
+    """Persist the desired tunnel state so it survives a restart. Best-effort:
+    a non-writable runtime dir (e.g. dev run outside systemd) logs a warning
+    and leaves the env-var fallback in place rather than failing the request."""
+    path = playit_binary.enabled_state_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("true" if enabled else "false")
+    except OSError as exc:
+        logger.warning("playit: could not persist enabled-state: %s", exc)
+
+
 def start() -> None:
     """Launch the agent. If no secret exists, bootstraps via the claim flow.
 
@@ -149,6 +178,11 @@ def start() -> None:
         return
 
     global _proc, _exchange_proc, _status, _address, _claim_url, _error_reason, _gen
+
+    # Persist the desired state up front so an auto-start after restart knows
+    # the tunnel was wanted. Done before the binary checks so even a failed
+    # start (missing binary) remembers the user's intent to re-enable.
+    set_enabled(True)
 
     # Orphan reap BEFORE bumping gen so we don't race with our own watchdog
     # of an old run. Safe to call even when no PID file exists.
@@ -202,6 +236,10 @@ def stop() -> None:
         return
 
     global _proc, _exchange_proc, _status, _address, _claim_url, _error_reason, _gen
+
+    # Persist the user's intent so auto-start after a restart won't bring a
+    # deliberately-stopped tunnel back up.
+    set_enabled(False)
 
     with _lock:
         _gen += 1                # invalidate every in-flight thread

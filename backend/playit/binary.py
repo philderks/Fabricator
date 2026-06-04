@@ -48,6 +48,13 @@ def log_path() -> Path:
     return runtime_dir() / "playitd.log"
 
 
+def enabled_state_path() -> Path:
+    """Persisted desired-state file: written when the user toggles the tunnel
+    on/off so the choice survives a service restart. Lives in the runtime dir
+    (service-user-writable), unlike the root-owned env file."""
+    return runtime_dir() / "playit.enabled"
+
+
 def _first_executable(*candidates: str) -> Optional[str]:
     for c in candidates:
         if os.access(c, os.X_OK):
