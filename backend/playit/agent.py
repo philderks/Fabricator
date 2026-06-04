@@ -902,7 +902,13 @@ def _write_pid_file(pid: int) -> None:
     path = _pid_file_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(str(pid))
+        # Atomic write: a concurrent reader (e.g. the reaper, or a test polling
+        # for the file) must never observe a truncated/empty file mid-write.
+        # write_text() truncates then writes, leaving a window where the file
+        # exists but is empty; os.replace() swaps in fully-written content.
+        tmp = path.with_suffix(".pid.tmp")
+        tmp.write_text(str(pid))
+        os.replace(tmp, path)
     except OSError as exc:
         logger.warning("playit: could not write PID file %s: %s", path, exc)
 

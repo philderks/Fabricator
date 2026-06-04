@@ -54,11 +54,26 @@ def agent(tmp_path, monkeypatch):
 
     yield agent_mod
 
-    # Teardown: best-effort stop any lingering subprocesses started by tests.
+    # Teardown: drain lingering lifecycle / rundata threads before the next
+    # test starts. These are daemon threads that resolve the runtime dir via
+    # the PLAYIT_RUNTIME_DIR env var at call time — if one outlives its test
+    # it would read the NEXT test's tmp_path and could clear that test's PID
+    # file mid-assertion. stop() bumps the generation; the gen-checked threads
+    # exit within one 0.5s sleep chunk, so we wait for the playit-named
+    # threads to die (bounded) before releasing the fixture.
     try:
         agent_mod.stop()
     except Exception:
         pass
+
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline:
+        alive = [t for t in threading.enumerate()
+                 if t.name.startswith(("playit-lifecycle-", "playit-rundata-"))
+                 and t.is_alive()]
+        if not alive:
+            break
+        time.sleep(0.05)
 
 
 def _make_completed(stdout: str = "", rc: int = 0) -> subprocess.CompletedProcess:
