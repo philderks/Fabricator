@@ -81,6 +81,13 @@ _RUNDATA_PATH              = "/v1/agents/rundata"
 _RUNDATA_INTERVAL_SECONDS  = 30        # address is static; no need to hammer the API
 _RUNDATA_TIMEOUT_SECONDS   = 10
 _RUNDATA_INITIAL_BACKOFF   = 1.5       # give the daemon time to register before first poll
+_RUNDATA_AUTH_FAIL_LIMIT   = 2         # consecutive 401/403s before we declare the agent invalid
+
+# Sentinel returned by _call_rundata() when the API rejects the agent key
+# (HTTP 401/403) — distinct from a transient None so the poller can surface
+# "agent deleted/revoked on playit.gg — re-claim" instead of sitting on a
+# misleading neutral "running/active".
+_RUNDATA_UNAUTHORIZED = object()
 
 # ANSI escape sequence stripper for the daemon's tracing output.
 _RE_ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -753,15 +760,16 @@ def _start_rundata_poller(my_gen: int) -> None:
 
 
 def _rundata_poller(my_gen: int) -> None:
-    """Long-running poller — owns transitions to/out of connected, running,
-    needs_tunnel, and error (for disabled_reason). Gen-token disciplined."""
-    global _status
+    """Long-running poller — owns the daemon-level running/error transitions
+    and populates _tunnels. Gen-token disciplined."""
+    global _status, _error_reason
 
     # Give the daemon a moment to authenticate with the playit API before the
     # first call, otherwise we'd just get a 401 for the first cycle.
     if not _sleep_with_gen(my_gen, _RUNDATA_INITIAL_BACKOFF):
         return
 
+    auth_failures = 0
     while True:
         secret = _read_secret_for_api()
         body = _call_rundata(secret) if secret else None
@@ -772,13 +780,26 @@ def _rundata_poller(my_gen: int) -> None:
         with _lock:
             if my_gen != _gen:
                 return
-            if body is not None:
+            if body is _RUNDATA_UNAUTHORIZED:
+                # The API rejected our agent key. One 401 can be a blip right
+                # after (re)claim, so require a few in a row — then say so
+                # clearly instead of sitting on a misleading "running/active".
+                auth_failures += 1
+                if auth_failures >= _RUNDATA_AUTH_FAIL_LIMIT and not (
+                    _status == "error" and _is_inline_failure(_error_reason)
+                ):
+                    _status = "error"
+                    _error_reason = (
+                        "playit rejected this agent (HTTP 401) — it was likely "
+                        "deleted or revoked on playit.gg. Reset and re-claim."
+                    )
+            elif body is not None:
+                auth_failures = 0
                 _apply_rundata_to_state(body)
             else:
-                # Transient: if we're still in the brief post-spawn "starting"
-                # window, transition to neutral "running" so the UI doesn't
-                # hang on a loading state indefinitely. If we were already in
-                # running / connected / needs_tunnel / error, don't touch it.
+                # Transient (network / timeout / 5xx): if we're still in the
+                # brief post-spawn "starting" window, flip to neutral "running"
+                # so the UI doesn't hang on a loading state. Otherwise leave it.
                 if _status == "starting":
                     _status = "running"
 
@@ -817,8 +838,9 @@ def _read_secret_for_api() -> Optional[str]:
 
 
 def _call_rundata(secret: str) -> Optional[dict]:
-    """One POST to /v1/agents/rundata. Returns parsed body or None on any
-    transient error. Secret and Authorization header are NEVER logged,
+    """One POST to /v1/agents/rundata. Returns the parsed body (dict) on 200,
+    the _RUNDATA_UNAUTHORIZED sentinel on 401/403 (agent key rejected), or None
+    on any transient error. Secret and Authorization header are NEVER logged,
     NEVER included in exception messages."""
     import urllib.request
     import urllib.error
@@ -841,6 +863,10 @@ def _call_rundata(secret: str) -> Optional[dict]:
         # request which carried the secret, so we deliberately do NOT touch
         # e.read() here.
         logger.debug("playit: rundata HTTP %d", e.code)
+        if e.code in (401, 403):
+            # Agent key rejected — the agent was deleted/revoked, or the secret
+            # is stale. Signal it distinctly so the poller can surface it.
+            return _RUNDATA_UNAUTHORIZED
         return None
     except (urllib.error.URLError, TimeoutError, OSError) as e:
         # Same pattern: log type, never the args (which may contain the URL

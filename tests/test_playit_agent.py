@@ -1060,11 +1060,31 @@ def test_rundata_secret_never_logged(agent, tmp_path, monkeypatch, caplog):
     with patch("urllib.request.urlopen", side_effect=fake_http_err):
         result = agent._call_rundata(secret)
 
-    assert result is None
+    assert result is agent._RUNDATA_UNAUTHORIZED   # 401 → distinct sentinel, not None
     assert secret not in caplog.text, "SECRET LEAK via rundata error path"
     for rec in caplog.records:
         assert secret not in rec.getMessage()
         assert secret not in str(rec.args)
+
+
+def test_rundata_persistent_401_surfaces_invalid_agent_error(agent, tmp_path, monkeypatch):
+    """A persistent 401 (agent deleted/revoked on playit.gg) must surface an
+    actionable error, not sit on a misleading 'running/active'."""
+    monkeypatch.setattr(agent, "_RUNDATA_AUTH_FAIL_LIMIT", 2)
+    daemon_hold = threading.Event()
+    fake_daemon, _, patches = _spawn_daemon_with_rundata(
+        agent, tmp_path, agent._RUNDATA_UNAUTHORIZED, daemon_hold, monkeypatch,
+    )
+    with patches[0], patches[1], patches[2], patches[3]:
+        try:
+            agent.start()
+            assert _wait_for(lambda: agent.get_status()["status"] == "error", timeout=2.0), \
+                f"never surfaced auth error; got {agent.get_status()}"
+            status = agent.get_status()
+            assert "401" in (status["error_reason"] or "")
+            assert status["tunnels_known"] is False
+        finally:
+            daemon_hold.set()
 
 
 # ---------------------------------------------------------------------------
