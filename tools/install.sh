@@ -21,6 +21,23 @@ main() {
     FABRICATOR_REPO="${FABRICATOR_REPO:-${GITHUB_OWNER}/${GITHUB_REPO}}"
     FABRICATOR_BRANCH="${FABRICATOR_BRANCH:-main}"
     FABRICATOR_VERSION="${FABRICATOR_VERSION:-latest}"  # latest | main | v1.2.3
+
+    # playit.gg tunnel agent — pinned to a known-verified release.
+    # Bumping this constant requires refreshing every sha256 in PLAYIT_SHA256
+    # from https://api.github.com/repos/playit-cloud/playit-agent/releases/tags/<ver>
+    # (the per-asset `digest` field).
+    PLAYIT_VERSION="v1.0.5"
+    declare -A PLAYIT_SHA256=(
+        [playit-linux-amd64]=217bd341b3ea88f982ce45bb68aa8b795bf8d6866be841cc675d36f3c6b90277
+        [playit-linux-aarch64]=7cfcf151581076295a210d56d2015a4b0b1ef26f4b3d4b753424c5d96eca6d95
+        [playit-linux-armv7]=140a8a2b49ee01d0562cd1a2c898dc641d640057c62cf6172724587cdf08828a
+        [playit-linux-i686]=c7b84d00aeb2735645230d5d9479a90a6bb2999f679d48613c91def30758580b
+        [playit-cli-linux-amd64]=1a3e6f2acfef345dafe32daa280ce4dc62e39601ff083bb5b88ea28ae7e5168c
+        [playit-cli-linux-aarch64]=0b7a8d580727a1d2ff249ab96eab5233b7973720f6df245764016f4436d3ff70
+        [playit-cli-linux-armv7]=98855142ef50d49cb85b84b61531423ffac11bf78eafa250f43453e9e14cbe1e
+        [playit-cli-linux-i686]=571a4e22148e3c6c8a0d90ad3dbf4a7d43e18d1bd40e367cb755a5e355903775
+    )
+    PLAYIT_BINARY_VERIFIED="false"   # set to "true" only after successful sha256 verify
     # Set to 1 by tools/update.sh for in-dashboard updates only.
     FABRICATOR_SKIP_OS_PACKAGES="${FABRICATOR_SKIP_OS_PACKAGES:-0}"
     MODE="${FABRICATOR_MODE:-install}"                  # install | update
@@ -196,6 +213,88 @@ main() {
         fi
     }
 
+    # Install pinned playit-agent binaries (daemon + CLI) with sha256 verification.
+    # Sets the outer PLAYIT_BINARY_VERIFIED to "true" on full success, "false" otherwise.
+    # Never aborts the Fabricator install on failure — playit is optional at runtime.
+    install_playit_binaries() {
+        local arch_raw arch daemon_asset cli_asset playit_dir
+        arch_raw="$(uname -m)"
+        case "$arch_raw" in
+            x86_64)          arch="amd64"   ;;
+            aarch64|arm64)   arch="aarch64" ;;
+            armv7l)          arch="armv7"   ;;
+            i386|i686)       arch="i686"    ;;
+            *)
+                warn "playit: unsupported architecture '$arch_raw'; skipping playit binary install."
+                return 0
+                ;;
+        esac
+        daemon_asset="playit-linux-${arch}"
+        cli_asset="playit-cli-linux-${arch}"
+
+        local daemon_sha cli_sha
+        daemon_sha="${PLAYIT_SHA256[$daemon_asset]:-}"
+        cli_sha="${PLAYIT_SHA256[$cli_asset]:-}"
+        if [[ -z "$daemon_sha" || -z "$cli_sha" ]]; then
+            warn "playit: no pinned sha256 for ${arch} in PLAYIT_SHA256; skipping."
+            return 0
+        fi
+
+        # Drift detection: if both binaries already present and matching, skip download in install mode.
+        if [[ "$MODE" != "update" \
+              && -x /usr/local/bin/playit \
+              && -x /usr/local/bin/playit-cli ]]; then
+            if echo "${daemon_sha}  /usr/local/bin/playit" | sha256sum -c - >/dev/null 2>&1 \
+               && echo "${cli_sha}  /usr/local/bin/playit-cli" | sha256sum -c - >/dev/null 2>&1; then
+                info "playit ${PLAYIT_VERSION} binaries already present and verified."
+                PLAYIT_BINARY_VERIFIED="true"
+                return 0
+            fi
+            info "playit: existing binaries do not match pin; re-downloading."
+        fi
+
+        local base="https://github.com/playit-cloud/playit-agent/releases/download/${PLAYIT_VERSION}"
+        local tmp
+        tmp="$(mktemp -d)"
+
+        info "playit: downloading ${PLAYIT_VERSION} (${arch})..."
+        if ! curl -fSL --retry 3 "${base}/${daemon_asset}" -o "${tmp}/${daemon_asset}"; then
+            warn "playit: download of ${daemon_asset} failed."
+            rm -rf "$tmp"
+            return 0
+        fi
+        if ! curl -fSL --retry 3 "${base}/${cli_asset}" -o "${tmp}/${cli_asset}"; then
+            warn "playit: download of ${cli_asset} failed."
+            rm -rf "$tmp"
+            return 0
+        fi
+
+        if ! echo "${daemon_sha}  ${tmp}/${daemon_asset}" | sha256sum -c - >/dev/null 2>&1; then
+            warn "playit: sha256 mismatch on ${daemon_asset}; refusing to install."
+            rm -rf "$tmp"
+            return 0
+        fi
+        if ! echo "${cli_sha}  ${tmp}/${cli_asset}" | sha256sum -c - >/dev/null 2>&1; then
+            warn "playit: sha256 mismatch on ${cli_asset}; refusing to install."
+            rm -rf "$tmp"
+            return 0
+        fi
+
+        $SUDO install -m 0755 -o root -g root "${tmp}/${daemon_asset}" /usr/local/bin/playit
+        $SUDO install -m 0755 -o root -g root "${tmp}/${cli_asset}"    /usr/local/bin/playit-cli
+        rm -rf "$tmp"
+
+        playit_dir="${DATA_DIR}/playit"
+        $SUDO mkdir -p "$playit_dir"
+        $SUDO chown "$SERVICE_USER:$SERVICE_USER" "$playit_dir"
+        $SUDO chmod 0700 "$playit_dir"
+
+        info "playit ${PLAYIT_VERSION} installed to /usr/local/bin (sha256 verified)."
+        PLAYIT_BINARY_VERIFIED="true"
+    }
+
+    install_playit_binaries
+
     # 3) Download Fabricator release asset
     info "Downloading Fabricator from GitHub Releases..."
     TMP_DIR="$(mktemp -d)"
@@ -320,9 +419,20 @@ SERVER_INDEX_FILE=${DATA_DIR}/servers.json
 
 # playit.gg tunnel agent — set to "true" to start automatically on boot.
 PLAYIT_ENABLED=false
+# Reflects whether install.sh verified the pinned playit binary sha256.
+# Backend reads this; UI shows a non-blocking warning when "false".
+PLAYIT_BINARY_VERIFIED=${PLAYIT_BINARY_VERIFIED}
 EOF
         $SUDO chown root:fabricator "$ENV_FILE"
         $SUDO chmod 0640 "$ENV_FILE"
+    else
+        # Env file already exists (update path). Refresh PLAYIT_BINARY_VERIFIED
+        # in place so stale "false" doesn't survive a successful re-verify.
+        if $SUDO grep -q '^PLAYIT_BINARY_VERIFIED=' "$ENV_FILE"; then
+            $SUDO sed -i "s|^PLAYIT_BINARY_VERIFIED=.*|PLAYIT_BINARY_VERIFIED=${PLAYIT_BINARY_VERIFIED}|" "$ENV_FILE"
+        else
+            echo "PLAYIT_BINARY_VERIFIED=${PLAYIT_BINARY_VERIFIED}" | $SUDO tee -a "$ENV_FILE" >/dev/null
+        fi
     fi
 
     # 5) Install systemd service

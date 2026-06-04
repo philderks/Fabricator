@@ -5,9 +5,10 @@ import FormField from '../../components/ui/FormField.vue'
 import Panel from '../../components/ui/Panel.vue'
 import ToggleRow from '../../components/ui/ToggleRow.vue'
 import { useServerStore } from '../../stores/server'
-import { getPlayitStatus, startPlayit, stopPlayit } from '../../api/playit'
+import { usePlayitStore } from '../../stores/playit'
 
 const store = useServerStore()
+const playit = usePlayitStore()
 
 const isDirty = computed(() => store.isDirtySettings)
 
@@ -49,69 +50,34 @@ const onReset = () => {
 }
 
 // ─── playit.gg tunnel ────────────────────────────────────────────────────────
+// State + polling live in stores/playit.js — one source, one poller across
+// Overview and Settings. The toggle's checked-state is derived from
+// playit.isActive so it always reflects backend truth (status=error → AUS).
 
-const playitEnabled  = ref(false)
-const playitStatus   = ref('stopped')   // stopped|starting|claiming|connected|error
-const playitAddress  = ref(null)
-const playitClaimUrl = ref(null)
+let _unsubscribePlayit = null
 
-let _playitTimer = null
+// Suppress the "signature unverified" warning while we're in an error state
+// with a missing-binary reason — otherwise the user gets two banners about
+// the same root cause.
+const showVerifiedWarning = computed(
+  () => !playit.binaryVerified
+    && !(playit.isError && /binary not found/i.test(playit.errorReason || ''))
+)
 
-async function _fetchPlayitStatus() {
-  try {
-    const data = await getPlayitStatus()
-    playitStatus.value   = data.status
-    playitAddress.value  = data.address   ?? null
-    playitClaimUrl.value = data.claim_url ?? null
-    // Keep the toggle in sync with live process state.
-    playitEnabled.value  = ['starting', 'claiming', 'connected'].includes(data.status)
-  } catch {
-    // Silent — a network hiccup should not crash the settings page.
-  }
+function onPlayitToggle(enabled) {
+  if (enabled) playit.start()
+  else         playit.stop()
 }
 
-function _startPolling() {
-  if (_playitTimer) return
-  _playitTimer = setInterval(_fetchPlayitStatus, 3000)
-}
-
-function _stopPolling() {
-  if (_playitTimer) {
-    clearInterval(_playitTimer)
-    _playitTimer = null
-  }
-}
-
-async function onPlayitToggle(enabled) {
-  // Optimistically reflect intent immediately.
-  playitEnabled.value = enabled
-  try {
-    if (enabled) {
-      await startPlayit()
-      _startPolling()
-    } else {
-      await stopPlayit()
-      _stopPolling()
-      playitStatus.value   = 'stopped'
-      playitAddress.value  = null
-      playitClaimUrl.value = null
-    }
-  } catch (err) {
-    // Revert the optimistic update so the UI stays truthful.
-    playitEnabled.value = !enabled
-    console.error('[playit] toggle failed:', err)
-  }
-}
-
-onMounted(async () => {
-  await _fetchPlayitStatus()
-  if (playitEnabled.value) {
-    _startPolling()
-  }
+onMounted(() => {
+  _unsubscribePlayit = playit.subscribe()
 })
 
 onUnmounted(() => {
-  _stopPolling()
+  if (_unsubscribePlayit) {
+    _unsubscribePlayit()
+    _unsubscribePlayit = null
+  }
 })
 </script>
 
@@ -952,7 +918,7 @@ onUnmounted(() => {
       </div>
     </Panel>
 
-    <Panel title="Network">
+    <Panel v-if="!playit.isUnsupported" title="Network">
       <!-- playit.gg tunnel row ─────────────────────────────────────────────
            Layout: description text on the left, status dot + toggle on the
            right.  The toggle is built inline (same HTML/CSS as ToggleRow)
@@ -971,8 +937,8 @@ onUnmounted(() => {
           <!-- Status dot: grey=stopped, orange=starting|claiming, green=connected, red=error -->
           <span
             class="playit-dot"
-            :class="`playit-dot--${playitStatus}`"
-            :title="playitStatus"
+            :class="`playit-dot--${playit.status}`"
+            :title="playit.status"
             aria-hidden="true"
           ></span>
 
@@ -982,7 +948,7 @@ onUnmounted(() => {
               type="checkbox"
               role="switch"
               :aria-label="'playit.gg tunnel'"
-              :checked="playitEnabled"
+              :checked="playit.isActive"
               @change="onPlayitToggle($event.target.checked)"
             />
             <span class="playit-switch__track" aria-hidden="true">
@@ -992,24 +958,125 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Claim banner: shown while the agent is waiting for account linking -->
+      <!-- Binary-verify warning: install.sh could not confirm sha256 pin.
+           Hidden when status=error with a binary-not-found reason, since
+           that error message already covers the same root cause. -->
+      <div
+        v-if="showVerifiedWarning"
+        class="playit-warn"
+        role="status"
+      >
+        playit binary signature unverified — see install logs.
+      </div>
+
+      <!-- Error banner: prominent + actionable. "Use different account" calls
+           /reset (wipes the secret) so the user can claim against a different
+           playit.gg account when the current one is at its agent limit. -->
       <Transition name="playit-banner">
         <div
-          v-if="playitStatus === 'claiming' && playitClaimUrl"
+          v-if="playit.isError"
+          class="playit-error"
+          role="alert"
+        >
+          <div class="playit-error__body">
+            <p class="playit-error__title">playit.gg tunnel failed</p>
+            <p class="playit-error__reason">
+              {{ playit.errorReason || 'No further details — check the playit.gg dashboard.' }}
+            </p>
+          </div>
+          <div class="playit-error__actions">
+            <button type="button" class="playit-error__action" @click="playit.start">
+              Try again
+            </button>
+            <button type="button" class="playit-error__action playit-error__action--primary" @click="playit.reset">
+              Use different account
+            </button>
+          </div>
+        </div>
+      </Transition>
+
+      <!-- Claim banner: surfaced for the full user-action window. The URL
+           stays here until the user approves the agent in their browser. -->
+      <Transition name="playit-banner">
+        <div
+          v-if="playit.isClaiming && playit.claimUrl"
           class="playit-claim"
           role="status"
         >
           <p class="playit-claim__text">
-            One more step — link your playit.gg account to activate the tunnel
+            Open the link, sign in to playit.gg, and approve this agent.
           </p>
+          <div class="playit-claim__actions">
+            <a
+              :href="playit.claimUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="playit-claim__btn"
+            >
+              Claim agent →
+            </a>
+            <button type="button" class="playit-claim__alt" @click="playit.reset">
+              Use different account
+            </button>
+          </div>
+        </div>
+      </Transition>
+
+      <!-- needs_tunnel banner: agent up but the dashboard has no tunnel yet.
+           Actionable, not an error. -->
+      <Transition name="playit-banner">
+        <div
+          v-if="playit.isNeedsTunnel"
+          class="playit-info-row"
+          role="status"
+        >
+          <span class="playit-info-row__text">
+            Agent connected — create a tunnel in your playit.gg dashboard.
+          </span>
           <a
-            :href="playitClaimUrl"
+            href="https://playit.gg/account"
             target="_blank"
             rel="noopener noreferrer"
-            class="playit-claim__btn"
+            class="playit-info-row__link"
           >
-            Claim agent →
+            Open dashboard ↗
           </a>
+        </div>
+      </Transition>
+
+      <!-- running banner: tunnel up, address transiently unavailable.
+           Neutral, not an error. -->
+      <Transition name="playit-banner">
+        <div
+          v-if="playit.isRunning"
+          class="playit-info-row"
+          role="status"
+        >
+          <span class="playit-info-row__text">
+            Tunnel running. Public address shown in your playit.gg dashboard.
+          </span>
+          <a
+            href="https://playit.gg/account"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="playit-info-row__link"
+          >
+            Open dashboard ↗
+          </a>
+        </div>
+      </Transition>
+
+      <!-- connected banner: address available — show it inline. -->
+      <Transition name="playit-banner">
+        <div
+          v-if="playit.isConnected && playit.address"
+          class="playit-info-row playit-info-row--success"
+          role="status"
+        >
+          <span class="playit-info-row__text">
+            Public address:
+            <code class="playit-info-row__addr">{{ playit.address }}</code>
+          </span>
         </div>
       </Transition>
     </Panel>
@@ -1453,6 +1520,163 @@ onUnmounted(() => {
 .playit-claim__btn:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
+}
+
+/* Error banner — surfaces backend error_reason, plus reset/retry actions. */
+.playit-error {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklch, var(--danger) 10%, transparent);
+}
+
+.playit-error__title {
+  margin: 0 0 var(--space-1) 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: var(--leading-tight);
+}
+
+.playit-error__reason {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: var(--leading-normal);
+  word-wrap: break-word;
+}
+
+.playit-error__actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.playit-error__action {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 6px 12px;
+  font: inherit;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+
+.playit-error__action:hover {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+.playit-error__action--primary {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--text-on-primary);
+}
+
+.playit-error__action--primary:hover {
+  background: var(--danger-dark);
+  border-color: var(--danger-dark);
+  color: var(--text-on-primary);
+}
+
+.playit-error__action:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Claim banner — gets a second action so the user can switch accounts even
+   before they click the URL. */
+.playit-claim__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}
+
+.playit-claim__alt {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  cursor: pointer;
+  text-decoration: underline;
+  white-space: nowrap;
+}
+
+.playit-claim__alt:hover {
+  color: var(--text-secondary);
+}
+
+/* Info row — neutral states (running, needs_tunnel, connected address hint).
+   No danger styling. Sits like a soft banner under the toggle. */
+.playit-info-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: var(--leading-normal);
+}
+
+.playit-info-row--success {
+  border-color: var(--success);
+  background: color-mix(in oklch, var(--success) 6%, transparent);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.playit-info-row__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.playit-info-row__addr {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+  padding: 0 4px;
+  margin-left: 2px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  word-break: break-all;
+}
+
+.playit-info-row__link {
+  flex-shrink: 0;
+  color: var(--primary);
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.playit-info-row__link:hover {
+  text-decoration: underline;
+}
+
+/* Non-blocking signature warning — sits above the banners, full row. */
+.playit-warn {
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--warning);
+  background: color-mix(in oklch, var(--warning) 6%, transparent);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
 }
 
 /* Banner enter/leave transition */

@@ -14,8 +14,9 @@ export function getPlayitStatus() {
 }
 
 /**
- * Start the playit agent (no-op if already running).
- * @returns {Promise<{ ok: boolean }>}
+ * Start the playit agent (no-op if already running). The response body is
+ * the same shape as getPlayitStatus() — caller branches on `status`.
+ * @returns {Promise<{ status, address, claim_url, error_reason, binary_verified }>}
  */
 export function startPlayit() {
   return post('/api/playit/start')
@@ -23,8 +24,17 @@ export function startPlayit() {
 
 /**
  * Stop the playit agent.
- * @returns {Promise<{ ok: boolean }>}
+ * @returns {Promise<{ status, address, claim_url, error_reason, binary_verified }>}
  */
 export function stopPlayit() {
   return post('/api/playit/stop')
+}
+
+/**
+ * Reset playit — stop the daemon and delete the persisted secret, forcing a
+ * fresh claim on the next start.
+ * @returns {Promise<{ status, address, claim_url, error_reason, binary_verified }>}
+ */
+export function resetPlayit() {
+  return post('/api/playit/reset')
 }
