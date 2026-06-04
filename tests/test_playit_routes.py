@@ -20,7 +20,8 @@ def playit_client(app, monkeypatch, tmp_path):
     importlib.reload(agent_mod)
     with agent_mod._lock:
         agent_mod._status        = "stopped"
-        agent_mod._address       = None
+        agent_mod._tunnels       = []
+        agent_mod._tunnels_known = False
         agent_mod._claim_url     = None
         agent_mod._error_reason  = None
         agent_mod._gen           = 0
@@ -28,17 +29,19 @@ def playit_client(app, monkeypatch, tmp_path):
 
 
 def test_status_returns_full_snapshot_shape(playit_client):
-    """GET /api/playit/status returns all five documented fields."""
+    """GET /api/playit/status returns the documented daemon-level snapshot."""
     resp = playit_client.get("/api/playit/status")
     assert resp.status_code == 200
     body = resp.get_json()
     assert set(body.keys()) == {
-        "status", "address", "claim_url", "error_reason", "binary_verified"
+        "status", "claim_url", "error_reason", "binary_verified",
+        "tunnels", "tunnels_known",
     }
     assert body["status"] == "stopped"
-    assert body["address"] is None
     assert body["claim_url"] is None
     assert body["error_reason"] is None
+    assert body["tunnels"] == []
+    assert body["tunnels_known"] is False
 
 
 def test_start_returns_status_body_not_ok_envelope(playit_client):
@@ -75,7 +78,8 @@ def test_reset_returns_status_body(playit_client, tmp_path):
 
 def test_start_stop_roundtrip_shape(playit_client):
     """All endpoints return the same body shape (frontend uses one parser)."""
-    keys = {"status", "address", "claim_url", "error_reason", "binary_verified"}
+    keys = {"status", "claim_url", "error_reason", "binary_verified",
+            "tunnels", "tunnels_known"}
     for route in ("/api/playit/status",):
         body = playit_client.get(route).get_json()
         assert set(body.keys()) == keys, f"GET {route} body keys: {body.keys()}"

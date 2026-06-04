@@ -47,7 +47,8 @@ def agent(tmp_path, monkeypatch):
         agent_mod._proc          = None
         agent_mod._exchange_proc = None
         agent_mod._status        = "stopped"
-        agent_mod._address       = None
+        agent_mod._tunnels       = []
+        agent_mod._tunnels_known = False
         agent_mod._claim_url     = None
         agent_mod._error_reason  = None
         agent_mod._gen           = 0
@@ -160,10 +161,11 @@ def _make_fake_daemon_proc(stdout_lines, hold: Optional[threading.Event] = None,
 def test_happy_path_claim_to_daemon_spawn(agent, tmp_path):
     """Full bootstrap: generate → url → exchange → daemon spawn → starting.
 
-    Status stops at "starting" because address-discovery via daemon stdout is
-    intentionally disabled (the daemon does not log addresses to stdout in
-    v1.0.5; the connected path will be wired through `playit-cli attach -s`
-    once the event format is observed against a real claim).
+    At the checkpoint (PID file just written) the status is still "starting":
+    the rundata poller hasn't run yet (initial backoff), and even once it does
+    the fake secret isn't valid hex so _read_secret_for_api returns None and no
+    rundata call is made. The test asserts the bootstrap reached daemon-spawn,
+    not the steady state.
     """
     fake_exchange = MagicMock(spec=subprocess.Popen)
     fake_exchange.communicate.return_value = (SECRET_MARKER, "")
@@ -312,7 +314,7 @@ def test_cancel_during_claim_does_not_persist_secret(agent, tmp_path):
 
     final = agent.get_status()
     assert final["status"] == "stopped", f"status was {final}"
-    assert final["address"] is None
+    assert final["tunnels"] == []
     assert final["claim_url"] is None
 
     # Secret file MUST NOT exist — user said no.
@@ -430,8 +432,11 @@ def test_restart_race_old_reader_does_not_overwrite_new_state(agent):
     # Manually drive the reader function with a stale generation.
     with agent._lock:
         agent._gen = 5
-        agent._status = "connected"
-        agent._address = "alpha.ply.gg:1"
+        agent._status = "running"
+        agent._tunnels = [{"local_port": 25565, "address": "alpha.gl.joinmc.link",
+                           "disabled_reason": None, "name": "Test",
+                           "tunnel_type": "minecraft-java"}]
+        agent._tunnels_known = True
 
     # Fake an old proc that has already exited non-zero.
     old_proc = MagicMock(spec=subprocess.Popen)
@@ -443,16 +448,17 @@ def test_restart_race_old_reader_does_not_overwrite_new_state(agent):
     agent._read_daemon_stdout(old_proc, my_gen=4)
 
     status = agent.get_status()
-    assert status["status"] == "connected", \
+    assert status["status"] == "running", \
         f"stale reader corrupted state: {status}"
-    assert status["address"] == "alpha.ply.gg:1"
+    assert status["tunnels"][0]["address"] == "alpha.gl.joinmc.link"
+    assert status["tunnels_known"] is True
 
 
 def test_stop_then_late_reader_does_not_set_error(agent):
     """stop() bumps gen; a slow reader of the now-dead proc must noop."""
     with agent._lock:
         agent._gen = 1
-        agent._status = "connected"
+        agent._status = "running"
 
     agent.stop()  # bumps _gen to 2, sets status=stopped
 
@@ -671,7 +677,7 @@ def test_match_daemon_error_recognises_known_substrings(agent):
 #       "permissions": {...} } }
 
 
-def _rundata_active_response(address="alpha.gl.joinmc.link"):
+def _rundata_active_response(address="alpha.gl.joinmc.link", local_port="25565"):
     return {
         "status": "success",
         "data": {
@@ -684,6 +690,10 @@ def _rundata_active_response(address="alpha.gl.joinmc.link"):
                     "tunnel_type": "minecraft-java",
                     "port_type": "tcp",
                     "port_count": 1,
+                    "agent_config": {"fields": [
+                        {"name": "local_ip", "value": "127.0.0.1"},
+                        {"name": "local_port", "value": local_port},
+                    ]},
                     "disabled_reason": None,
                 }
             ],
@@ -707,7 +717,7 @@ def _rundata_empty_response():
     }
 
 
-def _rundata_disabled_response(reason="legal-review"):
+def _rundata_disabled_response(reason="legal-review", local_port="25565"):
     return {
         "status": "success",
         "data": {
@@ -718,6 +728,9 @@ def _rundata_disabled_response(reason="legal-review"):
                     "name": "Test",
                     "display_address": None,
                     "tunnel_type": "minecraft-java",
+                    "agent_config": {"fields": [
+                        {"name": "local_port", "value": local_port},
+                    ]},
                     "disabled_reason": reason,
                 }
             ],
@@ -751,25 +764,33 @@ def _spawn_daemon_with_rundata(agent, tmp_path, rundata_result, daemon_hold, mon
     ]
 
 
-def test_rundata_active_tunnel_transitions_to_connected(agent, tmp_path, monkeypatch):
-    """rundata returns a tunnel with display_address → status=connected, address set."""
+def test_rundata_active_tunnel_populates_tunnels(agent, tmp_path, monkeypatch):
+    """rundata with an active tunnel → status=running, tunnel parsed into _tunnels
+    with an int local_port and its address."""
     daemon_hold = threading.Event()
     fake_daemon, _, patches = _spawn_daemon_with_rundata(
-        agent, tmp_path, _rundata_active_response("beta.gl.joinmc.link"), daemon_hold, monkeypatch,
+        agent, tmp_path, _rundata_active_response("beta.gl.joinmc.link", "25566"), daemon_hold, monkeypatch,
     )
 
     with patches[0], patches[1], patches[2], patches[3]:
         try:
             agent.start()
-            assert _wait_for(lambda: agent.get_status()["status"] == "connected", timeout=2.0), \
-                f"never reached connected; got {agent.get_status()}"
-            assert agent.get_status()["address"] == "beta.gl.joinmc.link"
+            assert _wait_for(lambda: agent.get_status()["tunnels_known"], timeout=2.0), \
+                f"never got authoritative tunnels; got {agent.get_status()}"
+            status = agent.get_status()
+            assert status["status"] == "running"
+            assert len(status["tunnels"]) == 1
+            t = status["tunnels"][0]
+            assert t["local_port"] == 25566 and isinstance(t["local_port"], int)
+            assert t["address"] == "beta.gl.joinmc.link"
+            assert t["disabled_reason"] is None
         finally:
             daemon_hold.set()
 
 
-def test_rundata_empty_tunnels_transitions_to_needs_tunnel(agent, tmp_path, monkeypatch):
-    """Empty tunnels[] → status=needs_tunnel (actionable, NOT error)."""
+def test_rundata_empty_tunnels_running_and_known(agent, tmp_path, monkeypatch):
+    """Empty tunnels[] → status=running, _tunnels==[], tunnels_known True. The
+    'go create a tunnel' hint is now per-server (frontend), NOT a global state."""
     daemon_hold = threading.Event()
     fake_daemon, _, patches = _spawn_daemon_with_rundata(
         agent, tmp_path, _rundata_empty_response(), daemon_hold, monkeypatch,
@@ -778,16 +799,19 @@ def test_rundata_empty_tunnels_transitions_to_needs_tunnel(agent, tmp_path, monk
     with patches[0], patches[1], patches[2], patches[3]:
         try:
             agent.start()
-            assert _wait_for(lambda: agent.get_status()["status"] == "needs_tunnel", timeout=2.0), \
-                f"never reached needs_tunnel; got {agent.get_status()}"
-            assert agent.get_status()["address"] is None
-            assert agent.get_status()["error_reason"] is None
+            assert _wait_for(lambda: agent.get_status()["tunnels_known"], timeout=2.0), \
+                f"never got authoritative empty list; got {agent.get_status()}"
+            status = agent.get_status()
+            assert status["status"] == "running"
+            assert status["tunnels"] == []
+            assert status["error_reason"] is None
         finally:
             daemon_hold.set()
 
 
-def test_rundata_disabled_reason_transitions_to_error(agent, tmp_path, monkeypatch):
-    """disabled_reason set → status=error with that reason."""
+def test_rundata_disabled_tunnel_stays_running_reason_preserved(agent, tmp_path, monkeypatch):
+    """A disabled tunnel is NOT a global error — status stays running and the
+    disabled_reason rides per-tunnel for the frontend to surface for that server."""
     daemon_hold = threading.Event()
     fake_daemon, _, patches = _spawn_daemon_with_rundata(
         agent, tmp_path, _rundata_disabled_response("policy-violation"), daemon_hold, monkeypatch,
@@ -796,15 +820,81 @@ def test_rundata_disabled_reason_transitions_to_error(agent, tmp_path, monkeypat
     with patches[0], patches[1], patches[2], patches[3]:
         try:
             agent.start()
-            assert _wait_for(lambda: agent.get_status()["status"] == "error", timeout=2.0), \
-                f"never reached error; got {agent.get_status()}"
-            assert "policy-violation" in (agent.get_status()["error_reason"] or "")
+            assert _wait_for(lambda: agent.get_status()["tunnels_known"], timeout=2.0), \
+                f"never got tunnels; got {agent.get_status()}"
+            status = agent.get_status()
+            assert status["status"] == "running"        # NOT global error
+            assert status["error_reason"] is None
+            assert status["tunnels"][0]["disabled_reason"] == "policy-violation"
+        finally:
+            daemon_hold.set()
+
+
+def test_rundata_two_tunnels_both_parsed(agent, tmp_path, monkeypatch):
+    """Two active tunnels → both parsed with int local_ports + their addresses."""
+    resp = _rundata_active_response("first.gl.joinmc.link", "25565")
+    resp["data"]["tunnels"].append({
+        "id": "tun-uuid-2",
+        "name": "Test2",
+        "display_address": "second.gl.joinmc.link",
+        "tunnel_type": "minecraft-java",
+        "port_type": "tcp",
+        "port_count": 1,
+        "agent_config": {"fields": [{"name": "local_port", "value": "25566"}]},
+        "disabled_reason": None,
+    })
+
+    daemon_hold = threading.Event()
+    fake_daemon, _, patches = _spawn_daemon_with_rundata(
+        agent, tmp_path, resp, daemon_hold, monkeypatch,
+    )
+    with patches[0], patches[1], patches[2], patches[3]:
+        try:
+            agent.start()
+            assert _wait_for(lambda: len(agent.get_status()["tunnels"]) == 2, timeout=2.0), \
+                f"never parsed both tunnels; got {agent.get_status()}"
+            status = agent.get_status()
+            assert status["status"] == "running"
+            by_port = {t["local_port"]: t for t in status["tunnels"]}
+            assert set(by_port) == {25565, 25566}
+            assert by_port[25565]["address"] == "first.gl.joinmc.link"
+            assert by_port[25566]["address"] == "second.gl.joinmc.link"
+        finally:
+            daemon_hold.set()
+
+
+def test_rundata_unparseable_local_port_skipped(agent, tmp_path, monkeypatch):
+    """A tunnel whose local_port can't be parsed is skipped, others survive,
+    and the poll still counts as authoritative (tunnels_known True)."""
+    resp = _rundata_active_response("ok.gl.joinmc.link", "25565")
+    resp["data"]["tunnels"].append({
+        "id": "tun-bad",
+        "name": "Bad",
+        "display_address": "bad.gl.joinmc.link",
+        "tunnel_type": "minecraft-java",
+        "agent_config": {"fields": [{"name": "local_port", "value": "not-a-number"}]},
+        "disabled_reason": None,
+    })
+
+    daemon_hold = threading.Event()
+    fake_daemon, _, patches = _spawn_daemon_with_rundata(
+        agent, tmp_path, resp, daemon_hold, monkeypatch,
+    )
+    with patches[0], patches[1], patches[2], patches[3]:
+        try:
+            agent.start()
+            assert _wait_for(lambda: agent.get_status()["tunnels_known"], timeout=2.0), \
+                f"never authoritative; got {agent.get_status()}"
+            status = agent.get_status()
+            assert status["status"] == "running"        # no crash on bad port
+            assert [t["local_port"] for t in status["tunnels"]] == [25565]
         finally:
             daemon_hold.set()
 
 
 def test_rundata_network_failure_keeps_neutral_running(agent, tmp_path, monkeypatch):
-    """API unreachable → status=running (neutral), NOT error."""
+    """API unreachable → status=running (neutral), NOT error, and tunnels stay
+    UNKNOWN (tunnels_known False) so the UI shows 'can't confirm', not 'create one'."""
     daemon_hold = threading.Event()
     fake_daemon, _, patches = _spawn_daemon_with_rundata(
         agent, tmp_path, None,  # transient failure
@@ -816,9 +906,11 @@ def test_rundata_network_failure_keeps_neutral_running(agent, tmp_path, monkeypa
             agent.start()
             assert _wait_for(lambda: agent.get_status()["status"] == "running", timeout=2.0), \
                 f"never reached running; got {agent.get_status()}"
-            # Crucially, this is NOT an error — no red UI.
-            assert agent.get_status()["status"] != "error"
-            assert agent.get_status()["error_reason"] is None
+            status = agent.get_status()
+            assert status["status"] != "error"          # not red UI
+            assert status["error_reason"] is None
+            assert status["tunnels"] == []
+            assert status["tunnels_known"] is False      # the "unknown" case
         finally:
             daemon_hold.set()
 

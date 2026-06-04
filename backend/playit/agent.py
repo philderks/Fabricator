@@ -1,25 +1,30 @@
 """playit.gg agent lifecycle: claim bootstrap, daemon supervision, status.
 
-State machine (transitions only via start()/stop()/reset() or background threads):
+State machine (transitions only via start()/stop()/reset() or background
+threads). The status is DAEMON/ACCOUNT level only — per-server tunnel state is
+derived client-side from the `tunnels` list (see get_status()):
 
     unsupported  ──── (Windows only — no playit support)
     stopped      ──── initial / after stop() / after reset()
     claiming     ──── claim URL is published AND the exchange subprocess is
                       blocking on the user's browser-approval.
     starting     ──── daemon Popen launched, rundata poll not yet completed.
-    running      ──── daemon healthy, but no usable address yet (rundata
-                      unreachable, or returned no tunnel-with-address). This
-                      is NEUTRAL — the tunnel may still be live from the
-                      daemon's side; we just lack confirmation. NOT an error.
-    needs_tunnel ──── daemon healthy + rundata confirmed agent registered,
-                      but tunnels[] is empty. User must allocate one in the
-                      playit.gg dashboard. Actionable, not an error.
-    connected    ──── rundata returned a tunnel with display_address and
-                      disabled_reason=null — the address is in _address.
-    error        ──── REAL failure only: disabled_reason non-null from
-                      rundata, AgentDisabledOverLimit from daemon stdout,
-                      or daemon process exited non-zero. Transient rundata
+    running      ──── daemon healthy. `_tunnels` (and whether it is
+                      authoritative, `_tunnels_known`) carry the rest: the
+                      frontend matches a tunnel's local_port to a server's
+                      port to show that server's address. NEUTRAL — "no
+                      matching tunnel" is a per-server hint, not a global error.
+    error        ──── REAL account/daemon failure only: AgentDisabledOverLimit
+                      from daemon stdout, or daemon process exited non-zero.
+                      A per-tunnel disabled_reason is NOT a global error — it
+                      rides per-tunnel in `_tunnels`. Transient rundata
                       failures do NOT enter this state.
+
+`_tunnels`        list of {local_port:int, address:str|None, disabled_reason,
+                  name, tunnel_type} parsed from rundata. Never None.
+`_tunnels_known`  False until the first successful rundata of a generation,
+                  then True. Distinguishes "rundata says zero tunnels" from
+                  "rundata not reachable yet" — both leave _tunnels == [].
 
 Race-freedom is enforced by a monotonic generation counter (`_gen`). Both
 start() and stop() bump `_gen` under the lock. Every background thread
@@ -108,7 +113,8 @@ _lock           = threading.RLock()
 _proc:           Optional[subprocess.Popen] = None  # daemon
 _exchange_proc:  Optional[subprocess.Popen] = None  # `playit-cli claim exchange`
 _status         = "stopped"
-_address:       Optional[str] = None
+_tunnels:       list[dict] = []
+_tunnels_known  = False
 _claim_url:     Optional[str] = None
 _error_reason:  Optional[str] = None
 _gen            = 0
@@ -119,22 +125,30 @@ _gen            = 0
 # ---------------------------------------------------------------------------
 
 def get_status() -> dict:
-    """Snapshot of the agent state. Safe to call from any thread."""
+    """Snapshot of the agent state. Safe to call from any thread.
+
+    `status` is daemon/account level. The caller derives a server's public
+    address from `tunnels` by matching tunnel.local_port to that server's port.
+    `tunnels_known` is False until the first successful rundata of this run, so
+    the caller can tell "no tunnels" apart from "rundata not reachable yet".
+    """
     if platform_utils.is_windows():
         return {
             "status": "unsupported",
-            "address": None,
             "claim_url": None,
             "error_reason": "playit is not supported on Windows",
             "binary_verified": False,
+            "tunnels": [],
+            "tunnels_known": False,
         }
     with _lock:
         return {
             "status": _status,
-            "address": _address,
             "claim_url": _claim_url,
             "error_reason": _error_reason,
             "binary_verified": playit_binary.binary_verified(),
+            "tunnels": list(_tunnels),
+            "tunnels_known": _tunnels_known,
         }
 
 
@@ -177,7 +191,7 @@ def start() -> None:
     if platform_utils.is_windows():
         return
 
-    global _proc, _exchange_proc, _status, _address, _claim_url, _error_reason, _gen
+    global _proc, _exchange_proc, _status, _tunnels, _tunnels_known, _claim_url, _error_reason, _gen
 
     # Persist the desired state up front so an auto-start after restart knows
     # the tunnel was wanted. Done before the binary checks so even a failed
@@ -195,7 +209,8 @@ def start() -> None:
         _gen += 1
         my_gen = _gen
         _status = "starting"
-        _address = None
+        _tunnels = []
+        _tunnels_known = False
         _claim_url = None
         _error_reason = None
 
@@ -235,7 +250,7 @@ def stop() -> None:
     if platform_utils.is_windows():
         return
 
-    global _proc, _exchange_proc, _status, _address, _claim_url, _error_reason, _gen
+    global _proc, _exchange_proc, _status, _tunnels, _tunnels_known, _claim_url, _error_reason, _gen
 
     # Persist the user's intent so auto-start after a restart won't bring a
     # deliberately-stopped tunnel back up.
@@ -248,7 +263,8 @@ def stop() -> None:
         _proc = None
         _exchange_proc = None
         _status = "stopped"
-        _address = None
+        _tunnels = []
+        _tunnels_known = False
         _claim_url = None
         _error_reason = None
 
@@ -628,7 +644,7 @@ def _read_daemon_stdout(proc: subprocess.Popen, my_gen: int) -> None:
        because rundata still returns a (disabled) tunnel record. The stdout
        pattern is the earliest signal we have.
     """
-    global _status, _address, _claim_url, _error_reason
+    global _status, _tunnels, _tunnels_known, _claim_url, _error_reason
 
     assert proc.stdout is not None
     log_buffer: Deque[str] = deque(maxlen=_LOG_BUFFER_LINES)
@@ -649,7 +665,8 @@ def _read_daemon_stdout(proc: subprocess.Popen, my_gen: int) -> None:
                     _status = "error"
                     _error_reason = matched
                     _claim_url = None
-                    _address = None
+                    _tunnels = []
+                    _tunnels_known = False
                     logger.info("playit: daemon reported failure: %s", matched)
 
     proc.wait()
@@ -824,57 +841,62 @@ def _call_rundata(secret: str) -> Optional[dict]:
 def _apply_rundata_to_state(body: dict) -> None:
     """Translate a rundata response into our state machine. Caller holds _lock.
 
-    Tunnel-selection rule (matches what we saw in the live response):
-      - Prefer the first tunnel with display_address AND disabled_reason=null
-        → connected.
-      - If all tunnels are disabled, surface the first disabled_reason
-        → error.
-      - If tunnels[] is empty → needs_tunnel (actionable).
-      - If tunnels exist but none has an address and none is disabled (e.g.
-        pending setup) → running (neutral).
+    Called only with a non-None body (rundata answered). Parses every tunnel
+    into `_tunnels` and marks the list authoritative (`_tunnels_known = True`).
+    Per-server matching (local_port → server.port) and per-tunnel disabled
+    state are resolved client-side; this keeps the GLOBAL status at daemon
+    level (`running`, unless an inline daemon failure already set error).
     """
-    global _status, _address, _error_reason
+    global _status, _tunnels, _tunnels_known, _error_reason
 
     # Don't overwrite an inline AgentDisabled error that the stdout reader
-    # already surfaced — that signal is faster and more specific.
+    # already surfaced — that signal is faster and more specific. Leave the
+    # tunnel list alone too; the UI shows the agent-level error regardless.
     if _status == "error" and _error_reason and _is_inline_failure(_error_reason):
         return
 
     data = (body or {}).get("data") or {}
-    tunnels = data.get("tunnels") or []
+    raw_tunnels = data.get("tunnels") or []
 
-    if not tunnels:
-        _status = "needs_tunnel"
-        _address = None
-        _error_reason = None
-        return
-
-    active = None
-    disabled = None
-    for t in tunnels:
+    parsed: list[dict] = []
+    for t in raw_tunnels:
         if not isinstance(t, dict):
             continue
-        if t.get("disabled_reason"):
-            disabled = disabled or t
-        elif t.get("display_address"):
-            active = active or t
+        local_port = _extract_local_port(t)
+        if local_port is None:
+            logger.debug("playit: skipping tunnel with unparseable local_port")
+            continue
+        parsed.append({
+            "local_port": local_port,
+            "address": t.get("display_address") or None,
+            "disabled_reason": t.get("disabled_reason"),
+            "name": t.get("name"),
+            "tunnel_type": t.get("tunnel_type"),
+        })
 
-    if active:
-        _status = "connected"
-        _address = active["display_address"]
-        _error_reason = None
-        return
-
-    if disabled:
-        _status = "error"
-        _address = None
-        _error_reason = "playit tunnel disabled: " + str(disabled.get("disabled_reason"))
-        return
-
-    # Tunnels listed but neither active-with-address nor disabled — pending
-    # setup. Stay neutral, don't pretend we have an address.
+    _tunnels = parsed
+    _tunnels_known = True
     _status = "running"
-    _address = None
+    _error_reason = None
+
+
+def _extract_local_port(tunnel: dict) -> Optional[int]:
+    """Pull the int local_port out of a rundata tunnel's agent_config.fields.
+
+    rundata carries local_port as a STRING ("25565") inside
+    agent_config.fields[] where name == "local_port". Returns None when it is
+    absent or not int-parseable, and the caller skips that tunnel.
+    """
+    config = tunnel.get("agent_config")
+    if not isinstance(config, dict):
+        return None
+    for field in config.get("fields") or []:
+        if isinstance(field, dict) and field.get("name") == "local_port":
+            try:
+                return int(str(field.get("value")).strip())
+            except (TypeError, ValueError):
+                return None
+    return None
 
 
 def _is_inline_failure(reason: Optional[str]) -> bool:
