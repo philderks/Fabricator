@@ -627,7 +627,8 @@ def test_binary_verified_reflects_env(agent, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# runtime_dir_writable — startup pre-check that warns when the dir is unusable
+# runtime_dir resolution (env → writable default → per-user fallback) + the
+# writability guard used at startup
 # ---------------------------------------------------------------------------
 
 def test_runtime_dir_writable_true_for_creatable_dir(monkeypatch, tmp_path):
@@ -643,6 +644,30 @@ def test_runtime_dir_writable_false_when_no_writable_ancestor(monkeypatch, tmp_p
     monkeypatch.setenv("PLAYIT_RUNTIME_DIR", str(tmp_path / "x" / "y"))
     monkeypatch.setattr(b.os, "access", lambda *a, **k: False)
     assert b.runtime_dir_writable() is False
+
+
+def test_runtime_dir_env_var_takes_precedence(monkeypatch, tmp_path):
+    """PLAYIT_RUNTIME_DIR wins over both the default and the fallback."""
+    from backend.playit import binary as b
+    monkeypatch.setenv("PLAYIT_RUNTIME_DIR", str(tmp_path / "explicit"))
+    assert b.runtime_dir() == tmp_path / "explicit"
+
+
+def test_runtime_dir_uses_default_when_writable(monkeypatch):
+    """No env + writable default → the systemd /var/lib path (production)."""
+    from backend.playit import binary as b
+    monkeypatch.delenv("PLAYIT_RUNTIME_DIR", raising=False)
+    monkeypatch.setattr(b, "_writable_or_creatable", lambda p: True)
+    assert str(b.runtime_dir()) == "/var/lib/fabricator/playit"
+
+
+def test_runtime_dir_falls_back_to_appdata_when_default_unwritable(monkeypatch, tmp_path):
+    """No env + unwritable default (dev) → per-user ~/.fabricator/playit."""
+    from backend.playit import binary as b
+    monkeypatch.delenv("PLAYIT_RUNTIME_DIR", raising=False)
+    monkeypatch.setattr(b, "_writable_or_creatable", lambda p: False)
+    monkeypatch.setattr(b.platform_utils, "appdata_dir", lambda: tmp_path / ".fabricator")
+    assert b.runtime_dir() == tmp_path / ".fabricator" / "playit"
 
 
 # ---------------------------------------------------------------------------

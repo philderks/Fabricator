@@ -30,10 +30,25 @@ _RUNTIME_DIR_DEFAULT = "/var/lib/fabricator/playit"
 def runtime_dir() -> Path:
     """Directory the daemon uses for secret/socket/log files.
 
-    All three live together because the systemd unit only grants the service
-    user write access to /var/lib/fabricator. Dev override via env var.
+    Resolution order:
+      1. PLAYIT_RUNTIME_DIR, if set (production systemd unit + explicit dev).
+      2. /var/lib/fabricator/playit when it's writable/creatable — the systemd
+         installer (tools/install.sh) creates it owned by the service user.
+      3. Otherwise (dev / non-service run, where /var/lib isn't writable by the
+         current user) the per-user data dir ~/.fabricator/playit, so the tunnel
+         can actually persist its secret instead of failing every write and
+         showing offline on playit.gg.
+
+    Production is unchanged: the service user owns the /var/lib path, so step 2
+    matches and the fallback never triggers.
     """
-    return Path(os.environ.get("PLAYIT_RUNTIME_DIR") or _RUNTIME_DIR_DEFAULT)
+    env = os.environ.get("PLAYIT_RUNTIME_DIR")
+    if env:
+        return Path(env)
+    default = Path(_RUNTIME_DIR_DEFAULT)
+    if _writable_or_creatable(default):
+        return default
+    return platform_utils.appdata_dir() / "playit"
 
 
 def secret_path() -> Path:
@@ -55,23 +70,23 @@ def enabled_state_path() -> Path:
     return runtime_dir() / "playit.enabled"
 
 
-def runtime_dir_writable() -> bool:
-    """True if the runtime dir is writable, or could be created (its nearest
-    existing ancestor is writable). Non-mutating.
-
-    Used at startup to warn early when the playit runtime dir isn't usable —
-    the common dev case is PLAYIT_RUNTIME_DIR unset, so it defaults to
-    /var/lib/fabricator/playit, which a non-service user can't create. Without
-    a writable dir the tunnel can't persist its secret after a claim and the
-    agent silently shows offline on playit.gg.
-    """
-    probe = runtime_dir()
+def _writable_or_creatable(path: Path) -> bool:
+    """True if `path` is writable, or its nearest existing ancestor is (so it
+    could be created). Non-mutating — used to pick and validate the runtime dir."""
+    probe = path
     while not probe.exists():
         parent = probe.parent
         if parent == probe:          # reached the filesystem root, nothing exists
             return False
         probe = parent
     return os.access(probe, os.W_OK)
+
+
+def runtime_dir_writable() -> bool:
+    """True if the resolved runtime dir is usable. After the dev fallback in
+    runtime_dir() this is normally True; kept as a startup guard for the
+    pathological case where even the per-user data dir isn't writable."""
+    return _writable_or_creatable(runtime_dir())
 
 
 def _first_executable(*candidates: str) -> Optional[str]:
