@@ -149,14 +149,17 @@ def main() -> None:
     app = create_app()
     config = get_config()
 
-    # Auto-start the playit tunnel if enabled. Isolated in try/except so a
-    # missing binary or runtime-dir permission error can't take down Flask.
-    if os.environ.get("PLAYIT_ENABLED", "").strip().lower() == "true":
-        try:
-            from backend.playit import agent as playit_agent
+    # Auto-start the playit tunnel if enabled. agent.is_enabled() honours the
+    # persisted desired-state file first (so a tunnel toggled on from the
+    # dashboard survives a restart), falling back to the PLAYIT_ENABLED env
+    # var for fresh / env-driven installs. Isolated in try/except so a missing
+    # binary or runtime-dir permission error can't take down Flask.
+    try:
+        from backend.playit import agent as playit_agent
+        if playit_agent.is_enabled():
             playit_agent.start()
-        except Exception as exc:
-            logger.warning("playit auto-start failed: %s", exc)
+    except Exception as exc:
+        logger.warning("playit auto-start failed: %s", exc)
 
     def shutdown() -> None:
         os._exit(0)  # noqa: SCS2 - we want an immediate exit
