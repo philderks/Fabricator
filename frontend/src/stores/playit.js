@@ -1,24 +1,21 @@
 /**
  * playit.gg Tunnel Store (setup syntax).
  *
- * Single source of truth for the playit tunnel — both the Server Overview
- * onboarding panel and the Settings → Network row consume from here. There
- * is exactly ONE poller across the whole app: callers ref-count it via
- * usePolling()/stopPolling(), so the interval runs while ≥1 consumer is
- * active and stops the moment the last one unmounts.
+ * Single source of truth for the playit agent. There is exactly ONE poller
+ * across the whole app: callers ref-count it via subscribe() (returns an
+ * unsubscribe), so the interval runs while ≥1 consumer is active and stops the
+ * moment the last one unmounts.
  *
- * Response shape (matches backend.playit.routes):
- *   { status, address, claim_url, error_reason, binary_verified }
+ * Response shape (matches backend.playit.routes / agent.get_status):
+ *   { status, claim_url, error_reason, binary_verified, tunnels, tunnels_known }
  *
- * `status` values:
- *   stopped | claiming | starting | running | needs_tunnel | connected
- *                                                              | error | unsupported
+ * `status` is DAEMON/ACCOUNT level:
+ *   stopped | claiming | starting | running | error | unsupported
  *
- * Semantics:
- *   running       — daemon healthy, address not (yet) known. Neutral, NOT an error.
- *   needs_tunnel  — daemon healthy, but no tunnel allocated. Actionable, NOT an error.
- *   connected     — rundata confirmed tunnel + display_address.
- *   error         — REAL failure (disabled_reason, daemon stdout match, daemon crash).
+ * Per-server state is derived: match a tunnel's local_port to a server's port
+ * via tunnelForPort(port). `tunnels_known` is false until the first successful
+ * rundata of this run, so the UI can tell "no tunnel for this port" apart from
+ * "can't reach the playit API right now".
  */
 
 import { computed, ref } from 'vue'
@@ -30,49 +27,55 @@ const POLL_MS = 3000
 export const usePlayitStore = defineStore('playit', () => {
   // ---------- State ----------
   const status         = ref('stopped')
-  const address        = ref(null)
+  const tunnels        = ref([])
+  const tunnelsKnown   = ref(false)
   const claimUrl       = ref(null)
   const errorReason    = ref(null)
   const binaryVerified = ref(true)
 
-  // Internal — not returned. Ref-counted poller and a debounce so two
-  // consumers mounting in the same tick don't trigger two parallel fetches.
+  // Internal — ref-counted poller and a debounce so two consumers mounting in
+  // the same tick don't trigger two parallel fetches.
   const _consumers     = ref(0)
   const _pollHandle    = ref(null)
   const _inFlightFetch = ref(null)
 
-  // ---------- Getters ----------
-  // `isActive` is the truthy-toggle predicate: the daemon is live (or being
-  // brought up). Includes the neutral states `running` and `needs_tunnel`
-  // — the user shouldn't see the toggle flip off just because we don't
-  // have an address yet.
-
-  const isActive    = computed(() =>
-    ['claiming', 'starting', 'running', 'needs_tunnel', 'connected'].includes(status.value)
+  // ---------- Getters (daemon-level) ----------
+  // `isActive` is the on/off truth for the agent toggle: the daemon is live or
+  // being brought up.
+  const isActive     = computed(() =>
+    ['claiming', 'starting', 'running'].includes(status.value)
   )
-  const isConnected = computed(() =>
-    status.value === 'connected' && address.value !== null
-  )
+  const isStopped     = computed(() => status.value === 'stopped')
   const isClaiming    = computed(() => status.value === 'claiming')
+  const isStarting    = computed(() => status.value === 'starting')
   const isRunning     = computed(() => status.value === 'running')
-  const isNeedsTunnel = computed(() => status.value === 'needs_tunnel')
   const isError       = computed(() => status.value === 'error')
   const isUnsupported = computed(() => status.value === 'unsupported')
 
-  // ---------- Internals ----------
+  /**
+   * The tunnel forwarding to `port`, or null. local_port arrives as a JSON
+   * number (backend int()-parsed), so a strict === against Number(port) holds.
+   * @returns {{local_port:number, address:string|null, disabled_reason:string|null, name:string|null, tunnel_type:string|null}|null}
+   */
+  function tunnelForPort(port) {
+    const p = Number(port)
+    if (!Number.isFinite(p)) return null
+    return tunnels.value.find(t => t.local_port === p) || null
+  }
 
+  // ---------- Internals ----------
   function _applySnapshot(data) {
     status.value         = data?.status ?? 'stopped'
-    address.value        = data?.address      ?? null
+    tunnels.value        = Array.isArray(data?.tunnels) ? data.tunnels : []
+    tunnelsKnown.value   = data?.tunnels_known === true
     claimUrl.value       = data?.claim_url    ?? null
     errorReason.value    = data?.error_reason ?? null
-    // binary_verified defaults to true so the absence of the field in older
-    // backends (none, but defense-in-depth) doesn't flash the warning.
+    // binary_verified defaults to true so the absence of the field doesn't
+    // flash the warning.
     binaryVerified.value = data?.binary_verified !== false
   }
 
   // ---------- Actions ----------
-
   async function fetch() {
     if (_inFlightFetch.value) return _inFlightFetch.value
     const promise = (async () => {
@@ -146,9 +149,10 @@ export const usePlayitStore = defineStore('playit', () => {
 
   return {
     // state
-    status, address, claimUrl, errorReason, binaryVerified,
+    status, tunnels, tunnelsKnown, claimUrl, errorReason, binaryVerified,
     // getters
-    isActive, isConnected, isClaiming, isRunning, isNeedsTunnel, isError, isUnsupported,
+    isActive, isStopped, isClaiming, isStarting, isRunning, isError, isUnsupported,
+    tunnelForPort,
     // actions
     fetch, start, stop, reset, subscribe,
   }

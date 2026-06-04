@@ -8,6 +8,7 @@ import ServerPlayersPage from '../views/server/ServerPlayersPage.vue'
 import ServerModsPage from '../views/server/ServerModsPage.vue'
 import ServerFilesPage from '../views/server/ServerFilesPage.vue'
 import ServerBackupsPage from '../views/server/ServerBackupsPage.vue'
+import ServerPlayitPage from '../views/server/ServerPlayitPage.vue'
 import ServerSettingsPage from '../views/server/ServerSettingsPage.vue'
 
 const routes = [
@@ -29,6 +30,7 @@ const routes = [
       { path: 'mods',     name: 'ServerMods',     component: ServerModsPage },
       { path: 'files',    name: 'ServerFiles',    component: ServerFilesPage },
       { path: 'backups',  name: 'ServerBackups',  component: ServerBackupsPage },
+      { path: 'playit',   name: 'ServerPlayit',   component: ServerPlayitPage },
       { path: 'settings', name: 'ServerSettings', component: ServerSettingsPage }
     ]
   }
