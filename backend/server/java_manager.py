@@ -215,6 +215,87 @@ def managed_java_info(major: int) -> dict:
     }
 
 
+def _probe_java_version(binary: Path) -> Optional[int]:
+    """Return the major version reported by ``binary -version``, or None.
+
+    Mirrors :func:`_parse_system_java_major` but targets an explicit binary
+    path (a managed install) rather than ``java`` on PATH. The same timeout
+    guard applies so a wedged binary cannot hang the request thread.
+    """
+    try:
+        result = subprocess.run(
+            [str(binary), "-version"],
+            capture_output=True,
+            text=True,
+            timeout=_SYSTEM_JAVA_VERSION_TIMEOUT_SEC,
+            **platform_utils.subprocess_no_window_kwargs(),
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
+        logger.warning("'%s -version' failed: %s", binary, exc)
+        return None
+    if result.returncode != 0:
+        return None
+    return parse_java_major((result.stdout or "") + (result.stderr or ""))
+
+
+def list_installed_java() -> list[dict]:
+    """Enumerate managed JDK installs under the managed base directory.
+
+    Each entry is ``{ "major", "path", "version" }`` where ``major`` is the
+    directory name (an integer), ``path`` is the java binary, and ``version``
+    is the probed major reported by the binary (may be ``None`` if the probe
+    fails). Returns an empty list when the base directory does not exist or
+    holds no valid installs. Entries are sorted by major ascending.
+    """
+    base = _managed_base()
+    if not base.exists():
+        return []
+
+    installs: list[dict] = []
+    for child in base.iterdir():
+        if not child.is_dir():
+            continue
+        try:
+            major = int(child.name)
+        except ValueError:
+            continue
+        binary = child / "bin" / java_binary(major)
+        if not binary.exists():
+            continue
+        installs.append({
+            "major": major,
+            "path": str(binary),
+            "version": _probe_java_version(binary),
+        })
+
+    installs.sort(key=lambda item: item["major"])
+    return installs
+
+
+def uninstall_java(major: int) -> bool:
+    """Remove the managed JDK install for ``major``.
+
+    Resolves the install directory through :func:`managed_java_dir` (applying
+    the same fallback mapping as installs, e.g. 16 -> 17) and verifies it is
+    located inside the managed base before removal so a crafted ``major`` can
+    never escape the data directory. Returns ``True`` when an install was
+    removed, ``False`` when nothing was installed for that major.
+    """
+    resolved_major = effective_install_major(int(major))
+    target_dir = managed_java_dir(resolved_major)
+
+    base = _managed_base().resolve()
+    resolved_target = target_dir.resolve()
+    if base not in resolved_target.parents:
+        raise ValueError(f"Refusing to remove path outside managed base: {target_dir}")
+
+    if not target_dir.exists():
+        return False
+
+    _safe_rmtree(target_dir)
+    return not target_dir.exists()
+
+
 def adoptium_asset_url(major: int) -> dict:
     """Return Temurin asset metadata for the current platform + architecture.
 

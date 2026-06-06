@@ -1,96 +1,35 @@
 <script setup>
-import { reactive, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import Panel from '../../components/ui/Panel.vue'
-import ToggleRow from '../../components/ui/ToggleRow.vue'
-import AppButton from '../../components/ui/AppButton.vue'
+import JavaManagerPanel from '../../components/settings/JavaManagerPanel.vue'
 import { version as appVersion } from '../../../package.json'
-import { useToast } from '../../composables/useToast'
+import { getUpdateStatus } from '../../api/servers'
 
-const STORAGE_KEY = 'fabricator:preferences'
+// Mirror the sidebar's update pill: show the backend's reported version
+// (which may be "unknown" on dev checkouts without a .fabricator_version
+// file) and fall back to the bundled package.json version only if absent.
+const reportedVersion = ref(null)
+const displayVersion = computed(() => reportedVersion.value || appVersion)
 
-const DEFAULTS = {
-  consoleAutoScroll: true,
-  consoleTimestamps: true,
-  confirmDestructive: true,
-  reducedMotion: false,
-  compactSidebar: false
-}
-
-const toast = useToast()
-
-const loadPreferences = () => {
+onMounted(async () => {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return { ...DEFAULTS }
-    return { ...DEFAULTS, ...JSON.parse(raw) }
+    const status = await getUpdateStatus()
+    reportedVersion.value = status?.currentVersion ?? null
   } catch {
-    return { ...DEFAULTS }
+    // Non-critical: leave the bundled version as the fallback.
   }
-}
-
-const prefs = reactive(loadPreferences())
-
-watch(
-  prefs,
-  (value) => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(value))
-    } catch {
-      // localStorage may be unavailable (private mode); preferences are
-      // non-critical so we silently skip persistence.
-    }
-  },
-  { deep: true }
-)
-
-const resetPreferences = () => {
-  Object.assign(prefs, DEFAULTS)
-  toast.success('Preferences reset to defaults', 'Settings')
-}
+})
 </script>
 
 <template>
   <div class="general-settings">
-    <Panel title="Console">
-      <div class="general-settings__toggles">
-        <ToggleRow
-          v-model="prefs.consoleAutoScroll"
-          label="Auto-scroll to newest output"
-        />
-        <ToggleRow
-          v-model="prefs.consoleTimestamps"
-          label="Show timestamps in console"
-        />
-      </div>
-    </Panel>
-
-    <Panel title="Interface">
-      <div class="general-settings__toggles">
-        <ToggleRow
-          v-model="prefs.compactSidebar"
-          label="Compact sidebar"
-        />
-        <ToggleRow
-          v-model="prefs.reducedMotion"
-          label="Reduce motion and animations"
-        />
-      </div>
-    </Panel>
-
-    <Panel title="Safety">
-      <div class="general-settings__toggles">
-        <ToggleRow
-          v-model="prefs.confirmDestructive"
-          label="Ask for confirmation before destructive actions"
-        />
-      </div>
-    </Panel>
+    <JavaManagerPanel />
 
     <Panel title="About">
       <dl class="general-settings__about">
         <div class="general-settings__about-row">
           <dt>Version</dt>
-          <dd>{{ appVersion }}</dd>
+          <dd>{{ displayVersion }}</dd>
         </div>
         <div class="general-settings__about-row">
           <dt>Application</dt>
@@ -98,12 +37,6 @@ const resetPreferences = () => {
         </div>
       </dl>
     </Panel>
-
-    <footer class="general-settings__footer">
-      <AppButton variant="ghost" @click="resetPreferences">
-        Reset to defaults
-      </AppButton>
-    </footer>
   </div>
 </template>
 
@@ -113,12 +46,6 @@ const resetPreferences = () => {
   flex-direction: column;
   gap: var(--space-4);
   max-width: 880px;
-}
-
-.general-settings__toggles {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
 }
 
 .general-settings__about {
@@ -145,10 +72,5 @@ const resetPreferences = () => {
   font-size: var(--text-sm);
   color: var(--text-secondary);
   font-family: var(--font-mono, ui-monospace, monospace);
-}
-
-.general-settings__footer {
-  display: flex;
-  justify-content: flex-end;
 }
 </style>

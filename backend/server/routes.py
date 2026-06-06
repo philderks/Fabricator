@@ -1115,6 +1115,37 @@ def cancel_java_install(task_id):
     return jsonify(java_manager.get_install_task(task_id) or {})
 
 
+@server_bp.route('/java/installed', methods=['GET'])
+def list_installed_java():
+    """List managed Java runtimes plus the system Java probe.
+
+    Used by the Java manager in the Settings tab to render installed
+    runtimes. Managed entries are removable; the system entry is informational
+    only (lives outside Fabricator's data directory).
+    """
+    return jsonify({
+        'managed': java_manager.list_installed_java(),
+        'system': java_manager.system_java_info(),
+    })
+
+
+@server_bp.route('/java/installed/<int:major>', methods=['DELETE'])
+def uninstall_installed_java(major):
+    """Remove a managed Java runtime by major version.
+
+    Returns 404 when no managed install exists for ``major``. Removal is safe:
+    if a server later needs the removed runtime, the normal resolution flow
+    re-triggers the install prompt on next start.
+    """
+    try:
+        removed = java_manager.uninstall_java(major)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    if not removed:
+        return jsonify({'error': f'No managed Java {major} install found'}), 404
+    return jsonify({'success': True, 'major': major})
+
+
 @server_bp.route('/metrics/system', methods=['GET'])
 def get_system_metrics():
     if not psutil:
