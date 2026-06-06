@@ -265,6 +265,23 @@ export async function getJavaInstallProgress(taskId) {
 }
 
 /**
+ * List installed Java runtimes (managed installs plus the system Java probe).
+ * @returns {Promise<Object>} { managed: Array<{major, path, version}>, system: {path, version, installed} }
+ */
+export async function getInstalledJava() {
+  return get('/api/java/installed')
+}
+
+/**
+ * Remove a managed Java runtime by major version.
+ * @param {number} major - Managed Java major version to remove
+ * @returns {Promise<Object>} { success, major }
+ */
+export async function uninstallJava(major) {
+  return del(`/api/java/installed/${major}`)
+}
+
+/**
  * Get Fabricator self-update status.
  * @returns {Promise<Object>} Update state and latest-version information
  */

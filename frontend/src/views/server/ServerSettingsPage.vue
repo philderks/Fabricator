@@ -46,6 +46,7 @@ const onReset = () => {
   if (!store.canEditSettings) return
   store.resetSettings()
 }
+
 </script>
 
 <template>
@@ -1156,4 +1157,5 @@ const onReset = () => {
   color: var(--text-muted);
   line-height: var(--leading-normal);
 }
+
 </style>
