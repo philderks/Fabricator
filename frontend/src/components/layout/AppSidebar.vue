@@ -24,7 +24,7 @@ const ALL_NAV_ITEMS = [
   { name: 'ServerFiles',    label: 'Files',    icon: 'files'    },
   { name: 'ServerBackups',  label: 'Backups',  icon: 'backups'  },
   { name: 'ServerPlayit',   label: 'playit.gg', icon: 'network' },
-  { name: 'ServerSettings', label: 'Settings', icon: 'settings' }
+  { name: 'ServerSettings', label: 'Properties', icon: 'properties' }
 ]
 
 // Defensive guard: hide Mods tab for vanilla servers (they have no mod folder).
@@ -261,9 +261,13 @@ onUnmounted(() => {
             <path d="M1.5 7.5h12"/>
             <path d="M7.5 1.5c1.85 1.7 2.85 3.85 2.85 6s-1 4.3-2.85 6c-1.85-1.7-2.85-3.85-2.85-6s1-4.3 2.85-6z"/>
           </template>
-          <template v-else-if="item.icon === 'settings'">
-            <path d="M11.5 8.9L13.4 8.9L13.4 6.2L11.5 6.1L10.7 4.8L11.6 3.1L9.3 1.8L8.2 3.4L6.8 3.4L5.8 1.8L3.4 3.1L4.3 4.8L3.6 6.1L1.7 6.2L1.7 8.9L3.6 8.9L4.3 10.2L3.4 11.9L5.8 13.2L6.8 11.6L8.2 11.6L9.3 13.2L11.6 11.9L10.7 10.2Z"/>
-            <circle cx="7.5" cy="7.5" r="2.2"/>
+          <template v-else-if="item.icon === 'properties'">
+            <path d="M2 4h7"/>
+            <path d="M13 4h-2"/>
+            <circle cx="10" cy="4" r="1.6"/>
+            <path d="M2 11h2"/>
+            <path d="M13 11H6"/>
+            <circle cx="5" cy="11" r="1.6"/>
           </template>
         </svg>
         <span>{{ item.label }}</span>
@@ -271,6 +275,21 @@ onUnmounted(() => {
     </nav>
 
     <div class="app-sidebar__bottom">
+      <component
+        :is="hasServerContext ? 'router-link' : 'div'"
+        v-bind="hasServerContext
+          ? { to: { name: 'ServerGeneralSettings', params: { id: serverId } }, activeClass: 'is-active' }
+          : { 'aria-disabled': 'true' }"
+        class="app-sidebar__nav-item"
+        :class="{ 'app-sidebar__nav-item--ghost': !hasServerContext }"
+      >
+        <svg class="app-sidebar__nav-icon" width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+          <path d="M11.5 8.9L13.4 8.9L13.4 6.2L11.5 6.1L10.7 4.8L11.6 3.1L9.3 1.8L8.2 3.4L6.8 3.4L5.8 1.8L3.4 3.1L4.3 4.8L3.6 6.1L1.7 6.2L1.7 8.9L3.6 8.9L4.3 10.2L3.4 11.9L5.8 13.2L6.8 11.6L8.2 11.6L9.3 13.2L11.6 11.9L10.7 10.2Z"/>
+          <circle cx="7.5" cy="7.5" r="2.2"/>
+        </svg>
+        <span>Settings</span>
+      </component>
+
       <component
         :is="updateAvailable ? 'button' : 'div'"
         :type="updateAvailable ? 'button' : undefined"

@@ -34,9 +34,13 @@ const route = useRoute()
 const ROUTE_TITLE = {
   ServerOverview: 'Overview',
   ServerConsole:  'Console',
+  ServerPlayers:  'Players',
   ServerMods:     'Mods',
   ServerFiles:    'Files',
-  ServerSettings: 'Settings'
+  ServerBackups:  'Backups',
+  ServerPlayit:   'playit.gg',
+  ServerSettings: 'Properties',
+  ServerGeneralSettings: 'Settings'
 }
 
 const pageTitle = computed(() => ROUTE_TITLE[route.name] || '')
@@ -110,9 +114,9 @@ const isRunning = computed(() => props.serverStatus.status === 'running')
 }
 
 .app-topbar__title {
-  font-size: var(--text-sm);
-  font-weight: 500;
-  color: var(--text-secondary);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 .app-topbar__right {

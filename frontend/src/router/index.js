@@ -10,6 +10,7 @@ import ServerFilesPage from '../views/server/ServerFilesPage.vue'
 import ServerBackupsPage from '../views/server/ServerBackupsPage.vue'
 import ServerPlayitPage from '../views/server/ServerPlayitPage.vue'
 import ServerSettingsPage from '../views/server/ServerSettingsPage.vue'
+import ServerGeneralSettingsPage from '../views/server/ServerGeneralSettingsPage.vue'
 
 const routes = [
   {
@@ -31,7 +32,8 @@ const routes = [
       { path: 'files',    name: 'ServerFiles',    component: ServerFilesPage },
       { path: 'backups',  name: 'ServerBackups',  component: ServerBackupsPage },
       { path: 'playit',   name: 'ServerPlayit',   component: ServerPlayitPage },
-      { path: 'settings', name: 'ServerSettings', component: ServerSettingsPage }
+      { path: 'properties', name: 'ServerSettings', component: ServerSettingsPage },
+      { path: 'settings', name: 'ServerGeneralSettings', component: ServerGeneralSettingsPage }
     ]
   }
 ]
