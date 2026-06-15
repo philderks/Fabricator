@@ -19,7 +19,7 @@ FROM python:3.11-slim AS runtime
 # fonts/AWT (some server jars reach for them). tini = clean PID 1 so the
 # Minecraft / playit subprocesses are reaped and signals are forwarded.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates fontconfig libfreetype6 tini \
+        ca-certificates fontconfig libfreetype6 gosu tini \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -52,11 +52,22 @@ ENV FLASK_ENV=production \
 # ignores appdata for these paths and run.py's chdir-into-appdata is frozen
 # (.exe) only, so it would be dead weight here.
 
+# Run as a dedicated unprivileged user (parity with the systemd install's
+# --system 'fabricator' user; root in the container would be a regression).
+# uid is pinned so ownership on the /data volume is stable across rebuilds.
+RUN useradd --system --no-create-home --shell /usr/sbin/nologin --uid 10001 fabricator
+
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
 VOLUME ["/data"]
 EXPOSE 5000
 
 # HOST=0.0.0.0 binds all interfaces *inside* the container netns (required to
 # reach the panel through a published port). Restrict exposure on the host side
 # via the compose port mapping, not by changing HOST.
-ENTRYPOINT ["tini", "--"]
+#
+# The entrypoint starts as root only to chown the freshly-mounted /data volume,
+# then drops to 'fabricator' via gosu and execs tini (PID 1) -> python.
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["python", "run.py"]
