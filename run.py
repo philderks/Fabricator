@@ -1,6 +1,7 @@
 """Entry point for the Fabricator application with system tray support."""
 import logging
 import os
+import signal
 import sys
 import threading
 import time
@@ -137,6 +138,32 @@ def _load_system_env() -> None:
 
 
 # ============================================
+# Graceful Shutdown
+# ============================================
+
+def _graceful_stop() -> None:
+    """Stop running Minecraft servers (saving worlds) and the playit tunnel.
+
+    Runs on SIGTERM (``docker stop`` / ``systemctl stop``), SIGINT (Ctrl-C) and
+    the tray "Quit" action — all route through ``shutdown()``. Without it the
+    process would ``os._exit`` straight past the JVM children without sending
+    the console ``stop`` command, so worlds would never be saved.
+    """
+    try:
+        from backend.server.registry import get_server_process_registry
+        stopped = get_server_process_registry().stop_all_running()
+        if stopped:
+            logger.info("Graceful shutdown stopped servers: %s", stopped)
+    except Exception as exc:  # cleanup must never block the exit
+        logger.warning("Graceful server shutdown failed: %s", exc)
+    try:
+        from backend.playit import agent as playit_agent
+        playit_agent.stop()
+    except Exception as exc:
+        logger.debug("playit stop on shutdown skipped: %s", exc)
+
+
+# ============================================
 # Main Entry Point
 # ============================================
 
@@ -179,8 +206,16 @@ def main() -> None:
     except Exception as exc:
         logger.warning("playit auto-start failed: %s", exc)
 
-    def shutdown() -> None:
-        os._exit(0)  # noqa: SCS2 - we want an immediate exit
+    shutdown_started = threading.Event()
+
+    def shutdown(*_args) -> None:
+        # Idempotent: a second SIGTERM (or a tray-quit racing a signal) while a
+        # shutdown is already in flight must not start a second stop pass.
+        if shutdown_started.is_set():
+            return
+        shutdown_started.set()
+        _graceful_stop()
+        os._exit(0)  # noqa: SCS2 - immediate exit once worlds are saved
 
     def run_server() -> None:
         from werkzeug.serving import make_server
@@ -191,9 +226,16 @@ def main() -> None:
     server_thread = threading.Thread(target=run_server, daemon=True)
     server_thread.start()
 
-    open_browser_delayed(config.HOST, config.PORT)
+    # Trap SIGTERM (docker stop / systemctl stop) and SIGINT (Ctrl-C) so they run
+    # the graceful shutdown instead of dropping the JVM children. Must be
+    # registered on the main thread.
+    signal.signal(signal.SIGTERM, shutdown)
+    signal.signal(signal.SIGINT, shutdown)
 
     if _has_tray_support():
+        # Browser auto-open only makes sense in a desktop session; in a headless
+        # container (FABRICATOR_NO_TRAY=1) there is no browser, so skip it.
+        open_browser_delayed(config.HOST, config.PORT)
         try:
             tray_icon = create_tray_icon(config.PORT, shutdown)
             tray_icon.run()

@@ -231,6 +231,60 @@ class ServerProcessRegistry:
             return {'status': 'stopped', 'message': 'Server is not running'}
         return manager.stop()
 
+    def stop_all_running(self, timeout: float = 45.0) -> Dict[str, str]:
+        """Gracefully stop every running server in parallel.
+
+        Spawns one thread per running manager so total wall-clock stays ~a
+        single server's stop time (``ServerManager.stop`` waits up to 30s for a
+        clean ``stop``-command save) regardless of how many are running, then
+        joins on a shared deadline. Drives the signal-based shutdown path so
+        ``docker stop`` / Ctrl-C / tray-quit save worlds instead of getting the
+        JVM children SIGKILLed. ``timeout`` must stay below the container's
+        ``stop_grace_period`` (60s) so the join finishes before Docker escalates
+        to SIGKILL. Returns a ``{server_id: status}`` map for what it attempted.
+        """
+        with self._lock:
+            targets = [
+                (server_id, manager)
+                for server_id, manager in self._instances.items()
+                if manager.is_running
+            ]
+        if not targets:
+            return {}
+
+        results: Dict[str, str] = {}
+        results_lock = threading.Lock()
+
+        def _stop_one(server_id: str, manager: ServerManager) -> None:
+            # Each manager guards itself with its own lock, so concurrent stops
+            # of distinct servers never collide.
+            try:
+                outcome = manager.stop()
+                status = str(outcome.get('status', 'unknown'))
+            except Exception as exc:  # one server must not block the others
+                status = f'error: {exc}'
+            with results_lock:
+                results[server_id] = status
+            with self._lock:
+                self._started_at.pop(server_id, None)
+
+        threads = [
+            threading.Thread(
+                target=_stop_one,
+                args=(server_id, manager),
+                name=f'shutdown-stop-{server_id}',
+                daemon=True,
+            )
+            for server_id, manager in targets
+        ]
+        for thread in threads:
+            thread.start()
+
+        deadline = time.time() + timeout
+        for thread in threads:
+            thread.join(max(0.0, deadline - time.time()))
+        return results
+
     def restart_server(self, server: Dict[str, object]) -> Dict[str, Dict[str, object]]:
         stop_result = self.stop_server(str(server['id']))
         if stop_result.get('status') != 'stopped':
