@@ -1,0 +1,35 @@
+services:
+  fabricator:
+    image: ghcr.io/philderks/fabricator:latest
+    # build: .            # uncomment for local builds
+    container_name: fabricator
+    restart: unless-stopped
+    # The panel has no built-in authentication (single-operator design — auth is
+    # delegated to a reverse proxy). The default below publishes ONLY to host
+    # loopback, so the panel is not reachable from the network out of the box.
+    # To expose it: put a reverse proxy with auth/TLS in front, or — only behind
+    # a firewall/VPN — change the mapping to "5000:5000". Do NOT set HOST to
+    # 127.0.0.1 in the container; it must stay 0.0.0.0 to be reachable through
+    # the published port. The restriction belongs on the host side of the map.
+    ports:
+      - "127.0.0.1:5000:5000"   # Panel — host loopback only
+      # Minecraft server ports are not published here. Use playit for tunneling,
+      # or map each server's port explicitly for direct access, e.g.:
+      # - "25565:25565"
+    volumes:
+      - fabricator-data:/data
+    # docker stop / `compose pull && up` send SIGTERM; run.py traps it and
+    # gracefully stops each running server (console "stop" + world save) in
+    # parallel before exiting. Give that ~a single server's save time before
+    # Docker escalates to SIGKILL. tini (PID 1, baked into the image) reaps
+    # subprocesses, so `init: true` is not needed.
+    stop_grace_period: 60s
+    environment:
+      - FLASK_ENV=production
+      # - PLAYIT_ENABLED=true   # auto-start the tunnel on boot
+    # Minecraft is RAM-hungry. If you cap here, keep each server's JVM heap
+    # (-Xmx) below the cap or the container gets OOM-killed.
+    # mem_limit: 6g
+
+volumes:
+  fabricator-data:
