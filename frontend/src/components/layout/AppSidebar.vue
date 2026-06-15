@@ -48,6 +48,7 @@ const updateState = ref({
   currentVersion: appVersion,
   latestVersion: null,
   updateAvailable: false,
+  selfUpdateDisabled: false,
   lastError: null,
   lastExitCode: null
 })
@@ -110,10 +111,13 @@ const stopUpdatePoll = () => {
 }
 
 const updateAvailable = computed(() =>
-  Boolean(updateState.value.updateAvailable) && !updateState.value.inProgress
+  Boolean(updateState.value.updateAvailable) &&
+  !updateState.value.inProgress &&
+  !updateState.value.selfUpdateDisabled
 )
 
 const updateLabel = computed(() => {
+  if (updateState.value.selfUpdateDisabled) return 'Managed by image'
   if (updateState.value.inProgress || updateTriggering.value) return 'Updating…'
   if (updateAvailable.value) return 'Update available'
   return 'Up to date'
