@@ -1,0 +1,16 @@
+.git
+.github
+**/__pycache__/
+**/*.pyc
+frontend/node_modules
+frontend/dist
+dist
+build
+*.spec
+venv
+.venv
+staging
+java
+*.log
+.fabricator
+docs
