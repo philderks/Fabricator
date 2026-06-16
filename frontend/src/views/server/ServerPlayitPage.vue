@@ -5,6 +5,7 @@ import AppButton from '../../components/ui/AppButton.vue'
 import ConfirmModal from '../../components/modals/ConfirmModal.vue'
 import { useServerStore } from '../../stores/server'
 import { usePlayitStore } from '../../stores/playit'
+import { copyToClipboard } from '../../utils/clipboard'
 
 const store = useServerStore()
 const playit = usePlayitStore()
@@ -87,14 +88,14 @@ const deferralHint = computed(() => {
 // Copy-with-2s-check, same pattern as the Overview stat card.
 const copied = ref(false)
 let _copyTimeout = null
-function copyAddress() {
+async function copyAddress() {
   const addr = tunnel.value?.address
   if (!addr) return
-  navigator.clipboard.writeText(addr).then(() => {
-    copied.value = true
-    if (_copyTimeout) clearTimeout(_copyTimeout)
-    _copyTimeout = setTimeout(() => { copied.value = false; _copyTimeout = null }, 2000)
-  }).catch(() => { /* clipboard unavailable — silent */ })
+  const ok = await copyToClipboard(addr)
+  if (!ok) return
+  copied.value = true
+  if (_copyTimeout) clearTimeout(_copyTimeout)
+  _copyTimeout = setTimeout(() => { copied.value = false; _copyTimeout = null }, 2000)
 }
 
 onMounted(() => {
@@ -561,6 +562,7 @@ onUnmounted(() => {
   align-items: center;
   gap: var(--space-3);
   min-width: 0;
+  width: 100%;
 }
 
 .pb-connected__dot {
@@ -584,6 +586,8 @@ onUnmounted(() => {
 }
 
 .pb-copy {
+  position: relative;
+  z-index: 1;
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;

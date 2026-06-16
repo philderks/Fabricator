@@ -6,6 +6,7 @@ import Panel from '../../components/ui/Panel.vue'
 import { installedModDisplayName, installedModInitial } from '../../utils/installedModDisplay'
 import { useServerStore } from '../../stores/server'
 import { usePlayitStore } from '../../stores/playit'
+import { copyToClipboard } from '../../utils/clipboard'
 
 const route = useRoute()
 const store = useServerStore()
@@ -53,17 +54,17 @@ const copied = ref(false)
 let _copyTimeout = null
 let _unsubscribePlayit = null
 
-function copyAddress() {
+async function copyAddress() {
   const addr = playitTunnel.value?.address
   if (!addr) return
-  navigator.clipboard.writeText(addr).then(() => {
-    copied.value = true
-    if (_copyTimeout) clearTimeout(_copyTimeout)
-    _copyTimeout = setTimeout(() => {
-      copied.value = false
-      _copyTimeout = null
-    }, 2000)
-  }).catch(() => { /* clipboard unavailable — silent */ })
+  const ok = await copyToClipboard(addr)
+  if (!ok) return
+  copied.value = true
+  if (_copyTimeout) clearTimeout(_copyTimeout)
+  _copyTimeout = setTimeout(() => {
+    copied.value = false
+    _copyTimeout = null
+  }, 2000)
 }
 
 onMounted(() => {

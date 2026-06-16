@@ -4,6 +4,7 @@ import AppButton from '../../components/ui/AppButton.vue'
 import Panel from '../../components/ui/Panel.vue'
 import ConfirmModal from '../../components/modals/ConfirmModal.vue'
 import { formatFileSize } from '../../utils/format'
+import { copyToClipboard } from '../../utils/clipboard'
 import { useServerStore } from '../../stores/server'
 
 const store = useServerStore()
@@ -96,15 +97,9 @@ const copyState = ref('idle')
 const onCopyPath = async () => {
   const path = store.fileBrowser.absolutePath
   if (!path) return
-  try {
-    await navigator.clipboard.writeText(path)
-    copyState.value = 'copied'
-    setTimeout(() => { copyState.value = 'idle' }, 1500)
-  } catch (err) {
-    console.error('Clipboard write failed:', err)
-    copyState.value = 'error'
-    setTimeout(() => { copyState.value = 'idle' }, 1500)
-  }
+  const ok = await copyToClipboard(path)
+  copyState.value = ok ? 'copied' : 'error'
+  setTimeout(() => { copyState.value = 'idle' }, 1500)
 }
 </script>
 

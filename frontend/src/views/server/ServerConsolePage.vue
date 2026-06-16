@@ -20,9 +20,12 @@ const parseLine = (raw) => {
   return { time, level, message: raw }
 }
 
+// Tag each line with a stream-scoped id so :key stays stable across filter
+// toggles — index keys made Vue recycle DOM nodes carrying the previous
+// line's level class, flashing the wrong color on filter swap.
 const allLines = computed(() => {
-  const stdout = (store.logs.stdout || []).map((line) => ({ stream: 'stdout', ...parseLine(line) }))
-  const stderr = (store.logs.stderr || []).map((line) => ({ stream: 'stderr', level: 'ERROR', time: parseLine(line).time, message: line }))
+  const stdout = (store.logs.stdout || []).map((line, i) => ({ id: `stdout:${i}`, stream: 'stdout', ...parseLine(line) }))
+  const stderr = (store.logs.stderr || []).map((line, i) => ({ id: `stderr:${i}`, stream: 'stderr', level: 'ERROR', time: parseLine(line).time, message: line }))
   return [...stdout, ...stderr]
 })
 
@@ -85,8 +88,8 @@ const onSubmit = (event) => {
         <template v-else>No {{ activeFilter }} entries.</template>
       </div>
       <div
-        v-for="(line, i) in filteredLines"
-        :key="i"
+        v-for="line in filteredLines"
+        :key="line.id"
         class="console-page__line"
         :class="`console-page__line--${line.level.toLowerCase()}`"
       >
