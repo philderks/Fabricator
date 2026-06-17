@@ -539,9 +539,8 @@ export default {
       this.performInstall(ctx.mod, ctx.mcVersion, ctx.missing)
     },
 
-    selectMod(mod) {
+    selectMod(_mod) {
       // Future: Open mod details view
-      console.log('Selected mod:', mod);
     },
 
     truncate,

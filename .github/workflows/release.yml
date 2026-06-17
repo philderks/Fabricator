@@ -115,3 +115,56 @@ jobs:
         with:
           files: dist/Fabricator-${{ github.event.release.tag_name }}.exe
           fail_on_unmatched_files: true
+
+  build-docker:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU            # emulation for the linux/arm64 runtime stage
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive tags + labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/philderks/fabricator
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+          flavor: |
+            latest=auto
+          # latest=auto tags :latest on every NON-prerelease semver tag. It does
+          # NOT compare against existing/higher tags, so re-publishing an older
+          # patch (e.g. a v1.2.x hotfix after v1.3.0) moves :latest backwards.
+          # Fine for the normal forward-release flow; revisit if back-publishing
+          # becomes routine.
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64   # drop arm64 for amd64-only builds
+          push: true
+          build-args: |
+            VERSION=${{ github.event.release.tag_name }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

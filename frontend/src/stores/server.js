@@ -524,8 +524,7 @@ export const useServerStore = defineStore('server', () => {
     }
   }
 
-  function handleUpdateMod(mod) {
-    console.log('Update mod placeholder:', mod)
+  function handleUpdateMod(_mod) {
     toast.info('Mod updates coming soon', 'Not Implemented')
   }
 
