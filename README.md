@@ -8,7 +8,8 @@
 
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/philderks/Fabricator?style=flat-square)](https://github.com/philderks/Fabricator/stargazers)
-[![Platform](https://img.shields.io/badge/platform-Linux-lightgrey?style=flat-square)](https://github.com/philderks/Fabricator)
+[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Docker-lightgrey?style=flat-square)](https://github.com/philderks/Fabricator)
+[![Docker](https://img.shields.io/badge/ghcr.io-philderks%2Ffabricator-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/philderks/Fabricator/pkgs/container/fabricator)
 
 [Website](https://fabricator.site/) | [Documentation](https://docs.fabricator.site/)
 
@@ -17,7 +18,7 @@
 ---
 
 <div align="center">
-  <img width="2560" height="1282" alt="image" src="https://github.com/user-attachments/assets/78f797c8-f1ac-4e33-87c9-a3d79b207c4a" />
+  <img width="2560" height="1313" alt="Overview" src="https://github.com/user-attachments/assets/7ed784e6-eb1d-4305-bc98-3800a785fbc1" />
 </div>
 
 
@@ -32,13 +33,41 @@
 | 📋 | **Logs & Monitoring** — live log stream, TPS and RAM graphs | ✅ Available |
 | 💾 | **Backups & Restore** — manual snapshots, restore from any backup | ✅ Available |
 | 🖥️ | **Multiple Servers** — manage several instances from one dashboard | ✅ Available |
+| 🐳 | **Docker** — single multi-arch (amd64/arm64) image, runs as a non-root user | ✅ Available |
 | ⬆️ | **Fabricator self-update** — checks GitHub Releases; update from the sidebar or reinstall script | ✅ Available |
+| ⌨️ | **CLI** (`fabricator` command) — `status`, `start`/`stop`, `update`, `version`, `uninstall` | ✅ Available |
 | 🔄 | **One-click Minecraft / Fabric server updates** | 🔧 Coming soon |
-| ⌨️ | **CLI** (`fabricator` command) | 🔧 Coming soon |
 
 ---
 
 ## Quick Start
+
+### Docker (recommended)
+
+A single multi-arch image is published to GHCR for every release. It runs as a
+non-root user and keeps all state on one `/data` volume.
+
+```bash
+# Grab the compose file and start
+curl -fsSL https://raw.githubusercontent.com/philderks/Fabricator/main/docker-compose.yml -o docker-compose.yml
+docker compose up -d
+```
+
+The packaged `docker-compose.yml` publishes the panel to **host loopback only**
+(`127.0.0.1:5000`) because there is no built-in authentication — put a reverse
+proxy with auth/TLS in front before exposing it, or restrict access to a trusted
+network. Minecraft server ports aren't published by default; use the built-in
+playit.gg tunnel, or map each server's port explicitly (e.g. `25565:25565`).
+
+To update, pull the new image and recreate the container — your data persists in
+the named volume:
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+Docker is the simplest way to run Fabricator on **Linux, macOS, or Windows** (via
+Docker Desktop / WSL2).
 
 ### One-line installer
 
@@ -93,17 +122,18 @@ Environment variables are documented in `.env.example`. For production-like path
 
 | | Requirement |
 |---|---|
-| OS | Linux — Debian/Ubuntu, Arch, or Fedora/RHEL (systemd) |
-| Python | 3.10+ |
+| Docker | Any OS with Docker Engine / Docker Desktop (recommended path) |
+| OS | Linux — Debian/Ubuntu, Arch, or Fedora/RHEL (systemd) for the native installer |
+| Python | 3.10+ (manual/native install) |
 | Node.js | 20.x (frontend build only) |
 
-> Windows is not supported yet.
+> The native installer targets Linux. On macOS and Windows, run Fabricator via Docker.
 
 ---
 
 ## Configuration
 
-The installer writes `/etc/fabricator/fabricator.env` (group `fabricator`, mode `0640`). Common variables:
+With Docker, set these as `environment:` entries in `docker-compose.yml`; the image already pins every data path onto the `/data` volume. For the native install, the installer writes `/etc/fabricator/fabricator.env` (group `fabricator`, mode `0640`). Common variables:
 
 ```env
 # Listen address — packaged default is all interfaces; use a reverse proxy in production
@@ -152,6 +182,23 @@ sudo systemctl restart fabricator
 
 ---
 
+## CLI
+
+The native (systemd) install ships a `fabricator` command for managing the service from the shell:
+
+```bash
+fabricator status            # systemd state + Flask/Minecraft API reachability (--json available)
+fabricator start | stop      # control the systemd service
+fabricator update            # update to the latest GitHub release (runs the installer)
+fabricator version           # show the installed version
+fabricator uninstall         # remove app, data, config, systemd unit, and service user
+fabricator help              # list all commands
+```
+
+The read commands (`status`, `version`, `help`) accept `--json` for scripting. The CLI is currently minimal and will grow to cover server and mod management.
+
+---
+
 ## Roadmap
 
 | Status | Feature |
@@ -160,11 +207,13 @@ sudo systemctl restart fabricator
 | ✅ Done | Logs & monitoring |
 | ✅ Done | Backups & restore |
 | ✅ Done | Multiple server instances |
+| ✅ Done | Docker image (multi-arch, non-root) + compose |
 | ✅ Done | Fabricator self-update (UI + installer) |
-| 🔧 In progress | CLI (`fabricator` command) |
+| ✅ Done | CLI — minimal form (`status`, `start`/`stop`, `update`, `version`, `uninstall`) |
+| 🔧 In progress | CLI — expanded server/mod management commands |
 | 🔧 In progress | Additional loader support — Vanilla shipped; NeoForge, Forge, Quilt, Paper next |
 | 📋 Planned | One-click Minecraft / Fabric server upgrades |
-| 📋 Planned | Windows support |
+| 📋 Planned | Native Windows installer (Docker works today) |
 
 ---
 
