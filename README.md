@@ -4,7 +4,7 @@
 
 # Fabricator
 
-**Self-hosted web dashboard for managing Fabric and Vanilla Minecraft servers.**
+**Self-hosted web dashboard for managing Minecraft servers.**
 
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/philderks/Fabricator?style=flat-square)](https://github.com/philderks/Fabricator/stargazers)
@@ -207,11 +207,11 @@ The read commands (`status`, `version`, `help`) accept `--json` for scripting. T
 | ✅ Done | Logs & monitoring |
 | ✅ Done | Backups & restore |
 | ✅ Done | Multiple server instances |
+| ✅ Done | Loader support: Vanilla, NeoForge, Forge, Quilt, Fabric |
 | ✅ Done | Docker image (multi-arch, non-root) + compose |
 | ✅ Done | Fabricator self-update (UI + installer) |
 | ✅ Done | CLI — minimal form (`status`, `start`/`stop`, `update`, `version`, `uninstall`) |
 | 🔧 In progress | CLI — expanded server/mod management commands |
-| 🔧 In progress | Additional loader support — Vanilla shipped; NeoForge, Forge, Quilt, Paper next |
 | 📋 Planned | One-click Minecraft / Fabric server upgrades |
 | 📋 Planned | Native Windows installer (Docker works today) |
 
