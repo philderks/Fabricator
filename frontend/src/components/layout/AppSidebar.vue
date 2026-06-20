@@ -1,8 +1,10 @@
 <script setup>
 import { computed, inject, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import ServerSwitcher from './ServerSwitcher.vue'
 import ConfirmModal from '../modals/ConfirmModal.vue'
+import ChangePasswordModal from '../modals/ChangePasswordModal.vue'
+import { useAuthStore } from '../../stores/auth'
 import { version as appVersion } from '../../../package.json'
 import { getUpdateStatus, triggerUpdate } from '../../api/servers'
 import { useToast } from '../../composables/useToast'
@@ -12,6 +14,15 @@ const route = useRoute()
 const toast = useToast()
 const store = useServerStore()
 const showCreateModal = inject('showCreateModal', ref(false))
+
+const auth = useAuthStore()
+const router = useRouter()
+const showChangePassword = ref(false)
+
+async function onLogout() {
+  await auth.logout()
+  router.push({ name: 'Login' })
+}
 
 const serverId = computed(() => route.params.id)
 const hasServerContext = computed(() => Boolean(serverId.value))
@@ -294,6 +305,32 @@ onUnmounted(() => {
         <span>Settings</span>
       </component>
 
+      <template v-if="auth.enabled">
+        <button
+          type="button"
+          class="app-sidebar__nav-item app-sidebar__account-btn"
+          @click="showChangePassword = true"
+        >
+          <svg class="app-sidebar__nav-icon" width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+            <rect x="3" y="6.5" width="9" height="6.5" rx="1"/>
+            <path d="M5 6.5V4.5a2.5 2.5 0 015 0v2"/>
+          </svg>
+          <span>Change password</span>
+        </button>
+        <button
+          type="button"
+          class="app-sidebar__nav-item app-sidebar__account-btn"
+          @click="onLogout"
+        >
+          <svg class="app-sidebar__nav-icon" width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+            <path d="M6 2.5H3.5A1 1 0 002.5 3.5v8A1 1 0 003.5 12.5H6"/>
+            <path d="M9.5 10.5l3-3-3-3"/>
+            <path d="M12.5 7.5H6"/>
+          </svg>
+          <span>Log out</span>
+        </button>
+      </template>
+
       <component
         :is="updateAvailable ? 'button' : 'div'"
         :type="updateAvailable ? 'button' : undefined"
@@ -323,6 +360,8 @@ onUnmounted(() => {
       @confirm="handleUpdateConfirm"
       @cancel="handleUpdateCancel"
     />
+
+    <ChangePasswordModal :show="showChangePassword" @close="showChangePassword = false" />
   </aside>
 </template>
 
@@ -437,6 +476,16 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+/* Account actions styled like nav items but they're <button>s. */
+.app-sidebar__account-btn {
+  background: none;
+  border: none;
+  width: 100%;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 /* Update status pill — subtle, blends into the sidebar */
