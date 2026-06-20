@@ -58,15 +58,20 @@ def cookie_secure() -> bool:
 # Persistent state file (0600, co-located with servers.json)
 # --------------------------------------------------------------------------- #
 
-def _auth_file() -> Path:
-    """Path to ``auth.json`` in the same data dir as ``servers.json``.
+def data_dir() -> Path:
+    """The persistent data directory — the same one ``servers.json`` uses.
 
     Derived from the live config so it tracks the prod override
     (``/var/lib/fabricator``) and test redirection (``SERVER_INDEX_FILE``)
     automatically — never a user-home path under the systemd service.
     """
     from backend.core.config import get_config  # lazy: keep pure helpers light
-    return Path(get_config().SERVERS_FILE).parent / _AUTH_FILE_NAME
+    return Path(get_config().SERVERS_FILE).parent
+
+
+def _auth_file() -> Path:
+    """Path to the 0600 ``auth.json`` state file in the data dir."""
+    return data_dir() / _AUTH_FILE_NAME
 
 
 def _read_auth_file() -> dict:
@@ -119,7 +124,7 @@ def data_dir_writable() -> bool:
     The single remaining hard-fail at startup: setup mode is pointless if the
     credential/key cannot be persisted. Probes the nearest existing ancestor.
     """
-    probe = _auth_file().parent
+    probe = data_dir()
     while not probe.exists():
         parent = probe.parent
         if parent == probe:

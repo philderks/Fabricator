@@ -113,3 +113,28 @@ def authed_client(auth_client):
     resp = auth_client.post("/api/auth/login", json={"password": _AUTH_TEST_PASSWORD})
     assert resp.status_code == 200
     return auth_client
+
+
+@pytest.fixture
+def setup_app(tmp_servers_root, monkeypatch):
+    """Flask app in SETUP MODE: auth enabled, no env hash, no persisted file.
+
+    The temp data dir (via SERVER_INDEX_FILE) has no auth.json, so the app boots
+    locked into setup mode; SECRET_KEY is generated+persisted there at boot.
+    """
+    monkeypatch.delenv("FABRICATOR_DISABLE_AUTH", raising=False)
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    monkeypatch.delenv("FABRICATOR_AUTH_PASSWORD_HASH", raising=False)
+
+    import backend.server.registry as registry_mod
+    registry_mod.reset_for_tests()
+    from backend.core.app import create_app
+
+    app = create_app()
+    app.config["TESTING"] = True
+    return app
+
+
+@pytest.fixture
+def setup_client(setup_app):
+    return setup_app.test_client()
