@@ -59,6 +59,9 @@ class Config:
         # set HOST explicitly (and should put Fabricator behind a reverse
         # proxy).
         self.DEBUG = os.environ.get("FLASK_ENV") != "production"
+        # Session signing key (Flask-standard name). Required when built-in
+        # auth is enabled - see backend/auth. SENSITIVE: never log or repr.
+        self.SECRET_KEY = os.environ.get("SECRET_KEY")
         self.HOST = os.environ.get("HOST", "127.0.0.1")
         self.PORT = int(os.environ.get("PORT", 5000))
 
