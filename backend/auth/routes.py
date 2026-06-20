@@ -77,6 +77,46 @@ def login():
     return jsonify({"authenticated": True}), 200
 
 
+@auth_bp.route("/change-password", methods=["POST"])
+def change_password():
+    """Change the operator password (requires the CURRENT password).
+
+    Protected by the gate (session required). Re-verifies the current password
+    so a hijacked session can't silently lock out the operator. JSON only.
+    Refuses (409) when the password is declared via the env var. SENSITIVE:
+    never log either password.
+    """
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON body required"}), 400
+    current = data.get("current")
+    new = data.get("new")
+    if not isinstance(current, str) or not isinstance(new, str):
+        return jsonify({"error": "current and new passwords are required"}), 400
+    if len(new) < MIN_PASSWORD_LENGTH:
+        return (
+            jsonify(
+                {"error": f"password must be at least {MIN_PASSWORD_LENGTH} characters"}
+            ),
+            400,
+        )
+    if service.password_is_env_managed():
+        return (
+            jsonify(
+                {
+                    "error": "password is set via FABRICATOR_AUTH_PASSWORD_HASH; "
+                    "change it there"
+                }
+            ),
+            409,
+        )
+    if not service.verify_password(current):
+        time.sleep(LOGIN_FAILURE_DELAY_SECONDS)
+        return jsonify({"error": "current password is incorrect"}), 401
+    service.set_password(new)
+    return jsonify({"changed": True}), 200
+
+
 @auth_bp.route("/logout", methods=["POST"])
 def logout():
     # Reaching here means the gate already let us through (logout is protected).

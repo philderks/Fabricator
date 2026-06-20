@@ -148,6 +148,15 @@ def get_password_hash() -> str | None:
     return _read_auth_file().get("password_hash") or None
 
 
+def password_is_env_managed() -> bool:
+    """True when the password hash comes from the env var.
+
+    In that mode the credential is declarative; a UI password change can't take
+    effect (env overrides the file), so the change-password endpoint refuses.
+    """
+    return bool(os.environ.get(_PASSWORD_HASH_ENV))
+
+
 def hash_password(password: str) -> str:
     """Return a Werkzeug hash of ``password``.
 
