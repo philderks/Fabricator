@@ -17,3 +17,12 @@ export function postLogin(password) {
 export function postLogout() {
   return apiRequest('/api/auth/logout', { method: 'POST' })
 }
+
+export function postSetup(password) {
+  // First-boot credential. A JSON body is required by the server (CSRF guard).
+  return apiRequest('/api/auth/setup', {
+    method: 'POST',
+    body: JSON.stringify({ password }),
+    skipAuthRedirect: true
+  })
+}

@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import LoginPage from '../views/LoginPage.vue'
+import SetupPage from '../views/SetupPage.vue'
 import RootLayout from '../layouts/RootLayout.vue'
 import Servers from '../views/Servers.vue'
 import ServerLayout from '../layouts/ServerLayout.vue'
@@ -16,6 +17,7 @@ import ServerGeneralSettingsPage from '../views/server/ServerGeneralSettingsPage
 
 const routes = [
   { path: '/login', name: 'Login', component: LoginPage },
+  { path: '/setup', name: 'Setup', component: SetupPage },
   {
     path: '/',
     component: RootLayout,
@@ -53,11 +55,20 @@ router.beforeEach(async (to) => {
       await auth.checkStatus()
     } catch (_) {
       // Status call failed (server/network): treat as unauthenticated and leave
-      // `checked` false so the next navigation retries. enabled stays true
-      // (its safe default), so the next branch routes to /login.
+      // `checked` false so the next navigation retries. `enabled` stays true and
+      // `needsSetup` false (safe defaults), so the next branches route to /login.
     }
   }
   if (!auth.enabled) return true // auth turned off on the backend
+
+  // First-boot: no credential yet -> force the setup page, lock everything else.
+  if (auth.needsSetup) {
+    return to.name === 'Setup' ? true : { name: 'Setup' }
+  }
+  // Configured: keep users off the setup page.
+  if (to.name === 'Setup') {
+    return auth.isAuthenticated ? { name: 'Servers' } : { name: 'Login' }
+  }
   if (to.name === 'Login') {
     return auth.isAuthenticated ? { name: 'Servers' } : true
   }
