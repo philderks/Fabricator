@@ -17,6 +17,24 @@ export class ApiError extends Error {
   }
 }
 
+// Global 401 handler, registered in main.js. Kept here (not importing the store
+// or router) so this low-level module stays decoupled.
+let unauthorizedHandler = null
+
+export function setUnauthorizedHandler(fn) {
+  unauthorizedHandler = fn
+}
+
+function notifyUnauthorized() {
+  if (typeof unauthorizedHandler === 'function') {
+    try {
+      unauthorizedHandler()
+    } catch (_) {
+      // never let the handler break request error propagation
+    }
+  }
+}
+
 function extractErrorMessageFromBody(rawBody) {
   if (!rawBody) {
     return ''
@@ -70,6 +88,9 @@ export async function apiRequest(endpoint, options = {}) {
     
     // Handle non-OK responses
     if (!response.ok) {
+      if (response.status === 401 && !options.skipAuthRedirect) {
+        notifyUnauthorized()
+      }
       const bodyMessage = extractErrorMessageFromBody(rawBody)
       throw new ApiError(
         data.error || data.message || bodyMessage || `Request failed with status ${response.status}`,
