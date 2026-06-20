@@ -46,7 +46,7 @@ def create_app() -> Flask:
     # Built-in authentication: fail-closed validation + the request gate. Runs
     # before any startup side effects so a misconfigured (enabled-but-unconfigured)
     # install refuses to start cleanly instead of half-initialising.
-    init_auth(app, config)
+    init_auth(app)
 
     CORS(app, origins=config.CORS_ORIGINS)
 

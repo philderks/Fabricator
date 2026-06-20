@@ -56,7 +56,7 @@ def _auth_gate():
     return jsonify({"error": "authentication required"}), 401
 
 
-def init_auth(app, config) -> None:
+def init_auth(app) -> None:
     """Configure auth on ``app``: session cookie, fail-closed validation,
     the gate, and the blueprint. Resolves the disable/secure flags ONCE here so
     startup validation and the gate read the same parsed values.
