@@ -179,6 +179,13 @@ To run **without** the built-in login (only if you front Fabricator with your
 own reverse-proxy authentication), set `FABRICATOR_DISABLE_AUTH=1`. This is the
 only supported way to disable it.
 
+**Change or reset the password.** Once logged in, change it from the panel header
+(**Change password**). Forgot it / locked out? Delete `auth.json` from the data
+directory and restart — the app drops back into setup mode so you can set a new
+one. The file lives next to `servers.json`: `/var/lib/fabricator/auth.json` under
+systemd, `~/.fabricator/auth.json` in dev, `%APPDATA%\Fabricator\auth.json` on
+Windows. (Deleting it only resets the password/key; your servers are untouched.)
+
 > **Security note (trust-on-first-use).** The first-boot setup page is reachable
 > by anyone who can reach the panel until the password is set. On an untrusted
 > network, set `FABRICATOR_AUTH_PASSWORD_HASH` before first exposure instead of
