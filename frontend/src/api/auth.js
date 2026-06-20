@@ -26,3 +26,13 @@ export function postSetup(password) {
     skipAuthRedirect: true
   })
 }
+
+export function postChangePassword(current, next) {
+  // skipAuthRedirect: a wrong-current 401 is shown in the modal, it must NOT
+  // trigger the global session-expiry redirect (that would log the user out).
+  return apiRequest('/api/auth/change-password', {
+    method: 'POST',
+    body: JSON.stringify({ current, new: next }),
+    skipAuthRedirect: true
+  })
+}

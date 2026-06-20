@@ -9,7 +9,13 @@
  */
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
-import { getAuthStatus, postLogin, postLogout, postSetup } from '../api/auth'
+import {
+  getAuthStatus,
+  postLogin,
+  postLogout,
+  postSetup,
+  postChangePassword
+} from '../api/auth'
 
 export const useAuthStore = defineStore('auth', () => {
   const enabled = ref(true)
@@ -59,6 +65,16 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  async function changePassword(currentPassword, newPassword) {
+    // The session stays valid (same signing key) — no local state change.
+    try {
+      await postChangePassword(currentPassword, newPassword)
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, error }
+    }
+  }
+
   async function logout() {
     try {
       await postLogout()
@@ -81,6 +97,7 @@ export const useAuthStore = defineStore('auth', () => {
     checkStatus,
     setup,
     login,
+    changePassword,
     logout,
     markUnauthenticated
   }

@@ -1,7 +1,9 @@
 <script setup>
+import { ref } from 'vue'
 import AppSidebar from '../components/layout/AppSidebar.vue'
 import { useRouter } from 'vue-router'
 import AppButton from '../components/ui/AppButton.vue'
+import ChangePasswordModal from '../components/modals/ChangePasswordModal.vue'
 import { useAuthStore } from '../stores/auth'
 
 // `showCreateModal` is provided at the App.vue level so the create-server
@@ -9,6 +11,7 @@ import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
 const router = useRouter()
+const showChangePassword = ref(false)
 
 async function onLogout() {
   await auth.logout()
@@ -21,10 +24,12 @@ async function onLogout() {
     <AppSidebar />
     <main class="root-layout__content">
       <div v-if="auth.enabled" class="root-layout__topbar">
+        <AppButton variant="ghost" size="sm" @click="showChangePassword = true">Change password</AppButton>
         <AppButton variant="ghost" size="sm" @click="onLogout">Log out</AppButton>
       </div>
       <router-view />
     </main>
+    <ChangePasswordModal :show="showChangePassword" @close="showChangePassword = false" />
   </div>
 </template>
 
@@ -47,6 +52,7 @@ async function onLogout() {
 .root-layout__topbar {
   display: flex;
   justify-content: flex-end;
+  gap: var(--space-2);
   padding: var(--space-3) var(--space-4);
 }
 </style>
