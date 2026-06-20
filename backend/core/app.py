@@ -7,6 +7,7 @@ from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
 from backend.core.config import get_config
+from backend.auth import init_auth
 from backend.server.routes import server_bp
 from backend.modrinth.routes import modrinth_bp
 from backend.system.routes import system_bp
@@ -41,6 +42,11 @@ def create_app() -> Flask:
 
     config = get_config()
     app.config.from_object(config)
+
+    # Built-in authentication: fail-closed validation + the request gate. Runs
+    # before any startup side effects so a misconfigured (enabled-but-unconfigured)
+    # install refuses to start cleanly instead of half-initialising.
+    init_auth(app, config)
 
     CORS(app, origins=config.CORS_ORIGINS)
 
