@@ -56,7 +56,7 @@ By default this installs the **latest** published release.
 curl -fsSL https://fabricator.site/install.sh | bash -s -- --update
 ```
 
-After install, open `http://<host>:5000` (the default packaged config binds to all interfaces — use a firewall or reverse proxy if the host is reachable from untrusted networks).
+After install, open `http://<host>:5000`. The panel requires a password on first use — see [Authentication](#authentication) below to configure `SECRET_KEY` and `FABRICATOR_AUTH_PASSWORD_HASH` before starting the service. (The default packaged config also binds to all interfaces — use a firewall or reverse proxy if the host is internet-facing.)
 
 For local development, the app defaults to loopback-only; see `.env.example`.
 
@@ -149,6 +149,26 @@ sudo systemctl restart fabricator
 ```
 
 </details>
+
+### Authentication
+
+The management panel requires a login by default. On first setup you must
+configure a signing key and an operator password hash, or the app will refuse
+to start (fail-closed — an unconfigured, exposed panel is exactly the hole this
+closes):
+
+1. Set `SECRET_KEY` to a long random string:
+   `python -c "import secrets; print(secrets.token_hex(32))"`
+2. Generate a password hash and set `FABRICATOR_AUTH_PASSWORD_HASH`:
+   - systemd install: `fabricator hash-password`
+   - Docker / source: `python -m backend.auth hash`
+
+To run **without** the built-in login (only if you front Fabricator with your
+own reverse-proxy authentication), set `FABRICATOR_DISABLE_AUTH=1`. This is the
+only supported way to disable it.
+
+When Fabricator is served behind TLS, also set `FABRICATOR_SESSION_COOKIE_SECURE=1`
+so the session cookie carries the `Secure` flag.
 
 ---
 
