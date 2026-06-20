@@ -56,7 +56,7 @@ By default this installs the **latest** published release.
 curl -fsSL https://fabricator.site/install.sh | bash -s -- --update
 ```
 
-After install, open `http://<host>:5000`. The panel requires a password on first use — see [Authentication](#authentication) below to configure `SECRET_KEY` and `FABRICATOR_AUTH_PASSWORD_HASH` before starting the service. (The default packaged config also binds to all interfaces — use a firewall or reverse proxy if the host is internet-facing.)
+After install, open `http://<host>:5000`. On first use the panel shows a one-time setup page to create the operator password — see [Authentication](#authentication). (The default packaged config also binds to all interfaces — use a firewall or reverse proxy if the host is internet-facing.)
 
 For local development, the app defaults to loopback-only; see `.env.example`.
 
@@ -152,20 +152,37 @@ sudo systemctl restart fabricator
 
 ### Authentication
 
-The management panel requires a login by default. On first setup you must
-configure a signing key and an operator password hash, or the app will refuse
-to start (fail-closed — an unconfigured, exposed panel is exactly the hole this
-closes):
+The management panel requires a login by default. On **first boot** (no
+credential configured yet) it starts in a locked **setup mode**: open the panel
+and you'll be taken to a one-time page to create the operator password — in the
+browser, the same on Linux, Docker, and the Windows `.exe` (no terminal needed).
+Until a password is set, only that page is reachable.
 
-1. Set `SECRET_KEY` to a long random string:
+The session signing key is generated and persisted automatically on first boot;
+the password is stored, hashed, in a `0600` `auth.json` in the data directory
+next to `servers.json` (`/var/lib/fabricator` under systemd).
+
+**Advanced / declarative setup.** You can skip the setup page by providing the
+credential up front — useful for Docker/automation and recommended on untrusted
+networks (see the security note):
+
+1. Optionally pin `SECRET_KEY` to a fixed value (otherwise auto-generated):
    `python -c "import secrets; print(secrets.token_hex(32))"`
 2. Generate a password hash and set `FABRICATOR_AUTH_PASSWORD_HASH`:
    - systemd install: `fabricator hash-password`
    - Docker / source: `python -m backend.auth hash`
 
+Precedence: env hash > persisted file > setup mode (and for the signing key:
+env > file > auto-generated).
+
 To run **without** the built-in login (only if you front Fabricator with your
 own reverse-proxy authentication), set `FABRICATOR_DISABLE_AUTH=1`. This is the
 only supported way to disable it.
+
+> **Security note (trust-on-first-use).** The first-boot setup page is reachable
+> by anyone who can reach the panel until the password is set. On an untrusted
+> network, set `FABRICATOR_AUTH_PASSWORD_HASH` before first exposure instead of
+> relying on the open setup page.
 
 When Fabricator is served behind TLS, also set `FABRICATOR_SESSION_COOKIE_SECURE=1`
 so the session cookie carries the `Secure` flag.
