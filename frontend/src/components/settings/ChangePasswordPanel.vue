@@ -1,17 +1,12 @@
 <script setup>
-import { ref, watch } from 'vue'
-import { useAuthStore } from '../../stores/auth'
-import { useToast } from '../../composables/useToast'
-import BaseModal from './BaseModal.vue'
+import { ref } from 'vue'
+import Panel from '../ui/Panel.vue'
 import AppButton from '../ui/AppButton.vue'
 import FormField from '../ui/FormField.vue'
+import { useAuthStore } from '../../stores/auth'
+import { useToast } from '../../composables/useToast'
 
 const MIN_LENGTH = 8
-
-const props = defineProps({
-  show: { type: Boolean, required: true }
-})
-const emit = defineEmits(['close'])
 
 const auth = useAuthStore()
 const toast = useToast()
@@ -21,24 +16,6 @@ const next = ref('')
 const confirm = ref('')
 const error = ref('')
 const submitting = ref(false)
-
-function reset() {
-  current.value = ''
-  next.value = ''
-  confirm.value = ''
-  error.value = ''
-  submitting.value = false
-}
-
-// Clear the form each time the modal opens.
-watch(() => props.show, (open) => {
-  if (open) reset()
-})
-
-function close() {
-  if (submitting.value) return
-  emit('close')
-}
 
 async function onSubmit() {
   if (submitting.value) return
@@ -56,7 +33,9 @@ async function onSubmit() {
   submitting.value = false
   if (res.ok) {
     toast.success('Password changed', 'Authentication')
-    emit('close')
+    current.value = ''
+    next.value = ''
+    confirm.value = ''
   } else {
     error.value =
       res.error?.data?.error || res.error?.message || 'Could not change the password.'
@@ -65,14 +44,14 @@ async function onSubmit() {
 </script>
 
 <template>
-  <BaseModal :show="show" title="Change password" size="small" @close="close">
-    <form class="change-pw" @submit.prevent="onSubmit">
+  <Panel title="Password">
+    <form class="change-pw-form" @submit.prevent="onSubmit">
       <FormField label="Current password" v-slot="{ id, describedBy }">
         <input
           :id="id"
           v-model="current"
           type="password"
-          class="change-pw__input"
+          class="change-pw-form__input"
           autocomplete="current-password"
           :aria-describedby="describedBy"
         />
@@ -82,7 +61,7 @@ async function onSubmit() {
           :id="id"
           v-model="next"
           type="password"
-          class="change-pw__input"
+          class="change-pw-form__input"
           autocomplete="new-password"
           :aria-describedby="describedBy"
         />
@@ -92,41 +71,40 @@ async function onSubmit() {
           :id="id"
           v-model="confirm"
           type="password"
-          class="change-pw__input"
+          class="change-pw-form__input"
           autocomplete="new-password"
           :aria-describedby="describedBy"
         />
       </FormField>
-      <p v-if="error" class="change-pw__error" role="alert">{{ error }}</p>
-      <!-- allow Enter to submit while focus is in a field -->
-      <button type="submit" hidden></button>
+      <p v-if="error" class="change-pw-form__error" role="alert">{{ error }}</p>
+      <div class="change-pw-form__actions">
+        <AppButton type="submit" variant="primary" size="md" :loading="submitting">
+          Change password
+        </AppButton>
+      </div>
     </form>
-
-    <template #footer>
-      <AppButton variant="ghost" size="md" :disabled="submitting" @click="close">
-        Cancel
-      </AppButton>
-      <AppButton variant="primary" size="md" :loading="submitting" @click="onSubmit">
-        Change password
-      </AppButton>
-    </template>
-  </BaseModal>
+  </Panel>
 </template>
 
 <style scoped>
-.change-pw {
+.change-pw-form {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+  max-width: 360px;
 }
 
-.change-pw__input {
+.change-pw-form__input {
   width: 100%;
 }
 
-.change-pw__error {
+.change-pw-form__error {
   margin: 0;
   font-size: var(--text-sm);
   color: var(--danger);
+}
+
+.change-pw-form__actions {
+  display: flex;
 }
 </style>
