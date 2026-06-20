@@ -1,7 +1,7 @@
-"""Authentication endpoints: login, logout, status.
+"""Authentication endpoints: setup, login, logout, status.
 
-SENSITIVE: the login handler receives the operator password. Never log the
-request body, the password, or the configured hash.
+SENSITIVE: the setup/login handlers receive the operator password. Never log
+the request body, the password, or the configured hash.
 """
 from __future__ import annotations
 
@@ -17,6 +17,52 @@ auth_bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 # to 0 to avoid the real delay.
 LOGIN_FAILURE_DELAY_SECONDS = 1.0
 
+# First-boot setup password floor. Single operator — one field, no policy zoo.
+MIN_PASSWORD_LENGTH = 8
+
+
+def _login_session() -> None:
+    """Mark the current session authenticated (fixation-safe: clear first)."""
+    session.clear()
+    session["authenticated"] = True
+    session.permanent = True
+
+
+@auth_bp.route("/setup", methods=["POST"])
+def setup():
+    """First-boot: set the operator password (reachable ONLY in setup mode).
+
+    JSON only (``application/json``) — a non-JSON / form-encoded body is
+    rejected, which together with the CORS preflight closes pre-auth CSRF on
+    this state-changing endpoint. One-time: refuses (409) once any credential
+    exists, guarded both by the runtime ``FABRICATOR_NEEDS_SETUP`` flag and the
+    race-safe ``service.complete_setup`` exists-check.
+    """
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON body required"}), 400
+    password = data.get("password")
+    if not isinstance(password, str) or len(password) < MIN_PASSWORD_LENGTH:
+        return (
+            jsonify(
+                {"error": f"password must be at least {MIN_PASSWORD_LENGTH} characters"}
+            ),
+            400,
+        )
+
+    if not current_app.config.get("FABRICATOR_NEEDS_SETUP"):
+        return jsonify({"error": "already configured"}), 409
+
+    # Race-safe one-time write: complete_setup returns False if a credential
+    # already exists (defends against races / a stale NEEDS_SETUP flag).
+    if not service.complete_setup(password):
+        current_app.config["FABRICATOR_NEEDS_SETUP"] = False
+        return jsonify({"error": "already configured"}), 409
+
+    current_app.config["FABRICATOR_NEEDS_SETUP"] = False
+    _login_session()
+    return jsonify({"authenticated": True}), 200
+
 
 @auth_bp.route("/login", methods=["POST"])
 def login():
@@ -27,9 +73,7 @@ def login():
     if not service.verify_password(password):
         time.sleep(LOGIN_FAILURE_DELAY_SECONDS)
         return jsonify({"error": "invalid credentials"}), 401
-    session.clear()
-    session["authenticated"] = True
-    session.permanent = True
+    _login_session()
     return jsonify({"authenticated": True}), 200
 
 
@@ -43,5 +87,13 @@ def logout():
 @auth_bp.route("/status", methods=["GET"])
 def status():
     enabled = bool(current_app.config.get("FABRICATOR_AUTH_ENABLED"))
-    authenticated = enabled and session.get("authenticated") is True
-    return jsonify({"enabled": enabled, "authenticated": authenticated}), 200
+    needs_setup = bool(current_app.config.get("FABRICATOR_NEEDS_SETUP"))
+    authenticated = (
+        enabled and not needs_setup and session.get("authenticated") is True
+    )
+    return (
+        jsonify(
+            {"enabled": enabled, "authenticated": authenticated, "needs_setup": needs_setup}
+        ),
+        200,
+    )
