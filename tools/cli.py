@@ -304,3 +304,24 @@ def help_cmd(as_json: bool) -> None:
         click.echo(json.dumps(data))
     else:
         _render_help(data)
+
+
+# ---------------------------------------------------------------------------
+# hash-password
+# ---------------------------------------------------------------------------
+
+@cli.command(name="hash-password")
+def hash_password_cmd() -> None:
+    """Generate a password hash for FABRICATOR_AUTH_PASSWORD_HASH."""
+    import sys
+    from pathlib import Path
+
+    # Make `backend` importable when run from a source checkout (the installed
+    # `fabricator` entry point already has the project on sys.path).
+    root = Path(__file__).resolve().parents[1]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from backend.auth.service import hash_password
+
+    password = click.prompt("Password", hide_input=True, confirmation_prompt=True)
+    click.echo(hash_password(password))
