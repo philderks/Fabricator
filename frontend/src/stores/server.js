@@ -13,6 +13,7 @@ import {
   stopServer,
   restartServer,
   updateServerSettings,
+  setServerAutoStart,
   sendServerCommand,
   browseServerFiles,
   deleteServer,
@@ -842,6 +843,25 @@ export const useServerStore = defineStore('server', () => {
     serverSettings.value = defaultSettings(server.value)
   }
 
+  // Boot auto-start mode is a Fabricator-level preference (not server.properties),
+  // so it saves instantly via its own endpoint and is editable while running —
+  // independent of the main settings form and its "stop to edit" guard.
+  const autoStartMode = computed(() => server.value?.autoStart || 'never')
+
+  async function setAutoStartMode(mode) {
+    if (!server.value) return
+    const previous = server.value.autoStart || 'never'
+    if (mode === previous) return
+    server.value = { ...server.value, autoStart: mode }  // optimistic
+    try {
+      await setServerAutoStart(currentServerId.value, mode)
+      toast.success('Auto-start updated', 'Settings')
+    } catch (error) {
+      server.value = { ...server.value, autoStart: previous }  // rollback
+      toast.error(error.message || 'Failed to update auto-start', 'Error')
+    }
+  }
+
   // Performs the same job as the layout's previous resetDashboardState().
   // setup-syntax Pinia stores have no automatic $reset, so we write it explicitly.
   function resetState() {
@@ -995,6 +1015,8 @@ export const useServerStore = defineStore('server', () => {
     sendConsoleCommand,
     handleSaveSettings,
     resetSettings,
+    autoStartMode,
+    setAutoStartMode,
     resetState
   }
 })

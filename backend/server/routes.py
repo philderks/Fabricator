@@ -562,6 +562,35 @@ def update_server_settings(server_id, server):
     return jsonify(server)
 
 
+@server_bp.route('/servers/<server_id>/autostart', methods=['PUT'])
+@require_server
+def set_server_autostart(server_id, server):
+    """Set the server's boot auto-start mode (always / never / last).
+
+    This is a Fabricator-level preference, not a server.properties value, so it
+    can be changed at any time — including while the server is running — and
+    does not rewrite server.properties or invalidate the process manager.
+    """
+    from backend.server.autostart import VALID_MODES, normalize_mode
+
+    data = request.get_json(silent=True) or {}
+    mode = str(data.get('mode') or '').lower()
+    if mode not in VALID_MODES:
+        return jsonify({
+            'error': f"mode must be one of {', '.join(sorted(VALID_MODES))}"
+        }), 400
+
+    updated = storage.update_server(server_id, {'autoStart': normalize_mode(mode)})
+    if not updated:
+        return jsonify({'error': 'Server not found'}), 404
+
+    return jsonify({
+        'success': True,
+        'autoStart': mode,
+        'server': _augment_with_runtime(updated),
+    })
+
+
 @server_bp.route('/servers/<server_id>', methods=['DELETE'])
 @require_server
 @with_server_lock

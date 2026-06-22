@@ -206,6 +206,17 @@ def main() -> None:
     except Exception as exc:
         logger.warning("playit auto-start failed: %s", exc)
 
+    # Auto-start Minecraft servers per their persisted ``autoStart`` mode
+    # (always / last-state). Reads the run-state snapshot synchronously now —
+    # before Flask serves and the dashboard reconciles a stale "running" back to
+    # "stopped" — then launches each target on its own background thread so a
+    # slow JVM start can't delay the tray / serve loop.
+    try:
+        from backend.server.autostart import autostart_servers
+        autostart_servers()
+    except Exception as exc:
+        logger.warning("server auto-start failed: %s", exc)
+
     shutdown_started = threading.Event()
 
     def shutdown(*_args) -> None:

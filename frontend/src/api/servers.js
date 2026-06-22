@@ -50,6 +50,16 @@ export async function updateServerSettings(serverId, settings) {
 }
 
 /**
+ * Set a server's boot auto-start mode
+ * @param {string|number} serverId - Server ID
+ * @param {('always'|'never'|'last')} mode - Auto-start mode
+ * @returns {Promise<Object>} Updated server details
+ */
+export async function setServerAutoStart(serverId, mode) {
+  return put(`/api/servers/${serverId}/autostart`, { mode })
+}
+
+/**
  * Delete a server
  * @param {string|number} serverId - Server ID
  * @returns {Promise<Object>} Deletion confirmation
