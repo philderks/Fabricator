@@ -6,7 +6,7 @@
 
 **Self-hosted web dashboard for managing Minecraft servers.**
 
-[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square)](LICENSE)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/philderks/Fabricator?style=flat-square)](https://github.com/philderks/Fabricator/stargazers)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Docker-lightgrey?style=flat-square)](https://github.com/philderks/Fabricator)
 [![Docker](https://img.shields.io/badge/ghcr.io-philderks%2Ffabricator-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/philderks/Fabricator/pkgs/container/fabricator)
@@ -227,4 +227,4 @@ The frontend is Vue 3 + Vite in `/frontend`. The backend is Flask with blueprint
 
 ## License
 
-[GPL-3.0](LICENSE)
+[AGPL-3.0](LICENSE)
