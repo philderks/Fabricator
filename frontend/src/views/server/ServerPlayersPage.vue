@@ -150,6 +150,17 @@ async function safe(fn) {
   try { await fn() } catch (e) { toast.error(e.message || 'Operation failed') }
 }
 
+// Perform a reversible removal, then offer an Undo toast that restores it.
+async function removeWithUndo(message, removeFn, undoFn) {
+  try {
+    await removeFn()
+  } catch (e) {
+    toast.error(e.message || 'Operation failed')
+    return
+  }
+  toast.action(message, 'Undo', () => safe(undoFn))
+}
+
 // ── Inline reason entry (shared by kick + ban) ──────────────────────────────
 const reasonTarget = ref(null)  // { name, mode: 'kick' | 'ban' }
 const reasonText = ref('')
@@ -178,13 +189,33 @@ async function submitReason() {
 
 // ── Role toggles ────────────────────────────────────────────────────────────
 function toggleWhitelist(p) {
-  if (p.isWhitelisted) safe(() => store.removeWhitelist(p.name))
-  else safe(() => store.addWhitelist(p.name))
+  if (p.isWhitelisted) {
+    removeWithUndo(
+      `Removed ${p.name} from the whitelist`,
+      () => store.removeWhitelist(p.name),
+      () => store.addWhitelist(p.name)
+    )
+  } else safe(() => store.addWhitelist(p.name))
 }
 
 function toggleOp(p) {
-  if (p.isOp) safe(() => store.removeOp(p.name))
-  else safe(() => store.addOp(p.name, 4))  // vanilla defaults to 4; level editable below when stopped
+  if (p.isOp) {
+    const level = p.opLevel  // capture so Undo restores the same level
+    removeWithUndo(
+      `Removed operator ${p.name}`,
+      () => store.removeOp(p.name),
+      () => store.addOp(p.name, level)
+    )
+  } else safe(() => store.addOp(p.name, 4))  // vanilla defaults to 4; level editable below when stopped
+}
+
+function unban(p) {
+  const reason = bannedMap.value.get(p.name.toLowerCase())?.reason ?? null  // restore same reason on Undo
+  removeWithUndo(
+    `Unbanned ${p.name}`,
+    () => store.removeBan(p.name),
+    () => store.addBan(p.name, reason)
+  )
 }
 
 function changeOpLevel(p, level) {
@@ -353,7 +384,7 @@ function onToggleEnforce(value) {
           <span class="player-row__spacer" />
 
           <AppButton v-if="p.isOnline" variant="ghost" size="sm" @click="startReason(p.name, 'kick')">Kick</AppButton>
-          <AppButton v-if="p.isBanned" variant="ghost" size="sm" @click="safe(() => store.removeBan(p.name))">Unban</AppButton>
+          <AppButton v-if="p.isBanned" variant="ghost" size="sm" @click="unban(p)">Unban</AppButton>
           <AppButton v-else variant="danger" size="sm" @click="startReason(p.name, 'ban')">Ban</AppButton>
         </div>
       </li>
