@@ -8,7 +8,7 @@
 
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/philderks/Fabricator?style=flat-square)](https://github.com/philderks/Fabricator/stargazers)
-[![Platform](https://img.shields.io/badge/platform-Linux-lightgrey?style=flat-square)](https://github.com/philderks/Fabricator)
+[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20Docker-lightgrey?style=flat-square)](https://github.com/philderks/Fabricator)
 
 [Website](https://fabricator.site/) | [Documentation](https://docs.fabricator.site/)
 
@@ -31,16 +31,18 @@
 | 📦 | **Mod Management** — install, remove, and browse Fabric mods | ✅ Available |
 | 📋 | **Logs & Monitoring** — live log stream, TPS and RAM graphs | ✅ Available |
 | 💾 | **Backups & Restore** — manual snapshots, restore from any backup | ✅ Available |
+| 🌍 | **World Import** — upload a world archive and swap it in | ✅ Available |
 | 🖥️ | **Multiple Servers** — manage several instances from one dashboard | ✅ Available |
+| ▶️ | **Auto-start** — configure servers to start always, never, or on last-state restore | ✅ Available |
 | ⬆️ | **Fabricator self-update** — checks GitHub Releases; update from the sidebar or reinstall script | ✅ Available |
-| 🔄 | **One-click Minecraft / Fabric server updates** | 🔧 Coming soon |
-| ⌨️ | **CLI** (`fabricator` command) | 🔧 Coming soon |
+| ⌨️ | **CLI** (`fabricator` command) — start, stop, status, update, version, uninstall | ✅ Available |
+| 🔄 | **One-click Minecraft / Fabric server updates** | 📋 Planned |
 
 ---
 
 ## Quick Start
 
-### One-line installer
+### One-line installer (Linux)
 
 The script downloads a **release tarball** from [GitHub Releases](https://github.com/philderks/Fabricator/releases), installs dependencies, creates a `fabricator` user and systemd unit, and starts the app. Supported distros: Debian/Ubuntu (and derivatives), Arch, Fedora/RHEL family. **systemd** and **curl** are required.
 
@@ -54,6 +56,12 @@ By default this installs the **latest** published release.
 
 ```bash
 curl -fsSL https://fabricator.site/install.sh | bash -s -- --update
+```
+
+Or use the `fabricator` CLI:
+
+```bash
+fabricator update
 ```
 
 After install, open `http://<host>:5000`. On first use the panel shows a one-time setup page to create the operator password — see [Authentication](#authentication). (The default packaged config also binds to all interfaces — use a firewall or reverse proxy if the host is internet-facing.)
@@ -89,15 +97,55 @@ Environment variables are documented in `.env.example`. For production-like path
 
 ---
 
+### Docker
+
+A pre-built multi-arch image (`linux/amd64`, `linux/arm64`) is published to GHCR on every release.
+
+**docker-compose.yml** (recommended):
+
+```yaml
+services:
+  fabricator:
+    image: ghcr.io/philderks/fabricator:latest
+    container_name: fabricator
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5000:5000"   # Panel — host loopback only by default
+    volumes:
+      - fabricator-data:/data
+    stop_grace_period: 60s
+    environment:
+      - FLASK_ENV=production
+      # - PLAYIT_ENABLED=true   # auto-start the tunnel on boot
+
+volumes:
+  fabricator-data:
+```
+
+```bash
+docker compose up -d
+```
+
+All persistent data (servers, backups, managed Java) lives in the `fabricator-data` volume. The image runs as an unprivileged `fabricator` user (uid 10001).
+
+To expose the panel to the network, change the port mapping to `"5000:5000"` and put a reverse proxy with TLS in front. Do **not** change `HOST` inside the container — it must stay `0.0.0.0`.
+
+---
+
+### Windows
+
+Download `Fabricator-<version>.exe` from [GitHub Releases](https://github.com/philderks/Fabricator/releases) and run it. The app starts a local server and opens the panel in your browser. No installation required.
+
+---
+
 ## Requirements
 
 | | Requirement |
 |---|---|
-| OS | Linux — Debian/Ubuntu, Arch, or Fedora/RHEL (systemd) |
-| Python | 3.10+ |
-| Node.js | 20.x (frontend build only) |
-
-> Windows is not supported yet.
+| **Linux** | Debian/Ubuntu, Arch, or Fedora/RHEL; systemd; Python 3.10+ |
+| **Docker** | Any host running Docker with `linux/amd64` or `linux/arm64` |
+| **Windows** | Windows 10/11 — standalone `.exe`, no Python or Node required |
+| **Node.js** | 20.x (frontend build only — not needed for Docker or Windows installs) |
 
 ---
 
@@ -196,6 +244,24 @@ so the session cookie carries the `Secure` flag.
 
 ---
 
+## CLI
+
+The `fabricator` command is available after a Linux systemd install:
+
+```
+fabricator start          # Start the Fabricator service
+fabricator stop           # Stop the Fabricator service
+fabricator status         # Show service and API status
+fabricator update         # Update to the latest release
+fabricator version        # Print the installed version
+fabricator hash-password  # Generate a password hash for FABRICATOR_AUTH_PASSWORD_HASH
+fabricator uninstall      # Remove Fabricator and all its data
+```
+
+Most commands also accept `--json` for machine-readable output.
+
+---
+
 ## Roadmap
 
 | Status | Feature |
@@ -203,12 +269,15 @@ so the session cookie carries the `Secure` flag.
 | ✅ Done | Mod management |
 | ✅ Done | Logs & monitoring |
 | ✅ Done | Backups & restore |
+| ✅ Done | World import |
 | ✅ Done | Multiple server instances |
-| ✅ Done | Fabricator self-update (UI + installer) |
-| 🔧 In progress | CLI (`fabricator` command) |
-| 🔧 In progress | Additional loader support — Vanilla shipped; NeoForge, Forge, Quilt, Paper next |
+| ✅ Done | Auto-start (always / never / last-state) |
+| ✅ Done | Fabricator self-update (UI + installer + CLI) |
+| ✅ Done | CLI (`fabricator` command) |
+| ✅ Done | Docker image |
+| ✅ Done | Windows support |
+| 🔧 In progress | Additional loader support — NeoForge, Forge, Quilt, Paper |
 | 📋 Planned | One-click Minecraft / Fabric server upgrades |
-| 📋 Planned | Windows support |
 
 ---
 
