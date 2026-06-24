@@ -14,10 +14,12 @@ Phase vocabulary (set by ``backups/service.py`` and ``backups/restore.py``):
     archiving       — building tar / tar.gz outputs
     finalizing      — atomic publish to storagePath + retention
     restarting      — bringing the server back if it was running
-    safety_snapshot — restore: writing the mandatory safety .tar
-    extracting      — restore: unpacking the chosen snapshot
+    safety_snapshot — restore/import: writing the mandatory safety .tar
+    extracting      — restore: unpacking the chosen snapshot;
+                      import: unpacking the uploaded archive
+    converting      — import: detecting layout + normalising world dirs
     overlaying      — restore in_place: copying staging on top of live dir
-    swapping        — restore reset: atomic rename of staged tree
+    swapping        — restore reset / import: atomic rename of staged tree
     done            — completed successfully (terminal)
     failed          — failed (entry has ``error``; terminal)
 

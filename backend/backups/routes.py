@@ -28,13 +28,22 @@ import logging
 import shutil
 import tarfile
 import tempfile
+import uuid
 import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from flask import Blueprint, after_this_request, jsonify, request, send_file
+from werkzeug.utils import secure_filename
 
-from backend.backups import progress, restore, scheduler, service, storage
+from backend.backups import (
+    progress,
+    restore,
+    scheduler,
+    service,
+    storage,
+    world_import,
+)
 from backend.server.registry import get_server_process_registry
 from backend.utils.routes import require_server
 from backend.utils.strings import bool_from_str
@@ -304,6 +313,59 @@ def restore_snapshot(server_id, server, snapshot_id):
         job_id = restore.run_restore_async(snapshot_id, mode=mode)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
+    return jsonify({"success": True, "job_id": job_id}), 202
+
+
+@backups_bp.route("/servers/<server_id>/world-import", methods=["POST"])
+@require_server
+def import_world(server_id, server):
+    """Upload a world archive and replace the server's active world.
+
+    The raw archive bytes are the request body (``fetch(url, {body: file})``);
+    the display filename comes from the ``filename`` query param or the
+    ``X-Filename`` header. The body is streamed to a temp file under the
+    server's parent dir (so the later move onto the live tree is a cheap
+    same-filesystem rename), validated cheaply, then handed to the async
+    importer which polls through ``GET /api/backup-jobs/<job_id>``.
+    """
+    original_name = (
+        request.args.get("filename")
+        or request.headers.get("X-Filename")
+        or "world-upload"
+    )
+    safe_display = secure_filename(original_name) or "world-upload"
+
+    max_bytes = world_import.max_upload_bytes()
+    if request.content_length and request.content_length > max_bytes:
+        return jsonify(
+            {"error": f"Upload exceeds the {max_bytes}-byte limit"}
+        ), 413
+
+    registry = get_server_process_registry()
+    install_path = registry.resolve_install_path(server)
+    upload_dir = install_path.parent / ".uploads"
+    temp_path = upload_dir / f"world-{server_id}-{uuid.uuid4().hex}.upload"
+
+    try:
+        written = world_import.stream_upload_to_temp(
+            request.stream, temp_path, max_bytes=max_bytes
+        )
+    except world_import.UploadTooLargeError as exc:
+        return jsonify({"error": str(exc)}), 413
+
+    if written == 0:
+        temp_path.unlink(missing_ok=True)
+        return jsonify({"error": "Empty upload — no file received"}), 400
+
+    try:
+        world_import.validate_upload_archive(temp_path)
+    except world_import.InvalidWorldArchiveError as exc:
+        temp_path.unlink(missing_ok=True)
+        return jsonify({"error": str(exc)}), 400
+
+    job_id = world_import.run_world_import_async(
+        server_id, temp_path, original_name=safe_display
+    )
     return jsonify({"success": True, "job_id": job_id}), 202
 
 
