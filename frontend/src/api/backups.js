@@ -6,7 +6,7 @@
  * returned by the `run` and `restore` endpoints — no server scoping needed.
  */
 
-import { get, post, put, del } from './client'
+import { get, post, put, del, ApiError } from './client'
 
 /** List all backup configs for a server. */
 export async function listBackupConfigs(serverId) {
@@ -96,4 +96,62 @@ export async function restoreSnapshot(serverId, snapshotId, mode) {
  */
 export async function getBackupJob(jobId) {
   return get(`/api/backup-jobs/${jobId}`)
+}
+
+/**
+ * Upload a world archive (zip / tar / tar.gz) to replace the server's active
+ * world. The raw file is the request body; the backend streams it to disk,
+ * validates it, then runs the import as a job. Returns `{ job_id }` — poll
+ * `getBackupJob` for the server-side extract/convert/swap phases.
+ *
+ * Uses XMLHttpRequest (not fetch) for the one thing fetch can't give us here:
+ * upload progress events. Worlds are large, so `onProgress(pct)` drives a real
+ * progress bar during the upload before the job even starts.
+ *
+ * @param {string} serverId
+ * @param {File} file
+ * @param {object} [opts]
+ * @param {(pct:number)=>void} [opts.onProgress] 0–100, or -1 when indeterminate
+ * @param {(abort:()=>void)=>void} [opts.registerAbort] receives a cancel fn
+ * @returns {Promise<{job_id:string}>}
+ */
+export function uploadWorld(serverId, file, { onProgress, registerAbort } = {}) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    const url = `/api/servers/${serverId}/world-import?filename=${encodeURIComponent(file.name)}`
+    xhr.open('POST', url)
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream')
+
+    if (typeof registerAbort === 'function') {
+      registerAbort(() => xhr.abort())
+    }
+
+    xhr.upload.onprogress = (event) => {
+      if (typeof onProgress !== 'function') return
+      onProgress(event.lengthComputable ? Math.round((event.loaded / event.total) * 100) : -1)
+    }
+
+    xhr.onload = () => {
+      let data = {}
+      try {
+        data = JSON.parse(xhr.responseText || '{}')
+      } catch (_) {
+        data = {}
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(data)
+      } else {
+        reject(new ApiError(
+          data.error || data.message || `Upload failed with status ${xhr.status}`,
+          xhr.status,
+          data && Object.keys(data).length ? data : null
+        ))
+      }
+    }
+
+    xhr.onerror = () => reject(new ApiError('Network error during upload', 0, null))
+    xhr.onabort = () => reject(new ApiError('Upload cancelled', 0, null))
+
+    xhr.send(file)
+  })
 }

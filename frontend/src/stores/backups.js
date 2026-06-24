@@ -25,7 +25,8 @@ import {
   runBackupConfig,
   runQuickBackup as runQuickBackupApi,
   restoreSnapshot,
-  getBackupJob
+  getBackupJob,
+  uploadWorld
 } from '../api/backups'
 import { useServerStore } from './server'
 import { useToast } from '../composables/useToast'
@@ -135,6 +136,12 @@ export const useBackupsStore = defineStore('backups', () => {
 
   // Quick-backup modal (config-free one-off backup)
   const showQuickBackupModal = ref(false)
+
+  // Import-world modal (upload an archive to replace the active world)
+  const showImportWorldModal = ref(false)
+  const importUploading = ref(false)
+  const importUploadPct = ref(0) // 0–100, or -1 when indeterminate
+  let importAbort = null
 
   // Active job tracking (one in-flight backup/restore per view at a time)
   // `targetConfigId` and `targetSnapshotId` are nullable hints used by the
@@ -421,6 +428,69 @@ export const useBackupsStore = defineStore('backups', () => {
     }
   }
 
+  // ---------- Import world (upload) ----------
+
+  function openImportWorldModal() {
+    showImportWorldModal.value = true
+  }
+
+  function closeImportWorldModal() {
+    if (importUploading.value || activeJob.value?.active) return
+    showImportWorldModal.value = false
+  }
+
+  function cancelImportUpload() {
+    if (typeof importAbort === 'function') importAbort()
+  }
+
+  /**
+   * Upload a world archive and start the import job. The upload itself shows a
+   * determinate progress bar (importUploadPct); once it lands the job_id takes
+   * over via the shared polling loop, which surfaces the server-side
+   * extract/convert/swap phases. The server is stopped and the active world
+   * replaced — the modal warns about both before the user gets here.
+   */
+  async function importWorld(file) {
+    if (!serverId.value || !file) return
+    if (importUploading.value || activeJob.value?.active) return
+    importUploading.value = true
+    importUploadPct.value = 0
+    try {
+      const res = await uploadWorld(serverId.value, file, {
+        onProgress: (pct) => { importUploadPct.value = pct },
+        registerAbort: (abort) => { importAbort = abort }
+      })
+      const jobId = res?.job_id
+      if (!jobId) {
+        toast.error('World import did not return a job id', 'Backups')
+        return
+      }
+      activeJob.value = {
+        id: jobId,
+        kind: 'world_import',
+        configId: null,
+        snapshotId: null,
+        active: true,
+        phase: 'starting'
+      }
+      showImportWorldModal.value = false
+      startJobPolling()
+      toast.info('World import started', 'Backups')
+    } catch (err) {
+      // A user-initiated cancel surfaces as status 0 / "Upload cancelled".
+      if (err?.message === 'Upload cancelled') {
+        toast.info('Upload cancelled', 'Backups')
+      } else {
+        console.error('Failed to import world:', err)
+        toast.error(err?.message || 'Failed to import world', 'Backups')
+      }
+    } finally {
+      importUploading.value = false
+      importUploadPct.value = 0
+      importAbort = null
+    }
+  }
+
   // ---------- Restore ----------
 
   function requestRestoreSnapshot(snapshot) {
@@ -526,7 +596,11 @@ export const useBackupsStore = defineStore('backups', () => {
       if (!status?.active) {
         stopJobPolling()
         runningConfigId.value = null
-        const kind = job.kind === 'restore' ? 'Restore' : 'Backup'
+        const kind = job.kind === 'restore'
+          ? 'Restore'
+          : job.kind === 'world_import'
+            ? 'World import'
+            : 'Backup'
         const phase = status?.phase || 'done'
         if (phase === 'failed' || status?.error) {
           toast.error(status?.error || `${kind} failed`, 'Backups')
@@ -592,6 +666,10 @@ export const useBackupsStore = defineStore('backups', () => {
     showDeleteSnapshotModal.value = false
     deletingSnapshot.value = false
     showQuickBackupModal.value = false
+    showImportWorldModal.value = false
+    importUploading.value = false
+    importUploadPct.value = 0
+    importAbort = null
     activeJob.value = null
     runningConfigId.value = null
     search.value = ''
@@ -619,6 +697,9 @@ export const useBackupsStore = defineStore('backups', () => {
     configToDelete,
     deletingConfig,
     showQuickBackupModal,
+    showImportWorldModal,
+    importUploading,
+    importUploadPct,
     showRestoreModal,
     snapshotToRestore,
     snapshotToDelete,
@@ -654,6 +735,10 @@ export const useBackupsStore = defineStore('backups', () => {
     openQuickBackupModal,
     closeQuickBackupModal,
     runQuickBackup,
+    openImportWorldModal,
+    closeImportWorldModal,
+    cancelImportUpload,
+    importWorld,
     requestRestoreSnapshot,
     cancelRestore,
     confirmRestore,
