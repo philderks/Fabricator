@@ -310,29 +310,54 @@ main() {
         | sed -E 's/.*"tag_name":[[:space:]]*"([^"]+)".*/\1/'
     }
 
-    if [[ "$FABRICATOR_VERSION" == "latest" ]]; then
-      TAG="$(get_latest_tag || true)"
-      if [[ -z "$TAG" ]]; then
-        error "Could not determine latest release tag. GitHub API may be rate-limited. Re-run with: FABRICATOR_VERSION=vX.Y.Z"
+    APP_SRC_DIR="$TMP_DIR/fabricator"
+
+    if [[ -n "${FABRICATOR_LOCAL_SRC:-}" ]]; then
+      # Dev/testing escape hatch: deploy from a local checkout instead of a
+      # published release asset. Mirrors the CI tarball layout exactly (see
+      # .github/workflows/release.yml) so the installed payload matches a real
+      # release. Use this to test unreleased branches end-to-end:
+      #   sudo FABRICATOR_LOCAL_SRC=/path/to/checkout bash tools/install.sh --update
+      # NOTE: the prebuilt frontend/dist is copied as-is — run `npm run build`
+      # in frontend/ first if you changed any frontend code.
+      local_src="$(cd "$FABRICATOR_LOCAL_SRC" && pwd)"
+      info "Local source mode: staging from $local_src (skipping release download)"
+      mkdir -p "$APP_SRC_DIR/frontend"
+      rsync -a --exclude='__pycache__/' --exclude='*.pyc' "$local_src/backend/" "$APP_SRC_DIR/backend/"
+      rsync -a --exclude='__pycache__/' --exclude='*.pyc' "$local_src/tools/" "$APP_SRC_DIR/tools/"
+      cp "$local_src/run.py" "$local_src/requirements.txt" "$local_src/pyproject.toml" "$APP_SRC_DIR/"
+      if [[ -d "$local_src/frontend/dist" ]]; then
+        cp -r "$local_src/frontend/dist" "$APP_SRC_DIR/frontend/dist"
+      else
+        warn "frontend/dist not found in local source; the UI will not be served."
+        warn "Run 'npm ci && npm run build' in frontend/ to build it."
       fi
-      info "Latest release: $TAG"
-    elif [[ "$FABRICATOR_VERSION" == "main" ]]; then
-      error "FABRICATOR_VERSION=main is no longer supported. Specify a version tag, e.g. FABRICATOR_VERSION=v0.3.0"
+      TAG="$(git -C "$local_src" describe --tags --always --dirty 2>/dev/null || echo dev-local)"
+      info "Local source version marker: $TAG"
     else
-      TAG="$FABRICATOR_VERSION"
-      info "Using specified version: $TAG"
+      if [[ "$FABRICATOR_VERSION" == "latest" ]]; then
+        TAG="$(get_latest_tag || true)"
+        if [[ -z "$TAG" ]]; then
+          error "Could not determine latest release tag. GitHub API may be rate-limited. Re-run with: FABRICATOR_VERSION=vX.Y.Z"
+        fi
+        info "Latest release: $TAG"
+      elif [[ "$FABRICATOR_VERSION" == "main" ]]; then
+        error "FABRICATOR_VERSION=main is no longer supported. Specify a version tag, e.g. FABRICATOR_VERSION=v0.3.0"
+      else
+        TAG="$FABRICATOR_VERSION"
+        info "Using specified version: $TAG"
+      fi
+
+      ASSET_URL="https://github.com/${FABRICATOR_REPO}/releases/download/${TAG}/fabricator-${TAG}.tar.gz"
+      info "Fetching: $ASSET_URL"
+      curl -fsSL "$ASSET_URL" -o "$TMP_DIR/fabricator.tar.gz"
+      tar -xzf "$TMP_DIR/fabricator.tar.gz" -C "$TMP_DIR"
     fi
 
-    ASSET_URL="https://github.com/${FABRICATOR_REPO}/releases/download/${TAG}/fabricator-${TAG}.tar.gz"
-    info "Fetching: $ASSET_URL"
-    curl -fsSL "$ASSET_URL" -o "$TMP_DIR/fabricator.tar.gz"
-    tar -xzf "$TMP_DIR/fabricator.tar.gz" -C "$TMP_DIR"
-
-    APP_SRC_DIR="$TMP_DIR/fabricator"
     if [[ ! -d "$APP_SRC_DIR" ]]; then
       error "Could not locate extracted Fabricator sources. Expected: $APP_SRC_DIR"
     fi
-    info "Source extracted to: $APP_SRC_DIR"
+    info "Source staged at: $APP_SRC_DIR"
 
     backup_update_state() {
         local timestamp backup_dir
@@ -512,17 +537,21 @@ Type=oneshot
 # The panel can only write the request file's *contents*; update.sh validates
 # them against a strict allowlist before trusting the version string.
 Environment=FABRICATOR_UPDATE_REQUEST_FILE=${UPDATE_REQUEST_FILE}
-ExecStartPre=-/bin/rm -f ${UPDATE_RESULT_FILE}
+# Start each run clean: truncate the log and drop any stale result. We truncate
+# here, NOT via StandardOutput=truncate:, because truncate: re-truncates the
+# file on every Exec* open — including ExecStopPost, which runs last and would
+# wipe the log ExecStart just wrote. append: below then preserves it.
+ExecStartPre=-${UPDATE_BASH} -c ': > ${UPDATE_LOG_FILE}; rm -f ${UPDATE_RESULT_FILE}'
 ExecStart=${UPDATE_BASH} ${APP_DIR}/tools/update.sh
-# Persist the outcome and clear the request so the path unit can re-arm. Runs
-# on success, failure, or kill (\$EXIT_STATUS is set by systemd for ExecStopPost).
-ExecStopPost=${UPDATE_BASH} -c 'printf "%s" "\$EXIT_STATUS" > ${UPDATE_RESULT_FILE}; rm -f ${UPDATE_REQUEST_FILE}'
+# Persist the outcome and clear the request so the path unit can re-arm. Runs on
+# success, failure, or kill. NOTE: %% escapes systemd's '%' specifier so bash
+# receives a literal "%s"; a bare "%s" is expanded by systemd (to the shell
+# path) before bash ever runs, writing garbage into the result file.
+ExecStopPost=${UPDATE_BASH} -c 'printf "%%s" "\$EXIT_STATUS" > ${UPDATE_RESULT_FILE}; rm -f ${UPDATE_REQUEST_FILE}'
 # World-readable log/result so the unprivileged panel user can read them back.
 UMask=0022
-# truncate: gives a fresh log per run (and bounds growth); both streams share
-# the same file so logs stay interleaved in order.
-StandardOutput=truncate:${UPDATE_LOG_FILE}
-StandardError=truncate:${UPDATE_LOG_FILE}
+StandardOutput=append:${UPDATE_LOG_FILE}
+StandardError=append:${UPDATE_LOG_FILE}
 EOF
 
     $SUDO tee "/etc/systemd/system/fabricator-update.path" >/dev/null <<EOF
