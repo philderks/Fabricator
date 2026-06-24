@@ -200,7 +200,10 @@ main() {
     if ! id "$SERVICE_USER" >/dev/null 2>&1; then
         $SUDO useradd --system --home "$DATA_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
     fi
-    $SUDO mkdir -p "$DATA_DIR" "$DATA_DIR/servers"
+    # $DATA_DIR/update holds the self-update control files: the panel writes
+    # `request` (watched by fabricator-update.path); the root oneshot writes
+    # `update.log` and `result` back for the panel to read.
+    $SUDO mkdir -p "$DATA_DIR" "$DATA_DIR/servers" "$DATA_DIR/update"
     $SUDO chown -R "$SERVICE_USER:$SERVICE_USER" "$DATA_DIR"
     $SUDO chmod 0750 "$DATA_DIR"
 
@@ -417,6 +420,11 @@ FLASK_ENV=production
 SERVER_ROOT=${DATA_DIR}/servers
 SERVER_INDEX_FILE=${DATA_DIR}/servers.json
 
+# Self-update: the panel queues updates via a request file watched by
+# fabricator-update.path (instead of sudo, which the sandboxed unit forbids).
+FABRICATOR_UPDATE_MODE=systemd
+FABRICATOR_UPDATE_DIR=${DATA_DIR}/update
+
 # playit.gg tunnel agent — set to "true" to start automatically on boot.
 PLAYIT_ENABLED=false
 # Reflects whether install.sh verified the pinned playit binary sha256.
@@ -432,6 +440,14 @@ EOF
             $SUDO sed -i "s|^PLAYIT_BINARY_VERIFIED=.*|PLAYIT_BINARY_VERIFIED=${PLAYIT_BINARY_VERIFIED}|" "$ENV_FILE"
         else
             echo "PLAYIT_BINARY_VERIFIED=${PLAYIT_BINARY_VERIFIED}" | $SUDO tee -a "$ENV_FILE" >/dev/null
+        fi
+        # Backfill self-update settings for installs created before trigger-file
+        # updates existed (older installs used the now-removed sudo path).
+        if ! $SUDO grep -q '^FABRICATOR_UPDATE_MODE=' "$ENV_FILE"; then
+            echo "FABRICATOR_UPDATE_MODE=systemd" | $SUDO tee -a "$ENV_FILE" >/dev/null
+        fi
+        if ! $SUDO grep -q '^FABRICATOR_UPDATE_DIR=' "$ENV_FILE"; then
+            echo "FABRICATOR_UPDATE_DIR=${DATA_DIR}/update" | $SUDO tee -a "$ENV_FILE" >/dev/null
         fi
     fi
 
@@ -466,26 +482,68 @@ CapabilityBoundingSet=
 WantedBy=multi-user.target
 EOF
 
-    # In-app updater runs as $SERVICE_USER; install.sh needs root — grant one NOPASSWD path.
+    # In-app self-update: a root oneshot, fired by a path unit watching a file
+    # the panel can write. This replaces the old `sudo -n update.sh` design,
+    # which could never work: the main service runs NoNewPrivileges=true (so
+    # sudo cannot regain root) under ProtectSystem=strict (so even root could
+    # not write /etc, /usr). The oneshot runs OUTSIDE that sandbox, and being a
+    # separate unit it survives install.sh restarting fabricator.service.
     UPDATE_BASH="$(command -v bash)"
     if [[ -z "$UPDATE_BASH" ]]; then
         error "bash not found; cannot configure self-update."
     fi
-    SUDO_DROPIN="/etc/sudoers.d/fabricator-self-update"
-    info "Configuring passwordless sudo for dashboard self-update..."
-    $SUDO tee "$SUDO_DROPIN" >/dev/null <<EOF
-# Managed by Fabricator install.sh — do not edit by hand
-${SERVICE_USER} ALL=(root) NOPASSWD: ${UPDATE_BASH} ${APP_DIR}/tools/update.sh, ${UPDATE_BASH} ${APP_DIR}/tools/update.sh *
+    info "Configuring self-update trigger units..."
+
+    UPDATE_REQUEST_FILE="$DATA_DIR/update/request"
+    UPDATE_LOG_FILE="$DATA_DIR/update/update.log"
+    UPDATE_RESULT_FILE="$DATA_DIR/update/result"
+
+    # Drop the obsolete sudoers rule from pre-trigger installs.
+    $SUDO rm -f /etc/sudoers.d/fabricator-self-update
+
+    $SUDO tee "/etc/systemd/system/fabricator-update.service" >/dev/null <<EOF
+[Unit]
+Description=Fabricator self-update job
+# Deliberately unsandboxed: install.sh writes system files (systemd units,
+# /usr/local/bin, this very unit) and restarts fabricator.service.
+
+[Service]
+Type=oneshot
+# The panel can only write the request file's *contents*; update.sh validates
+# them against a strict allowlist before trusting the version string.
+Environment=FABRICATOR_UPDATE_REQUEST_FILE=${UPDATE_REQUEST_FILE}
+ExecStartPre=-/bin/rm -f ${UPDATE_RESULT_FILE}
+ExecStart=${UPDATE_BASH} ${APP_DIR}/tools/update.sh
+# Persist the outcome and clear the request so the path unit can re-arm. Runs
+# on success, failure, or kill (\$EXIT_STATUS is set by systemd for ExecStopPost).
+ExecStopPost=${UPDATE_BASH} -c 'printf "%s" "\$EXIT_STATUS" > ${UPDATE_RESULT_FILE}; rm -f ${UPDATE_REQUEST_FILE}'
+# World-readable log/result so the unprivileged panel user can read them back.
+UMask=0022
+# truncate: gives a fresh log per run (and bounds growth); both streams share
+# the same file so logs stay interleaved in order.
+StandardOutput=truncate:${UPDATE_LOG_FILE}
+StandardError=truncate:${UPDATE_LOG_FILE}
 EOF
-    $SUDO chmod 0440 "$SUDO_DROPIN"
-    if ! $SUDO visudo -cf "$SUDO_DROPIN" >/dev/null 2>&1; then
-        $SUDO rm -f "$SUDO_DROPIN"
-        error "sudoers drop-in failed validation and was removed. Please report this to Fabricator."
-    fi
+
+    $SUDO tee "/etc/systemd/system/fabricator-update.path" >/dev/null <<EOF
+[Unit]
+Description=Watch for Fabricator self-update requests
+
+[Path]
+PathExists=${UPDATE_REQUEST_FILE}
+Unit=fabricator-update.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
 
     info "Reloading systemd and enabling service..."
     $SUDO systemctl daemon-reload
     $SUDO systemctl enable --now "$SERVICE_NAME"
+    # Arm the self-update watcher. A stale request file from a previous run
+    # would otherwise fire the oneshot immediately on enable.
+    $SUDO rm -f "$DATA_DIR/update/request"
+    $SUDO systemctl enable --now fabricator-update.path
 
     echo ""
     info "Fabricator service installed and started."
