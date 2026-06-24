@@ -56,6 +56,7 @@ function statusMeta(snap) {
 function typeLabel(type) {
   if (type === 'safety') return 'Safety'
   if (type === 'restore') return 'Restore'
+  if (type === 'import') return 'Import'
   return 'Backup'
 }
 
@@ -292,6 +293,11 @@ function downloadHref(snap, format = 'tar') {
 .snapshots-table__type-pill--backup {
   color: var(--primary);
   border-color: var(--primary);
+}
+
+.snapshots-table__type-pill--import {
+  color: var(--success, var(--primary));
+  border-color: var(--success, var(--primary));
 }
 
 .snapshots-table__actions {

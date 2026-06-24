@@ -1,12 +1,10 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import WhitelistPanel from '../../components/players/WhitelistPanel.vue'
-import OpsPanel from '../../components/players/OpsPanel.vue'
-import BansPanel from '../../components/players/BansPanel.vue'
-import KnownPlayersPanel from '../../components/players/KnownPlayersPanel.vue'
-import OnlinePlayersPanel from '../../components/players/OnlinePlayersPanel.vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import IpBansPanel from '../../components/players/IpBansPanel.vue'
+import PlayerAvatar from '../../components/players/PlayerAvatar.vue'
 import StatCard from '../../components/ui/StatCard.vue'
 import AppButton from '../../components/ui/AppButton.vue'
+import ToggleRow from '../../components/ui/ToggleRow.vue'
 import { usePlayersStore } from '../../stores/players'
 import { useServerStore } from '../../stores/server'
 import { useToast } from '../../composables/useToast'
@@ -44,16 +42,11 @@ watch(
   }
 )
 
-// ── Tab state ──────────────────────────────────────────────────────────────
-const activeTab = ref('all')
-
-// ── All Players tab ────────────────────────────────────────────────────────
-const filter = ref('ALL')
-const search = ref('')
-
-const onlineNames = computed(() => new Set(store.online.map(p => p.name.toLowerCase())))
+// ── Lookup maps (lowercased name → entry) ───────────────────────────────────
+const onlineMap = computed(() => new Map(store.online.map(p => [p.name.toLowerCase(), p])))
 const opMap = computed(() => new Map(store.ops.map(o => [o.name.toLowerCase(), o])))
-const bannedSet = computed(() => new Set(store.bans.map(b => b.name.toLowerCase())))
+const bannedMap = computed(() => new Map(store.bans.map(b => [b.name.toLowerCase(), b])))
+const whitelistSet = computed(() => new Set(store.whitelist.map(w => (w.name || '').toLowerCase())))
 
 function lastSeenFromExpiresOn(expiresOn) {
   if (!expiresOn) return null
@@ -71,67 +64,191 @@ function relativeTime(date) {
   return `${Math.floor(h / 24)}d ago`
 }
 
+// Merge every player we know about — known players plus anyone with a role
+// (whitelist/op/ban) who may never have joined — into one list.
 const allPlayers = computed(() => {
-  const players = store.knownPlayers.map(p => {
-    const key = (p.name || '').toLowerCase()
+  const byKey = new Map()
+  const ensure = (name, uuid) => {
+    const key = (name || '').toLowerCase()
+    if (!byKey.has(key)) byKey.set(key, { name, uuid: uuid || null, lastSeen: null })
+    else if (uuid && !byKey.get(key).uuid) byKey.get(key).uuid = uuid
+    return byKey.get(key)
+  }
+
+  for (const p of store.knownPlayers) {
+    const row = ensure(p.name, p.uuid)
+    row.lastSeen = lastSeenFromExpiresOn(p.expiresOn)
+  }
+  for (const w of store.whitelist) ensure(w.name, w.uuid)
+  for (const o of store.ops) ensure(o.name, o.uuid)
+  for (const b of store.bans) ensure(b.name, b.uuid)
+  for (const o of store.online) ensure(o.name, o.uuid)
+
+  const rows = [...byKey.values()].map(row => {
+    const key = row.name.toLowerCase()
     const op = opMap.value.get(key)
     return {
-      name: p.name,
-      uuid: p.uuid,
-      isOnline: onlineNames.value.has(key),
-      lastSeen: lastSeenFromExpiresOn(p.expiresOn),
+      name: row.name,
+      uuid: row.uuid,
+      isOnline: onlineMap.value.has(key),
+      lastSeen: row.lastSeen,
       isOp: !!op,
       opLevel: op?.level ?? 4,
-      isBanned: bannedSet.value.has(key),
+      isBanned: bannedMap.value.has(key),
+      isWhitelisted: whitelistSet.value.has(key),
     }
   })
-  return players.sort((a, b) => {
+  return rows.sort((a, b) => {
     if (a.isOnline !== b.isOnline) return a.isOnline ? -1 : 1
     return (b.lastSeen?.getTime() ?? 0) - (a.lastSeen?.getTime() ?? 0)
   })
 })
 
+// ── Filtering / search ──────────────────────────────────────────────────────
+const filter = ref('all')
+const search = ref('')
+
+const filters = computed(() => [
+  { id: 'all', label: 'All', count: allPlayers.value.length },
+  { id: 'online', label: 'Online', count: store.online.length },
+  { id: 'whitelisted', label: 'Whitelisted', count: store.whitelist.length },
+  { id: 'ops', label: 'Operators', count: store.ops.length },
+  { id: 'banned', label: 'Banned', count: store.bans.length },
+])
+
 const filteredPlayers = computed(() => {
   let list = allPlayers.value
-  if (filter.value === 'ONLINE') list = list.filter(p => p.isOnline)
-  else if (filter.value === 'OPS') list = list.filter(p => p.isOp)
-  else if (filter.value === 'BANNED') list = list.filter(p => p.isBanned)
+  if (filter.value === 'online') list = list.filter(p => p.isOnline)
+  else if (filter.value === 'whitelisted') list = list.filter(p => p.isWhitelisted)
+  else if (filter.value === 'ops') list = list.filter(p => p.isOp)
+  else if (filter.value === 'banned') list = list.filter(p => p.isBanned)
   const q = search.value.trim().toLowerCase()
   return q ? list.filter(p => p.name.toLowerCase().includes(q)) : list
 })
 
-const onlineCount = computed(() => store.online.length)
-const knownCount = computed(() => store.knownPlayers.length)
-const oldestSeen = computed(() => {
-  let oldest = null
-  for (const p of store.knownPlayers) {
-    const d = lastSeenFromExpiresOn(p.expiresOn)
-    if (d && (!oldest || d < oldest)) oldest = d
+// Only show the full-page loading state on the initial load (no data yet) —
+// loadAll() drives store.loading, while the 5s online poll does not.
+const showLoading = computed(() => store.loading && !allPlayers.value.length)
+
+const emptyMessage = computed(() => {
+  if (search.value.trim()) return `No players match “${search.value.trim()}”.`
+  switch (filter.value) {
+    case 'online': return store.isRunning ? 'No players online.' : 'Server is stopped — no players online.'
+    case 'whitelisted': return 'No players whitelisted yet.'
+    case 'ops': return 'No operators yet.'
+    case 'banned': return 'No banned players.'
+    default: return 'No players yet.'
   }
-  return oldest ? relativeTime(oldest) : '—'
 })
 
-function initials(name) {
-  return (name || '').slice(0, 2).toUpperCase() || '?'
+async function retry() {
+  await store.loadAll()
+  if (store.isRunning) store.startOnlinePolling()
 }
 
 async function safe(fn) {
   try { await fn() } catch (e) { toast.error(e.message || 'Operation failed') }
 }
 
-// ── Kick with reason ───────────────────────────────────────────────────────
-const kickTarget = ref(null)  // player name being kicked
-const kickReason = ref('')
-
-function startKick(name) {
-  kickTarget.value = name
-  kickReason.value = ''
+// Perform a reversible removal, then offer an Undo toast that restores it.
+async function removeWithUndo(message, removeFn, undoFn) {
+  try {
+    await removeFn()
+  } catch (e) {
+    toast.error(e.message || 'Operation failed')
+    return
+  }
+  toast.action(message, 'Undo', () => safe(undoFn))
 }
 
-async function executeKick(name) {
-  await safe(() => store.kick(name, kickReason.value.trim() || null))
-  kickTarget.value = null
-  kickReason.value = ''
+// ── Inline reason entry (shared by kick + ban) ──────────────────────────────
+const reasonTarget = ref(null)  // { name, mode: 'kick' | 'ban' }
+const reasonText = ref('')
+const reasonInputEl = ref(null)  // only one reason input is rendered at a time
+
+async function startReason(name, mode) {
+  reasonTarget.value = { name, mode }
+  reasonText.value = ''
+  await nextTick()
+  reasonInputEl.value?.focus()
+}
+
+function cancelReason() {
+  reasonTarget.value = null
+  reasonText.value = ''
+}
+
+async function submitReason() {
+  const t = reasonTarget.value
+  if (!t) return
+  const reason = reasonText.value.trim() || null
+  if (t.mode === 'kick') await safe(() => store.kick(t.name, reason))
+  else await safe(() => store.addBan(t.name, reason))
+  cancelReason()
+}
+
+// ── Role toggles ────────────────────────────────────────────────────────────
+function toggleWhitelist(p) {
+  if (p.isWhitelisted) {
+    removeWithUndo(
+      `Removed ${p.name} from the whitelist`,
+      () => store.removeWhitelist(p.name),
+      () => store.addWhitelist(p.name)
+    )
+  } else safe(() => store.addWhitelist(p.name))
+}
+
+function toggleOp(p) {
+  if (p.isOp) {
+    const level = p.opLevel  // capture so Undo restores the same level
+    removeWithUndo(
+      `Removed operator ${p.name}`,
+      () => store.removeOp(p.name),
+      () => store.addOp(p.name, level)
+    )
+  } else safe(() => store.addOp(p.name, 4))  // vanilla defaults to 4; level editable below when stopped
+}
+
+function unban(p) {
+  const reason = bannedMap.value.get(p.name.toLowerCase())?.reason ?? null  // restore same reason on Undo
+  removeWithUndo(
+    `Unbanned ${p.name}`,
+    () => store.removeBan(p.name),
+    () => store.addBan(p.name, reason)
+  )
+}
+
+function changeOpLevel(p, level) {
+  if (store.isRunning) return  // disabled in template; defensive guard
+  safe(() => store.setOpLevel(p.name, Number(level)))
+}
+
+// ── Add a player who hasn't joined yet ──────────────────────────────────────
+const addName = ref('')
+const addBusy = ref(false)
+
+async function addPlayer(action) {
+  const name = addName.value.trim()
+  if (!name || addBusy.value) return
+  addBusy.value = true
+  try {
+    if (action === 'whitelist') await store.addWhitelist(name)
+    else if (action === 'op') await store.addOp(name, 4)
+    else if (action === 'ban') await store.addBan(name, null)
+    addName.value = ''
+  } catch (e) {
+    toast.error(e.message || 'Operation failed')
+  } finally {
+    addBusy.value = false
+  }
+}
+
+// ── Whitelist enforcement settings ──────────────────────────────────────────
+function onToggleActive(value) {
+  safe(() => store.toggleWhitelistActive(value))
+}
+function onToggleEnforce(value) {
+  safe(() => store.toggleEnforceWhitelist(value))
 }
 </script>
 
@@ -141,86 +258,140 @@ async function executeKick(name) {
       Server is in offline mode — player avatars and online identity verification are unavailable.
     </div>
 
-    <div class="players-tabs" role="tablist">
-      <button
-        v-for="tab in [{ id: 'all', label: 'All Players' }, { id: 'whitelist', label: 'Whitelist' }, { id: 'operators', label: 'Operators' }, { id: 'banned', label: 'Banned' }]"
-        :key="tab.id"
-        :class="['players-tab', { 'players-tab--active': activeTab === tab.id }]"
-        role="tab"
-        :aria-selected="activeTab === tab.id"
-        type="button"
-        @click="activeTab = tab.id"
-      >{{ tab.label }}</button>
+    <div v-if="store.error" class="players-page__error-banner" role="alert">
+      <span>{{ store.error }}</span>
+      <AppButton variant="ghost" size="sm" :loading="store.loading" @click="retry">Retry</AppButton>
     </div>
 
-    <!-- All Players tab -->
-    <div v-if="activeTab === 'all'" class="players-tab-content">
-      <OnlinePlayersPanel v-if="store.isRunning" />
+    <!-- Stats -->
+    <div class="players-stats">
+      <StatCard label="Online now" :value="store.online.length" accent="success" />
+      <StatCard label="Whitelisted" :value="store.whitelist.length" />
+      <StatCard label="Operators" :value="store.ops.length" accent="primary" />
+      <StatCard label="Banned" :value="store.bans.length" accent="danger" />
+    </div>
 
-      <div class="players-stats">
-        <StatCard label="Online now" :value="onlineCount" accent="success" />
-        <StatCard label="Known players" :value="knownCount" />
-        <StatCard label="Oldest seen" :value="oldestSeen" />
+    <!-- Whitelist enforcement -->
+    <section class="whitelist-settings">
+      <ToggleRow
+        v-if="store.isRunning"
+        label="Whitelist on (runtime)"
+        :model-value="store.whitelistActive"
+        @update:model-value="onToggleActive"
+      />
+      <ToggleRow
+        v-else
+        label="Enforce whitelist"
+        :model-value="store.enforceWhitelist"
+        @update:model-value="onToggleEnforce"
+      />
+      <p class="whitelist-settings__hint">
+        <template v-if="store.isRunning">
+          Turns the whitelist on/off live. Resets to the persisted setting on next start.
+        </template>
+        <template v-else>
+          Persisted in server.properties — applies on next start.
+        </template>
+      </p>
+    </section>
+
+    <!-- Toolbar: filters + search -->
+    <div class="players-toolbar">
+      <div class="players-filters">
+        <button
+          v-for="f in filters"
+          :key="f.id"
+          :class="['filter-pill', { 'filter-pill--active': filter === f.id }]"
+          type="button"
+          @click="filter = f.id"
+        >{{ f.label }} <span class="filter-pill__count">{{ f.count }}</span></button>
       </div>
+      <input v-model="search" class="players-search" type="search" placeholder="Search players…" />
+    </div>
 
-      <div class="players-toolbar">
-        <div class="players-filters">
-          <button
-            v-for="f in ['ALL', 'ONLINE', 'OPS', 'BANNED']"
-            :key="f"
-            :class="['filter-pill', { 'filter-pill--active': filter === f }]"
-            type="button"
-            @click="filter = f"
-          >{{ f }}</button>
+    <!-- Add a player who hasn't joined -->
+    <form class="player-add" @submit.prevent="addPlayer('whitelist')">
+      <input
+        v-model="addName"
+        class="player-add__input"
+        type="text"
+        placeholder="Add a player by name…"
+        :disabled="addBusy"
+      />
+      <AppButton type="submit" variant="primary" size="sm" :loading="addBusy" :disabled="!addName.trim()">+ Whitelist</AppButton>
+      <AppButton type="button" variant="ghost" size="sm" :disabled="!addName.trim() || addBusy" @click="addPlayer('op')">+ Op</AppButton>
+      <AppButton type="button" variant="danger" size="sm" :disabled="!addName.trim() || addBusy" @click="addPlayer('ban')">Ban</AppButton>
+    </form>
+
+    <!-- Loading state (initial load only) -->
+    <div v-if="showLoading" class="player-list__loading">
+      <span class="player-list__spinner" aria-hidden="true" />
+      Loading players…
+    </div>
+
+    <!-- Unified player list -->
+    <ul v-else class="player-list">
+      <li v-for="p in filteredPlayers" :key="p.uuid || p.name" class="player-row">
+        <span :class="['status-dot', p.isOnline ? 'status-dot--online' : 'status-dot--offline']" />
+        <PlayerAvatar :name="p.name" :uuid="p.uuid" :offline-mode="!store.onlineMode" :size="28" />
+
+        <div class="player-row__main">
+          <span class="player-row__name">{{ p.name }}</span>
+          <span class="player-row__when">{{ p.isOnline ? 'online' : (relativeTime(p.lastSeen) || 'never seen') }}</span>
         </div>
-        <input v-model="search" class="players-search" type="search" placeholder="Search players…" />
-      </div>
 
-      <ul class="all-players-list">
-        <li v-for="p in filteredPlayers" :key="p.uuid || p.name" class="all-player-row">
-          <span :class="['status-dot', p.isOnline ? 'status-dot--online' : 'status-dot--offline']" />
-          <span :class="['initials-av', p.isOnline ? 'initials-av--online' : '']">{{ initials(p.name) }}</span>
-          <div class="all-player-row__main">
-            <span class="all-player-row__name">{{ p.name }}</span>
-            <span class="all-player-row__when">{{ p.isOnline ? 'online' : relativeTime(p.lastSeen) }}</span>
-          </div>
-          <span v-if="p.isOp" class="role-badge role-badge--op">OP L{{ p.opLevel }}</span>
-          <span v-else-if="p.isBanned" class="role-badge role-badge--banned">Banned</span>
-          <div class="all-player-row__actions">
-            <template v-if="p.isOnline && kickTarget === p.name">
-              <input
-                v-model="kickReason"
-                class="kick-reason-input"
-                type="text"
-                placeholder="Kick reason…"
-                maxlength="256"
-                @keydown.enter.prevent="executeKick(p.name)"
-                @keydown.escape="kickTarget = null"
-              />
-              <AppButton variant="danger" size="sm" @click="executeKick(p.name)">Kick</AppButton>
-              <AppButton variant="ghost" size="sm" @click="kickTarget = null">✕</AppButton>
-            </template>
-            <AppButton v-else-if="p.isOnline" variant="ghost" size="sm" @click="startKick(p.name)">Kick</AppButton>
-            <AppButton v-if="p.isBanned" variant="ghost" size="sm" @click="safe(() => store.removeBan(p.name))">Unban</AppButton>
-            <AppButton v-else variant="danger" size="sm" @click="safe(() => store.addBan(p.name, null))">Ban</AppButton>
-          </div>
-        </li>
-        <li v-if="!filteredPlayers.length" class="players-empty">No players found.</li>
-      </ul>
-    </div>
+        <!-- Reason entry mode replaces the actions -->
+        <template v-if="reasonTarget && reasonTarget.name === p.name">
+          <input
+            ref="reasonInputEl"
+            v-model="reasonText"
+            class="reason-input"
+            type="text"
+            :placeholder="reasonTarget.mode === 'kick' ? 'Kick reason…' : 'Ban reason…'"
+            maxlength="256"
+            @keydown.enter.prevent="submitReason"
+            @keydown.escape="cancelReason"
+          />
+          <AppButton variant="danger" size="sm" @click="submitReason">
+            {{ reasonTarget.mode === 'kick' ? 'Kick' : 'Ban' }}
+          </AppButton>
+          <AppButton variant="ghost" size="sm" @click="cancelReason">✕</AppButton>
+        </template>
 
-    <template v-else-if="activeTab === 'whitelist'">
-      <WhitelistPanel />
-      <KnownPlayersPanel />
-    </template>
-    <template v-else-if="activeTab === 'operators'">
-      <OpsPanel />
-      <KnownPlayersPanel />
-    </template>
-    <template v-else-if="activeTab === 'banned'">
-      <BansPanel />
-      <KnownPlayersPanel />
-    </template>
+        <!-- Default: role chips + actions -->
+        <div v-else class="player-row__roles">
+          <button
+            :class="['role-chip', { 'role-chip--on': p.isWhitelisted }]"
+            type="button"
+            :title="p.isWhitelisted ? 'Remove from whitelist' : 'Add to whitelist'"
+            @click="toggleWhitelist(p)"
+          >{{ p.isWhitelisted ? '✓ Whitelisted' : '+ Whitelist' }}</button>
+
+          <span v-if="p.isOp" class="op-control">
+            <button class="role-chip role-chip--on role-chip--op" type="button" title="Remove operator" @click="toggleOp(p)">✓ Op</button>
+            <select
+              :value="p.opLevel"
+              class="op-level"
+              :disabled="store.isRunning"
+              :title="store.isRunning ? 'Stop the server to change op level' : 'Operator level'"
+              @change="changeOpLevel(p, $event.target.value)"
+            >
+              <option v-for="l in [1,2,3,4]" :key="l" :value="l">L{{ l }}</option>
+            </select>
+          </span>
+          <button v-else class="role-chip" type="button" title="Make operator" @click="toggleOp(p)">+ Op</button>
+
+          <span class="player-row__spacer" />
+
+          <AppButton v-if="p.isOnline" variant="ghost" size="sm" @click="startReason(p.name, 'kick')">Kick</AppButton>
+          <AppButton v-if="p.isBanned" variant="ghost" size="sm" @click="unban(p)">Unban</AppButton>
+          <AppButton v-else variant="danger" size="sm" @click="startReason(p.name, 'ban')">Ban</AppButton>
+        </div>
+      </li>
+      <li v-if="!filteredPlayers.length" class="player-list__empty">{{ emptyMessage }}</li>
+    </ul>
+
+    <IpBansPanel />
   </div>
 </template>
 
@@ -240,62 +411,58 @@ async function executeKick(name) {
   font-size: var(--text-xs);
 }
 
-/* ── Tab nav ── */
-.players-tabs {
+.players-page__error-banner {
   display: flex;
-  gap: var(--space-1);
-  border-bottom: 1px solid var(--border-color);
-}
-
-.players-tab {
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  padding: var(--space-2) var(--space-3);
-  font-family: inherit;
-  font-size: var(--text-sm);
-  font-weight: 500;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: color 0.15s ease, border-color 0.15s ease;
-}
-
-.players-tab:hover {
-  color: var(--text-secondary);
-}
-
-.players-tab--active {
-  color: var(--primary);
-  border-bottom-color: var(--primary);
-}
-
-/* ── All Players tab ── */
-.players-tab-content {
-  display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
   gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--radius-md);
+  color: var(--danger);
+  font-size: var(--text-sm);
 }
 
+/* ── Stats ── */
 .players-stats {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: var(--space-3);
 }
 
+/* ── Whitelist settings ── */
+.whitelist-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 var(--space-3);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+.whitelist-settings__hint {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--text-disabled);
+}
+
+/* ── Toolbar ── */
 .players-toolbar {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  flex-wrap: wrap;
 }
 
 .players-filters {
   display: flex;
   gap: var(--space-1);
+  flex-wrap: wrap;
 }
 
 .filter-pill {
-  height: 26px;
+  height: 28px;
   padding: 0 var(--space-3);
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
@@ -308,9 +475,7 @@ async function executeKick(name) {
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
-.filter-pill:hover {
-  color: var(--text-secondary);
-}
+.filter-pill:hover { color: var(--text-secondary); }
 
 .filter-pill--active {
   background: rgba(249, 115, 22, 0.12);
@@ -318,10 +483,17 @@ async function executeKick(name) {
   color: var(--primary);
 }
 
+.filter-pill__count {
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+
 .players-search {
   height: 32px;
   flex: 1;
-  max-width: 220px;
+  min-width: 160px;
+  max-width: 240px;
+  margin-left: auto;
   padding: 0 var(--space-3);
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
@@ -330,31 +502,45 @@ async function executeKick(name) {
   font-family: inherit;
   font-size: var(--text-sm);
 }
+.players-search:focus { outline: none; border-color: var(--primary); }
 
-.players-search:focus {
-  outline: none;
-  border-color: var(--primary);
+/* ── Add player ── */
+.player-add {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
 }
+.player-add__input {
+  flex: 1;
+  max-width: 280px;
+  height: 32px;
+  padding: 0 var(--space-3);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+}
+.player-add__input:focus { outline: none; border-color: var(--primary); }
 
-.all-players-list {
+/* ── Player list ── */
+.player-list {
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
-.all-player-row {
+.player-row {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2) 0;
   border-bottom: 1px solid var(--border-color);
 }
+.player-row:last-child { border-bottom: none; }
 
-.all-player-row:last-child {
-  border-bottom: none;
-}
-
-.all-player-row__main {
+.player-row__main {
   flex: 1;
   min-width: 0;
   display: flex;
@@ -362,7 +548,7 @@ async function executeKick(name) {
   gap: 1px;
 }
 
-.all-player-row__name {
+.player-row__name {
   font-size: var(--text-sm);
   font-weight: 500;
   color: var(--text-primary);
@@ -371,24 +557,20 @@ async function executeKick(name) {
   text-overflow: ellipsis;
 }
 
-.all-player-row__when {
+.player-row__when {
   font-size: var(--text-xs);
   color: var(--text-disabled);
   font-family: var(--font-mono);
 }
 
-.all-player-row__actions {
+.player-row__roles {
   display: flex;
-  gap: var(--space-2);
   align-items: center;
+  gap: var(--space-2);
   flex-shrink: 0;
-  opacity: 0;
-  transition: opacity 0.15s ease;
 }
 
-.all-player-row:hover .all-player-row__actions {
-  opacity: 1;
-}
+.player-row__spacer { width: var(--space-1); }
 
 /* ── Status dot ── */
 .status-dot {
@@ -397,54 +579,82 @@ async function executeKick(name) {
   border-radius: 50%;
   flex-shrink: 0;
 }
-
 .status-dot--online  { background: var(--success); }
 .status-dot--offline { background: var(--text-disabled); }
 
-/* ── Initials avatar ── */
-.initials-av {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-color);
+/* ── Role chips (always-visible toggles) ── */
+.role-chip {
+  height: 26px;
+  padding: 0 var(--space-2);
   background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-pill);
+  font-family: inherit;
   font-size: var(--text-xs);
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  white-space: nowrap;
 }
+.role-chip:hover { color: var(--text-secondary); border-color: var(--text-muted); }
 
-.initials-av--online {
+.role-chip--on {
   background: rgba(34, 197, 94, 0.12);
   border-color: rgba(34, 197, 94, 0.3);
   color: var(--success);
 }
-
-/* ── Role badge ── */
-.role-badge {
-  font-size: var(--text-xs);
-  font-weight: 600;
-  padding: 1px var(--space-2);
-  border-radius: var(--radius-pill);
-  flex-shrink: 0;
+.role-chip--op.role-chip--on {
+  background: rgba(249, 115, 22, 0.12);
+  border-color: rgba(249, 115, 22, 0.35);
+  color: var(--primary);
 }
 
-.role-badge--op     { background: rgba(249, 115, 22, 0.12); color: var(--primary); }
-.role-badge--banned { background: rgba(239, 68, 68, 0.12);  color: var(--danger); }
+.op-control { display: inline-flex; align-items: center; gap: var(--space-1); }
+.op-level {
+  height: 26px;
+  padding: 0 var(--space-1);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+}
+.op-level:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.players-empty {
+.player-list__empty {
   padding: var(--space-3) 0;
   font-size: var(--text-sm);
   color: var(--text-disabled);
 }
 
-/* ── Inline kick reason input ── */
-.kick-reason-input {
+.player-list__loading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4) 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.player-list__spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border-color);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: players-spin 0.7s linear infinite;
+}
+
+@keyframes players-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Inline reason input ── */
+.reason-input {
   height: 26px;
-  width: 140px;
+  width: 160px;
+  flex-shrink: 0;
   padding: 0 var(--space-2);
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
@@ -453,5 +663,5 @@ async function executeKick(name) {
   font-family: inherit;
   font-size: var(--text-xs);
 }
-.kick-reason-input:focus { outline: none; border-color: var(--danger); }
+.reason-input:focus { outline: none; border-color: var(--danger); }
 </style>

@@ -7,6 +7,7 @@ import ManageConfigsPanel from '../../components/backups/ManageConfigsPanel.vue'
 import RestoreModeModal from '../../components/modals/RestoreModeModal.vue'
 import DeleteBackupConfigModal from '../../components/modals/DeleteBackupConfigModal.vue'
 import QuickBackupModal from '../../components/modals/QuickBackupModal.vue'
+import ImportWorldModal from '../../components/modals/ImportWorldModal.vue'
 import ConfirmModal from '../../components/modals/ConfirmModal.vue'
 import { useBackupsStore } from '../../stores/backups'
 import { useServerStore } from '../../stores/server'
@@ -18,7 +19,8 @@ const TYPE_FILTERS = [
   { value: 'all',     label: 'All'      },
   { value: 'backup',  label: 'Backups'  },
   { value: 'safety',  label: 'Safety'   },
-  { value: 'restore', label: 'Restores' }
+  { value: 'restore', label: 'Restores' },
+  { value: 'import',  label: 'Imports'  }
 ]
 
 const configsById = computed(() => {
@@ -38,7 +40,11 @@ const activeJobLabel = computed(() => {
   const job = store.activeJob
   if (!job?.active) return ''
   const phase = job.phase || 'starting'
-  const kind = job.kind === 'restore' ? 'Restore' : 'Backup'
+  const kind = job.kind === 'restore'
+    ? 'Restore'
+    : job.kind === 'world_import'
+      ? 'World import'
+      : 'Backup'
   return `${kind} · ${phase.replace(/_/g, ' ')}`
 })
 
@@ -91,6 +97,14 @@ onUnmounted(() => {
       </div>
       <div class="backups-page__top-actions">
         <AppButton variant="ghost" size="md" @click="store.openCreateConfig()">Schedules</AppButton>
+        <AppButton
+          variant="ghost"
+          size="md"
+          :disabled="store.activeJob?.active || store.importUploading"
+          @click="store.openImportWorldModal()"
+        >
+          Import world
+        </AppButton>
         <AppButton
           variant="primary"
           size="md"
@@ -217,6 +231,17 @@ onUnmounted(() => {
       :default-storage-path="store.defaultStoragePath"
       @confirm="store.runQuickBackup"
       @cancel="store.closeQuickBackupModal()"
+    />
+
+    <!-- Import world modal (upload an archive to replace the active world) -->
+    <ImportWorldModal
+      :show="store.showImportWorldModal"
+      :uploading="store.importUploading"
+      :upload-pct="store.importUploadPct"
+      :active-job="store.activeJob"
+      @confirm="store.importWorld"
+      @cancel="store.closeImportWorldModal()"
+      @cancel-upload="store.cancelImportUpload()"
     />
 
     <!-- Snapshot delete confirmation (simple) -->

@@ -2,8 +2,12 @@
 import { computed, onMounted, ref } from 'vue'
 import Panel from '../../components/ui/Panel.vue'
 import JavaManagerPanel from '../../components/settings/JavaManagerPanel.vue'
+import ChangePasswordPanel from '../../components/settings/ChangePasswordPanel.vue'
+import { useAuthStore } from '../../stores/auth'
 import { version as appVersion } from '../../../package.json'
 import { getUpdateStatus } from '../../api/servers'
+
+const auth = useAuthStore()
 
 // Mirror the sidebar's update pill: show the backend's reported version
 // (which may be "unknown" on dev checkouts without a .fabricator_version
@@ -24,6 +28,8 @@ onMounted(async () => {
 <template>
   <div class="general-settings">
     <JavaManagerPanel />
+
+    <ChangePasswordPanel v-if="auth.enabled" />
 
     <Panel title="About">
       <dl class="general-settings__about">

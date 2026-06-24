@@ -9,16 +9,31 @@ if [[ ! -f "$INSTALL_SCRIPT" ]]; then
   exit 1
 fi
 
-# In-app updates are invoked as root via: sudo -n bash …/update.sh
-# (see install.sh sudoers). No need to re-run apt/pacman/dnf every time;
-# only pull the release tarball, sync, refresh venv, restart service.
+# In-app updates are invoked as root by the fabricator-update.service oneshot,
+# triggered when the unprivileged panel drops a request file watched by
+# fabricator-update.path (see install.sh). No need to re-run apt/pacman/dnf
+# every time; only pull the release tarball, sync, refresh venv, restart service.
 export FABRICATOR_SKIP_OS_PACKAGES=1
 
-# Optional pinned version without relying on the environment (needed after
-# sudo, which resets the caller env by default).
+# Pinned version, in order of precedence:
+#   1) explicit positional arg (manual `bash update.sh 1.2.3`)
+#   2) request file written by the panel (FABRICATOR_UPDATE_REQUEST_FILE)
+# The request file is attacker-controllable (written by the unprivileged panel
+# user), so its contents are validated against a strict allowlist before use —
+# this is the trust boundary between the panel and the root updater.
 if [[ -n "${1:-}" ]] && [[ "$1" != -* ]]; then
   export FABRICATOR_VERSION="$1"
   shift
+elif [[ -n "${FABRICATOR_UPDATE_REQUEST_FILE:-}" ]] && [[ -f "$FABRICATOR_UPDATE_REQUEST_FILE" ]]; then
+  REQUESTED_VERSION="$(head -n1 "$FABRICATOR_UPDATE_REQUEST_FILE" | tr -d '[:space:]')"
+  if [[ -n "$REQUESTED_VERSION" ]]; then
+    if [[ "$REQUESTED_VERSION" =~ ^[A-Za-z0-9._-]+$ ]]; then
+      export FABRICATOR_VERSION="$REQUESTED_VERSION"
+    else
+      echo "[ERROR] Rejecting malformed version in request file: ${REQUESTED_VERSION}" >&2
+      exit 2
+    fi
+  fi
 fi
 
 TARGET_VERSION="${FABRICATOR_VERSION:-latest}"

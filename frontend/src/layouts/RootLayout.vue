@@ -3,6 +3,8 @@ import AppSidebar from '../components/layout/AppSidebar.vue'
 
 // `showCreateModal` is provided at the App.vue level so the create-server
 // modal works from any layout/route (e.g. ServerSwitcher's "Add server").
+// Account actions (change password / log out) live in AppSidebar so they
+// are reachable on every authenticated page, including server pages.
 </script>
 
 <template>

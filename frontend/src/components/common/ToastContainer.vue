@@ -13,6 +13,7 @@
             :message="toast.message"
             :duration="toast.duration"
             :auto-close="toast.autoClose"
+            :action="toast.action"
             @close="removeToast(toast.id)"
           />
         </div>

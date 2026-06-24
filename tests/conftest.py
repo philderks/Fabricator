@@ -52,6 +52,10 @@ def tmp_servers_root(tmp_path, monkeypatch):
     monkeypatch.setenv("FLASK_ENV", "development")
     monkeypatch.setenv("CORS_ORIGINS", "http://localhost:3000")
     monkeypatch.setenv("HOST", "127.0.0.1")
+    # Built-in auth is on by default and always fail-closed; the vast majority
+    # of tests don't exercise it, so disable it here. Auth tests opt back in via
+    # the auth_app/auth_client/authed_client fixtures below.
+    monkeypatch.setenv("FABRICATOR_DISABLE_AUTH", "1")
     yield tmp_path
 
 
@@ -72,3 +76,65 @@ def app(tmp_servers_root):
 def client(app):
     """Flask test client."""
     return app.test_client()
+
+
+# Known password used by the auth fixtures.
+_AUTH_TEST_PASSWORD = "s3cret-test-pw"
+
+
+@pytest.fixture
+def auth_app(tmp_servers_root, monkeypatch):
+    """Flask app with built-in auth ENABLED and fully configured."""
+    from backend.auth import service
+
+    monkeypatch.delenv("FABRICATOR_DISABLE_AUTH", raising=False)
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key")
+    monkeypatch.setenv(
+        "FABRICATOR_AUTH_PASSWORD_HASH", service.hash_password(_AUTH_TEST_PASSWORD)
+    )
+
+    import backend.server.registry as registry_mod
+    registry_mod.reset_for_tests()
+    from backend.core.app import create_app
+
+    app = create_app()
+    app.config["TESTING"] = True
+    return app
+
+
+@pytest.fixture
+def auth_client(auth_app):
+    return auth_app.test_client()
+
+
+@pytest.fixture
+def authed_client(auth_client):
+    """A client that has already logged in (carries the session cookie)."""
+    resp = auth_client.post("/api/auth/login", json={"password": _AUTH_TEST_PASSWORD})
+    assert resp.status_code == 200
+    return auth_client
+
+
+@pytest.fixture
+def setup_app(tmp_servers_root, monkeypatch):
+    """Flask app in SETUP MODE: auth enabled, no env hash, no persisted file.
+
+    The temp data dir (via SERVER_INDEX_FILE) has no auth.json, so the app boots
+    locked into setup mode; SECRET_KEY is generated+persisted there at boot.
+    """
+    monkeypatch.delenv("FABRICATOR_DISABLE_AUTH", raising=False)
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    monkeypatch.delenv("FABRICATOR_AUTH_PASSWORD_HASH", raising=False)
+
+    import backend.server.registry as registry_mod
+    registry_mod.reset_for_tests()
+    from backend.core.app import create_app
+
+    app = create_app()
+    app.config["TESTING"] = True
+    return app
+
+
+@pytest.fixture
+def setup_client(setup_app):
+    return setup_app.test_client()

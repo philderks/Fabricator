@@ -1,8 +1,9 @@
 <script setup>
 import { computed, inject, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import ServerSwitcher from './ServerSwitcher.vue'
 import ConfirmModal from '../modals/ConfirmModal.vue'
+import { useAuthStore } from '../../stores/auth'
 import { version as appVersion } from '../../../package.json'
 import { getUpdateStatus, triggerUpdate } from '../../api/servers'
 import { useToast } from '../../composables/useToast'
@@ -12,6 +13,14 @@ const route = useRoute()
 const toast = useToast()
 const store = useServerStore()
 const showCreateModal = inject('showCreateModal', ref(false))
+
+const auth = useAuthStore()
+const router = useRouter()
+
+async function onLock() {
+  await auth.logout()
+  router.push({ name: 'Login' })
+}
 
 const serverId = computed(() => route.params.id)
 const hasServerContext = computed(() => Boolean(serverId.value))
@@ -294,6 +303,19 @@ onUnmounted(() => {
         <span>Settings</span>
       </component>
 
+      <button
+        v-if="auth.enabled"
+        type="button"
+        class="app-sidebar__nav-item app-sidebar__account-btn"
+        @click="onLock"
+      >
+        <svg class="app-sidebar__nav-icon" width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+          <rect x="3.5" y="6.8" width="8" height="6" rx="1"/>
+          <path d="M5.3 6.8V4.8a2.2 2.2 0 014.4 0v2"/>
+        </svg>
+        <span>Lock</span>
+      </button>
+
       <component
         :is="updateAvailable ? 'button' : 'div'"
         :type="updateAvailable ? 'button' : undefined"
@@ -437,6 +459,16 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+/* Account actions styled like nav items but they're <button>s. */
+.app-sidebar__account-btn {
+  background: none;
+  border: none;
+  width: 100%;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 /* Update status pill — subtle, blends into the sidebar */

@@ -21,18 +21,24 @@ if [ "$(id -u)" -ne 0 ]; then
     fi
 fi
 
-# Stop and disable the systemd service
-if $SUDO systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
-    info "Stopping $SERVICE_NAME..."
-    $SUDO systemctl stop "$SERVICE_NAME"
-fi
-if $SUDO systemctl is-enabled --quiet "$SERVICE_NAME" 2>/dev/null; then
-    info "Disabling $SERVICE_NAME..."
-    $SUDO systemctl disable "$SERVICE_NAME"
-fi
+# Stop and disable the systemd units (main service + self-update trigger)
+for unit in "$SERVICE_NAME" fabricator-update.path fabricator-update.service; do
+    if $SUDO systemctl is-active --quiet "$unit" 2>/dev/null; then
+        info "Stopping $unit..."
+        $SUDO systemctl stop "$unit"
+    fi
+    if $SUDO systemctl is-enabled --quiet "$unit" 2>/dev/null; then
+        info "Disabling $unit..."
+        $SUDO systemctl disable "$unit"
+    fi
+done
 
-# Remove the systemd unit file and reload
-$SUDO rm -f "/etc/systemd/system/$SERVICE_NAME"
+# Remove the systemd unit files, the obsolete sudoers rule, and reload
+$SUDO rm -f \
+    "/etc/systemd/system/$SERVICE_NAME" \
+    "/etc/systemd/system/fabricator-update.path" \
+    "/etc/systemd/system/fabricator-update.service" \
+    /etc/sudoers.d/fabricator-self-update
 $SUDO systemctl daemon-reload
 
 # Remove application files

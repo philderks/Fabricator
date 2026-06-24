@@ -10,19 +10,25 @@ const props = defineProps({
 
 const imgFailed = ref(false)
 
-watch(() => props.uuid, () => { imgFailed.value = false })
+watch(() => [props.uuid, props.name], () => { imgFailed.value = false })
 
 const initial = computed(() => {
   const n = (props.name || '').trim()
   return n ? n[0].toUpperCase() : '?'
 })
 
+// mc-heads.net resolves both UUIDs and usernames; fall back to the name when
+// we don't have a UUID yet (e.g. optimistically-added players).
+const identifier = computed(() => props.uuid || (props.name || '').trim() || null)
+
 const showImg = computed(() =>
-  !!props.uuid && !props.offlineMode && !imgFailed.value
+  !!identifier.value && !props.offlineMode && !imgFailed.value
 )
 
 const src = computed(() =>
-  props.uuid ? `https://crafatar.com/avatars/${props.uuid}?size=${props.size}&overlay` : null
+  identifier.value
+    ? `https://mc-heads.net/avatar/${encodeURIComponent(identifier.value)}/${props.size}`
+    : null
 )
 </script>
 

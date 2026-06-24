@@ -17,6 +17,7 @@ export function useToast() {
    * @param {string} options.title - Optional title
    * @param {number} options.duration - Duration in ms (default: 4000)
    * @param {boolean} options.autoClose - Auto close toast (default: true)
+   * @param {Object} options.action - Optional action button { label, handler }
    */
   const showToast = (options) => {
     const toast = {
@@ -25,12 +26,30 @@ export function useToast() {
       type: options.type || 'info',
       title: options.title || '',
       duration: options.duration || 4000,
-      autoClose: options.autoClose !== false
+      autoClose: options.autoClose !== false,
+      action: options.action || null
     }
-    
+
     toasts.value.push(toast)
-    
+
     return toast.id
+  }
+
+  /**
+   * Show a toast with an action button (e.g. "Undo").
+   * @param {string} message - Toast message
+   * @param {string} label - Action button label
+   * @param {Function} handler - Called when the action is clicked
+   * @param {Object} opts - Extra toast options (type, title, duration)
+   */
+  const action = (message, label, handler, opts = {}) => {
+    return showToast({
+      message,
+      type: opts.type || 'info',
+      title: opts.title || '',
+      duration: opts.duration || 6000,
+      action: { label, handler }
+    })
   }
 
   /**
@@ -82,6 +101,8 @@ export function useToast() {
 
   return {
     toasts,
+    showToast,
+    action,
     success,
     error,
     warning,

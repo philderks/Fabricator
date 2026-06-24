@@ -30,7 +30,11 @@
       <div class="toast-title" v-if="title">{{ title }}</div>
       <div class="toast-message">{{ message }}</div>
     </div>
-    
+
+    <button v-if="action" class="toast-action" type="button" @click="runAction">
+      {{ action.label }}
+    </button>
+
     <button class="toast-close" @click="$emit('close')" v-if="!autoClose">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
         <path d="M18 6L6 18M6 6L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
@@ -63,6 +67,10 @@ export default {
     duration: {
       type: Number,
       default: 4000
+    },
+    action: {
+      type: Object,
+      default: null
     }
   },
   emits: ['close'],
@@ -90,6 +98,12 @@ export default {
       setTimeout(() => {
         this.$emit('close')
       }, 220) // Match animation duration
+    },
+    runAction() {
+      if (this.action && typeof this.action.handler === 'function') {
+        this.action.handler()
+      }
+      this.close()
     }
   }
 }
@@ -155,6 +169,26 @@ export default {
   color: var(--text-secondary);
   line-height: 1.4;
   word-wrap: break-word;
+}
+
+.toast-action {
+  flex-shrink: 0;
+  align-self: center;
+  padding: 0.25rem 0.6rem;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--primary);
+  font-family: inherit;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.toast-action:hover {
+  background: rgba(249, 115, 22, 0.12);
+  border-color: var(--primary);
 }
 
 .toast-close {

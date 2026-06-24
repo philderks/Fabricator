@@ -32,7 +32,9 @@
 | 📦 | **Mod Management** — install, remove, and browse Fabric mods | ✅ Available |
 | 📋 | **Logs & Monitoring** — live log stream, TPS and RAM graphs | ✅ Available |
 | 💾 | **Backups & Restore** — manual snapshots, restore from any backup | ✅ Available |
+| 🌍 | **World Import** — upload a world archive and swap it in | ✅ Available |
 | 🖥️ | **Multiple Servers** — manage several instances from one dashboard | ✅ Available |
+| ▶️ | **Auto-start** — configure servers to start always, never, or on last-state restore | ✅ Available |
 | 🐳 | **Docker** — single multi-arch (amd64/arm64) image, runs as a non-root user | ✅ Available |
 | ⬆️ | **Fabricator self-update** — checks GitHub Releases; update from the sidebar or reinstall script | ✅ Available |
 | ⌨️ | **CLI** (`fabricator` command) — `status`, `start`/`stop`, `update`, `version`, `uninstall` | ✅ Available |
@@ -54,10 +56,9 @@ docker compose up -d
 ```
 
 The packaged `docker-compose.yml` publishes the panel to **host loopback only**
-(`127.0.0.1:5000`) because there is no built-in authentication — put a reverse
-proxy with auth/TLS in front before exposing it, or restrict access to a trusted
-network. Minecraft server ports aren't published by default; use the built-in
-playit.gg tunnel, or map each server's port explicitly (e.g. `25565:25565`).
+(`127.0.0.1:5000`). On first use you'll be prompted to create the operator password.
+Minecraft server ports aren't published by default; use the built-in playit.gg tunnel,
+or map each server's port explicitly (e.g. `25565:25565`).
 
 To update, pull the new image and recreate the container — your data persists in
 the named volume:
@@ -180,6 +181,50 @@ sudo systemctl restart fabricator
 
 </details>
 
+### Authentication
+
+The management panel requires a login by default. On **first boot** (no
+credential configured yet) it starts in a locked **setup mode**: open the panel
+and you'll be taken to a one-time page to create the operator password — in the
+browser, the same on Linux and Docker (no terminal needed).
+Until a password is set, only that page is reachable.
+
+The session signing key is generated and persisted automatically on first boot;
+the password is stored, hashed, in a `0600` `auth.json` in the data directory
+next to `servers.json` (`/var/lib/fabricator` under systemd, `/data` in Docker).
+
+**Advanced / declarative setup.** You can skip the setup page by providing the
+credential up front — useful for Docker/automation and recommended on untrusted
+networks (see the security note):
+
+1. Optionally pin `SECRET_KEY` to a fixed value (otherwise auto-generated):
+   `python -c "import secrets; print(secrets.token_hex(32))"`
+2. Generate a password hash and set `FABRICATOR_AUTH_PASSWORD_HASH`:
+   - systemd install: `fabricator hash-password`
+   - Docker / source: `python -m backend.auth hash`
+
+Precedence: env hash > persisted file > setup mode (and for the signing key:
+env > file > auto-generated).
+
+To run **without** the built-in login (only if you front Fabricator with your
+own reverse-proxy authentication), set `FABRICATOR_DISABLE_AUTH=1`. This is the
+only supported way to disable it.
+
+**Change or reset the password.** Once logged in, change it from the panel header
+(**Change password**). Forgot it / locked out? Delete `auth.json` from the data
+directory and restart — the app drops back into setup mode so you can set a new
+one. The file lives next to `servers.json`: `/var/lib/fabricator/auth.json` under
+systemd, `/data/auth.json` in Docker. (Deleting it only resets the password/key;
+your servers are untouched.)
+
+> **Security note (trust-on-first-use).** The first-boot setup page is reachable
+> by anyone who can reach the panel until the password is set. On an untrusted
+> network, set `FABRICATOR_AUTH_PASSWORD_HASH` before first exposure instead of
+> relying on the open setup page.
+
+When Fabricator is served behind TLS, also set `FABRICATOR_SESSION_COOKIE_SECURE=1`
+so the session cookie carries the `Secure` flag.
+
 ---
 
 ## CLI
@@ -191,6 +236,7 @@ fabricator status            # systemd state + Flask/Minecraft API reachability 
 fabricator start | stop      # control the systemd service
 fabricator update            # update to the latest GitHub release (runs the installer)
 fabricator version           # show the installed version
+fabricator hash-password     # generate a password hash for FABRICATOR_AUTH_PASSWORD_HASH
 fabricator uninstall         # remove app, data, config, systemd unit, and service user
 fabricator help              # list all commands
 ```
@@ -206,7 +252,9 @@ The read commands (`status`, `version`, `help`) accept `--json` for scripting. T
 | ✅ Done | Mod management |
 | ✅ Done | Logs & monitoring |
 | ✅ Done | Backups & restore |
+| ✅ Done | World import |
 | ✅ Done | Multiple server instances |
+| ✅ Done | Auto-start (always / never / last-state) |
 | ✅ Done | Loader support: Vanilla, NeoForge, Forge, Quilt, Fabric |
 | ✅ Done | Docker image (multi-arch, non-root) + compose |
 | ✅ Done | Fabricator self-update (UI + installer) |
