@@ -46,27 +46,6 @@ const onReset = () => {
   if (!store.canEditSettings) return
   store.resetSettings()
 }
-
-// Boot auto-start mode — saves instantly via its own endpoint, so it stays
-// editable even while the server is running (unlike server.properties below).
-const autoStartOptions = [
-  {
-    value: 'always',
-    label: 'Always start',
-    hint: 'Start this server every time Fabricator starts.',
-  },
-  {
-    value: 'last',
-    label: 'Restore last state',
-    hint: 'Start only if it was running when Fabricator last stopped — survives crashes and host reboots.',
-  },
-  {
-    value: 'never',
-    label: 'Never',
-    hint: 'Do not start automatically. Start it manually when you need it.',
-  },
-]
-
 </script>
 
 <template>
@@ -89,32 +68,6 @@ const autoStartOptions = [
         >
           {{ modeButtonLabel }}
         </button>
-      </div>
-    </Panel>
-
-    <Panel title="Auto-start">
-      <p class="settings-page__autostart-intro">
-        What should happen to this server when Fabricator starts up?
-      </p>
-      <div class="settings-page__autostart" role="radiogroup" aria-label="Auto-start mode">
-        <label
-          v-for="opt in autoStartOptions"
-          :key="opt.value"
-          class="settings-page__autostart-option"
-          :class="{ 'settings-page__autostart-option--active': store.autoStartMode === opt.value }"
-        >
-          <input
-            type="radio"
-            name="autostart-mode"
-            :value="opt.value"
-            :checked="store.autoStartMode === opt.value"
-            @change="store.setAutoStartMode(opt.value)"
-          />
-          <span class="settings-page__autostart-text">
-            <span class="settings-page__autostart-label">{{ opt.label }}</span>
-            <span class="settings-page__autostart-hint">{{ opt.hint }}</span>
-          </span>
-        </label>
       </div>
     </Panel>
 
@@ -1028,67 +981,6 @@ const autoStartOptions = [
 .settings-page__mode-button--active {
   border-color: var(--primary);
   color: var(--primary);
-}
-
-.settings-page__autostart-intro {
-  margin: 0 0 var(--space-3);
-  font-size: var(--text-sm);
-  color: var(--text-muted);
-}
-
-.settings-page__autostart {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.settings-page__autostart-option {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
-  padding: var(--space-3);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  background: var(--bg-tertiary);
-  cursor: pointer;
-  transition: border-color 120ms ease, background 120ms ease;
-}
-
-.settings-page__autostart-option:hover {
-  border-color: var(--text-muted);
-}
-
-.settings-page__autostart-option--active {
-  border-color: var(--primary);
-  background: color-mix(in oklch, var(--primary) 8%, transparent);
-}
-
-.settings-page__autostart-option input[type="radio"] {
-  margin-top: 2px;
-  width: 16px;
-  height: 16px;
-  accent-color: var(--primary);
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.settings-page__autostart-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.settings-page__autostart-label {
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-
-.settings-page__autostart-hint {
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-  line-height: var(--leading-normal);
 }
 
 .settings-page__grid {

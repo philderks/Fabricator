@@ -184,7 +184,7 @@ const onCopyPath = async () => {
                 <span>{{ entry.name }}</span>
               </button>
             </td>
-            <td class="files-page__td-size">{{ entry.isDir ? '—' : formatFileSize(entry.size) }}</td>
+            <td class="files-page__td-size">{{ formatFileSize(entry.size) }}</td>
             <td class="files-page__td-modified">{{ formatModified(entry.modifiedAt) }}</td>
           </tr>
         </tbody>

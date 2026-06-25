@@ -128,6 +128,31 @@ def _augment_with_runtime(server: dict) -> dict:
     return augmented
 
 
+def _directory_size(path: Path) -> int:
+    """Recursively sum the size of every regular file under ``path``.
+
+    A directory's own ``st_size`` is just the inode/block size, so to report a
+    meaningful folder size we walk the tree. Symlinks are skipped (to avoid
+    loops and double counting) and unreadable entries are ignored.
+    """
+    total = 0
+    try:
+        with os.scandir(path) as it:
+            for entry in it:
+                try:
+                    if entry.is_symlink():
+                        continue
+                    if entry.is_dir(follow_symlinks=False):
+                        total += _directory_size(Path(entry.path))
+                    else:
+                        total += entry.stat(follow_symlinks=False).st_size
+                except OSError:
+                    continue
+    except OSError:
+        pass
+    return total
+
+
 def _serialize_file_entry(path: Path, base_path: Path | None = None) -> dict:
     stat_result = path.stat()
     relative_path = path.name
@@ -136,13 +161,14 @@ def _serialize_file_entry(path: Path, base_path: Path | None = None) -> dict:
             relative_path = str(path.relative_to(base_path))
         except ValueError:
             relative_path = path.name
+    is_dir = path.is_dir()
     return {
         'name': path.name,
-        'size': stat_result.st_size,
+        'size': _directory_size(path) if is_dir else stat_result.st_size,
         'updatedAt': iso_z_from_timestamp(stat_result.st_mtime),
         'path': str(path),
         'relativePath': relative_path,
-        'isDir': path.is_dir()
+        'isDir': is_dir
     }
 
 
