@@ -77,8 +77,10 @@ watch(() => route.name, (name) => {
   } else {
     stopLogPolling()
   }
-  if (name === 'ServerFiles' && !store.fileBrowser.entries.length && !store.fileBrowser.loading) {
-    store.openFileBrowser()
+  // Refresh on every visit to the Files tab (not just the first) so the
+  // listing reflects on-disk changes. Keep the user's current folder.
+  if (name === 'ServerFiles' && !store.fileBrowser.loading) {
+    store.openFileBrowser(store.fileBrowser.currentPath)
   }
 }, { immediate: true })
 
