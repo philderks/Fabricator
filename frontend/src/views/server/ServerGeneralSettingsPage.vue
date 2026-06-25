@@ -4,10 +4,32 @@ import Panel from '../../components/ui/Panel.vue'
 import JavaManagerPanel from '../../components/settings/JavaManagerPanel.vue'
 import ChangePasswordPanel from '../../components/settings/ChangePasswordPanel.vue'
 import { useAuthStore } from '../../stores/auth'
+import { useServerStore } from '../../stores/server'
 import { version as appVersion } from '../../../package.json'
 import { getUpdateStatus } from '../../api/servers'
 
 const auth = useAuthStore()
+const store = useServerStore()
+
+// Boot auto-start mode — saves instantly via its own endpoint, so it stays
+// editable even while the server is running (unlike server.properties).
+const autoStartOptions = [
+  {
+    value: 'always',
+    label: 'Always start',
+    hint: 'Start this server every time Fabricator starts.',
+  },
+  {
+    value: 'last',
+    label: 'Restore last state',
+    hint: 'Start only if it was running when Fabricator last stopped — survives crashes and host reboots.',
+  },
+  {
+    value: 'never',
+    label: 'Never',
+    hint: 'Do not start automatically. Start it manually when you need it.',
+  },
+]
 
 // Mirror the sidebar's update pill: show the backend's reported version
 // (which may be "unknown" on dev checkouts without a .fabricator_version
@@ -27,6 +49,32 @@ onMounted(async () => {
 
 <template>
   <div class="general-settings">
+    <Panel title="Auto-start">
+      <p class="general-settings__autostart-intro">
+        What should happen to this server when Fabricator starts up?
+      </p>
+      <div class="general-settings__autostart" role="radiogroup" aria-label="Auto-start mode">
+        <label
+          v-for="opt in autoStartOptions"
+          :key="opt.value"
+          class="general-settings__autostart-option"
+          :class="{ 'general-settings__autostart-option--active': store.autoStartMode === opt.value }"
+        >
+          <input
+            type="radio"
+            name="autostart-mode"
+            :value="opt.value"
+            :checked="store.autoStartMode === opt.value"
+            @change="store.setAutoStartMode(opt.value)"
+          />
+          <span class="general-settings__autostart-text">
+            <span class="general-settings__autostart-label">{{ opt.label }}</span>
+            <span class="general-settings__autostart-hint">{{ opt.hint }}</span>
+          </span>
+        </label>
+      </div>
+    </Panel>
+
     <JavaManagerPanel />
 
     <ChangePasswordPanel v-if="auth.enabled" />
@@ -52,6 +100,67 @@ onMounted(async () => {
   flex-direction: column;
   gap: var(--space-4);
   max-width: 880px;
+}
+
+.general-settings__autostart-intro {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.general-settings__autostart {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.general-settings__autostart-option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.general-settings__autostart-option:hover {
+  border-color: var(--text-muted);
+}
+
+.general-settings__autostart-option--active {
+  border-color: var(--primary);
+  background: color-mix(in oklch, var(--primary) 8%, transparent);
+}
+
+.general-settings__autostart-option input[type="radio"] {
+  margin-top: 2px;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.general-settings__autostart-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.general-settings__autostart-label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.general-settings__autostart-hint {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: var(--leading-normal);
 }
 
 .general-settings__about {
