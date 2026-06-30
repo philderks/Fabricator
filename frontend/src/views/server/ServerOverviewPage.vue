@@ -37,7 +37,10 @@ const cpuDisplay = computed(() => {
 })
 const recentLogLines = computed(() => {
   const lines = store.logs.stdout || []
-  return lines.slice(-RECENT_LOG_PREVIEW_LINES)
+  // Entries are { ts, text }; tolerate plain strings from an older backend.
+  return lines
+    .slice(-RECENT_LOG_PREVIEW_LINES)
+    .map((entry) => (typeof entry === 'string' ? entry : (entry?.text ?? '')))
 })
 const modPreview = computed(() => store.installedMods.slice(0, 4))
 

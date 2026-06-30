@@ -9,6 +9,7 @@ from typing import Iterable, List, Optional
 
 from backend.utils import platform as platform_utils
 from backend.utils.java import parse_java_major
+from backend.utils.time import iso_z_now
 try:
     import psutil  # type: ignore
 except ImportError:  # pragma: no cover - optional dependency fallback
@@ -58,8 +59,14 @@ class ServerManager:
         self._ps_process: Optional["psutil.Process"] = None  # type: ignore[name-defined]
         self._stdout_thread: Optional[threading.Thread] = None
         self._stderr_thread: Optional[threading.Thread] = None
-        self._stdout_buffer: List[str] = []
-        self._stderr_buffer: List[str] = []
+        # Each entry is ``(capture_ts, text)`` where capture_ts is an ISO-Z
+        # timestamp taken when Fabricator read the line. The server's own
+        # ``[HH:MM:SS]`` is in the JVM's timezone (UTC on most hosts); shipping
+        # an absolute capture time instead lets the frontend render it in the
+        # viewer's local timezone. Storing the pair as one tuple keeps the
+        # lock-free append in ``_stream`` a single atomic list op.
+        self._stdout_buffer: List[tuple[str, str]] = []
+        self._stderr_buffer: List[tuple[str, str]] = []
         self._players: Dict[str, OnlinePlayer] = {}
         self._lock = threading.Lock()
 
@@ -189,9 +196,9 @@ class ServerManager:
         if not self._process:
             return
 
-        def _stream(pipe, buffer: List[str]):
+        def _stream(pipe, buffer: List[tuple[str, str]]):
             for line in iter(pipe.readline, ""):
-                buffer.append(line)
+                buffer.append((iso_z_now(), line))
                 if len(buffer) > self.MAX_LOG_LINES:
                     del buffer[: len(buffer) - self.MAX_LOG_LINES]
                 join_match = self._PLAYER_JOIN_RE.search(line)
@@ -238,8 +245,8 @@ class ServerManager:
 
             if self._process.poll() is not None:
                 exit_code = self._process.returncode
-                stdout_tail = "".join(self._stdout_buffer[-10:])
-                stderr_tail = "".join(self._stderr_buffer[-10:])
+                stdout_tail = "".join(text for _, text in self._stdout_buffer[-10:])
+                stderr_tail = "".join(text for _, text in self._stderr_buffer[-10:])
                 self._process = None
                 error_message = f"Server process exited immediately (code {exit_code})."
                 if stdout_tail:
@@ -393,8 +400,8 @@ class ServerManager:
             stderr = self._stderr_buffer[-limit:]
             running = self.is_running
         return {
-            "stdout": stdout,
-            "stderr": stderr,
+            "stdout": [{"ts": ts, "text": text} for ts, text in stdout],
+            "stderr": [{"ts": ts, "text": text} for ts, text in stderr],
             "running": running
         }
 
@@ -429,7 +436,7 @@ class ServerManager:
                 # thread can't truncate-then-resize the buffer mid-iter.
                 pending = self._stdout_buffer[start_index:]
                 start_index = len(self._stdout_buffer)
-            for line in pending:
+            for _, line in pending:
                 if pattern.search(line):
                     return True
             time.sleep(poll_interval)
@@ -438,7 +445,7 @@ class ServerManager:
         # arrives after the last poll-sleep but before timeout.
         with self._lock:
             pending = self._stdout_buffer[start_index:]
-        for line in pending:
+        for _, line in pending:
             if pattern.search(line):
                 return True
         return False

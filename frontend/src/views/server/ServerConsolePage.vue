@@ -11,21 +11,47 @@ const activeFilter = ref('ALL')
 const autoScroll = ref(true)
 const terminalRef = ref(null)
 
-const parseLine = (raw) => {
-  const m = raw.match(LEVEL_PATTERN)
+// Render an ISO-Z capture timestamp as HH:MM:SS in the viewer's local timezone.
+// getHours/Minutes/Seconds are local to the browser, so two people in different
+// zones each see their own wall-clock time for the same line.
+const formatLocalTime = (ts) => {
+  if (!ts) return ''
+  const d = new Date(ts)
+  if (Number.isNaN(d.getTime())) return ''
+  const p = (n) => String(n).padStart(2, '0')
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+
+const parseLine = (entry) => {
+  // Backend now ships { ts, text }; tolerate plain strings from an older
+  // backend during a rolling update.
+  const text = typeof entry === 'string' ? entry : (entry?.text ?? '')
+  const ts = entry && typeof entry === 'object' ? entry.ts : null
+  const m = text.match(LEVEL_PATTERN)
   const level = m ? m[1] : 'INFO'
-  // Try to extract a leading timestamp (e.g., [12:04:01]) — fall back to empty.
-  const tsMatch = raw.match(/\[(\d{2}:\d{2}:\d{2})\]/)
-  const time = tsMatch ? tsMatch[1] : ''
-  return { time, level, message: raw }
+  // Prefer the authoritative capture time (shown in local tz); fall back to any
+  // leading [HH:MM:SS] the server logged itself if no ts is present.
+  let time = formatLocalTime(ts)
+  if (!time) {
+    const tsMatch = text.match(/\[(\d{2}:\d{2}:\d{2})\]/)
+    time = tsMatch ? tsMatch[1] : ''
+  }
+  // Drop the server's own leading [HH:MM:SS] from the message — it's redundant
+  // with the time column (which now shows local time) and would otherwise read
+  // as a confusing double timestamp.
+  const message = text.replace(/^\s*\[\d{2}:\d{2}:\d{2}\]\s*/, '')
+  return { time, level, message }
 }
 
 // Tag each line with a stream-scoped id so :key stays stable across filter
 // toggles — index keys made Vue recycle DOM nodes carrying the previous
 // line's level class, flashing the wrong color on filter swap.
 const allLines = computed(() => {
-  const stdout = (store.logs.stdout || []).map((line, i) => ({ id: `stdout:${i}`, stream: 'stdout', ...parseLine(line) }))
-  const stderr = (store.logs.stderr || []).map((line, i) => ({ id: `stderr:${i}`, stream: 'stderr', level: 'ERROR', time: parseLine(line).time, message: line }))
+  const stdout = (store.logs.stdout || []).map((entry, i) => ({ id: `stdout:${i}`, stream: 'stdout', ...parseLine(entry) }))
+  const stderr = (store.logs.stderr || []).map((entry, i) => {
+    const parsed = parseLine(entry)
+    return { id: `stderr:${i}`, stream: 'stderr', level: 'ERROR', time: parsed.time, message: parsed.message }
+  })
   return [...stdout, ...stderr]
 })
 
