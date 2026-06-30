@@ -5,7 +5,24 @@ import { useServerStore } from '../../stores/server'
 
 const store = useServerStore()
 
-const LEVEL_PATTERN = /\b(ERROR|WARN|INFO|DEBUG)\b/
+// Case-sensitive on purpose: Minecraft/Log4j and the JVM emit these tokens in
+// uppercase (e.g. "[Server thread/WARN]", "WARNING:"), so matching only
+// uppercase avoids false hits on ordinary words in chat/messages.
+const LEVEL_PATTERN = /\b(FATAL|SEVERE|ERROR|WARNING|WARN|INFO|DEBUG|TRACE)\b/
+
+// Collapse the various spellings onto the four levels the UI filters/styles use.
+const normalizeLevel = (raw) => {
+  switch (raw) {
+    case 'FATAL':
+    case 'SEVERE':
+    case 'ERROR':   return 'ERROR'
+    case 'WARNING':
+    case 'WARN':    return 'WARN'
+    case 'DEBUG':
+    case 'TRACE':   return 'DEBUG'
+    default:        return 'INFO'
+  }
+}
 
 const activeFilter = ref('ALL')
 const autoScroll = ref(true)
@@ -22,13 +39,15 @@ const formatLocalTime = (ts) => {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
-const parseLine = (entry) => {
+const parseLine = (entry, defaultLevel = 'INFO') => {
   // Backend now ships { ts, text }; tolerate plain strings from an older
   // backend during a rolling update.
   const text = typeof entry === 'string' ? entry : (entry?.text ?? '')
   const ts = entry && typeof entry === 'object' ? entry.ts : null
   const m = text.match(LEVEL_PATTERN)
-  const level = m ? m[1] : 'INFO'
+  // Derive the level from the line itself; fall back to the stream's default
+  // (stderr lines without a recognizable level are treated as errors).
+  const level = m ? normalizeLevel(m[1]) : defaultLevel
   // Prefer the authoritative capture time (shown in local tz); fall back to any
   // leading [HH:MM:SS] the server logged itself if no ts is present.
   let time = formatLocalTime(ts)
@@ -49,8 +68,8 @@ const parseLine = (entry) => {
 const allLines = computed(() => {
   const stdout = (store.logs.stdout || []).map((entry, i) => ({ id: `stdout:${i}`, stream: 'stdout', ...parseLine(entry) }))
   const stderr = (store.logs.stderr || []).map((entry, i) => {
-    const parsed = parseLine(entry)
-    return { id: `stderr:${i}`, stream: 'stderr', level: 'ERROR', time: parsed.time, message: parsed.message }
+    const parsed = parseLine(entry, 'ERROR')
+    return { id: `stderr:${i}`, stream: 'stderr', ...parsed }
   })
   return [...stdout, ...stderr]
 })

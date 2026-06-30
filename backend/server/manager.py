@@ -140,6 +140,29 @@ class ServerManager:
             return self.command[0]
         return "java"
 
+    # JDK 23 (JEP 471) deprecated sun.misc.Unsafe's memory-access methods; JDK 24
+    # (JEP 498) makes the JVM print a WARNING the first time one is called.
+    # Minecraft's JOML math library calls them, so every modern server spams four
+    # scary-looking lines on boot. This flag opts back into silent access.
+    _UNSAFE_ACCESS_FLAG = "--sun-misc-unsafe-memory-access=allow"
+
+    def _with_unsafe_suppression(self, command: List[str], java_major: int) -> List[str]:
+        """Insert the Unsafe-warning suppression flag for Java 23+ launches.
+
+        The flag only exists on Java 23 and newer; passing it to an older JVM
+        aborts startup, so it is gated on the probed major version. A JVM option
+        must precede ``-jar``/the main class, so it goes right after the java
+        executable. Skipped if the user already set it themselves.
+        """
+        if java_major < 23 or not command:
+            return command
+        if any(
+            isinstance(arg, str) and arg.startswith("--sun-misc-unsafe-memory-access")
+            for arg in command
+        ):
+            return command
+        return [command[0], self._UNSAFE_ACCESS_FLAG, *command[1:]]
+
     def probe_java(self) -> dict:
         java_exec = self._java_executable()
         try:
@@ -300,6 +323,7 @@ class ServerManager:
                     "server_java_target": java_info.get("java_exec"),
                 }
 
+            command_to_run = self._with_unsafe_suppression(command_to_run, detected_java)
             started, message = self._spawn_process(command_to_run)
             status = "running" if started else "stopped"
             combined_message = message
