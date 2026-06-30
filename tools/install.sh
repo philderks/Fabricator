@@ -243,9 +243,11 @@ main() {
             return 0
         fi
 
-        # Drift detection: if both binaries already present and matching, skip download in install mode.
-        if [[ "$MODE" != "update" \
-              && -x /usr/local/bin/playit \
+        # Drift detection: if both binaries are already present and match the
+        # pinned sha256, skip the download entirely. This applies to updates too
+        # (the pin only moves when PLAYIT_VERSION is bumped), so a routine update
+        # doesn't re-fetch ~unchanged binaries from GitHub every time.
+        if [[ -x /usr/local/bin/playit \
               && -x /usr/local/bin/playit-cli ]]; then
             if echo "${daemon_sha}  /usr/local/bin/playit" | sha256sum -c - >/dev/null 2>&1 \
                && echo "${cli_sha}  /usr/local/bin/playit-cli" | sha256sum -c - >/dev/null 2>&1; then
@@ -412,8 +414,17 @@ main() {
     fi
 
     # 4a) Setup Python venv + requirements
-    info "Creating Python virtualenv..."
-    run_as_service_user python3 -m venv "$VENV_DIR"
+    # Reuse an existing venv across updates instead of recreating it: a fresh
+    # `python3 -m venv` plus a full dependency reinstall on every update is the
+    # main reason an update drags on (and risks the systemd start timeout). When
+    # the venv is already there, pip's "already satisfied" fast path skips most
+    # of the work and only changed/new requirements are installed.
+    if [ -x "$VENV_DIR/bin/python" ]; then
+        info "Reusing existing Python virtualenv at $VENV_DIR"
+    else
+        info "Creating Python virtualenv..."
+        run_as_service_user python3 -m venv "$VENV_DIR"
+    fi
     run_as_service_user "$VENV_DIR/bin/pip" install --upgrade pip </dev/null
 
     if [ -f "$APP_DIR/requirements.txt" ]; then
@@ -534,6 +545,12 @@ Description=Fabricator self-update job
 
 [Service]
 Type=oneshot
+# A full update recreates the venv and reinstalls every Python dependency
+# (and re-downloads playit), which routinely takes minutes on slower hosts
+# like a Raspberry Pi. Without this, the oneshot inherits DefaultTimeoutStartSec
+# (~90s); systemd would SIGTERM the installer mid-pip and the panel would report
+# a "failed" update that was only killed for being slow.
+TimeoutStartSec=infinity
 # The panel can only write the request file's *contents*; update.sh validates
 # them against a strict allowlist before trusting the version string.
 Environment=FABRICATOR_UPDATE_REQUEST_FILE=${UPDATE_REQUEST_FILE}
