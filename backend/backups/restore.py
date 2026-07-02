@@ -258,13 +258,6 @@ def run_restore(
                 "mode": mode,
             },
         )
-        progress.update(
-            job_id,
-            phase="done",
-            restore_record_id=restore_record["id"],
-            safety_snapshot_id=safety["id"],
-            duration_seconds=duration,
-        )
     except Exception as exc:
         if progress.get(job_id).get("phase") not in ("done", "failed"):
             progress.update(job_id, phase="failed", error=str(exc))
@@ -275,6 +268,19 @@ def run_restore(
         if was_running:
             progress.update(job_id, phase="restarting")
             _restart_server_safe(server, registry, job_id)
+        # Assert the terminal phase AFTER any restart. Previously "done" was set
+        # before the restart, then clobbered by "restarting", which was never
+        # reset — leaving the job stuck non-terminal: progress.is_active() stays
+        # True and the frontend poll loop never finishes even though the restore
+        # succeeded. _restart_server_safe only records restart_error on failure,
+        # so "done" is the correct terminal state either way.
+        progress.update(
+            job_id,
+            phase="done",
+            restore_record_id=restore_record["id"],
+            safety_snapshot_id=safety["id"],
+            duration_seconds=duration,
+        )
         return restore_record
     finally:
         server_lock.release()
@@ -306,19 +312,32 @@ def _write_safety_snapshot(
         )
 
     tmp_path = storage_path / (final_path.name + ".partial")
+
+    # Exclude the storage dir wherever it sits inside the install tree — it may
+    # be NESTED (e.g. <install>/data/backups), not just a direct child — so we
+    # never recursively pack prior backups into the safety tar (which would grow
+    # it with every restore). A tarfile filter on the arcname drops only the
+    # storage subtree while keeping unrelated siblings under the same
+    # intermediate dir (e.g. <install>/data/other).
+    try:
+        storage_rel = (
+            storage_path.resolve().relative_to(install_path.resolve()).as_posix()
+        )
+    except (ValueError, OSError):
+        storage_rel = None  # storage lives outside the install tree — nothing to skip
+
+    def _drop_storage(tarinfo):
+        if storage_rel and (
+            tarinfo.name == storage_rel
+            or tarinfo.name.startswith(storage_rel + "/")
+        ):
+            return None
+        return tarinfo
+
     try:
         with tarfile.open(tmp_path, "w") as tf:
             for entry in sorted(install_path.iterdir()):
-                # Skip the storage dir if it lives inside the install
-                # tree — recursively packing the backups folder into the
-                # safety would grow with every restore.
-                try:
-                    entry_resolved = entry.resolve()
-                    if storage_path.resolve() == entry_resolved:
-                        continue
-                except OSError:
-                    pass
-                tf.add(entry, arcname=entry.name)
+                tf.add(entry, arcname=entry.name, filter=_drop_storage)
         os.replace(tmp_path, final_path)
     except Exception:
         try:

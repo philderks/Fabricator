@@ -274,6 +274,65 @@ def test_running_server_is_stopped_then_restarted(
     registry.start_server.assert_called_once()
 
 
+def test_import_onto_running_server_reaches_done_phase(
+    import_env, monkeypatch, tmp_path
+):
+    """Importing onto a RUNNING server must end in the terminal 'done' phase,
+    not stay stuck in 'restarting' (mirror of the run_restore fix — the same
+    bug lived in run_world_import)."""
+    from backend.backups import progress
+
+    world_import = import_env["world_import"]
+    tmp = import_env["tmp"]
+    install = _seed_server(tmp, "srv_imprun")
+
+    archive = tmp_path / "up.zip"
+    _zip(archive, {"world/level.dat": "IMPORTED"})
+
+    registry = _fake_registry(install)
+    registry.get_status.return_value = {"status": "running"}
+    monkeypatch.setattr(
+        world_import, "get_server_process_registry", lambda: registry
+    )
+
+    job_id = progress.generate_job_id("bjw")
+    world_import.run_world_import(
+        "srv_imprun", archive, original_name="up.zip", job_id=job_id
+    )
+
+    registry.start_server.assert_called_once()          # it WAS restarted
+    entry = progress.get(job_id)
+    assert entry.get("phase") == "done", f"import stuck in {entry.get('phase')!r}"
+    assert not progress.is_active(job_id)
+
+
+def test_import_drops_stale_dimension_dirs(import_env, monkeypatch, tmp_path):
+    """Replace semantics: importing a world with only an overworld must remove
+    the previous world's Nether/End dirs, not leave them live (which produces a
+    mismatched world)."""
+    world_import = import_env["world_import"]
+    tmp = import_env["tmp"]
+    install = _seed_server(tmp, "srv_dims")
+    # Pre-existing live dimensions from the OLD (larger) world.
+    for d in ("world_nether", "world_the_end"):
+        (install / d).mkdir(parents=True, exist_ok=True)
+        (install / d / "marker").write_text("OLD", encoding="utf-8")
+
+    archive = tmp_path / "ow-only.zip"
+    _zip(archive, {"world/level.dat": "NEW-OW", "world/region/r.0.0.mca": "C"})
+
+    registry = _fake_registry(install)
+    monkeypatch.setattr(
+        world_import, "get_server_process_registry", lambda: registry
+    )
+
+    world_import.run_world_import("srv_dims", archive, original_name="ow-only.zip")
+
+    assert (install / "world" / "level.dat").read_text() == "NEW-OW"
+    assert not (install / "world_nether").exists(), "stale nether dir not removed"
+    assert not (install / "world_the_end").exists(), "stale end dir not removed"
+
+
 # ---------------------------------------------------------------------------
 # Upload streaming + validation
 # ---------------------------------------------------------------------------

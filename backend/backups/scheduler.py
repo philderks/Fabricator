@@ -217,9 +217,20 @@ def _build_trigger(schedule: Dict[str, Any]):
     if frequency_hours == 24:
         return CronTrigger(hour=time_of_day.hour, minute=time_of_day.minute)
 
-    # IntervalTrigger anchored at the next occurrence of ``timeOfDay``
-    # so "every 6h at :30" still feels predictable from the user's PoV.
-    now = datetime.now(timezone.utc)
+    # IntervalTrigger anchored at the next occurrence of ``timeOfDay`` so
+    # "every 6h at :30" stays predictable. Anchor in LOCAL time — the same frame
+    # CronTrigger(hour=, minute=) uses for daily schedules — so a sub-daily and a
+    # daily schedule with the same timeOfDay fire at the same wall-clock time
+    # instead of drifting by the host's UTC offset.
+    anchor = _interval_anchor(time_of_day, frequency_hours, datetime.now())
+    return IntervalTrigger(hours=frequency_hours, start_date=anchor)
+
+
+def _interval_anchor(
+    time_of_day: dtime, frequency_hours: int, now: datetime
+) -> datetime:
+    """Next occurrence of ``time_of_day`` at or after ``now`` (in ``now``'s tz),
+    rolled forward by whole ``frequency_hours`` when today's slot has passed."""
     anchor = now.replace(
         hour=time_of_day.hour,
         minute=time_of_day.minute,
@@ -228,7 +239,7 @@ def _build_trigger(schedule: Dict[str, Any]):
     )
     if anchor <= now:
         anchor = anchor + timedelta(hours=frequency_hours)
-    return IntervalTrigger(hours=frequency_hours, start_date=anchor)
+    return anchor
 
 
 def _run_scheduled_backup(config_id: str) -> None:

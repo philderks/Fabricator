@@ -286,6 +286,18 @@ def run_world_import(
         progress.update(job_id, phase="swapping")
         _swap_world_dirs(install_path, normalized_root, produced, server_id)
 
+        # Replace semantics: drop any live dimension dir for this level that the
+        # imported world did NOT provide — otherwise a world with fewer
+        # dimensions inherits the previous world's Nether/End and yields a
+        # mismatched world. The mandatory safety snapshot above already captured
+        # them, so this is recoverable.
+        for suffix in ("_nether", "_the_end"):
+            dim_name = f"{level_name}{suffix}"
+            if dim_name not in produced:
+                stale_dim = install_path / dim_name
+                if stale_dim.is_dir():
+                    shutil.rmtree(stale_dim, ignore_errors=True)
+
         duration = round(time.monotonic() - start_time, 3)
         import_record = storage.record_snapshot(
             server_id,
@@ -305,15 +317,6 @@ def run_world_import(
                 "mode": "import",
             },
         )
-        progress.update(
-            job_id,
-            phase="done",
-            import_record_id=import_record["id"],
-            safety_snapshot_id=safety["id"],
-            layout=detection["layout"],
-            world_dirs=produced,
-            duration_seconds=duration,
-        )
     except Exception as exc:
         if progress.get(job_id).get("phase") not in ("done", "failed"):
             progress.update(job_id, phase="failed", error=str(exc))
@@ -324,6 +327,19 @@ def run_world_import(
         if was_running:
             progress.update(job_id, phase="restarting")
             _restart_server_safe(server, registry, job_id)
+        # Assert the terminal phase AFTER any restart (mirror of run_restore):
+        # otherwise "restarting" clobbers "done" and is never reset, so
+        # progress.is_active() stays True and the frontend poll loop never ends
+        # even though the import succeeded.
+        progress.update(
+            job_id,
+            phase="done",
+            import_record_id=import_record["id"],
+            safety_snapshot_id=safety["id"],
+            layout=detection["layout"],
+            world_dirs=produced,
+            duration_seconds=duration,
+        )
         return import_record
     finally:
         if staging_root is not None and staging_root.exists():
@@ -577,16 +593,30 @@ def _write_safety_snapshot(
         )
 
     tmp_path = storage_path / (final_path.name + ".partial")
+
+    # Exclude the storage dir wherever it sits inside the install tree (mirror of
+    # restore._write_safety_snapshot). Here storage_path is <install>/backups (a
+    # direct child), but a tarfile arcname filter keeps the two copies identical
+    # and correct even if that ever nests — no recursive self-inclusion.
+    try:
+        storage_rel = (
+            storage_path.resolve().relative_to(install_path.resolve()).as_posix()
+        )
+    except (ValueError, OSError):
+        storage_rel = None
+
+    def _drop_storage(tarinfo):
+        if storage_rel and (
+            tarinfo.name == storage_rel
+            or tarinfo.name.startswith(storage_rel + "/")
+        ):
+            return None
+        return tarinfo
+
     try:
         with tarfile.open(tmp_path, "w") as tf:
             for entry in sorted(install_path.iterdir()):
-                # Don't pack the safety storage dir into itself.
-                try:
-                    if storage_path.resolve() == entry.resolve():
-                        continue
-                except OSError:
-                    pass
-                tf.add(entry, arcname=entry.name)
+                tf.add(entry, arcname=entry.name, filter=_drop_storage)
         os.replace(tmp_path, final_path)
     except Exception:
         tmp_path.unlink(missing_ok=True)

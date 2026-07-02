@@ -149,6 +149,77 @@ def test_safety_snapshot_failure_aborts_restore_and_preserves_live(
     )
 
 
+def test_restore_of_running_server_reaches_done_phase(
+    restore_env, monkeypatch, tmp_path
+):
+    """A restore of a server that was RUNNING must end in the terminal 'done'
+    phase, not stay stuck in 'restarting' (which keeps is_active() True and
+    hangs the frontend poll loop forever)."""
+    from backend.backups import progress
+
+    storage = restore_env["storage"]
+    restore = restore_env["restore"]
+    tmp = restore_env["tmp"]
+
+    install = _seed_server(tmp, "srv_running")
+    storage_dir = tmp_path / "store"
+    storage_dir.mkdir()
+    cfg = storage.create_config(
+        "srv_running",
+        {"name": "Run", "storagePath": str(storage_dir), "compress": False},
+    )
+    archive = storage_dir / "snap.tar"
+    _write_plain_tar(archive, {"world/level.dat": "RESTORED"})
+    snap = storage.record_snapshot(
+        "srv_running",
+        {
+            "configId": cfg["id"],
+            "type": "backup",
+            "filePath": str(archive),
+            "fileName": archive.name,
+            "sizeBytes": archive.stat().st_size,
+            "status": "success",
+        },
+    )
+
+    registry = _fake_registry(install)
+    registry.get_status.return_value = {"status": "running"}
+    monkeypatch.setattr(restore, "get_server_process_registry", lambda: registry)
+
+    job_id = progress.generate_job_id("bjr")
+    restore.run_restore(snap["id"], mode="in_place", job_id=job_id)
+
+    registry.start_server.assert_called_once()          # it WAS restarted
+    entry = progress.get(job_id)
+    assert entry.get("phase") == "done", f"restore stuck in {entry.get('phase')!r}"
+    assert not progress.is_active(job_id)
+
+
+def test_safety_snapshot_excludes_nested_storage_subtree(restore_env, tmp_path):
+    """A storagePath nested inside the install tree must be excluded from the
+    safety tar (no recursive self-inclusion of prior backups), while unrelated
+    siblings under the same intermediate dir are still captured."""
+    restore = restore_env["restore"]
+    install = tmp_path / "install"
+    (install / "world").mkdir(parents=True)
+    (install / "world" / "level.dat").write_text("W")
+    nested = install / "data" / "backups"          # storagePath two levels deep
+    nested.mkdir(parents=True)
+    (nested / "old-backup.tar").write_bytes(b"HUGE" * 4096)
+    (install / "data" / "keepme.dat").write_text("KEEP")
+
+    cfg = {"id": "c1", "name": "Nested"}
+    rec = restore._write_safety_snapshot(
+        install_path=install, cfg=cfg, storage_path=nested, server_id="srv_nested_x"
+    )
+
+    with tarfile.open(rec["filePath"]) as tf:
+        names = set(tf.getnames())
+    assert "world/level.dat" in names
+    assert "data/keepme.dat" in names                              # sibling kept
+    assert not any(n.startswith("data/backups") for n in names), names  # storage subtree gone
+
+
 def test_in_place_restore_overlays_and_preserves_extra_files(
     restore_env, monkeypatch, tmp_path
 ):

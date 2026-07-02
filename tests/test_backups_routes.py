@@ -182,6 +182,38 @@ def test_delete_config_with_purge_unlinks_files(client, env):
     assert not archive.exists()
 
 
+def test_delete_config_purge_default_storage_path_unlinks_files(client, env):
+    """A config with NO storagePath stores archives under the default
+    <install>/backups. Purge must resolve that default and delete them, not
+    silently retain everything (which orphaned every archive on disk)."""
+    install = _seed_server(env["tmp"], "srv_defpurge")
+    storage = env["storage"]
+    cfg = storage.create_config("srv_defpurge", {"name": "DefaultPath"})  # no storagePath
+    backups_dir = install / "backups"
+    backups_dir.mkdir(parents=True, exist_ok=True)
+    archive = backups_dir / "d.tar"
+    archive.write_bytes(b"archive")
+    storage.record_snapshot(
+        "srv_defpurge",
+        {
+            "configId": cfg["id"],
+            "type": "backup",
+            "filePath": str(archive),
+            "fileName": "d.tar",
+            "sizeBytes": archive.stat().st_size,
+            "status": "success",
+        },
+    )
+
+    resp = client.delete(
+        f"/api/servers/srv_defpurge/backup-configs/{cfg['id']}?purge=1"
+    )
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["deleted_files"] == 1, body
+    assert not archive.exists()
+
+
 def test_delete_config_purge_only_inside_storage_path(client, env):
     """Files OUTSIDE the config's storagePath must never be deleted."""
     inside = env["tmp"] / "inside-store"
