@@ -304,6 +304,16 @@ def test_validate_accepts_world_archive(import_env, tmp_path):
     assert world_import.validate_upload_archive(archive) == "zip"
 
 
+def test_validate_accepts_world_archive_with_root_level_dat(import_env, tmp_path):
+    """A zip of the world folder's CONTENTS — level.dat at the archive root — is
+    a valid world. _find_level_dat_root returns "" (not None) for that layout,
+    so a truthiness check would wrongly reject this common packaging."""
+    world_import = import_env["world_import"]
+    archive = tmp_path / "rootworld.zip"
+    _zip(archive, {"level.dat": "x", "region/r.0.0.mca": "y"})
+    assert world_import.validate_upload_archive(archive) == "zip"
+
+
 # ---------------------------------------------------------------------------
 # HTTP route (POST /api/servers/<id>/world-import)
 # ---------------------------------------------------------------------------

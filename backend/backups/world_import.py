@@ -133,7 +133,11 @@ def validate_upload_archive(path: Path) -> str:
     to run inline before spawning the worker.
     """
     kind, names = _list_archive_names(path)
-    if not _find_level_dat_root(names):
+    # _find_level_dat_root returns None only when NO level.dat exists; a world
+    # sitting at the archive root yields "" (empty string). `not ""` is True, so
+    # a truthiness check would wrongly reject the common "zip the world folder's
+    # contents" layout. Distinguish absent (None) from root-level ("").
+    if _find_level_dat_root(names) is None:
         raise InvalidWorldArchiveError(
             "Archive does not contain a level.dat — it is not a Minecraft world"
         )
