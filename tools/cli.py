@@ -126,25 +126,32 @@ def _collect_status() -> dict:
     systemd_state = result.stdout.strip() or "unknown"
 
     flask_up = False
-    api_status_code: int | None = None
-    api_body: dict | None = None
+    servers: "list | None" = None
 
+    # /api/health is the always-available liveness endpoint (open even in the
+    # setup/locked states). The old code hit a non-existent /api/status, which
+    # the catch-all turned into a JSON 404 — so Flask looked "up" but the status
+    # view could never show anything useful.
     try:
-        resp = requests.get(f"{API_BASE}/api/status", timeout=5)
-        flask_up = True
-        api_status_code = resp.status_code
-        try:
-            api_body = resp.json()
-        except Exception:
-            api_body = None
+        health = requests.get(f"{API_BASE}/api/health", timeout=5)
+        flask_up = bool(health.ok)
     except Exception:
-        pass
+        flask_up = False
+
+    if flask_up:
+        try:
+            resp = requests.get(f"{API_BASE}/api/servers", timeout=5)
+            if resp.ok:
+                body = resp.json()
+                if isinstance(body, list):
+                    servers = body
+        except Exception:
+            servers = None
 
     return {
         "systemd_state": systemd_state,
         "flask_up": flask_up,
-        "api_status_code": api_status_code,
-        "api_body": api_body,
+        "servers": servers,
     }
 
 
@@ -160,16 +167,18 @@ def _render_status(data: dict) -> None:
 
     click.echo(f"Flask:    {click.style('up', fg='green')}")
 
-    body = data.get("api_body") or {}
-    mc_keys = {"players", "tps", "uptime"}
-    mc_data = {k: v for k, v in body.items() if k in mc_keys}
+    servers = data.get("servers")
+    if servers is None:
+        click.echo("  (could not read the server list)")
+        return
 
-    if mc_data:
-        for key, value in mc_data.items():
-            click.echo(f"  {key}: {value}")
-    else:
-        code = data.get("api_status_code")
-        click.echo(f"  (API returned HTTP {code} — no Minecraft data available)")
+    def _running(server: dict) -> bool:
+        return ((server.get("runtime") or {}).get("status") or server.get("status")) == "running"
+
+    running = [s for s in servers if _running(s)]
+    click.echo(f"Servers:  {len(running)}/{len(servers)} running")
+    for server in running:
+        click.echo(f"  • {server.get('name') or server.get('id') or '?'}")
 
 
 @cli.command()

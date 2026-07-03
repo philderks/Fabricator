@@ -114,6 +114,42 @@ def test_start_without_cli_binary_sets_error(agent):
     assert "playit-cli binary not found" in status["error_reason"]
 
 
+def test_redundant_start_does_not_reap_own_running_daemon(agent):
+    """A redundant start() while our daemon is alive must NOT reap it — the PID
+    file points at our own healthy daemon, so reaping would kill the live
+    tunnel and defeat the 'already running' fast-return."""
+    reaped = {"called": False}
+    agent._reap_orphan_daemon = lambda: reaped.__setitem__("called", True)
+
+    alive = MagicMock(spec=subprocess.Popen)
+    alive.poll.return_value = None       # daemon is alive
+    alive.pid = 4321
+    with agent._lock:
+        agent._proc = alive
+        agent._status = "running"
+
+    agent.start()
+
+    assert reaped["called"] is False, "start() reaped our own live daemon"
+    assert agent._proc is alive          # daemon left untouched
+    assert agent.get_status()["status"] == "running"
+
+
+def test_start_without_own_daemon_still_reaps_orphan(agent):
+    """When we do NOT own a live daemon, start() must still reap a leftover
+    orphan from a previous run (guard against over-suppressing the reap)."""
+    reaped = {"called": False}
+    agent._reap_orphan_daemon = lambda: reaped.__setitem__("called", True)
+
+    # _proc is None from the fixture. Missing binaries make start() bail right
+    # after the reap.
+    with patch("backend.playit.binary.find_daemon", return_value=None), \
+         patch("backend.playit.binary.find_cli", return_value=None):
+        agent.start()
+
+    assert reaped["called"] is True
+
+
 # ---------------------------------------------------------------------------
 # Happy-path claim + daemon connect
 # ---------------------------------------------------------------------------

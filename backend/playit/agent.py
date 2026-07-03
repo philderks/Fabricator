@@ -205,9 +205,18 @@ def start() -> None:
     # start (missing binary) remembers the user's intent to re-enable.
     set_enabled(True)
 
-    # Orphan reap BEFORE bumping gen so we don't race with our own watchdog
-    # of an old run. Safe to call even when no PID file exists.
-    _reap_orphan_daemon()
+    # Only reap a leftover orphan from a PREVIOUS run — NEVER our own healthy
+    # daemon. While a daemon we own is alive, _write_pid_file has left the PID
+    # file pointing at it, and _reap_orphan_daemon (which only checks the PID
+    # file + _is_pid_alive, not _proc) can't tell it apart, so an unconditional
+    # reap here would SIGTERM/SIGKILL our own live tunnel on a redundant start()
+    # and defeat the "already running" fast-return below.
+    with _lock:
+        own_live_daemon = _proc is not None and _proc.poll() is None
+    if not own_live_daemon:
+        # Reap BEFORE bumping gen so we don't race with our own watchdog of an
+        # old run. Safe to call even when no PID file exists.
+        _reap_orphan_daemon()
 
     with _lock:
         if _proc is not None and _proc.poll() is None:
