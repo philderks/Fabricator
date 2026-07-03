@@ -1,12 +1,15 @@
 """Server management routes and blueprints."""
 from functools import lru_cache
 from pathlib import Path
+import logging
 import os
 import shutil
 import stat
 import threading
 
 from flask import Blueprint, jsonify, request
+
+logger = logging.getLogger(__name__)
 
 from backend.server.registry import get_server_process_registry
 from backend.server import storage
@@ -908,6 +911,15 @@ def start_server_by_id(server_id, server):
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
 
+    if result.get('stopping'):
+        # The manager refused because a stop() is still draining (a start that
+        # raced past the status snapshot above). Do NOT write status here — that
+        # would clobber the persisted 'stopping' back to 'stopped' mid-drain.
+        return jsonify({
+            'error': result.get('message', 'Server is stopping. Please wait for it to fully stop.'),
+            'server': _augment_with_runtime(server),
+        }), 409
+
     status_value = result.get('status')
     success = status_value == 'running'
     updated_server = (
@@ -959,8 +971,15 @@ def stop_server_by_id(server_id, server):
     updated_server = storage.update_server_status(server_id, 'stopping') or server
 
     def _stop_worker():
-        result = _registry().stop_server(server_id)
-        storage.update_server_status(server_id, result.get('status', 'stopped'))
+        try:
+            result = _registry().stop_server(server_id)
+            storage.update_server_status(server_id, result.get('status', 'stopped'))
+        except Exception:
+            # Never leave the persisted status stuck at 'stopping' — the manager
+            # clears its own _stopping flag in stop()'s finally, so the JVM is
+            # gone regardless; a stuck 'stopping' would otherwise mislead the UI.
+            logger.exception("Stop worker for server %s failed", server_id)
+            storage.update_server_status(server_id, 'stopped')
 
     threading.Thread(target=_stop_worker, daemon=True).start()
 

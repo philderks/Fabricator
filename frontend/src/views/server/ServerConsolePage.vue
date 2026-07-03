@@ -5,28 +5,89 @@ import { useServerStore } from '../../stores/server'
 
 const store = useServerStore()
 
-const LEVEL_PATTERN = /\b(ERROR|WARN|INFO|DEBUG)\b/
+// Case-sensitive on purpose: Minecraft/Log4j and the JVM emit these tokens in
+// uppercase (e.g. "[Server thread/WARN]", "WARNING:"), so matching only
+// uppercase avoids false hits on ordinary words in chat/messages.
+const LEVEL_PATTERN = /\b(FATAL|SEVERE|ERROR|WARNING|WARN|INFO|DEBUG|TRACE)\b/
+
+// Collapse the various spellings onto the four levels the UI filters/styles use.
+const normalizeLevel = (raw) => {
+  switch (raw) {
+    case 'FATAL':
+    case 'SEVERE':
+    case 'ERROR':   return 'ERROR'
+    case 'WARNING':
+    case 'WARN':    return 'WARN'
+    case 'DEBUG':
+    case 'TRACE':   return 'DEBUG'
+    default:        return 'INFO'
+  }
+}
 
 const activeFilter = ref('ALL')
 const autoScroll = ref(true)
 const terminalRef = ref(null)
 
-const parseLine = (raw) => {
-  const m = raw.match(LEVEL_PATTERN)
-  const level = m ? m[1] : 'INFO'
-  // Try to extract a leading timestamp (e.g., [12:04:01]) — fall back to empty.
-  const tsMatch = raw.match(/\[(\d{2}:\d{2}:\d{2})\]/)
-  const time = tsMatch ? tsMatch[1] : ''
-  return { time, level, message: raw }
+// Render an ISO-Z capture timestamp as HH:MM:SS in the viewer's local timezone.
+// getHours/Minutes/Seconds are local to the browser, so two people in different
+// zones each see their own wall-clock time for the same line.
+const formatLocalTime = (ts) => {
+  if (!ts) return ''
+  const d = new Date(ts)
+  if (Number.isNaN(d.getTime())) return ''
+  const p = (n) => String(n).padStart(2, '0')
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+
+const parseLine = (entry, defaultLevel = 'INFO') => {
+  // Backend now ships { ts, text }; tolerate plain strings from an older
+  // backend during a rolling update.
+  const text = typeof entry === 'string' ? entry : (entry?.text ?? '')
+  const ts = entry && typeof entry === 'object' ? entry.ts : null
+  const m = text.match(LEVEL_PATTERN)
+  // Derive the level from the line itself; fall back to the stream's default
+  // (stderr lines without a recognizable level are treated as errors).
+  const level = m ? normalizeLevel(m[1]) : defaultLevel
+  // Prefer the authoritative capture time (shown in local tz); fall back to any
+  // leading [HH:MM:SS] the server logged itself if no ts is present.
+  let time = formatLocalTime(ts)
+  if (!time) {
+    const tsMatch = text.match(/\[(\d{2}:\d{2}:\d{2})\]/)
+    time = tsMatch ? tsMatch[1] : ''
+  }
+  // Drop the server's own leading [HH:MM:SS] from the message — it's redundant
+  // with the time column (which now shows local time) and would otherwise read
+  // as a confusing double timestamp.
+  const message = text.replace(/^\s*\[\d{2}:\d{2}:\d{2}\]\s*/, '')
+  // Numeric sort key. Parse to a millisecond instant rather than comparing the
+  // raw ISO strings lexicographically: iso_z_now() omits the ".ffffff" fraction
+  // when microsecond == 0, so "…:00Z" would sort AFTER "…:00.5Z" as text
+  // ('.' < 'Z') and reverse same-second lines. NaN when ts is absent/unparseable.
+  const tsMs = ts ? Date.parse(ts) : NaN
+  return { tsMs, time, level, message }
 }
 
 // Tag each line with a stream-scoped id so :key stays stable across filter
 // toggles — index keys made Vue recycle DOM nodes carrying the previous
 // line's level class, flashing the wrong color on filter swap.
 const allLines = computed(() => {
-  const stdout = (store.logs.stdout || []).map((line, i) => ({ id: `stdout:${i}`, stream: 'stdout', ...parseLine(line) }))
-  const stderr = (store.logs.stderr || []).map((line, i) => ({ id: `stderr:${i}`, stream: 'stderr', level: 'ERROR', time: parseLine(line).time, message: line }))
-  return [...stdout, ...stderr]
+  const stdout = (store.logs.stdout || []).map((entry, i) => ({ id: `stdout:${i}`, stream: 'stdout', ...parseLine(entry) }))
+  const stderr = (store.logs.stderr || []).map((entry, i) => {
+    const parsed = parseLine(entry, 'ERROR')
+    return { id: `stderr:${i}`, stream: 'stderr', ...parsed }
+  })
+  // Interleave the two streams by capture timestamp so a crash's stderr shows
+  // next to the stdout that produced it, instead of all stderr dumped after all
+  // stdout. Only sort when EVERY line carries a parseable ts — a numeric key
+  // gives a proper total order (transitive), and a STABLE sort keeps
+  // same-instant lines in their per-stream arrival order. If any line lacks a
+  // ts (older backend sending plain strings), skip sorting and fall back to the
+  // previous stdout-then-stderr order rather than risk a non-transitive compare.
+  const merged = [...stdout, ...stderr]
+  if (merged.every((l) => Number.isFinite(l.tsMs))) {
+    merged.sort((a, b) => a.tsMs - b.tsMs)
+  }
+  return merged
 })
 
 const filteredLines = computed(() => {

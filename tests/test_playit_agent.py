@@ -114,6 +114,42 @@ def test_start_without_cli_binary_sets_error(agent):
     assert "playit-cli binary not found" in status["error_reason"]
 
 
+def test_redundant_start_does_not_reap_own_running_daemon(agent):
+    """A redundant start() while our daemon is alive must NOT reap it — the PID
+    file points at our own healthy daemon, so reaping would kill the live
+    tunnel and defeat the 'already running' fast-return."""
+    reaped = {"called": False}
+    agent._reap_orphan_daemon = lambda: reaped.__setitem__("called", True)
+
+    alive = MagicMock(spec=subprocess.Popen)
+    alive.poll.return_value = None       # daemon is alive
+    alive.pid = 4321
+    with agent._lock:
+        agent._proc = alive
+        agent._status = "running"
+
+    agent.start()
+
+    assert reaped["called"] is False, "start() reaped our own live daemon"
+    assert agent._proc is alive          # daemon left untouched
+    assert agent.get_status()["status"] == "running"
+
+
+def test_start_without_own_daemon_still_reaps_orphan(agent):
+    """When we do NOT own a live daemon, start() must still reap a leftover
+    orphan from a previous run (guard against over-suppressing the reap)."""
+    reaped = {"called": False}
+    agent._reap_orphan_daemon = lambda: reaped.__setitem__("called", True)
+
+    # _proc is None from the fixture. Missing binaries make start() bail right
+    # after the reap.
+    with patch("backend.playit.binary.find_daemon", return_value=None), \
+         patch("backend.playit.binary.find_cli", return_value=None):
+        agent.start()
+
+    assert reaped["called"] is True
+
+
 # ---------------------------------------------------------------------------
 # Happy-path claim + daemon connect
 # ---------------------------------------------------------------------------
@@ -518,6 +554,161 @@ def test_stop_then_late_reader_does_not_set_error(agent):
     agent._read_daemon_stdout(old_proc, my_gen=1)
 
     assert agent.get_status()["status"] == "stopped"
+
+
+# ---------------------------------------------------------------------------
+# Self-exit of the daemon: poller must not resurrect it, and must be retired
+# ---------------------------------------------------------------------------
+
+def _rundata_with_tunnel(local_port: str = "25565",
+                         address: str = "alpha.gl.joinmc.link") -> dict:
+    """Build a minimal rundata body that reports one live server-side tunnel."""
+    return {"data": {"tunnels": [{
+        "agent_config": {"fields": [{"name": "local_port", "value": local_port}]},
+        "display_address": address,
+        "name": "Test",
+        "tunnel_type": "minecraft-java",
+    }]}}
+
+
+def test_rundata_does_not_resurrect_exited_daemon(agent):
+    """A daemon that died on its own leaves _status='error' (non-inline tail
+    reason). A late rundata cycle still sees server-side tunnels — it must NOT
+    flip the state back to 'running', because the local daemon is gone."""
+    dead = MagicMock(spec=subprocess.Popen)
+    dead.poll.return_value = 1                     # process has exited
+    with agent._lock:
+        agent._proc = dead
+        agent._status = "error"
+        agent._error_reason = "playitd exited with code 1"
+        agent._apply_rundata_to_state(_rundata_with_tunnel())
+
+    status = agent.get_status()
+    assert status["status"] == "error", f"dead daemon resurrected: {status}"
+    assert status["error_reason"] == "playitd exited with code 1"
+
+
+def test_rundata_sets_running_when_daemon_alive(agent):
+    """Regression guard for the resurrection fix: while the daemon is alive,
+    rundata must still drive 'starting' → 'running' and populate tunnels."""
+    alive = MagicMock(spec=subprocess.Popen)
+    alive.poll.return_value = None                # still running
+    with agent._lock:
+        agent._proc = alive
+        agent._status = "starting"
+        agent._apply_rundata_to_state(_rundata_with_tunnel())
+
+    status = agent.get_status()
+    assert status["status"] == "running"
+    assert status["tunnels"][0]["address"] == "alpha.gl.joinmc.link"
+    assert status["tunnels_known"] is True
+
+
+def test_run_daemon_retires_generation_when_daemon_exits(agent, tmp_path):
+    """When the daemon exits on its own, _run_daemon must advance _gen so the
+    rundata poller spawned for that generation exits (no thread leak, and no
+    chance to resurrect the dead daemon on a later cycle)."""
+    fake = MagicMock(spec=subprocess.Popen)
+    fake.stdout = iter([])                         # EOF at once → daemon exited
+    fake.pid = 4242
+    fake.poll.return_value = 1
+    fake.returncode = 1
+    fake.wait = MagicMock(return_value=1)
+
+    with agent._lock:
+        agent._gen = 7
+
+    started_gens = []
+    with patch("subprocess.Popen", return_value=fake), \
+         patch.object(agent, "_start_rundata_poller",
+                      side_effect=lambda g: started_gens.append(g)):
+        agent._run_daemon(my_gen=7, daemon_bin="/fake/playit",
+                          secret=tmp_path / "secret.toml")
+
+    assert started_gens == [7], "poller should have been started for gen 7"
+    assert agent._gen == 8, "generation must advance so the stale poller exits"
+    assert agent.get_status()["status"] == "error"   # rc=1 → terminal error
+
+
+def test_poller_retires_generation_when_daemon_exited(agent, monkeypatch):
+    """Fallback path: if the daemon exits but the stdout reader is still blocked
+    (a child holds the pipe open, so _run_daemon never bumps _gen), the poller
+    itself must notice the dead process, refuse the stale 'live' rundata, and
+    retire its generation so it stops polling."""
+    dead = MagicMock(spec=subprocess.Popen)
+    dead.poll.return_value = 137                      # exited (OOM-killed)
+    with agent._lock:
+        agent._gen = 3
+        agent._proc = dead
+        agent._status = "running"
+
+    # rundata still reports a live tunnel (playit.gg lags a local exit); the
+    # poller must NOT trust it. Make the cycle instant.
+    monkeypatch.setattr(agent, "_read_secret_for_api", lambda: "a" * 64)
+    monkeypatch.setattr(agent, "_call_rundata", lambda secret: _rundata_with_tunnel())
+    monkeypatch.setattr(agent, "_RUNDATA_INITIAL_BACKOFF", 0)
+
+    t = threading.Thread(target=agent._rundata_poller, args=(3,),
+                         name="playit-rundata-3", daemon=True)
+    t.start()
+    t.join(timeout=3.0)
+
+    assert not t.is_alive(), "poller failed to retire and kept polling a dead daemon"
+    assert agent._gen == 4, "poller must advance _gen to retire the generation"
+    status = agent.get_status()
+    assert status["status"] == "error", "non-zero exit must map to 'error'"
+    assert "137" in (status["error_reason"] or ""), \
+        "error_reason must reflect the daemon's exit code"
+
+
+def test_poller_clean_exit_reports_stopped_not_error(agent, monkeypatch):
+    """A clean daemon self-exit (rc 0) detected by the poller fallback must be
+    reported as 'stopped', not a spurious 'error' — mirroring the reader path's
+    rc-aware classification rather than blindly forcing 'error'."""
+    dead = MagicMock(spec=subprocess.Popen)
+    dead.poll.return_value = 0                         # clean exit
+    with agent._lock:
+        agent._gen = 5
+        agent._proc = dead
+        agent._status = "running"
+
+    monkeypatch.setattr(agent, "_read_secret_for_api", lambda: "a" * 64)
+    monkeypatch.setattr(agent, "_call_rundata", lambda secret: _rundata_with_tunnel())
+    monkeypatch.setattr(agent, "_RUNDATA_INITIAL_BACKOFF", 0)
+
+    t = threading.Thread(target=agent._rundata_poller, args=(5,),
+                         name="playit-rundata-5", daemon=True)
+    t.start()
+    t.join(timeout=3.0)
+
+    assert not t.is_alive()
+    assert agent._gen == 6, "poller must retire the generation on clean exit too"
+    assert agent.get_status()["status"] == "stopped", "clean exit must not be 'error'"
+
+
+def test_poller_transient_error_does_not_run_exited_daemon(agent, monkeypatch):
+    """A transient rundata failure (body=None) must not flip an already-exited
+    daemon from 'starting' to 'running' via the transient window branch."""
+    dead = MagicMock(spec=subprocess.Popen)
+    dead.poll.return_value = 1
+    with agent._lock:
+        agent._gen = 2
+        agent._proc = dead
+        agent._status = "starting"
+
+    monkeypatch.setattr(agent, "_read_secret_for_api", lambda: "a" * 64)
+    monkeypatch.setattr(agent, "_call_rundata", lambda secret: None)   # transient
+    monkeypatch.setattr(agent, "_RUNDATA_INITIAL_BACKOFF", 0)
+
+    t = threading.Thread(target=agent._rundata_poller, args=(2,),
+                         name="playit-rundata-2", daemon=True)
+    t.start()
+    t.join(timeout=3.0)
+
+    assert not t.is_alive()
+    assert agent.get_status()["status"] != "running", \
+        "exited daemon was labeled 'running' via the transient branch"
+    assert agent._gen == 3
 
 
 # ---------------------------------------------------------------------------

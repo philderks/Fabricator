@@ -9,6 +9,7 @@ from typing import Iterable, List, Optional
 
 from backend.utils import platform as platform_utils
 from backend.utils.java import parse_java_major
+from backend.utils.time import iso_z_now
 try:
     import psutil  # type: ignore
 except ImportError:  # pragma: no cover - optional dependency fallback
@@ -40,8 +41,26 @@ class ServerManager:
 
     DEFAULT_COMMAND = "java -Xmx2G -jar server.jar nogui"
     MAX_LOG_LINES = 10_000
-    _PLAYER_JOIN_RE = re.compile(r'\[.*?INFO\]: (.+) joined the game')
-    _PLAYER_LEAVE_RE = re.compile(r'\[.*?INFO\]: (.+) left the game')
+    # Player join/leave detection from server stdout. The log prefix is pinned
+    # to the START of the line — "[<timestamp>] [<thread>/INFO]" (plus Forge's
+    # optional "[<category>]") — so a player who types "INFO]: Ghost joined the
+    # game" (or "[x/INFO]: ...") into CHAT can't make the prefix re-anchor onto
+    # that embedded marker and spoof a join/leave. The name is then restricted
+    # to characters a real username can't share with the chat wrapper ("<", ">")
+    # or the 1.19+ "[Not Secure]" prefix ("[", "]"), which rejects "<Notch> ..."
+    # and "[Not Secure] <Notch> ..." while still allowing spaces (Bedrock/Geyser
+    # gamertags). Lines are ANSI-stripped (see _ANSI_RE) before matching, so a
+    # colour-wrapped name isn't dropped by the "[" exclusion.
+    _LOG_PREFIX = (
+        r'^(?:'
+        r'\[[^\]]*INFO\]'                            # legacy single bracket: [HH:MM:SS INFO]
+        r'|\[[^\]]+\] \[[^\]]*INFO\](?: \[[^\]]*\])?'  # [time] [thread/INFO] (+ Forge [category])
+        r'): '
+    )
+    _PLAYER_JOIN_RE = re.compile(_LOG_PREFIX + r'([^<>\[\]]+) joined the game')
+    _PLAYER_LEAVE_RE = re.compile(_LOG_PREFIX + r'([^<>\[\]]+) left the game')
+    # SGR colour escapes some setups emit around the message on the pipe.
+    _ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
 
     def __init__(self, cwd: str, command: Optional[Iterable[str]] = None):
         env_command = os.environ.get("SERVER_COMMAND")
@@ -58,10 +77,34 @@ class ServerManager:
         self._ps_process: Optional["psutil.Process"] = None  # type: ignore[name-defined]
         self._stdout_thread: Optional[threading.Thread] = None
         self._stderr_thread: Optional[threading.Thread] = None
-        self._stdout_buffer: List[str] = []
-        self._stderr_buffer: List[str] = []
+        # Each entry is ``(capture_ts, text)`` where capture_ts is an ISO-Z
+        # timestamp taken when Fabricator read the line. The server's own
+        # ``[HH:MM:SS]`` is in the JVM's timezone (UTC on most hosts); shipping
+        # an absolute capture time instead lets the frontend render it in the
+        # viewer's local timezone. Appends/reads are guarded by ``_buffer_lock``
+        # (below).
+        self._stdout_buffer: List[tuple[str, str]] = []
+        self._stderr_buffer: List[tuple[str, str]] = []
+        # Monotonic count of stdout lines ever appended — never reset by the
+        # MAX_LOG_LINES front-truncation. wait_for_log() diffs this instead of
+        # absolute buffer indices, which stop advancing once the buffer
+        # saturates at MAX_LOG_LINES and every append front-truncates.
+        self._stdout_total = 0
+        # Dedicated lock for the stdout/stderr buffers + _stdout_total, SEPARATE
+        # from self._lock. The append and the counter bump happen together under
+        # it so wait_for_log() reads a consistent (buffer, total) pair. It is NOT
+        # self._lock on purpose: start() holds self._lock across _spawn_process's
+        # 0.5s probe, and blocking the stream append there would empty the
+        # immediate-exit diagnostic tail.
+        self._buffer_lock = threading.Lock()
         self._players: Dict[str, OnlinePlayer] = {}
         self._lock = threading.Lock()
+        # True only while stop() is draining a still-alive process. stop()
+        # releases the lock during the drain (so stream threads can log shutdown
+        # lines), which makes is_running briefly read False even though the JVM
+        # is still up; start() checks this flag to avoid launching a second
+        # process on the same world during that window.
+        self._stopping = False
 
     def _parse_command(self, command: Optional[Iterable[str]]) -> Optional[List[str]]:
         if command is None:
@@ -133,6 +176,29 @@ class ServerManager:
             return self.command[0]
         return "java"
 
+    # JDK 23 (JEP 471) deprecated sun.misc.Unsafe's memory-access methods; JDK 24
+    # (JEP 498) makes the JVM print a WARNING the first time one is called.
+    # Minecraft's JOML math library calls them, so every modern server spams four
+    # scary-looking lines on boot. This flag opts back into silent access.
+    _UNSAFE_ACCESS_FLAG = "--sun-misc-unsafe-memory-access=allow"
+
+    def _with_unsafe_suppression(self, command: List[str], java_major: int) -> List[str]:
+        """Insert the Unsafe-warning suppression flag for Java 23+ launches.
+
+        The flag only exists on Java 23 and newer; passing it to an older JVM
+        aborts startup, so it is gated on the probed major version. A JVM option
+        must precede ``-jar``/the main class, so it goes right after the java
+        executable. Skipped if the user already set it themselves.
+        """
+        if java_major < 23 or not command:
+            return command
+        if any(
+            isinstance(arg, str) and arg.startswith("--sun-misc-unsafe-memory-access")
+            for arg in command
+        ):
+            return command
+        return [command[0], self._UNSAFE_ACCESS_FLAG, *command[1:]]
+
     def probe_java(self) -> dict:
         java_exec = self._java_executable()
         try:
@@ -189,12 +255,24 @@ class ServerManager:
         if not self._process:
             return
 
-        def _stream(pipe, buffer: List[str]):
+        def _stream(pipe, buffer: List[tuple[str, str]], is_stdout: bool):
             for line in iter(pipe.readline, ""):
-                buffer.append(line)
-                if len(buffer) > self.MAX_LOG_LINES:
-                    del buffer[: len(buffer) - self.MAX_LOG_LINES]
-                join_match = self._PLAYER_JOIN_RE.search(line)
+                # Append + truncate + counter bump together under _buffer_lock
+                # (NOT self._lock) so wait_for_log sees a consistent
+                # (buffer, _stdout_total) snapshot, while start()'s self._lock
+                # hold across the 0.5s spawn probe can't block this append (which
+                # would empty the immediate-exit diagnostic tail).
+                with self._buffer_lock:
+                    buffer.append((iso_z_now(), line))
+                    if len(buffer) > self.MAX_LOG_LINES:
+                        del buffer[: len(buffer) - self.MAX_LOG_LINES]
+                    if is_stdout:
+                        self._stdout_total += 1
+                # Player detection runs on the ANSI-stripped, prefix-anchored
+                # line (the raw line stays in the buffer for the colour console
+                # viewer).
+                clean = self._ANSI_RE.sub("", line)
+                join_match = self._PLAYER_JOIN_RE.search(clean)
                 if join_match:
                     name = join_match.group(1)
                     with self._lock:
@@ -203,20 +281,22 @@ class ServerManager:
                             joined_at=datetime.now(timezone.utc),
                         )
                 else:
-                    leave_match = self._PLAYER_LEAVE_RE.search(line)
+                    leave_match = self._PLAYER_LEAVE_RE.search(clean)
                     if leave_match:
                         with self._lock:
                             self._players.pop(leave_match.group(1), None)
                 print(line, end="")
             pipe.close()
 
-        self._stdout_buffer = []
-        self._stderr_buffer = []
+        with self._buffer_lock:
+            self._stdout_buffer = []
+            self._stderr_buffer = []
+            self._stdout_total = 0
         self._stdout_thread = threading.Thread(
-            target=_stream, args=(self._process.stdout, self._stdout_buffer), daemon=True
+            target=_stream, args=(self._process.stdout, self._stdout_buffer, True), daemon=True
         )
         self._stderr_thread = threading.Thread(
-            target=_stream, args=(self._process.stderr, self._stderr_buffer), daemon=True
+            target=_stream, args=(self._process.stderr, self._stderr_buffer, False), daemon=True
         )
         self._stdout_thread.start()
         self._stderr_thread.start()
@@ -238,8 +318,8 @@ class ServerManager:
 
             if self._process.poll() is not None:
                 exit_code = self._process.returncode
-                stdout_tail = "".join(self._stdout_buffer[-10:])
-                stderr_tail = "".join(self._stderr_buffer[-10:])
+                stdout_tail = "".join(text for _, text in self._stdout_buffer[-10:])
+                stderr_tail = "".join(text for _, text in self._stderr_buffer[-10:])
                 self._process = None
                 error_message = f"Server process exited immediately (code {exit_code})."
                 if stdout_tail:
@@ -259,6 +339,18 @@ class ServerManager:
         with self._lock:
             if self.is_running:
                 return {"status": "running", "message": "Server is already running"}
+
+            if self._stopping:
+                # A stop() is draining a still-alive JVM (is_running reads False
+                # only because self._process was cleared). Launching now would
+                # put a second process on the same world → corruption. The
+                # "stopping" marker lets the route reject without clobbering the
+                # persisted "stopping" status back to "stopped" mid-drain.
+                return {
+                    "status": "stopped",
+                    "stopping": True,
+                    "message": "Server is still stopping; wait for it to fully stop before starting again",
+                }
 
             command_to_run = self.command
 
@@ -293,6 +385,7 @@ class ServerManager:
                     "server_java_target": java_info.get("java_exec"),
                 }
 
+            command_to_run = self._with_unsafe_suppression(command_to_run, detected_java)
             started, message = self._spawn_process(command_to_run)
             status = "running" if started else "stopped"
             combined_message = message
@@ -321,6 +414,11 @@ class ServerManager:
             self._players.clear()
             self._stdout_thread = None
             self._stderr_thread = None
+            # Set atomically with clearing self._process so start() (which needs
+            # the same lock) sees a consistent state: either the process is still
+            # present (is_running True) or _stopping is True — never a window
+            # where both look idle. Reset in the finally once the drain is done.
+            self._stopping = True
 
         # Lock released so stream threads can still acquire it while draining
         # shutdown log lines (e.g. player-disconnect events logged on shutdown).
@@ -351,6 +449,8 @@ class ServerManager:
                 stdout_thread.join(timeout=5)
             if stderr_thread:
                 stderr_thread.join(timeout=5)
+            with self._lock:
+                self._stopping = False
 
         return {"status": "stopped", "message": "Server stopped"}
 
@@ -393,8 +493,8 @@ class ServerManager:
             stderr = self._stderr_buffer[-limit:]
             running = self.is_running
         return {
-            "stdout": stdout,
-            "stderr": stderr,
+            "stdout": [{"ts": ts, "text": text} for ts, text in stdout],
+            "stderr": [{"ts": ts, "text": text} for ts, text in stderr],
             "running": running
         }
 
@@ -406,39 +506,54 @@ class ServerManager:
     ) -> bool:
         """Wait for a log line matching ``pattern`` to appear after now.
 
-        Snapshots ``len(self._stdout_buffer)`` under the lock, then polls
-        every ``poll_interval`` seconds for any newly-appended stdout line
-        that matches. Lines already in the buffer at call time are ignored
-        — callers want confirmation of an action they just triggered (e.g.
-        ``save-all flush``), not the historical state.
+        Snapshots the monotonic stdout line counter under the lock, then polls
+        every ``poll_interval`` seconds for any newly-appended stdout line that
+        matches. Lines already in the buffer at call time are ignored — callers
+        want confirmation of an action they just triggered (e.g. ``save-all
+        flush``), not the historical state.
 
-        Returns True on match, False on timeout. Uses ``time.monotonic``
-        so a wall-clock jump (NTP adjust, suspend/resume) doesn't extend
-        or truncate the wait.
+        Uses ``self._stdout_total`` (a count that survives the MAX_LOG_LINES
+        front-truncation) rather than absolute buffer indices: once the buffer
+        saturates, its length stops growing, so an absolute ``start_index``
+        would never be exceeded and this would always time out.
+
+        The counter read and the buffer slice are taken together under
+        ``_buffer_lock`` (the same lock _stream appends under) so an interleaved
+        append cannot shift the tail window and make ``seen_total`` skip an
+        unseen line. Returns True on match, False on timeout. Uses
+        ``time.monotonic`` so a wall-clock jump (NTP adjust, suspend/resume)
+        doesn't extend or truncate the wait.
         """
         if isinstance(pattern, str):
             pattern = re.compile(pattern)
 
-        with self._lock:
-            start_index = len(self._stdout_buffer)
+        def _drain_new(seen_total: int):
+            """Return (new lines since seen_total, updated total). Best-effort:
+            if more than MAX_LOG_LINES arrived between polls, only the retained
+            tail is returned. Counter + slice are read atomically under
+            _buffer_lock; the returned slice is a fresh copy safe to iterate
+            after release."""
+            with self._buffer_lock:
+                total = self._stdout_total
+                new = total - seen_total
+                pending = self._stdout_buffer[-new:] if new > 0 else []
+            return pending, total
+
+        with self._buffer_lock:
+            seen_total = self._stdout_total
 
         deadline = time.monotonic() + max(0.0, timeout)
         while time.monotonic() < deadline:
-            with self._lock:
-                # Snapshot the slice under the lock so the streaming
-                # thread can't truncate-then-resize the buffer mid-iter.
-                pending = self._stdout_buffer[start_index:]
-                start_index = len(self._stdout_buffer)
-            for line in pending:
+            pending, seen_total = _drain_new(seen_total)
+            for _, line in pending:
                 if pattern.search(line):
                     return True
             time.sleep(poll_interval)
 
-        # One final sweep — covers the race where the matching line
-        # arrives after the last poll-sleep but before timeout.
-        with self._lock:
-            pending = self._stdout_buffer[start_index:]
-        for line in pending:
+        # One final sweep — covers the race where the matching line arrives
+        # after the last poll-sleep but before timeout.
+        pending, _ = _drain_new(seen_total)
+        for _, line in pending:
             if pattern.search(line):
                 return True
         return False

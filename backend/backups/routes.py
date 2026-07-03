@@ -452,11 +452,15 @@ def _purge_archive_files(
     ``storagePath`` are unlinked — defensive against two configs that
     happen to point at overlapping storage dirs.
     """
-    storage_path_raw = (cfg.get("storagePath") or "").strip()
-    storage_path = (
-        Path(storage_path_raw).expanduser().resolve()
-        if storage_path_raw else None
-    )
+    # Resolve the config's EFFECTIVE storage dir exactly like the backup writer
+    # does (storage.resolve_config_storage_path), so purge also matches files
+    # under the default <install>/backups location. An empty storagePath is a
+    # supported default; reading the raw value here made purge a silent no-op
+    # for such configs, orphaning every archive on disk.
+    try:
+        storage_path = storage.resolve_config_storage_path(cfg).resolve()
+    except (ValueError, OSError):
+        storage_path = None
 
     deleted: List[str] = []
     retained: List[str] = []

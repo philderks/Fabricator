@@ -205,9 +205,18 @@ def start() -> None:
     # start (missing binary) remembers the user's intent to re-enable.
     set_enabled(True)
 
-    # Orphan reap BEFORE bumping gen so we don't race with our own watchdog
-    # of an old run. Safe to call even when no PID file exists.
-    _reap_orphan_daemon()
+    # Only reap a leftover orphan from a PREVIOUS run — NEVER our own healthy
+    # daemon. While a daemon we own is alive, _write_pid_file has left the PID
+    # file pointing at it, and _reap_orphan_daemon (which only checks the PID
+    # file + _is_pid_alive, not _proc) can't tell it apart, so an unconditional
+    # reap here would SIGTERM/SIGKILL our own live tunnel on a redundant start()
+    # and defeat the "already running" fast-return below.
+    with _lock:
+        own_live_daemon = _proc is not None and _proc.poll() is None
+    if not own_live_daemon:
+        # Reap BEFORE bumping gen so we don't race with our own watchdog of an
+        # old run. Safe to call even when no PID file exists.
+        _reap_orphan_daemon()
 
     with _lock:
         if _proc is not None and _proc.poll() is None:
@@ -589,7 +598,7 @@ def _run_daemon(my_gen: int, daemon_bin: str, secret: Path) -> None:
     daemon writes to stdout (merged with stderr by Popen), feeding the reader
     a single coherent stream we can both parse for events and tail for errors.
     """
-    global _proc, _status, _error_reason
+    global _proc, _status, _error_reason, _gen
 
     socket = playit_binary.socket_path()
 
@@ -650,6 +659,20 @@ def _run_daemon(my_gen: int, daemon_bin: str, secret: Path) -> None:
     # Reader exited (proc closed stdout). Clear the PID file so the next
     # start() doesn't try to reap a no-longer-relevant process.
     _clear_pid_file()
+
+    # The daemon exited on its own (crash / OOM / external kill / clean exit)
+    # rather than via stop()/restart — otherwise a newer generation would have
+    # already advanced _gen. _read_daemon_stdout has recorded the terminal
+    # status ("stopped" or "error"); retire THIS generation so its rundata
+    # poller stops instead of hammering the API forever and resurrecting the
+    # dead daemon to "running" off stale server-side tunnel state. This is the
+    # fast/common path (fires the instant the reader sees stdout EOF); the
+    # poller's own liveness check is the fallback for the rare case where a
+    # child holds the stdout pipe open and the reader never returns here. Only
+    # bump if we're still current.
+    with _lock:
+        if my_gen == _gen:
+            _gen += 1
 
 
 def _read_daemon_stdout(proc: subprocess.Popen, my_gen: int) -> None:
@@ -762,7 +785,7 @@ def _start_rundata_poller(my_gen: int) -> None:
 def _rundata_poller(my_gen: int) -> None:
     """Long-running poller — owns the daemon-level running/error transitions
     and populates _tunnels. Gen-token disciplined."""
-    global _status, _error_reason
+    global _status, _error_reason, _gen
 
     # Give the daemon a moment to authenticate with the playit API before the
     # first call, otherwise we'd just get a 401 for the first cycle.
@@ -779,6 +802,29 @@ def _rundata_poller(my_gen: int) -> None:
 
         with _lock:
             if my_gen != _gen:
+                return
+            # Daemon-death fallback. _read_daemon_stdout + the _gen bump in
+            # _run_daemon are the PRIMARY retirement path (they also derive a
+            # rich error_reason from the log tail), but they only fire on stdout
+            # EOF — if the daemon exits while a child it spawned keeps the shared
+            # stdout pipe open, the reader blocks forever and never retires this
+            # generation. Detect the dead process here so we (a) stop polling
+            # instead of hammering the API forever, and (b) never fall through to
+            # the branches below and label a corpse "running" off stale
+            # server-side rundata. Runs BEFORE the body branches for exactly (b).
+            daemon_rc = _proc.poll() if _proc is not None else None
+            if daemon_rc is not None:
+                # Classify by exit code exactly like _read_daemon_stdout does, so
+                # a clean self-exit (rc 0) reports "stopped", not a spurious
+                # "error". Preserve any richer error_reason the reader already
+                # recorded before we won the lock.
+                if _status not in ("error", "stopped"):
+                    if daemon_rc == 0:
+                        _status = "stopped"
+                    else:
+                        _status = "error"
+                        _error_reason = _error_reason or f"playitd exited with code {daemon_rc}"
+                _gen += 1                    # retire this generation
                 return
             if body is _RUNDATA_UNAUTHORIZED:
                 # The API rejected our agent key. One 401 can be a blip right
@@ -896,6 +942,17 @@ def _apply_rundata_to_state(body: dict) -> None:
     # already surfaced — that signal is faster and more specific. Leave the
     # tunnel list alone too; the UI shows the agent-level error regardless.
     if _status == "error" and _error_reason and _is_inline_failure(_error_reason):
+        return
+
+    # Never resurrect a daemon that has already exited. If the process we own is
+    # gone (crashed / externally killed / clean exit), its terminal status was
+    # already recorded; playit.gg's rundata still reports the agent's server-side
+    # tunnels for a while after a local exit, and flipping back to "running" off
+    # that stale data would mask a dead tunnel. Defensive self-guard: the only
+    # caller (_rundata_poller) already performs the same liveness check under the
+    # same lock before calling us, so in practice _proc is live here — this keeps
+    # the function correct in isolation rather than relying on that invariant.
+    if _proc is None or _proc.poll() is not None:
         return
 
     data = (body or {}).get("data") or {}

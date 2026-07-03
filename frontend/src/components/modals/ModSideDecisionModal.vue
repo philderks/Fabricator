@@ -217,6 +217,11 @@ async function checkModViaApi(mod, { signal } = {}) {
       ...checks.value,
       [path]: { state: 'error', message: error?.message || 'API check failed.', recommendation: '', serverSide: '', projectTitle: '' }
     }
+    // Re-throw so a caller that wraps this in withBackoff (checkAllViaApi) can
+    // actually retry transient failures (429/503). Previously this was
+    // swallowed, so withBackoff always saw success and never retried. Single
+    // checks catch and ignore it (the per-row error state is already set).
+    throw error
   }
 }
 
@@ -227,7 +232,13 @@ async function checkSingleViaApi(mod) {
   if (!inflightController.value) {
     inflightController.value = new AbortController()
   }
-  await checkModViaApi(mod, { signal: inflightController.value.signal })
+  try {
+    await checkModViaApi(mod, { signal: inflightController.value.signal })
+  } catch {
+    // A single check has no retry; the per-row error/idle state is already
+    // recorded inside checkModViaApi. Swallow the re-thrown error so it doesn't
+    // surface as an unhandled rejection.
+  }
 }
 
 async function checkAllViaApi() {

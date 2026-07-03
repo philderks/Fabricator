@@ -182,3 +182,51 @@ def test_disable_env_var_short_circuits_init(tmp_servers_root, monkeypatch):
     # register_job / remove_job are inert without init.
     assert scheduler_mod.register_job({"id": "bkc_x"}) is None
     assert scheduler_mod.remove_job("bkc_x") is False
+
+
+# ---------------------------------------------------------------------------
+# Trigger timezone alignment (daily CronTrigger uses local time; sub-daily
+# IntervalTrigger must anchor to the SAME local frame, not drift by UTC offset)
+# ---------------------------------------------------------------------------
+
+
+def test_interval_anchor_uses_today_when_slot_still_ahead():
+    from datetime import time as dtime
+    import backend.backups.scheduler as scheduler_mod
+
+    now = datetime(2026, 7, 2, 1, 0)          # 01:00 — 03:30 slot still ahead today
+    anchor = scheduler_mod._interval_anchor(dtime(3, 30), 6, now)
+    assert anchor == datetime(2026, 7, 2, 3, 30)
+    assert anchor.tzinfo == now.tzinfo        # stays in `now`'s frame, not forced to UTC
+
+
+def test_interval_anchor_rolls_forward_when_slot_passed():
+    from datetime import time as dtime
+    import backend.backups.scheduler as scheduler_mod
+
+    now = datetime(2026, 7, 2, 5, 0)          # 05:00 — 03:30 already passed today
+    anchor = scheduler_mod._interval_anchor(dtime(3, 30), 6, now)
+    assert anchor == datetime(2026, 7, 2, 9, 30)   # rolled forward by frequency (6h)
+
+
+def test_subdaily_trigger_anchors_in_local_naive_time(monkeypatch):
+    """_build_trigger must feed a LOCAL (naive) `now` into the anchor — the same
+    frame CronTrigger(hour=, minute=) uses. Previously it passed a UTC-aware
+    datetime, so sub-daily backups fired at the wrong wall-clock time on non-UTC
+    hosts while daily backups fired at local time."""
+    from apscheduler.triggers.interval import IntervalTrigger
+    import backend.backups.scheduler as scheduler_mod
+
+    captured = {}
+    real_anchor = scheduler_mod._interval_anchor
+
+    def spy(time_of_day, frequency_hours, now):
+        captured["now"] = now
+        return real_anchor(time_of_day, frequency_hours, now)
+
+    monkeypatch.setattr(scheduler_mod, "_interval_anchor", spy)
+    trig = scheduler_mod._build_trigger({"frequencyHours": 6, "timeOfDay": "03:30"})
+
+    assert isinstance(trig, IntervalTrigger)
+    assert captured["now"].tzinfo is None, \
+        "sub-daily anchor must use a local (naive) now, not a UTC-aware datetime"
