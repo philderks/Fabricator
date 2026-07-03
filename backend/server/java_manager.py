@@ -574,6 +574,23 @@ def install_java(major: int, archive_path: Path) -> str:
 _install_tasks_lock = threading.Lock()
 _install_tasks: dict[str, dict] = {}
 
+# One lock per effective-major serialises the download+extract+install of that
+# major: two concurrent workers share the fixed download path and the managed
+# target dir and would corrupt each other. Unlike deduping to a single task,
+# this keeps each request an independently cancellable task with its own
+# cancel_event and its own (requested_major, substituted) metadata.
+_major_install_locks: dict[int, threading.Lock] = {}
+_major_install_locks_guard = threading.Lock()
+
+
+def _major_install_lock(major: int) -> threading.Lock:
+    with _major_install_locks_guard:
+        lock = _major_install_locks.get(major)
+        if lock is None:
+            lock = threading.Lock()
+            _major_install_locks[major] = lock
+        return lock
+
 # Internal handles per task — kept out of ``_install_tasks`` so the dict that
 # escapes via :func:`get_install_task` stays JSON-serialisable. Keys mirror
 # ``_install_tasks``; entries are removed by :func:`_evict_old_install_tasks`.
@@ -700,15 +717,26 @@ def _run_install_task(
 
     try:
         _check_cancel_or_timeout()
-        _update_task(task_id, status="downloading", downloaded=0, total=0)
-        archive = download_java(
-            install_major,
-            progress_callback=on_progress,
-            cancel_event=cancel_event,
-        )
-        _check_cancel_or_timeout()
-        _update_task(task_id, status="installing")
-        java_path = install_java(install_major, archive)
+        # Serialize with any other in-flight install of the SAME major — they
+        # share the fixed download path and the managed target dir. Poll-acquire
+        # in short slices so cancel and the wall-clock cap stay responsive while
+        # we wait for a concurrent install to finish.
+        major_lock = _major_install_lock(install_major)
+        while not major_lock.acquire(timeout=0.5):
+            _check_cancel_or_timeout()
+        try:
+            _check_cancel_or_timeout()
+            _update_task(task_id, status="downloading", downloaded=0, total=0)
+            archive = download_java(
+                install_major,
+                progress_callback=on_progress,
+                cancel_event=cancel_event,
+            )
+            _check_cancel_or_timeout()
+            _update_task(task_id, status="installing")
+            java_path = install_java(install_major, archive)
+        finally:
+            major_lock.release()
         # Atomic cancel-vs-success finalisation under the lock. Without it, a
         # concurrent ``cancel_install_task`` could interleave between the
         # is_set() check and the ``status="done"`` write — either direction
