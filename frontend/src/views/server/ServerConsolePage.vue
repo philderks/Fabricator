@@ -59,7 +59,12 @@ const parseLine = (entry, defaultLevel = 'INFO') => {
   // with the time column (which now shows local time) and would otherwise read
   // as a confusing double timestamp.
   const message = text.replace(/^\s*\[\d{2}:\d{2}:\d{2}\]\s*/, '')
-  return { time, level, message }
+  // Numeric sort key. Parse to a millisecond instant rather than comparing the
+  // raw ISO strings lexicographically: iso_z_now() omits the ".ffffff" fraction
+  // when microsecond == 0, so "…:00Z" would sort AFTER "…:00.5Z" as text
+  // ('.' < 'Z') and reverse same-second lines. NaN when ts is absent/unparseable.
+  const tsMs = ts ? Date.parse(ts) : NaN
+  return { tsMs, time, level, message }
 }
 
 // Tag each line with a stream-scoped id so :key stays stable across filter
@@ -71,7 +76,18 @@ const allLines = computed(() => {
     const parsed = parseLine(entry, 'ERROR')
     return { id: `stderr:${i}`, stream: 'stderr', ...parsed }
   })
-  return [...stdout, ...stderr]
+  // Interleave the two streams by capture timestamp so a crash's stderr shows
+  // next to the stdout that produced it, instead of all stderr dumped after all
+  // stdout. Only sort when EVERY line carries a parseable ts — a numeric key
+  // gives a proper total order (transitive), and a STABLE sort keeps
+  // same-instant lines in their per-stream arrival order. If any line lacks a
+  // ts (older backend sending plain strings), skip sorting and fall back to the
+  // previous stdout-then-stderr order rather than risk a non-transitive compare.
+  const merged = [...stdout, ...stderr]
+  if (merged.every((l) => Number.isFinite(l.tsMs))) {
+    merged.sort((a, b) => a.tsMs - b.tsMs)
+  }
+  return merged
 })
 
 const filteredLines = computed(() => {

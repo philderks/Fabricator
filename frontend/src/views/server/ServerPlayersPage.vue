@@ -170,7 +170,13 @@ async function startReason(name, mode) {
   reasonTarget.value = { name, mode }
   reasonText.value = ''
   await nextTick()
-  reasonInputEl.value?.focus()
+  // The ref lives inside the players v-for, so Vue collects it into an ARRAY —
+  // calling .focus() on the array threw and the input never focused. Only one
+  // reason input is rendered at a time (v-if on the matching row), so focus its
+  // single entry.
+  const el = reasonInputEl.value
+  const input = Array.isArray(el) ? el[0] : el
+  input?.focus()
 }
 
 function cancelReason() {
