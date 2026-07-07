@@ -31,6 +31,21 @@ export default defineConfig({
 
       pages: [
         {
+          path: '/',
+        },
+        {
+          path: '/download',
+        },
+        {
+          path: '/features',
+        },
+        {
+          path: '/privacy',
+        },
+        {
+          path: '/impressum',
+        },
+        {
           path: '/docs',
         },
         {

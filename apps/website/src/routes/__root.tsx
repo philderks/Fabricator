@@ -1,4 +1,5 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from '@tanstack/react-router';
+import { useLocation } from '@tanstack/react-router';
 import * as React from 'react';
 import appCss from '@/styles/app.css?url';
 import { RootProvider } from 'fumadocs-ui/provider/tanstack';
@@ -38,10 +39,29 @@ function RootComponent() {
       </head>
       <body className="flex flex-col min-h-screen">
         <RootProvider search={{ SearchDialog }} theme={{ defaultTheme: 'dark', enableSystem: true }}>
+          <HashScroller />
           <Outlet />
         </RootProvider>
         <Scripts />
       </body>
     </html>
   );
+}
+
+function HashScroller() {
+  const location = useLocation();
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const hash = window.location.hash.slice(1);
+    if (!hash) return;
+
+    window.requestAnimationFrame(() => {
+      const target = document.getElementById(hash);
+      target?.scrollIntoView({ block: 'start', behavior: 'auto' });
+    });
+  }, [location.href]);
+
+  return null;
 }
