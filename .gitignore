@@ -45,9 +45,9 @@ pnpm-debug.log*
 lerna-debug.log*
 .npm
 .yarn-integrity
-frontend/dist/
-frontend/dist-ssr/
-frontend/*.local
+apps/frontend/dist/
+apps/frontend/dist-ssr/
+apps/frontend/*.local
 
 # IDE
 .vscode/

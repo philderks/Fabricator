@@ -325,12 +325,13 @@ def hash_password_cmd() -> None:
     import sys
     from pathlib import Path
 
-    # Make `backend` importable when run from a source checkout (the installed
-    # `fabricator` entry point already has the project on sys.path).
+    # Make `backend` importable in both layouts:
+    # - source checkout: repo/apps/backend
+    # - installed release: $APP_DIR/backend
     root = Path(__file__).resolve().parents[3]
-    apps_src = root / "apps"
-    if str(apps_src) not in sys.path:
-        sys.path.insert(0, str(apps_src))
+    for candidate in (root, root / "apps"):
+        if candidate.exists() and str(candidate) not in sys.path:
+            sys.path.insert(0, str(candidate))
     from backend.auth.service import hash_password
 
     password = click.prompt("Password", hide_input=True, confirmation_prompt=True)
