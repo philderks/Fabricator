@@ -2,8 +2,10 @@
 .github
 **/__pycache__/
 **/*.pyc
-frontend/node_modules
-frontend/dist
+apps/frontend/node_modules
+apps/frontend/dist
+apps/cli/fabricator.egg-info
+node_modules
 dist
 build
 *.spec

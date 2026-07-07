@@ -6,12 +6,25 @@
 # QEMU on the linux/arm64 build (the slow, flaky part).
 FROM --platform=$BUILDPLATFORM node:20-slim AS frontend
 WORKDIR /app/frontend
-COPY frontend/package.json frontend/package-lock.json ./
+COPY apps/frontend/package.json apps/frontend/package-lock.json ./
 RUN npm ci
-COPY frontend/ ./
+COPY apps/frontend/ ./
 RUN npm run build
 
-# ---- Stage 2: Python runtime ----
+# ---- Stage 2: install Python dependencies ----
+FROM python:3.11-slim AS python-deps
+
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+WORKDIR /app
+
+COPY requirements.txt ./
+RUN python -m venv "$VIRTUAL_ENV" \
+    && pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt
+
+# ---- Stage 3: Python runtime ----
 FROM python:3.11-slim AS runtime
 
 # Java is managed at runtime by Fabricator into the /data volume (JAVA_ROOT),
@@ -24,13 +37,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
-COPY backend/ ./backend/
-COPY run.py pyproject.toml ./
-# tools/ (host installer + Windows spec-gen) is intentionally not copied.
+COPY --from=python-deps /opt/venv /opt/venv
 
+COPY apps/backend/ ./backend/
+COPY run.py ./
 COPY --from=frontend /app/frontend/dist ./frontend/dist
 
 ARG VERSION=unknown
@@ -57,7 +70,7 @@ ENV FLASK_ENV=production \
 # uid is pinned so ownership on the /data volume is stable across rebuilds.
 RUN useradd --system --no-create-home --shell /usr/sbin/nologin --uid 10001 fabricator
 
-COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 VOLUME ["/data"]
