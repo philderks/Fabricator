@@ -7,13 +7,13 @@ from pathlib import Path
 import pytest
 
 # Make backend importable without installing the package.
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+APPS_ROOT = Path(__file__).resolve().parents[2]
+if str(APPS_ROOT) not in sys.path:
+    sys.path.insert(0, str(APPS_ROOT))
 
 
 @pytest.fixture(autouse=True)
-def _clear_platform_caches():
+def _clear_platform_caches(tmp_path, monkeypatch):
     """Reset platform-level ``lru_cache``s before each test.
 
     ``appdata_dir``, ``arch_label``, and ``_system_name`` are cached for
@@ -22,6 +22,7 @@ def _clear_platform_caches():
     this fixture a stale cache from a previous test could leak into the
     next one and silently produce wrong paths or arch labels.
     """
+    monkeypatch.setenv("FABRICATOR_APPDATA", str(tmp_path / "appdata"))
     from backend.utils.platform import appdata_dir, arch_label, _system_name
     appdata_dir.cache_clear()
     arch_label.cache_clear()
@@ -49,6 +50,7 @@ def tmp_servers_root(tmp_path, monkeypatch):
     monkeypatch.setenv("SERVER_ROOT", str(servers_root))
     monkeypatch.setenv("SERVER_INDEX_FILE", str(tmp_path / "servers.json"))
     monkeypatch.setenv("JAVA_ROOT", str(tmp_path / "java"))
+    monkeypatch.setenv("FABRICATOR_APPDATA", str(tmp_path))
     monkeypatch.setenv("FLASK_ENV", "development")
     monkeypatch.setenv("CORS_ORIGINS", "http://localhost:3000")
     monkeypatch.setenv("HOST", "127.0.0.1")

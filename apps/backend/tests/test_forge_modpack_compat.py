@@ -43,6 +43,9 @@ def test_forge_modpack_on_neoforge_server_rejected(client, tmp_servers_root):
     }
 
     with patch(
+        "backend.modrinth.client.ModrinthClient.get_project",
+        return_value={"title": "Example Pack"},
+    ), patch(
         "backend.modrinth.client.ModrinthClient.get_project_versions",
         return_value=[fake_forge_version],
     ):

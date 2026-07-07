@@ -1,13 +1,13 @@
 """Pin the backend's RUNTIME_KNOWN_STATUSES set as a Cross-Branch contract.
 
-Frontend (`frontend/src/utils/getEffectiveStatus.js:RUNTIME_KNOWN_STATUSES`)
+Frontend (`apps/frontend/src/utils/getEffectiveStatus.js:RUNTIME_KNOWN_STATUSES`)
 mirrors this set. When the backend set changes, the frontend mirror MUST be
 updated in lockstep — this test is the canary.
 
 If you change `_RUNTIME_KNOWN_STATUSES` in `backend/server/routes.py`, you must:
 1. Update this pin (see expected set below).
 2. Update the frontend mirror in
-   `frontend/src/utils/getEffectiveStatus.js:RUNTIME_KNOWN_STATUSES`.
+   `apps/frontend/src/utils/getEffectiveStatus.js:RUNTIME_KNOWN_STATUSES`.
 3. Reference the new pin from CC5 in CONVENTIONS.md.
 
 Cross-Branch coordination: this commit (B14c on cleanup/backend) makes the
@@ -26,7 +26,7 @@ def test_runtime_known_statuses_is_pinned():
     assert _RUNTIME_KNOWN_STATUSES == expected, (
         f"Backend _RUNTIME_KNOWN_STATUSES drifted: got {_RUNTIME_KNOWN_STATUSES!r}, "
         f"expected {expected!r}. Update the frontend mirror in "
-        f"frontend/src/utils/getEffectiveStatus.js:RUNTIME_KNOWN_STATUSES + this pin."
+        f"apps/frontend/src/utils/getEffectiveStatus.js:RUNTIME_KNOWN_STATUSES + this pin."
     )
 
 

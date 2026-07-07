@@ -1,10 +1,8 @@
 """Phase 3b.1 anchor tests — Forge legacy MC ranges resolve to Java 8.
 
 These tests pin the end-to-end mapping that drives the Java-install modal
-in the UI when a user creates a Forge 1.12.2 / 1.16.5 server. They live
-in ``tests/`` (not at the repo root) so they're picked up by the default
-``pytest`` run; the root-level ``test_java_compat.py`` is not in the
-configured ``testpaths`` and only runs when invoked explicitly.
+in the UI when a user creates a Forge 1.12.2 / 1.16.5 server. They live in
+``apps/backend/tests/`` so they're picked up by the default ``pytest`` run.
 
 What we anchor:
 
