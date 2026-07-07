@@ -21,6 +21,20 @@ def get_base_path() -> str:
     return os.path.dirname(os.path.abspath(__file__))
 
 
+def bootstrap_source_paths() -> None:
+    """Make ``backend`` importable from a source checkout.
+
+    Release tarballs and Docker images stage ``backend/`` next to ``run.py``.
+    A repository checkout keeps the source under ``apps/backend/``. Supporting
+    both layouts lets ``python run.py`` keep working from the repo root without
+    requiring developers to export PYTHONPATH.
+    """
+    apps_path = os.path.join(get_base_path(), 'apps')
+    backend_path = os.path.join(apps_path, 'backend')
+    if os.path.isdir(backend_path) and apps_path not in sys.path:
+        sys.path.insert(0, apps_path)
+
+
 def setup_paths() -> None:
     """Ensure cwd is a stable, writable location for the bundled exe.
 
@@ -168,6 +182,7 @@ def _graceful_stop() -> None:
 # ============================================
 
 def main() -> None:
+    bootstrap_source_paths()
     setup_paths()
     _load_system_env()
 

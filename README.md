@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="frontend/public/favicon.svg" alt="Fabricator Logo" width="92" height="92" />
+<img src="apps/frontend/public/favicon.svg" alt="Fabricator Logo" width="92" height="92" />
 
 # Fabricator
 
@@ -104,12 +104,12 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 # Frontend
-cd frontend
+cd apps/frontend
 npm install
 npm run build
-cd ..
+cd ../..
 
-# Run (development — serves API + built frontend from frontend/dist)
+# Run (development — serves API + built frontend from apps/frontend/dist)
 python3 run.py
 ```
 
@@ -201,7 +201,8 @@ networks (see the security note):
    `python -c "import secrets; print(secrets.token_hex(32))"`
 2. Generate a password hash and set `FABRICATOR_AUTH_PASSWORD_HASH`:
    - systemd install: `fabricator hash-password`
-   - Docker / source: `python -m backend.auth hash`
+   - Docker: `python -m backend.auth hash`
+   - source checkout: `PYTHONPATH=apps python -m backend.auth hash`
 
 Precedence: env hash > persisted file > setup mode (and for the signing key:
 env > file > auto-generated).
@@ -269,7 +270,7 @@ The read commands (`status`, `version`, `help`) accept `--json` for scripting. T
 
 Bug reports and pull requests are welcome. For larger changes, open an issue first.
 
-The frontend is Vue 3 + Vite in `/frontend`. The backend is Flask with blueprints under `/backend`; the process entrypoint is `run.py`. HTTP API details live in [API_DOCS.md](API_DOCS.md). Both halves can be run without the installer for local development.
+The frontend is Vue 3 + Vite in `apps/frontend`. The backend is Flask with blueprints under `apps/backend`; the process entrypoint is root-level `run.py`. HTTP API details live in [API_DOCS.md](API_DOCS.md). Both halves can be run without the installer for local development.
 
 ---
 

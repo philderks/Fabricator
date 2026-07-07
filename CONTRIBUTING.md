@@ -18,4 +18,4 @@ By merging a pull request, the contributor confirms acceptance of these terms.
 
 ## Development Setup
 
-The frontend is Vue 3 + Vite in `/frontend`. The backend is Flask with blueprints under `/backend`; the process entrypoint is `run.py`. HTTP API details are in [API_DOCS.md](API_DOCS.md). Both halves can be run without the installer for local development.
+The frontend is Vue 3 + Vite in `apps/frontend`. The backend is Flask with blueprints under `apps/backend`; the process entrypoint is root-level `run.py`. HTTP API details are in [API_DOCS.md](API_DOCS.md). Both halves can be run without the installer for local development.

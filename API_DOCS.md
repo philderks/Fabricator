@@ -17,24 +17,23 @@ Ein moderner Minecraft Server Manager mit Modrinth-Integration zum einfachen Ver
 
 ```
 Fabricator/
-├── backend/
-│   ├── core/
-│   │   ├── app.py                # Flask App Factory
-│   │   └── config.py             # Zentrale Konfiguration
-│   ├── routes/
-│   │   ├── server.py             # Server Management Endpoints
-│   │   └── modrinth.py           # Modrinth API Endpoints
-│   ├── server/                   # Server-Lifecycle und Storage
-│   ├── modrinth/
-│   │   └── client.py             # Modrinth API Client
-│   └── utils/
-├── frontend/                     # Vue.js Frontend
-├── server/                       # Minecraft Server Dateien
-│   └── mods/                    # Installierte Mods
-├── run.py                       # Application Entry Point
-├── requirements.txt             # Python Dependencies
-└── test_api.py                 # API Tests
-
+├── apps/
+│   ├── backend/
+│   │   ├── core/
+│   │   │   ├── app.py            # Flask App Factory
+│   │   │   └── config.py         # Zentrale Konfiguration
+│   │   ├── server/               # Server-Lifecycle und Storage
+│   │   ├── modrinth/             # Modrinth API Client und Routes
+│   │   ├── system/               # System-/Update-Endpunkte
+│   │   ├── playit/               # playit.gg Agent und Routes
+│   │   ├── backups/              # Backup/Restore/Import
+│   │   └── tests/                # Backend-Tests
+│   ├── frontend/                 # Vue 3 + Vite Frontend
+│   └── cli/                      # Fabricator CLI Package und Tests
+├── tests/
+│   └── integration/              # Cross-App Contract Tests
+├── run.py                        # Application Entry Point / Orchestrator
+└── requirements.txt              # Repo-weite Python Dependencies
 ```
 
 ## 🛠️ Installation
@@ -420,7 +419,7 @@ CORS_ORIGINS=*               # Erlaubte Origins
 
 ### Konfigurationsklassen
 
-In `backend/core/config.py`:
+In `apps/backend/core/config.py`:
 - `DevelopmentConfig`: Debug-Modus aktiviert
 - `ProductionConfig`: Optimiert für Production
 
@@ -428,9 +427,9 @@ In `backend/core/config.py`:
 
 ## 🧩 Loader Registry (Entwickler)
 
-Die Loader-Dispatch-Schicht lebt in `backend/server/installer/__init__.py`. Ein neuer Loader benötigt drei Schritte:
+Die Loader-Dispatch-Schicht lebt in `apps/backend/server/installer/__init__.py`. Ein neuer Loader benötigt drei Schritte:
 
-1. **Subklasse von `InstallerBase`** (`backend/server/installer/base.py`) mit diesen Pflicht-Methoden anlegen:
+1. **Subklasse von `InstallerBase`** (`apps/backend/server/installer/base.py`) mit diesen Pflicht-Methoden anlegen:
    - `loader_name` (Property) — der Registry-Key, z.B. `"neoforge"`
    - `get_minecraft_versions()` → `List[{version, stable, type?}]` im normalisierten Schema (siehe `/api/loaders/<loader>/versions/game`)
    - `get_available_versions(mc_version)` → loader-natives Array; `[]` wenn der Loader keine separate Loader-Version hat
@@ -449,7 +448,7 @@ Die Loader-Dispatch-Schicht lebt in `backend/server/installer/__init__.py`. Ein 
 
    `get_installer_for(loader, install_path)` (case-insensitive) und `supported_loaders()` greifen automatisch auf den neuen Eintrag zu — Routes und der Install-Flow brauchen keine Änderung.
 
-3. **Frontend:** in `frontend/src/components/modals/ServerCreateModal.vue` der `loaderOptions`-Liste eine Option mit demselben `value` wie `loader_name` hinzufügen.
+3. **Frontend:** in `apps/frontend/src/components/modals/ServerCreateModal.vue` der `loaderOptions`-Liste eine Option mit demselben `value` wie `loader_name` hinzufügen.
 
 Phase-2-Loader (Forge, NeoForge) werden voraussichtlich einen neuen `LaunchSpec.type` einführen (z.B. `args_files` für die `@user_jvm_args.txt`-Form). `_build_command` wirft heute schon `ValueError` bei unbekanntem Typ — das ist absichtlich, damit ein Phase-2-Record auf einem alten Build früh erkannt wird.
 
