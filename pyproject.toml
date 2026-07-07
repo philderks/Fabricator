@@ -8,7 +8,9 @@ version = "0.0.0"
 requires-python = ">=3.11"
 
 [project.scripts]
-fabricator = "tools.cli:cli"
+fabricator = "fabricator.cli:main"
 
-[tool.setuptools]
-packages = ["tools"]
+[tool.setuptools.packages.find]
+where = ["apps/cli"]
+include = ["fabricator*"]
+namespaces = false

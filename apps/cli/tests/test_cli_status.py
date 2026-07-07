@@ -6,7 +6,7 @@ It now probes /api/health and summarises /api/servers.
 """
 from unittest.mock import MagicMock
 
-import tools.cli as cli
+import fabricator.cli as cli
 
 
 def _resp(ok=True, json_body=None):

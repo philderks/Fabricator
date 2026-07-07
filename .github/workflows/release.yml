@@ -50,7 +50,7 @@ jobs:
           VERSION="${{ github.event.release.tag_name }}"
           STAGING="staging/fabricator"
 
-          mkdir -p "$STAGING/frontend"
+          mkdir -p "$STAGING/frontend" "$STAGING/apps"
 
           # Backend
           rsync -a --exclude='__pycache__/' --exclude='*.pyc' \
@@ -60,6 +60,8 @@ jobs:
           cp run.py requirements.txt pyproject.toml "$STAGING/"
 
           # CLI + installer
+          rsync -a --exclude='__pycache__/' --exclude='*.pyc' \
+            apps/cli/ "$STAGING/apps/cli/"
           rsync -a --exclude='__pycache__/' --exclude='*.pyc' \
             tools/ "$STAGING/tools/"
 

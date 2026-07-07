@@ -49,11 +49,11 @@ def _get_latest_release_tag() -> str | None:
 
 
 @click.group()
-def cli():
+def main():
     """Fabricator service management."""
 
 
-@cli.command()
+@main.command()
 def start():
     """Start the Fabricator service."""
     click.echo("Starting Fabricator...")
@@ -65,7 +65,7 @@ def start():
         sys.exit(rc)
 
 
-@cli.command()
+@main.command()
 def stop():
     """Stop the Fabricator service (graceful shutdown attempt first)."""
     click.echo("Stopping Fabricator...")
@@ -78,7 +78,7 @@ def stop():
         sys.exit(rc)
 
 
-@cli.command()
+@main.command()
 def update():
     """Update Fabricator to the latest release."""
     local_version = _get_local_version()
@@ -181,7 +181,7 @@ def _render_status(data: dict) -> None:
         click.echo(f"  • {server.get('name') or server.get('id') or '?'}")
 
 
-@cli.command()
+@main.command()
 @click.option(
     "--json", "as_json",
     is_flag=True,
@@ -219,7 +219,7 @@ def _render_version(data: dict) -> None:
         )
 
 
-@cli.command()
+@main.command()
 @click.option(
     "--json", "as_json",
     is_flag=True,
@@ -254,7 +254,7 @@ def _uninstall_step(label: str, *cmd: str) -> None:
         click.echo(click.style(f" warning: {exc}", fg="yellow"))
 
 
-@cli.command()
+@main.command()
 def uninstall() -> None:
     """Remove Fabricator, its data, config, systemd unit, and service user."""
     confirmation = click.prompt(
@@ -286,7 +286,7 @@ def _collect_help() -> list[dict]:
     """Return a list of {command, description} dicts for all registered commands."""
     return [
         {"command": name, "description": cmd.get_short_help_str()}
-        for name, cmd in sorted(cli.commands.items())
+        for name, cmd in sorted(main.commands.items())
     ]
 
 
@@ -300,7 +300,7 @@ def _render_help(data: list[dict]) -> None:
         click.echo(f"  {item['command']:<{width}}  {item['description']}")
 
 
-@cli.command(name="help")
+@main.command(name="help")
 @click.option(
     "--json", "as_json",
     is_flag=True,
@@ -319,7 +319,7 @@ def help_cmd(as_json: bool) -> None:
 # hash-password
 # ---------------------------------------------------------------------------
 
-@cli.command(name="hash-password")
+@main.command(name="hash-password")
 def hash_password_cmd() -> None:
     """Generate a password hash for FABRICATOR_AUTH_PASSWORD_HASH."""
     import sys
@@ -327,9 +327,10 @@ def hash_password_cmd() -> None:
 
     # Make `backend` importable when run from a source checkout (the installed
     # `fabricator` entry point already has the project on sys.path).
-    root = Path(__file__).resolve().parents[1]
-    if str(root) not in sys.path:
-        sys.path.insert(0, str(root))
+    root = Path(__file__).resolve().parents[3]
+    apps_src = root / "apps"
+    if str(apps_src) not in sys.path:
+        sys.path.insert(0, str(apps_src))
     from backend.auth.service import hash_password
 
     password = click.prompt("Password", hide_input=True, confirmation_prompt=True)
