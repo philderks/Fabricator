@@ -1,0 +1,33 @@
+---
+title: Java Management
+description: How Fabricator detects, installs, and switches between Java versions.
+---
+
+Fabricator can manage Java runtimes per server. This avoids forcing every Minecraft version to use the same system Java.
+
+## Runtime resolution order
+
+When Fabricator starts a server, it resolves the Java executable in this order:
+
+1. `javaPath` stored on the server record, if present.
+2. A managed Java runtime under `JAVA_ROOT` that satisfies the server's Minecraft version requirement.
+3. `java` from `PATH` as a fallback, allowing the normal missing-Java flow to trigger.
+
+## Compatibility checks
+
+Fabricator computes the required Java major version from the Minecraft version. If the detected runtime is too old, start/install can be blocked and the UI can show an install recommendation.
+
+## Installing Java from the UI
+
+The Java API exposes:
+
+- Current runtime status.
+- Recommended download URL for the host OS/architecture and required Java version.
+- Install progress for background Java installs.
+- Cancellation for install tasks.
+
+Managed runtimes default to `/var/lib/fabricator/java` in production.
+
+## Development bypass
+
+`FABRICATOR_SKIP_JAVA_CHECK=1` disables enforcement for development/testing only. Do not enable it in production.

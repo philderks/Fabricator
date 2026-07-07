@@ -1,0 +1,46 @@
+---
+title: Common Errors
+description: Solutions to frequently encountered errors when running Fabricator.
+---
+
+## Dashboard is not reachable
+
+Check the service and bind address:
+
+```bash
+fabricator status
+sudo systemctl status fabricator
+sudo journalctl -u fabricator -n 100
+```
+
+If `HOST=127.0.0.1`, access it locally or through a reverse proxy. If `HOST=0.0.0.0`, verify firewall rules and the printed install URL.
+
+## Java version is too old
+
+Fabricator checks the Minecraft version against the required Java version. Install the recommended managed runtime from the UI, or configure `javaPath` to a compatible JVM.
+
+Do not use `FABRICATOR_SKIP_JAVA_CHECK=1` in production.
+
+## Port already in use
+
+Each server needs a unique Minecraft port. Edit or recreate the server with a free `server-port`. Also check optional query/RCON ports.
+
+## Operation already running
+
+Fabricator serializes mutating operations per server. Wait for install, backup, restore, start, stop, settings save, or file write jobs to finish before starting another operation.
+
+## playit.gg agent failed
+
+Open **Server → playit.gg** and read the displayed error. Common fixes:
+
+- Rerun the installer if `playit` or `playit-cli` is missing.
+- Use **Reset** if the saved playit secret was revoked or you want to claim a different account.
+- Remove unused agents in the playit.gg dashboard if the account is at its free-agent limit.
+- Create a playit tunnel whose local port matches the server's Minecraft port when the agent is running but no public address appears.
+
+## Modpack fails to start
+
+1. Stop the server.
+2. Restore the backup you created before the modpack change, or remove the last installed files.
+3. Check Console logs for missing dependencies or wrong loader/Minecraft version.
+4. Reinstall a compatible Modrinth version.

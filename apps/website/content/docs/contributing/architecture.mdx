@@ -1,0 +1,91 @@
+---
+title: Architecture
+description: An overview of Fabricator's system architecture, components, and data flow.
+---
+
+Fabricator is a Python/Flask backend plus a Vue 3 dashboard, deployed as a systemd service by shell tooling.
+
+## Repository structure
+
+```text
+Fabricator/
+├── backend/
+│   ├── core/          # App factory, config, version helpers
+│   ├── server/        # Server registry, installers, Java manager, players
+│   ├── modrinth/      # Modrinth client and API routes
+│   ├── backups/       # Backup/restore storage, jobs, scheduler
+│   ├── system/        # Self-update routes and update service
+│   └── utils/         # Shared parsing, platform, route, time, zip helpers
+├── frontend/          # Vue 3 + Vite dashboard
+├── tools/             # install.sh, update.sh, uninstall.sh, CLI
+├── tests/             # Pytest coverage for backend behavior
+└── run.py             # Process entry point
+```
+
+## Backend
+
+The Flask app is created in `backend/core/app.py`. Blueprints mount under `/api` and keep feature areas isolated:
+
+- `backend/server/routes.py` — server CRUD, install/start/stop/restart, files, mods, Java, metrics, loader versions, console.
+- `backend/modrinth/routes.py` — Modrinth search, version resolution, mod install, modpack install.
+- `backend/backups/routes.py` — backup configs, snapshots, downloads, restores, job polling.
+- `backend/server/players/routes.py` — player state, whitelist, ops, bans, IP bans, kicks.
+- `backend/system/routes.py` — self-update status and trigger.
+
+Config is instance-based: each `get_config()` call reads current environment variables. This avoids stale import-time values in tests and after `.env` loading.
+
+## Server registry
+
+`ServerProcessRegistry` owns runtime state for each server id:
+
+- Resolves each server install path under `SERVER_ROOT`.
+- Builds launch commands from stored launch specs.
+- Selects Java from explicit `javaPath`, managed Java, or `java` on `PATH`.
+- Caches `ServerManager` instances.
+- Tracks start time and formats uptime.
+- Provides logs and stdin command dispatch.
+
+Persisted records live in `SERVER_INDEX_FILE`. Runtime data is added to API responses without blindly overwriting transitional states such as `installing`, `starting`, or `stopping`.
+
+## Installer registry
+
+`backend/server/installer/__init__.py` maps loader names to installer classes:
+
+```python
+LOADER_REGISTRY = {
+    "fabric": FabricInstaller,
+    "vanilla": VanillaInstaller,
+    "neoforge": NeoForgeInstaller,
+    "quilt": QuiltInstaller,
+    "forge": ForgeInstaller,
+}
+```
+
+Adding a loader means adding an installer class and registering it. The loader version endpoints and server creation UI use this registry.
+
+## Frontend
+
+The dashboard is a Vue app with route groups:
+
+```text
+/                         # server list
+/server/:id/overview      # runtime overview
+/server/:id/console       # logs and commands
+/server/:id/players       # player management
+/server/:id/mods          # mods and modpacks
+/server/:id/files         # file browser/editor
+/server/:id/backups       # snapshots and backup configs
+/server/:id/settings      # server.properties editor
+```
+
+The sidebar hides the Mods tab for Vanilla servers. API modules live in `frontend/src/api/`, state stores in `frontend/src/stores/`, and feature pages in `frontend/src/views/server/`.
+
+## Deployment
+
+`tools/install.sh` installs release tarballs into `/opt/fabricator/app`, creates `/opt/fabricator/venv`, writes `/etc/fabricator/fabricator.env`, creates `fabricator.service`, and links the CLI to `/usr/local/bin/fabricator`.
+
+The systemd service runs as the `fabricator` user, with mutable write paths limited to `/opt/fabricator`, `/var/lib/fabricator`, and `/etc/fabricator`.
+
+## Test coverage
+
+The main repo contains pytest coverage for app factory behavior, storage, installers, Java compatibility, Modrinth routes, backups, players, and runtime status contracts. When changing backend contracts, update tests together with the docs.

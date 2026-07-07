@@ -1,0 +1,36 @@
+---
+title: Log Locations
+description: Where to find Fabricator and Minecraft logs.
+---
+
+## Fabricator service logs
+
+```bash
+sudo journalctl -u fabricator -f
+sudo journalctl -u fabricator --since "1 hour ago"
+```
+
+## Dashboard/API errors
+
+Backend exceptions and startup failures appear in the systemd journal. If the dashboard is blank, check the browser console and then the service logs.
+
+## Minecraft process output
+
+Use the **Console** page for recent stdout/stderr from a running managed server. This is the same stream Fabricator uses for command interaction.
+
+## Server files
+
+Minecraft also writes logs inside each server's install directory, usually under `logs/`. Use the **Files** page or SSH to inspect older log files.
+
+## playit.gg agent logs
+
+The playit daemon writes a runtime log at `/var/lib/fabricator/playit/playitd.log` in packaged installs. Fabricator also reports lifecycle and claim errors in the service journal:
+
+```bash
+sudo journalctl -u fabricator -f
+sudo tail -f /var/lib/fabricator/playit/playitd.log
+```
+
+## Update logs
+
+Dashboard self-update runs through the bundled update wrapper. Check both the UI update status and `journalctl -u fabricator` when diagnosing failures.

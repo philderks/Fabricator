@@ -74,7 +74,6 @@ build/
 java/
 .claude/settings.local.json
 
-docs
 
 # Local MCP server config — machine-specific, not shared
 .mcp.json

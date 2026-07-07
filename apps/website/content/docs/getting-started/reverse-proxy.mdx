@@ -1,0 +1,79 @@
+---
+title: Reverse Proxy Setup
+description: Configure nginx or Caddy to serve Fabricator securely behind a reverse proxy.
+---
+
+Fabricator includes a built-in operator login, but it still serves plain HTTP by itself. Use a reverse proxy for HTTPS, hostname routing, and any additional access controls such as SSO, basic auth, IP allowlists, VPN-only access, or rate limiting.
+
+## Recommended binding
+
+Keep Fabricator on loopback when the proxy runs on the same host.
+
+Native install:
+
+```ini
+HOST=127.0.0.1
+PORT=5000
+FABRICATOR_SESSION_COOKIE_SECURE=1
+```
+
+Then restart:
+
+```bash
+sudo systemctl restart fabricator
+```
+
+Docker compose already uses a loopback-only host mapping by default:
+
+```yaml
+ports:
+  - "127.0.0.1:5000:5000"
+```
+
+Keep `HOST=0.0.0.0` inside the container; the host-side mapping is what restricts exposure.
+
+## nginx example
+
+```nginx
+server {
+    listen 80;
+    server_name fabricator.example.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+```
+
+Add TLS with Certbot, your platform's certificate automation, or a provider such as Cloudflare.
+
+## Caddy example
+
+```text
+fabricator.example.com {
+    reverse_proxy 127.0.0.1:5000
+}
+```
+
+Caddy automatically provisions TLS when DNS points to the host.
+
+## Authentication and cookies
+
+- Complete Fabricator's first-boot setup before exposing the hostname to untrusted clients, or preconfigure `FABRICATOR_AUTH_PASSWORD_HASH`.
+- Set `FABRICATOR_SESSION_COOKIE_SECURE=1` when the public URL is HTTPS so browsers only send the session cookie over TLS.
+- If your reverse proxy provides its own authentication, you may disable Fabricator's built-in login with `FABRICATOR_DISABLE_AUTH=1`, but only behind that trusted layer.
+
+## Security checklist
+
+- Restrict dashboard access with VPN, SSO, basic auth, IP allowlists, or firewall rules when possible.
+- Use HTTPS for remote browser access.
+- Do not set `CORS_ORIGINS=*`; Fabricator rejects it.
+- Keep the Minecraft server port separate from the Fabricator dashboard port.
+- Review `/etc/sudoers.d/fabricator-self-update` on native installs; it should only allow the bundled update wrapper.

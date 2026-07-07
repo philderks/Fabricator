@@ -1,0 +1,69 @@
+---
+title: Running from Source
+description: Set up a local development environment to run Fabricator from source.
+---
+
+Use this for contributing to the main Fabricator app, not for running the docs site.
+
+## Backend setup
+
+```bash
+git clone https://github.com/philderks/Fabricator.git
+cd Fabricator
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+Run the Flask app:
+
+```bash
+python3 run.py
+```
+
+Development defaults bind to `127.0.0.1:5000` and store data in the platform app-data directory. Use `.env.example` as a starting point for local overrides.
+
+## Frontend setup
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The frontend is Vue 3 + Vite. Production releases serve the built frontend through Flask, but local development can run Vite separately.
+
+## Build frontend
+
+```bash
+cd frontend
+npm run build
+```
+
+The build output goes to `frontend/dist` and is served by the backend in production-like mode.
+
+## Tests
+
+Run backend tests from the repository root:
+
+```bash
+pytest
+```
+
+The test suite covers app factory behavior, storage, routes, installers, Java compatibility, Modrinth integration, backup/restore behavior, player management, and runtime status contracts.
+
+## Useful source locations
+
+| Path | Purpose |
+| --- | --- |
+| `backend/core/app.py` | Flask app factory and blueprint registration. |
+| `backend/core/config.py` | Environment-driven config object. |
+| `backend/server/routes.py` | Main server, files, mods, Java, metrics, loader, console routes. |
+| `backend/server/installer/` | Loader-specific server installers. |
+| `backend/modrinth/` | Modrinth API client and routes. |
+| `backend/backups/` | Backup configs, storage, scheduler, progress, restore. |
+| `backend/server/players/` | Player files, live commands, and player routes. |
+| `frontend/src/router/index.js` | Dashboard route map. |
+| `frontend/src/stores/` | Pinia state stores. |
+| `tools/install.sh` | Release installer. |
+| `tools/cli.py` | `fabricator` CLI. |

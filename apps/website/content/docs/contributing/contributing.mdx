@@ -1,0 +1,40 @@
+---
+title: Contributing Guide
+description: How to contribute changes to Fabricator.
+---
+
+## Before changing code
+
+1. Read the [Architecture](/contributing/architecture/) overview.
+2. Set up the app with [Running from Source](/contributing/dev-setup/).
+3. Check existing tests under `tests/` for the area you plan to modify.
+
+## Development loop
+
+```bash
+# backend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+pytest
+
+# frontend
+cd frontend
+npm install
+npm run build
+```
+
+## Documentation changes
+
+When backend routes, config variables, installer behavior, CLI commands, or user workflows change, update this docs site in the same change set.
+
+## Commit style
+
+Use focused conventional commits, for example:
+
+```text
+feat: add quilt installer
+fix: preserve installing status during runtime polling
+docs: update Java management guide
+test: cover modpack dependency classification
+```

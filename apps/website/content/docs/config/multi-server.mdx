@@ -1,0 +1,55 @@
+---
+title: Multi-Server Setup
+description: Run and manage multiple Minecraft servers from a single Fabricator instance.
+---
+
+Fabricator is designed around multiple server records stored in one server index. Each record has its own install path, port, loader, Minecraft version, memory setting, Java metadata, and `server.properties` values.
+
+## Create separate server directories
+
+In production, server data defaults to `/var/lib/fabricator/servers`. Use one directory per server:
+
+```text
+/var/lib/fabricator/servers/
+├── survival/
+├── creative/
+└── modded-pack/
+```
+
+Relative install paths are resolved inside `SERVER_ROOT`. Absolute paths are accepted only when they still resolve inside `SERVER_ROOT`.
+
+## Avoid port conflicts
+
+Every server needs a unique Minecraft port. Fabricator validates the `port` field when creating a server and rejects duplicates in the server index.
+
+Common pattern:
+
+| Server | Port |
+| --- | --- |
+| Main survival | `25565` |
+| Creative | `25566` |
+| Modpack testing | `25567` |
+
+If you enable query or RCON, keep those ports unique too.
+
+## Switching servers
+
+After selecting a server, the sidebar switcher changes the active context. Every server-scoped page uses the `server_id` from the route:
+
+```text
+/server/<server_id>/overview
+/server/<server_id>/console
+/server/<server_id>/players
+/server/<server_id>/mods
+/server/<server_id>/files
+/server/<server_id>/backups
+/server/<server_id>/settings
+```
+
+## Concurrent operations
+
+Fabricator uses per-server locks, so one busy server does not block unrelated servers. For the same server, mutating operations such as install, start, stop, settings save, file write, player mutation, backup, and restore are serialized.
+
+## Resource planning
+
+Fabricator itself is lightweight. Your host capacity is determined by the Minecraft processes you run. Plan CPU, RAM, and disk for the combined peak of all servers, worlds, backups, and Java runtimes.

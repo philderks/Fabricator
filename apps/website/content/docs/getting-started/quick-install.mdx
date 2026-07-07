@@ -1,0 +1,29 @@
+---
+title: Quick Install
+description: The shortest path from a fresh Linux host to a running Fabricator dashboard.
+---
+
+## Install
+
+```bash
+curl -fsSL https://fabricator.site/install.sh | bash
+```
+
+Open the URL printed by the installer, usually:
+
+```text
+http://<host-ip>:5000/
+```
+
+## After install
+
+```bash
+fabricator status
+sudo journalctl -u fabricator -f
+```
+
+## Next steps
+
+- Read the full [Installation](/getting-started/installation/) guide for what the installer changes.
+- Review [Requirements](/getting-started/requirements/) for supported distros and Java behavior.
+- Configure a [Reverse Proxy](/getting-started/reverse-proxy/) before exposing the dashboard broadly.

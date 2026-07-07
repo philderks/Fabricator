@@ -1,0 +1,19 @@
+---
+title: Reporting Bugs
+description: What information to include when reporting Fabricator issues.
+---
+
+Open issues at [github.com/philderks/Fabricator](https://github.com/philderks/Fabricator/issues).
+
+Include:
+
+- Fabricator version: `fabricator version`
+- Service status: `fabricator status`
+- Host OS and distro version.
+- Install method and whether this is a fresh install or update.
+- Relevant service logs: `sudo journalctl -u fabricator -n 200`
+- Browser console errors for dashboard issues.
+- Server loader, Minecraft version, and Java requirement/status for server start issues.
+- Exact steps to reproduce and what you expected to happen.
+
+Avoid posting secrets from `/etc/fabricator/fabricator.env`, reverse proxy config, or server files.
