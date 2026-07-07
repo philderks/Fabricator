@@ -1,14 +1,16 @@
-import { createFileRoute } from '@tanstack/react-router';
-import { LegalMdxPage, MarketingLayout } from '@/components/marketing';
-import ImpressumContent from '@/content/legal/impressum.mdx';
+import { createFileRoute } from "@tanstack/react-router";
+import { LegalMdxLayout } from "@/components/marketing/layouts/legal-mdx-layout";
+import { MarketingLayout } from "@/components/marketing/layouts/marketing-layout";
+import ImpressumContent from "@/content/legal/impressum.mdx";
 
-export const Route = createFileRoute('/impressum')({
+export const Route = createFileRoute("/impressum")({
   head: () => ({
     meta: [
-      { title: 'Legal Notice | Fabricator' },
+      { title: "Legal Notice | Fabricator" },
       {
-        name: 'description',
-        content: 'Legal notice and operator information for the Fabricator website.',
+        name: "description",
+        content:
+          "Legal notice and operator information for the Fabricator website.",
       },
     ],
   }),
@@ -18,13 +20,13 @@ export const Route = createFileRoute('/impressum')({
 function Impressum() {
   return (
     <MarketingLayout active="impressum" legal>
-      <LegalMdxPage
+      <LegalMdxLayout
         eyebrow="Legal"
         title="Legal Notice"
         intro="Information about the operator of fabricator.site."
       >
         <ImpressumContent />
-      </LegalMdxPage>
+      </LegalMdxLayout>
     </MarketingLayout>
   );
 }
