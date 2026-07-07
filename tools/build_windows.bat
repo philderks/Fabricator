@@ -21,7 +21,7 @@ if errorlevel 1 goto :error
 
 echo.
 echo [3/6] Installing frontend dependencies...
-pushd frontend
+pushd apps\frontend
 call npm install
 if errorlevel 1 (
     popd

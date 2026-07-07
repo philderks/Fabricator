@@ -7,13 +7,13 @@ def main() -> None:
     project_root = Path(__file__).resolve().parent.parent
     spec_path = project_root / "fabricator.spec"
 
-    # Data files to bundle: frontend/dist (must exist after npm run build)
+    # Data files to bundle: apps/frontend/dist (must exist after npm run build)
     datas = []
-    frontend_dist = project_root / "frontend" / "dist"
+    frontend_dist = project_root / "apps" / "frontend" / "dist"
     if frontend_dist.exists():
         datas.append((str(frontend_dist), "frontend/dist"))
     else:
-        print("WARNING: frontend/dist not found. Run 'npm run build' in frontend/ first.")
+        print("WARNING: apps/frontend/dist not found. Run 'npm run build' in apps/frontend/ first.")
 
     # Optional assets folder for tray icon
     assets_dir = project_root / "assets"
@@ -38,7 +38,9 @@ block_cipher = None
 
 a = Analysis(
     ['run.py'],
-    pathex=[],
+    pathex=[
+        {str(project_root / "apps")!r},
+    ],
     binaries=[],
     datas=[
     {datas_str}

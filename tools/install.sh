@@ -321,19 +321,19 @@ main() {
       # release. Use this to test unreleased branches end-to-end:
       #   sudo FABRICATOR_LOCAL_SRC=/path/to/checkout bash tools/install.sh --update
       # NOTE: the prebuilt frontend/dist is copied as-is — run `npm run build`
-      # in frontend/ first if you changed any frontend code.
+      # in apps/frontend/ first if you changed any frontend code.
       local_src="$(cd "$FABRICATOR_LOCAL_SRC" && pwd)"
       info "Local source mode: staging from $local_src (skipping release download)"
       mkdir -p "$APP_SRC_DIR/frontend" "$APP_SRC_DIR/apps"
-      rsync -a --exclude='__pycache__/' --exclude='*.pyc' "$local_src/backend/" "$APP_SRC_DIR/backend/"
+      rsync -a --exclude='__pycache__/' --exclude='*.pyc' "$local_src/apps/backend/" "$APP_SRC_DIR/backend/"
       rsync -a --exclude='__pycache__/' --exclude='*.pyc' "$local_src/apps/cli/" "$APP_SRC_DIR/apps/cli/"
       rsync -a --exclude='__pycache__/' --exclude='*.pyc' "$local_src/tools/" "$APP_SRC_DIR/tools/"
       cp "$local_src/run.py" "$local_src/requirements.txt" "$local_src/pyproject.toml" "$APP_SRC_DIR/"
-      if [[ -d "$local_src/frontend/dist" ]]; then
-        cp -r "$local_src/frontend/dist" "$APP_SRC_DIR/frontend/dist"
+      if [[ -d "$local_src/apps/frontend/dist" ]]; then
+        cp -r "$local_src/apps/frontend/dist" "$APP_SRC_DIR/frontend/dist"
       else
-        warn "frontend/dist not found in local source; the UI will not be served."
-        warn "Run 'npm ci && npm run build' in frontend/ to build it."
+        warn "apps/frontend/dist not found in local source; the UI will not be served."
+        warn "Run 'npm ci && npm run build' in apps/frontend/ to build it."
       fi
       TAG="$(git -C "$local_src" describe --tags --always --dirty 2>/dev/null || echo dev-local)"
       info "Local source version marker: $TAG"

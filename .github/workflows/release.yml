@@ -10,80 +10,38 @@ permissions:
   contents: write
 
 jobs:
-  check:
+  metadata:
+    name: Release metadata
     runs-on: ubuntu-latest
     outputs:
       is_prerelease: ${{ steps.detect.outputs.is_prerelease }}
+      started_at: ${{ steps.detect.outputs.started_at }}
+      start_epoch: ${{ steps.detect.outputs.start_epoch }}
+      version: ${{ steps.detect.outputs.version }}
     steps:
-      - name: Detect pre-release tag
+      - name: Detect release metadata
         id: detect
+        shell: bash
         run: |
-          if [[ "${{ github.event.release.tag_name }}" =~ -[a-zA-Z] ]]; then
-            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+          # .fabricator_version marker written into packaged releases.
+          VERSION="${{ github.event.release.tag_name }}"
+          START_EPOCH="$(date +%s)"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "start_epoch=${START_EPOCH}" >> "$GITHUB_OUTPUT"
+          echo "started_at=$(date -u -d "@${START_EPOCH}" '+%Y-%m-%d %H:%M:%S UTC')" >> "$GITHUB_OUTPUT"
+
+          # Preserve the previous behavior: tags with a hyphenated suffix
+          # such as v1.2.3-beta.1 are treated as prereleases.
+          if [[ "$VERSION" =~ -[a-zA-Z] ]]; then
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
           else
-            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
           fi
 
-  build-linux:
+  test-python:
+    name: Python tests
     runs-on: ubuntu-latest
-    needs: check
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Build frontend
-        working-directory: frontend
-        run: |
-          npm ci
-          npm run build
-
-      - name: Assemble tarball
-        run: |
-          VERSION="${{ github.event.release.tag_name }}"
-          STAGING="staging/fabricator"
-
-          mkdir -p "$STAGING/frontend" "$STAGING/apps"
-
-          # Backend
-          rsync -a --exclude='__pycache__/' --exclude='*.pyc' \
-            backend/ "$STAGING/backend/"
-
-          # Root entrypoint + deps
-          cp run.py requirements.txt pyproject.toml "$STAGING/"
-
-          # CLI + installer
-          rsync -a --exclude='__pycache__/' --exclude='*.pyc' \
-            apps/cli/ "$STAGING/apps/cli/"
-          rsync -a --exclude='__pycache__/' --exclude='*.pyc' \
-            tools/ "$STAGING/tools/"
-
-          # Pre-built frontend
-          cp -r frontend/dist "$STAGING/frontend/dist"
-
-          # Version marker
-          echo "$VERSION" > "$STAGING/.fabricator_version"
-
-          tar -czf "fabricator-${VERSION}.tar.gz" -C staging fabricator
-
-      - name: Upload release asset
-        uses: softprops/action-gh-release@v2
-        with:
-          files: fabricator-${{ github.event.release.tag_name }}.tar.gz
-          fail_on_unmatched_files: true
-          prerelease: ${{ needs.check.outputs.is_prerelease }}
-
-  build-windows:
-    runs-on: windows-latest
-    needs: check
-
+    needs: metadata
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -92,30 +50,136 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
+          cache: pip
+          # Cache the complete repo Python environment. requirements.txt is
+          # intentionally root-level because it describes the dev/release env.
+          cache-dependency-path: requirements.txt
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -e .
+
+      - name: Run Python tests
+        run: python -m pytest
+
+  build-frontend:
+    name: Build frontend
+    runs-on: ubuntu-latest
+    needs: metadata
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
+          cache: npm
+          cache-dependency-path: apps/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: apps/frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: apps/frontend
+        run: npm run build
+
+      - name: Upload frontend dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: apps/frontend/dist
+          if-no-files-found: error
+
+  build-linux:
+    name: Build Linux release tarball
+    runs-on: ubuntu-latest
+    needs:
+      - metadata
+      - test-python
+      - build-frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download frontend dist
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: staging/frontend-dist
+
+      - name: Assemble tarball
+        shell: bash
+        run: |
+          VERSION="${{ needs.metadata.outputs.version }}"
+          STAGING="staging/fabricator"
+
+          mkdir -p "$STAGING/frontend" "$STAGING/apps"
+
+          # Installed payload keeps the runtime layout flat so run.py can import
+          # backend directly and serve frontend/dist exactly as production does.
+          rsync -a --exclude='__pycache__/' --exclude='*.pyc' \
+            apps/backend/ "$STAGING/backend/"
+          cp -r staging/frontend-dist "$STAGING/frontend/dist"
+
+          # Root process runner + complete Python environment metadata. The
+          # installed systemd service still executes $APP_DIR/run.py.
+          cp run.py requirements.txt pyproject.toml "$STAGING/"
+
+          # CLI package and privileged installer/update scripts are separate:
+          # apps/cli provides the `fabricator` command, tools/ contains systemd
+          # install/update/uninstall scripts used by native installs.
+          rsync -a --exclude='__pycache__/' --exclude='*.pyc' \
+            apps/cli/ "$STAGING/apps/cli/"
+          rsync -a --exclude='__pycache__/' --exclude='*.pyc' \
+            tools/ "$STAGING/tools/"
+
+          # Backend and CLI both read this marker to report the installed version.
+          echo "$VERSION" > "$STAGING/.fabricator_version"
+
+          tar -czf "fabricator-${VERSION}.tar.gz" -C staging fabricator
+
+      - name: Upload Linux release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: fabricator-${{ needs.metadata.outputs.version }}.tar.gz
+          fail_on_unmatched_files: true
+          prerelease: ${{ needs.metadata.outputs.is_prerelease }}
+
+  build-windows:
+    name: Build Windows executable
+    runs-on: windows-latest
+    needs:
+      - metadata
+      - test-python
+      - build-frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download frontend dist
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: apps/frontend/dist
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements.txt
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller
-
-      - name: Build frontend
-        working-directory: frontend
-        run: |
-          npm ci
-          npm run build
+          python -m pip install -r requirements.txt
 
       - name: Write version marker
         shell: bash
-        run: echo "${{ github.event.release.tag_name }}" > .fabricator_version
+        run: echo "${{ needs.metadata.outputs.version }}" > .fabricator_version
 
       - name: Generate PyInstaller spec
         run: python tools/generate_spec.py
@@ -126,31 +190,35 @@ jobs:
       - name: Rename artifact
         shell: bash
         run: |
-          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${{ needs.metadata.outputs.version }}"
           mv dist/Fabricator.exe "dist/Fabricator-${VERSION}.exe"
 
-      - name: Upload release asset
+      - name: Upload Windows release asset
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/Fabricator-${{ github.event.release.tag_name }}.exe
+          files: dist/Fabricator-${{ needs.metadata.outputs.version }}.exe
           fail_on_unmatched_files: true
-          prerelease: ${{ needs.check.outputs.is_prerelease }}
+          prerelease: ${{ needs.metadata.outputs.is_prerelease }}
 
   build-docker:
+    name: Build and push Docker image
     runs-on: ubuntu-latest
-    needs: check
+    needs:
+      - metadata
+      - test-python
     permissions:
       contents: read
       packages: write
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up QEMU            # emulation for the linux/arm64 runtime stage
+      - name: Set up QEMU
+        # Required for building the linux/arm64 image on GitHub's amd64 runners.
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Buildx
+        # Buildx enables multi-platform builds and GitHub Actions layer caching.
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
@@ -160,7 +228,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Derive tags + labels
+      - name: Derive tags and labels
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -176,16 +244,82 @@ jobs:
           # Fine for the normal forward-release flow; revisit if back-publishing
           # becomes routine.
 
-      - name: Build & push
+      - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64   # drop arm64 for amd64-only builds
+          platforms: linux/amd64,linux/arm64
           push: true
           build-args: |
-            VERSION=${{ github.event.release.tag_name }}
+            VERSION=${{ needs.metadata.outputs.version }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Cache Docker layers across releases. The first multi-arch build is
+          # still expensive; subsequent builds reuse npm/pip/runtime layers when
+          # their inputs are unchanged.
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  summarize:
+    name: Release summary
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - metadata
+      - test-python
+      - build-frontend
+      - build-linux
+      - build-windows
+      - build-docker
+    steps:
+      - name: Write release summary
+        shell: bash
+        run: |
+          VERSION="${{ needs.metadata.outputs.version }}"
+          START_EPOCH="${{ needs.metadata.outputs.start_epoch }}"
+          if [ -z "$VERSION" ]; then
+            VERSION="${{ github.event.release.tag_name }}"
+          fi
+          END_EPOCH="$(date +%s)"
+          if [ -n "$START_EPOCH" ]; then
+            DURATION_SECONDS=$((END_EPOCH - START_EPOCH))
+          else
+            DURATION_SECONDS=0
+          fi
+          DURATION_MINUTES=$((DURATION_SECONDS / 60))
+          DURATION_REMAINDER=$((DURATION_SECONDS % 60))
+
+          RELEASE_URL="${{ github.server_url }}/${{ github.repository }}/releases/tag/${VERSION}"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          PACKAGE_URL="${{ github.server_url }}/${{ github.repository }}/pkgs/container/fabricator"
+          IMAGE="ghcr.io/philderks/fabricator:${VERSION#v}"
+          MAJOR_MINOR="$(printf '%s' "${VERSION#v}" | awk -F. '{print $1 "." $2}')"
+
+          {
+            echo "# Fabricator release ${VERSION}"
+            echo
+            echo "- Release: [${VERSION}](${RELEASE_URL})"
+            echo "- Workflow run: [${{ github.run_id }}](${RUN_URL})"
+            echo "- Started: ${{ needs.metadata.outputs.started_at }}"
+            echo "- Duration: ${DURATION_MINUTES}m ${DURATION_REMAINDER}s"
+            echo "- Prerelease: ${{ needs.metadata.outputs.is_prerelease }}"
+            echo
+            echo "## Job results"
+            echo
+            echo "| Job | Result |"
+            echo "| --- | --- |"
+            echo "| Python tests | ${{ needs.test-python.result }} |"
+            echo "| Frontend build | ${{ needs.build-frontend.result }} |"
+            echo "| Linux tarball | ${{ needs.build-linux.result }} |"
+            echo "| Windows executable | ${{ needs.build-windows.result }} |"
+            echo "| Docker image | ${{ needs.build-docker.result }} |"
+            echo
+            echo "## Release outputs"
+            echo
+            echo "- Linux asset: \`fabricator-${VERSION}.tar.gz\`"
+            echo "- Windows asset: \`Fabricator-${VERSION}.exe\`"
+            echo "- Docker image: \`${IMAGE}\`"
+            echo "- Docker minor tag: \`ghcr.io/philderks/fabricator:${MAJOR_MINOR}\`"
+            echo "- Container package: [ghcr.io/philderks/fabricator](${PACKAGE_URL})"
+          } >> "$GITHUB_STEP_SUMMARY"
