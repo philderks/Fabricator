@@ -1,0 +1,9 @@
+{
+  "title": "Contributing",
+  "pages": [
+    "architecture",
+    "dev-setup",
+    "../contributors",
+    "contributing"
+  ]
+}

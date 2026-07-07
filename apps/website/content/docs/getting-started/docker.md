@@ -46,7 +46,7 @@ Then set the generated value as `FABRICATOR_AUTH_PASSWORD_HASH` in `docker-compo
 
 The compose file intentionally does **not** publish Minecraft server ports. For each server, either:
 
-- use the built-in [playit.gg tunnel guide](/guides/playit/) to expose Minecraft without router port-forwarding, or
+- use the built-in [playit.gg tunnel guide](/docs/guides/playit/) to expose Minecraft without router port-forwarding, or
 - map the server port explicitly, for example `25565:25565`.
 
 Keep `HOST=0.0.0.0` inside the container. Restrict exposure with the host-side port mapping, firewall, VPN, or reverse proxy instead.

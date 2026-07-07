@@ -16,9 +16,9 @@ The packaged compose file publishes the dashboard to host loopback only (`127.0.
 
 Open `http://127.0.0.1:5000/` and complete the first-boot password setup. To reach the dashboard from another machine, put a reverse proxy/VPN/firewall in front of the loopback port or deliberately change the compose port mapping. Keep `HOST=0.0.0.0` inside the container; restrict exposure on the host side.
 
-Minecraft server ports are not published by default. Use [playit.gg tunnels](/guides/playit/) or map each server port explicitly, for example `25565:25565`.
+Minecraft server ports are not published by default. Use [playit.gg tunnels](/docs/guides/playit/) or map each server port explicitly, for example `25565:25565`.
 
-For details, see [Docker](/getting-started/docker/).
+For details, see [Docker](/docs/getting-started/docker/).
 
 ## Native Linux install
 
@@ -131,7 +131,7 @@ SERVER_ROOT=/var/lib/fabricator/servers
 SERVER_INDEX_FILE=/var/lib/fabricator/servers.json
 ```
 
-Open `http://<host-ip>:5000/`, complete [Authentication](/getting-started/authentication/), then place Fabricator behind a reverse proxy before exposing it broadly.
+Open `http://<host-ip>:5000/`, complete [Authentication](/docs/getting-started/authentication/), then place Fabricator behind a reverse proxy before exposing it broadly.
 
 ## Uninstall
 

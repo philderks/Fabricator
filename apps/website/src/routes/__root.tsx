@@ -15,22 +15,29 @@ export const Route = createRootRoute({
         content: 'width=device-width, initial-scale=1',
       },
       {
-        title: 'Fumadocs on TanStack Start',
+        title: 'Fabricator Docs',
+      },
+      {
+        name: 'description',
+        content: 'Self-hosted Minecraft server management dashboard documentation.',
       },
     ],
-    links: [{ rel: 'stylesheet', href: appCss }],
+    links: [
+      { rel: 'stylesheet', href: appCss },
+      { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' },
+    ],
   }),
   component: RootComponent,
 });
 
 function RootComponent() {
   return (
-    <html suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning>
       <head>
         <HeadContent />
       </head>
       <body className="flex flex-col min-h-screen">
-        <RootProvider search={{ SearchDialog }}>
+        <RootProvider search={{ SearchDialog }} theme={{ defaultTheme: 'dark', enableSystem: true }}>
           <Outlet />
         </RootProvider>
         <Scripts />

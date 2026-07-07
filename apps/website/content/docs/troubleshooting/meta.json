@@ -1,0 +1,8 @@
+{
+  "title": "Troubleshooting",
+  "pages": [
+    "common-errors",
+    "logs",
+    "reporting-bugs"
+  ]
+}

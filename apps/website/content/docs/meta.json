@@ -1,0 +1,12 @@
+{
+  "title": "Fabricator",
+  "pages": [
+    "index",
+    "getting-started",
+    "guides",
+    "config",
+    "reference",
+    "troubleshooting",
+    "contributing"
+  ]
+}

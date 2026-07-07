@@ -1,12 +1,103 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Syne:wght@500..700&display=swap');
 @import 'tailwindcss';
 @import 'fumadocs-ui/css/neutral.css';
 @import 'fumadocs-ui/css/preset.css';
+
+:root {
+  --fd-layout-width: 1400px;
+  --font-fabricator-display: 'Syne', ui-sans-serif, system-ui, sans-serif;
+  --font-fabricator-mono: 'IBM Plex Mono', 'SF Mono', Menlo, Consolas, monospace;
+
+  --color-fd-background: #fafafa;
+  --color-fd-foreground: #171717;
+  --color-fd-muted: #f4f4f5;
+  --color-fd-muted-foreground: #52525b;
+  --color-fd-popover: #ffffff;
+  --color-fd-popover-foreground: #18181b;
+  --color-fd-card: #ffffff;
+  --color-fd-card-foreground: #171717;
+  --color-fd-border: color-mix(in oklab, #d4d4d8 82%, transparent);
+  --color-fd-primary: #ea580c;
+  --color-fd-primary-foreground: #fff7ed;
+  --color-fd-secondary: #f4f4f5;
+  --color-fd-secondary-foreground: #18181b;
+  --color-fd-accent: #ffedd5;
+  --color-fd-accent-foreground: #9a3412;
+  --color-fd-ring: #f97316;
+  --color-fd-info: #2563eb;
+  --color-fd-warning: #f59e0b;
+  --color-fd-error: #ef4444;
+  --color-fd-success: #16a34a;
+}
+
+.dark {
+  --color-fd-background: #0f0f0f;
+  --color-fd-foreground: #f1f1f1;
+  --color-fd-muted: #171717;
+  --color-fd-muted-foreground: #a1a1aa;
+  --color-fd-popover: #141414;
+  --color-fd-popover-foreground: #f4f4f5;
+  --color-fd-card: #141414;
+  --color-fd-card-foreground: #f4f4f5;
+  --color-fd-border: color-mix(in oklab, #3f3f46 52%, transparent);
+  --color-fd-primary: #f97316;
+  --color-fd-primary-foreground: #1c1917;
+  --color-fd-secondary: #1f1f1f;
+  --color-fd-secondary-foreground: #f4f4f5;
+  --color-fd-accent: color-mix(in oklab, #f97316 16%, #1a1a1a);
+  --color-fd-accent-foreground: #fed7aa;
+  --color-fd-ring: #fb923c;
+  --color-fd-info: #60a5fa;
+  --color-fd-warning: #fbbf24;
+  --color-fd-error: #f87171;
+  --color-fd-success: #22c55e;
+}
 
 html {
   scrollbar-gutter: stable;
 }
 
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-fabricator-display);
+  letter-spacing: 0;
+}
+
+code,
+pre,
+kbd,
+samp {
+  font-family: var(--font-fabricator-mono);
+}
+
 html > body[data-scroll-locked] {
   margin-right: 0px !important;
   --removed-body-scroll-bar-size: 0px !important;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-fd-background);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-fd-border);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-fd-primary);
 }

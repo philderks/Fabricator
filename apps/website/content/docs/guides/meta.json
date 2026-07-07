@@ -1,0 +1,15 @@
+{
+  "title": "Guides",
+  "defaultOpen": true,
+  "pages": [
+    "dashboard-overview",
+    "console",
+    "players",
+    "managing-mods",
+    "files",
+    "backups",
+    "playit",
+    "server-settings",
+    "updating"
+  ]
+}

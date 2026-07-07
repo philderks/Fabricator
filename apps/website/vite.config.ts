@@ -4,6 +4,14 @@ import { defineConfig } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 import mdx from 'fumadocs-mdx/vite';
 import { nitro } from 'nitro/vite';
+import { fileURLToPath } from 'node:url';
+
+const syncExternalStoreShim = fileURLToPath(
+  new URL('./src/shims/use-sync-external-store-shim.ts', import.meta.url),
+);
+const syncExternalStoreSelectorShim = fileURLToPath(
+  new URL('./src/shims/use-sync-external-store-with-selector.ts', import.meta.url),
+);
 
 export default defineConfig({
   server: {
@@ -42,8 +50,15 @@ export default defineConfig({
   ],
   resolve: {
     tsconfigPaths: true,
-    alias: {
-      tslib: 'tslib/tslib.es6.js',
-    },
+    alias: [
+      {
+        find: /^use-sync-external-store\/shim$/,
+        replacement: syncExternalStoreShim,
+      },
+      {
+        find: /^use-sync-external-store\/shim\/with-selector$/,
+        replacement: syncExternalStoreSelectorShim,
+      },
+    ],
   },
 });

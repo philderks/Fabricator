@@ -59,7 +59,7 @@ docker compose up -d
 
 ## Authentication state
 
-`auth.json` lives next to `servers.json`: `/var/lib/fabricator/auth.json` on native installs and `/data/auth.json` in Docker. It stores the generated session key and hashed operator password when those values are not env-managed. See [Authentication](/getting-started/authentication/) for setup, reset, and disabling guidance.
+`auth.json` lives next to `servers.json`: `/var/lib/fabricator/auth.json` on native installs and `/data/auth.json` in Docker. It stores the generated session key and hashed operator password when those values are not env-managed. See [Authentication](/docs/getting-started/authentication/) for setup, reset, and disabling guidance.
 
 ## CORS allowlist
 
@@ -81,7 +81,7 @@ The native installer creates `/var/lib/fabricator/playit` for the `fabricator` s
 
 The runtime directory stores the account secret, daemon socket, PID file, log file, and dashboard-persisted enabled state. Treat it as sensitive because the saved secret can authenticate the playit agent.
 
-Use the [playit.gg tunnels guide](/guides/playit/) for dashboard setup and tunnel troubleshooting.
+Use the [playit.gg tunnels guide](/docs/guides/playit/) for dashboard setup and tunnel troubleshooting.
 
 ## Server root safety
 
@@ -89,4 +89,4 @@ Server install paths are resolved inside `SERVER_ROOT`. Relative install paths a
 
 ## Per-server settings
 
-Most game options are persisted in Fabricator's server index and written into the instance's `server.properties`. Settings are editable only while the server is stopped. See [Server settings](/guides/server-settings/) for the UI behavior and field groups.
+Most game options are persisted in Fabricator's server index and written into the instance's `server.properties`. Settings are editable only while the server is stopped. See [Server settings](/docs/guides/server-settings/) for the UI behavior and field groups.

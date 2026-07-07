@@ -1,0 +1,13 @@
+{
+  "title": "Getting Started",
+  "defaultOpen": true,
+  "pages": [
+    "introduction",
+    "installation",
+    "docker",
+    "authentication",
+    "requirements",
+    "reverse-proxy",
+    "quick-install"
+  ]
+}
