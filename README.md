@@ -24,21 +24,31 @@
 
 ---
 
-## Features
+## Features & Roadmap
 
 | | Feature | Status |
 |---|---|---|
-| 🧩 | **Loaders** — Fabric (modded) and Vanilla | ✅ Available |
-| 📦 | **Mod Management** — install, remove, and browse Fabric mods | ✅ Available |
-| 📋 | **Logs & Monitoring** — live log stream, TPS and RAM graphs | ✅ Available |
-| 💾 | **Backups & Restore** — manual snapshots, restore from any backup | ✅ Available |
-| 🌍 | **World Import** — upload a world archive and swap it in | ✅ Available |
-| 🖥️ | **Multiple Servers** — manage several instances from one dashboard | ✅ Available |
-| ▶️ | **Auto-start** — configure servers to start always, never, or on last-state restore | ✅ Available |
-| 🐳 | **Docker** — single multi-arch (amd64/arm64) image, runs as a non-root user | ✅ Available |
-| ⬆️ | **Fabricator self-update** — checks GitHub Releases; update from the sidebar or reinstall script | ✅ Available |
-| ⌨️ | **CLI** (`fabricator` command) — `status`, `start`/`stop`, `update`, `version`, `uninstall` | ✅ Available |
-| 🔄 | **One-click Minecraft / Fabric server updates** | 🔧 Coming soon |
+| 🧩 | **Loaders**: Fabric, Quilt, NeoForge, Forge, Vanilla | ✅ Available |
+| 📦 | **Mod management**: install, remove, and browse Modrinth mods | ✅ Available |
+| 📋 | **Logs & monitoring**: live log stream, TPS and RAM graphs | ✅ Available |
+| 👥 | **Player management**: online players, player heads, custom actions | ✅ Available |
+| 💾 | **Backups & restore**: manual snapshots, restore from any backup | ✅ Available |
+| 🌍 | **World import**: upload a world archive and swap it in | ✅ Available |
+| 🖥️ | **Multiple servers**: manage several instances from one dashboard | ✅ Available |
+| ▶️ | **Auto-start**: always, never, or last-state restore | ✅ Available |
+| ☕ | **Managed Java runtimes**: downloaded and pinned per server | ✅ Available |
+| 🌐 | **playit.gg tunnels**: public access without port forwarding | ✅ Available |
+| 🐳 | **Docker**: single multi-arch (amd64/arm64) image, runs non-root | ✅ Available |
+| ⌨️ | **CLI** (`fabricator`): `status`, `start`/`stop`, `update`, `version`, `uninstall` | ✅ Available |
+| ⬆️ | **Self-update**: from the web UI, or via the CLI or install script | ✅ Available |
+| ⌨️ | **CLI**: expanded server and mod management commands | 📋 Planned |
+| ⏰ | **Scheduled commands** | 📋 Planned |
+| 🔌 | **Paper, Purpur, etc.** with plugin support | 📋 Planned |
+| 🔄 | **One-click Minecraft / Fabric server upgrades** | 📋 Planned |
+| 📊 | **Metrics tab**: CPU, RAM, and usage over time | 📋 Planned |
+| 🔐 | **User roles and permissions** | 📋 Planned |
+| ✏️ | **Editor & files**: better text editor, file search, view archived logs | 📋 Planned |
+| 📥 | **More install targets**: Proxmox VE, CasaOS, Umbrel, Unraid, Coolify/Dokploy | 📋 Planned |
 
 ---
 
@@ -80,10 +90,16 @@ curl -fsSL https://fabricator.site/install.sh | bash
 
 By default this installs the **latest** published release.
 
-**Updating** an existing install (backs up `servers.json` and `fabricator.env`, replaces app files, keeps data under `/var/lib/fabricator`):
+**Updating.** The easiest way is from the panel itself: Fabricator checks GitHub Releases and you can update from the sidebar. You can also re-run the installer, which detects an existing install and updates in place (backing up `servers.json` and `fabricator.env`, keeping your data under `/var/lib/fabricator`):
 
 ```bash
-curl -fsSL https://fabricator.site/install.sh | bash -s -- --update
+curl -fsSL https://fabricator.site/install.sh | bash
+```
+
+Or update from the CLI:
+
+```bash
+fabricator update
 ```
 
 After install, open `http://<host>:5000` (the default packaged config binds to all interfaces — use a firewall or reverse proxy if the host is reachable from untrusted networks).
@@ -123,9 +139,9 @@ Environment variables are documented in `.env.example`. For production-like path
 
 | | Requirement |
 |---|---|
-| Docker | Any OS with Docker Engine / Docker Desktop (recommended path) |
-| OS | Linux — Debian/Ubuntu, Arch, or Fedora/RHEL (systemd) for the native installer |
-| Python | 3.10+ (manual/native install) |
+| Docker | Any OS with Docker Engine or Docker Desktop (recommended path) |
+| OS | Linux (Debian/Ubuntu, Arch, or Fedora/RHEL, systemd) for the native installer |
+| Python | 3.11+ (manual/native install) |
 | Node.js | 20.x (frontend build only) |
 
 > The native installer targets Linux. On macOS and Windows, run Fabricator via Docker.
@@ -245,31 +261,9 @@ The read commands (`status`, `version`, `help`) accept `--json` for scripting. T
 
 ---
 
-## Roadmap
-
-| Status | Feature |
-|---|---|
-| ✅ Done | Mod management |
-| ✅ Done | Logs & monitoring |
-| ✅ Done | Backups & restore |
-| ✅ Done | World import |
-| ✅ Done | Multiple server instances |
-| ✅ Done | Auto-start (always / never / last-state) |
-| ✅ Done | Loader support: Vanilla, NeoForge, Forge, Quilt, Fabric |
-| ✅ Done | Docker image (multi-arch, non-root) + compose |
-| ✅ Done | Fabricator self-update (UI + installer) |
-| ✅ Done | CLI — minimal form (`status`, `start`/`stop`, `update`, `version`, `uninstall`) |
-| 🔧 In progress | CLI — expanded server/mod management commands |
-| 📋 Planned | One-click Minecraft / Fabric server upgrades |
-| 📋 Planned | Native Windows installer (Docker works today) |
-
----
-
 ## Contributing
 
-Bug reports and pull requests are welcome. For larger changes, open an issue first.
-
-The frontend is Vue 3 + Vite in `/frontend`. The backend is Flask with blueprints under `/backend`; the process entrypoint is `run.py`. HTTP API details live in [API_DOCS.md](API_DOCS.md). Both halves can be run without the installer for local development.
+Bug reports and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines. For larger changes, open an issue first.
 
 ---
 
