@@ -15,6 +15,7 @@ const CodeEditor = defineAsyncComponent(() => import('../../components/ui/CodeEd
 const store = useServerStore()
 
 const editorRef = ref(null)
+const codeEditorRef = ref(null)
 
 // CC6: modal-based confirm instead of window.confirm. Local state with a
 // promise-resolver lets the call sites keep their `if (!await ...) return`
@@ -57,7 +58,10 @@ const onValidity = ({ hasErrors }) => {
 }
 
 const confirmInvalidSave = () => {
-  if (!hasSyntaxErrors.value) return Promise.resolve(true)
+  // Prefer the editor's synchronous, live check (no lint-debounce staleness);
+  // fall back to the last emitted flag if the editor ref isn't resolved.
+  const hasErrors = codeEditorRef.value?.hasErrors?.() ?? hasSyntaxErrors.value
+  if (!hasErrors) return Promise.resolve(true)
   return new Promise((resolve) => {
     invalidSaveResolver = resolve
     showInvalidSaveConfirm.value = true
@@ -290,6 +294,7 @@ const onCopyPath = async () => {
       <div v-if="store.fileEditor.loading" class="files-page__state">Loading file…</div>
       <div v-else>
         <CodeEditor
+          ref="codeEditorRef"
           v-model="store.fileEditor.content"
           :path="store.fileEditor.path"
           :disabled="store.fileEditor.saving"

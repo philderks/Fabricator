@@ -6,10 +6,11 @@ import { basicSetup } from 'codemirror'
 import {
   StreamLanguage,
   syntaxTree,
+  ensureSyntaxTree,
   HighlightStyle,
   syntaxHighlighting,
 } from '@codemirror/language'
-import { linter } from '@codemirror/lint'
+import { linter, forceLinting } from '@codemirror/lint'
 import { json, jsonParseLinter } from '@codemirror/lang-json'
 import { yaml } from '@codemirror/lang-yaml'
 import { properties } from '@codemirror/legacy-modes/mode/properties'
@@ -119,11 +120,15 @@ const highlightStyle = HighlightStyle.define([
 // tree-based language) gets syntax diagnostics with no extra parser dependency.
 function syntaxTreeLinter(vw) {
   const diagnostics = []
+  const docLength = vw.state.doc.length
   syntaxTree(vw.state).cursor().iterate((node) => {
     if (node.type.isError) {
+      // Widen zero-width error nodes by one char so the underline is visible,
+      // but never past the document end (an out-of-range diagnostic throws).
+      const to = node.to > node.from ? node.to : Math.min(node.from + 1, docLength)
       diagnostics.push({
         from: node.from,
-        to: node.to === node.from ? node.to + 1 : node.to,
+        to,
         severity: 'error',
         message: 'Syntax error',
       })
@@ -134,16 +139,34 @@ function syntaxTreeLinter(vw) {
 
 const jsonLinter = jsonParseLinter()
 
-function combinedLinter(vw) {
+// Shared diagnostic computation so the lint gutter and the on-demand save-time
+// check can never disagree. JSON has a dedicated linter with precise messages;
+// everything else with a syntax tree (YAML, …) uses the generic error walk.
+function computeDiagnostics(vw) {
   const ext = (props.path || '').toLowerCase().split('.').pop() || ''
-  // JSON has a dedicated linter with precise messages; everything else that has
-  // a syntax tree (YAML, properties, toml) uses the generic error-node walk.
-  const diagnostics = ext === 'json' ? jsonLinter(vw) : syntaxTreeLinter(vw)
+  return ext === 'json' ? jsonLinter(vw) : syntaxTreeLinter(vw)
+}
+
+function combinedLinter(vw) {
+  const diagnostics = computeDiagnostics(vw)
   // Emit validity from the same pass that produced the diagnostics so the page
-  // can gate saves without a stale read of the lint state field.
+  // has a fresh reactive flag for the dirty indicator etc.
   emit('validity', { hasErrors: diagnostics.some((d) => d.severity === 'error') })
   return diagnostics
 }
+
+// Synchronous, on-demand validity for the save guard. The lint plugin is
+// debounced, so its emitted flag can be stale within ~300ms of a keystroke;
+// this recomputes against the live state so a Ctrl+S right after typing an
+// error can't slip past the warning. Force a full parse first so large files
+// aren't judged on a partially-parsed tree.
+function hasErrors() {
+  if (!view) return false
+  ensureSyntaxTree(view.state, view.state.doc.length, 500)
+  return computeDiagnostics(view).some((d) => d.severity === 'error')
+}
+
+defineExpose({ hasErrors })
 
 const saveKeymap = Prec.highest(
   keymap.of([
@@ -166,7 +189,7 @@ function buildExtensions() {
     editableCompartment.of(EditorView.editable.of(!props.disabled)),
     appTheme,
     syntaxHighlighting(highlightStyle),
-    linter(combinedLinter),
+    linter(combinedLinter, { delay: 300 }),
     EditorView.updateListener.of((update) => {
       if (update.docChanged) {
         emit('update:modelValue', update.state.doc.toString())
@@ -183,6 +206,9 @@ onMounted(() => {
       extensions: buildExtensions(),
     }),
   })
+  // The lint plugin only runs on doc changes; force a pass so validity is known
+  // for a file that opens already-broken (before the user types anything).
+  forceLinting(view)
 })
 
 onUnmounted(() => {
@@ -212,6 +238,9 @@ watch(
     view.dispatch({
       effects: languageCompartment.reconfigure(languageForPath(props.path)),
     })
+    // Language (and thus the active linter) changed — re-lint now so validity
+    // reflects the new file immediately instead of after the debounce.
+    forceLinting(view)
   }
 )
 
