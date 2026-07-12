@@ -21,6 +21,7 @@ export async function searchMods({
   query = '',
   version = '',
   loader = '',
+  projectType = 'mod',
   sort = 'relevance',
   limit = 20,
   offset = 0
@@ -29,6 +30,7 @@ export async function searchMods({
     query,
     mc_version: version,
     loader,
+    project_type: projectType,
     index: sort,
     limit,
     offset

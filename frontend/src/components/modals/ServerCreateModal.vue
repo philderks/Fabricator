@@ -142,8 +142,10 @@
         </div>
       </Panel>
 
-      <!-- Modpack Setup — vanilla servers have no mod loader, so the Modrinth modpack flow doesn't apply. -->
-      <Panel v-if="formData.loader !== 'vanilla'" title="Modpack Setup">
+      <!-- Modpack Setup — only mod loaders use Modrinth modpacks (.mrpack).
+           Vanilla has no loader, and plugin servers (Paper/Purpur/Folia/Pufferfish)
+           use plugins, not modpacks. -->
+      <Panel v-if="showModpackPanel" title="Modpack Setup">
 
         <div class="mode-toggle" role="tablist" aria-label="Server setup mode">
           <button
@@ -553,6 +555,7 @@ import { installModpack, resolveProjectVersion } from '../../api/modrinth'
 import { useToast } from '../../composables/useToast'
 import { useModpackImport } from '../../composables/useModpackImport'
 import { formatNumber } from '../../utils/format'
+import { loaderContentKind } from '../../utils/loaderKind'
 
 export default {
   name: 'ServerCreateModal',
@@ -600,11 +603,15 @@ export default {
       javaStatus: null,
       javaRequirementWarning: '',
       loaderOptions: [
-        { value: 'fabric',   label: 'Fabric'   },
-        { value: 'quilt',    label: 'Quilt'    },
-        { value: 'neoforge', label: 'NeoForge' },
-        { value: 'forge',    label: 'Forge'    },
-        { value: 'vanilla',  label: 'Vanilla'  }
+        { value: 'fabric',     label: 'Fabric'     },
+        { value: 'quilt',      label: 'Quilt'      },
+        { value: 'neoforge',   label: 'NeoForge'   },
+        { value: 'forge',      label: 'Forge'      },
+        { value: 'paper',      label: 'Paper'      },
+        { value: 'purpur',     label: 'Purpur'     },
+        { value: 'folia',      label: 'Folia'      },
+        { value: 'pufferfish', label: 'Pufferfish' },
+        { value: 'vanilla',    label: 'Vanilla'    }
       ],
       formData: {
         setupMode: 'custom',
@@ -645,6 +652,10 @@ export default {
     this.loadGameVersions()
   },
   computed: {
+    showModpackPanel() {
+      // Only true mod loaders (Fabric/Quilt/Forge/NeoForge) support .mrpack.
+      return loaderContentKind(this.formData.loader) === 'mod'
+    },
     filteredGameVersions() {
       if (this.showSnapshots) return this.gameVersions
       return this.gameVersions.filter(v => v.stable)
@@ -704,10 +715,10 @@ export default {
     'formData.loader'(newLoader, oldLoader) {
       if (newLoader === oldLoader) return
       this.formData.version = ''
-      // Vanilla has no modpack story — flip back to custom and drop any
-      // cached modpack selection so a stale modpack URL/object doesn't
-      // ride along into the create POST and trip a backend 409.
-      if (newLoader === 'vanilla') {
+      // Loaders without a modpack story (Vanilla + plugin servers) — flip back
+      // to custom and drop any cached modpack selection so a stale modpack
+      // URL/object doesn't ride along into the create POST and trip a 409.
+      if (loaderContentKind(newLoader) !== 'mod') {
         this.formData.setupMode = 'custom'
         if (this.imp?.selectedModpack) {
           this.imp.selectedModpack.value = null

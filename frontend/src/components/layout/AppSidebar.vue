@@ -8,6 +8,7 @@ import { version as appVersion } from '../../../package.json'
 import { getUpdateStatus, triggerUpdate } from '../../api/servers'
 import { useToast } from '../../composables/useToast'
 import { useServerStore } from '../../stores/server'
+import { loaderContentKind, contentLabel } from '../../utils/loaderKind'
 
 const route = useRoute()
 const toast = useToast()
@@ -36,16 +37,20 @@ const ALL_NAV_ITEMS = [
   { name: 'ServerSettings', label: 'Properties', icon: 'properties' }
 ]
 
-// Defensive guard: hide Mods tab for vanilla servers (they have no mod folder).
-// Intentionally not a capability map — with two loaders that would be over-fitting.
-// Revisit when Phase-2 loaders (Paper/Forge/NeoForge) land and per-loader feature
-// profiles become a real need.
+// The add-on tab (ServerMods) is hidden for Vanilla (no add-on surface) and
+// relabelled "Plugins" for Bukkit-family loaders (Paper/Purpur/Folia/Pufferfish),
+// which install plugins rather than mods. The route name/path stay 'ServerMods'.
 const navItems = computed(() => {
-  const loader = String(store.server?.loader || '').toLowerCase()
-  if (loader === 'vanilla') {
+  const loader = store.server?.loader
+  const kind = loaderContentKind(loader)
+  if (kind === 'none') {
     return ALL_NAV_ITEMS.filter(item => item.name !== 'ServerMods')
   }
-  return ALL_NAV_ITEMS
+  return ALL_NAV_ITEMS.map(item =>
+    item.name === 'ServerMods'
+      ? { ...item, label: contentLabel(loader) }
+      : item
+  )
 })
 
 // ---------- Update polling (relocated from Servers.vue) ----------

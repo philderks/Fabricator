@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import StatusPill from '../ui/StatusPill.vue'
 import AppButton from '../ui/AppButton.vue'
+import { contentLabel } from '../../utils/loaderKind'
 
 const props = defineProps({
   serverStatus: {
@@ -43,7 +44,13 @@ const ROUTE_TITLE = {
   ServerGeneralSettings: 'Settings'
 }
 
-const pageTitle = computed(() => ROUTE_TITLE[route.name] || '')
+const pageTitle = computed(() => {
+  // The add-on page is "Plugins" for Bukkit-family servers, "Mods" otherwise.
+  if (route.name === 'ServerMods') {
+    return contentLabel(props.serverStatus.loader)
+  }
+  return ROUTE_TITLE[route.name] || ''
+})
 
 // StatusPill.vue owns the allowlist via its prop validator and falls back
 // to STATUS_META.unknown for unknown values — gating it here would just

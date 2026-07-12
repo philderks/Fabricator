@@ -5,12 +5,19 @@ import Panel from '../../components/ui/Panel.vue'
 import { formatFileSize } from '../../utils/format'
 import { installedModDisplayName, installedModInitial } from '../../utils/installedModDisplay'
 import { useServerStore } from '../../stores/server'
+import { contentLabel, isPluginLoader } from '../../utils/loaderKind'
 
 const store = useServerStore()
 
 const onSearch = (event) => { store.modSearch = event.target.value }
 
 const showEmpty = computed(() => !store.modsLoading && store.filteredMods.length === 0)
+
+// Add-on vocabulary (Mods vs Plugins) driven by the server's loader.
+const isPlugin = computed(() => isPluginLoader(store.server?.loader))
+const noun = computed(() => contentLabel(store.server?.loader, true))
+const nounSingular = computed(() => contentLabel(store.server?.loader, false))
+const nounLower = computed(() => noun.value.toLowerCase())
 </script>
 
 <template>
@@ -19,18 +26,18 @@ const showEmpty = computed(() => !store.modsLoading && store.filteredMods.length
       <input
         type="search"
         class="mods-page__search"
-        placeholder="Search installed mods…"
+        :placeholder="`Search installed ${nounLower}…`"
         :value="store.modSearch"
         @input="onSearch"
       />
       <div class="mods-page__actions">
-        <AppButton variant="ghost" @click="store.openModpackBrowser">Browse modpacks</AppButton>
+        <AppButton v-if="!isPlugin" variant="ghost" @click="store.openModpackBrowser">Browse modpacks</AppButton>
         <AppButton
           variant="primary"
           :loading="store.isInstalling"
           @click="store.openModBrowser"
         >
-          Browse mods
+          Browse {{ nounLower }}
         </AppButton>
       </div>
     </div>
@@ -42,7 +49,7 @@ const showEmpty = computed(() => !store.modsLoading && store.filteredMods.length
       </div>
     </Panel>
 
-    <Panel title="Installed mods" :padded="false">
+    <Panel :title="`Installed ${noun}`" :padded="false">
       <!-- Bulk action toolbar (only visible when at least one mod is selected) -->
       <div v-if="store.selectedCount > 0" class="mods-page__bulk-bar">
         <label class="mods-page__select-all">
@@ -68,15 +75,15 @@ const showEmpty = computed(() => !store.modsLoading && store.filteredMods.length
             :loading="store.bulkDeleting"
             @click="store.handleBulkRemoveMods"
           >
-            Delete {{ store.selectedCount }} mod{{ store.selectedCount === 1 ? '' : 's' }}
+            Delete {{ store.selectedCount }} {{ store.selectedCount === 1 ? nounSingular.toLowerCase() : nounLower }}
           </AppButton>
         </div>
       </div>
 
-      <div v-if="store.modsLoading" class="mods-page__state">Loading mods…</div>
+      <div v-if="store.modsLoading" class="mods-page__state">Loading {{ nounLower }}…</div>
       <div v-else-if="showEmpty" class="mods-page__state">
-        <template v-if="store.modSearch">No mods match "{{ store.modSearch }}".</template>
-        <template v-else>No mods installed yet. Use "Browse mods" to add one.</template>
+        <template v-if="store.modSearch">No {{ nounLower }} match "{{ store.modSearch }}".</template>
+        <template v-else>No {{ nounLower }} installed yet. Use "Browse {{ nounLower }}" to add one.</template>
       </div>
       <ul v-else class="mods-page__list">
         <li
@@ -122,7 +129,7 @@ const showEmpty = computed(() => !store.modsLoading && store.filteredMods.length
         class="mods-page__select-all-footer"
       >
         <button type="button" class="mods-page__select-all-btn" @click="store.toggleSelectAllMods">
-          Select all {{ store.filteredMods.length }} mods
+          Select all {{ store.filteredMods.length }} {{ nounLower }}
         </button>
       </div>
     </Panel>
