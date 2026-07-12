@@ -255,11 +255,15 @@ class ModrinthClient:
         project_id: str,
         mc_version: Optional[str] = None,
         loader: Optional[str] = None,
+        loaders: Optional[List[str]] = None,
     ) -> Optional[Dict[str, Any]]:
-        loaders = [loader] if loader else None
+        # ``loaders`` (a list) takes precedence over the single ``loader`` — used
+        # for plugin servers, whose accepted facets are a compatibility chain
+        # (paper/spigot/bukkit). Falls back to ``[loader]`` for mods.
+        loader_facets = loaders if loaders else ([loader] if loader else None)
         game_versions = [mc_version] if mc_version else None
 
-        versions = self.get_project_versions(project_id=project_id, loaders=loaders, game_versions=game_versions)
+        versions = self.get_project_versions(project_id=project_id, loaders=loader_facets, game_versions=game_versions)
         best_version = self.pick_best_version(versions)
         if not best_version:
             return None

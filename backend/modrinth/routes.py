@@ -259,6 +259,14 @@ def get_project_versions(project_id):
 def resolve_project_version(project_id):
     mc_version = request.args.get('mc_version')
     loader = request.args.get('loader')
+    # Optional comma-joined facet chain (plugin servers accept paper/spigot/
+    # bukkit); when present it supersedes the single ``loader`` so a plugin
+    # tagged only 'spigot' still resolves for a Paper server.
+    loaders_raw = request.args.get('loaders')
+    loaders = (
+        [part.strip() for part in loaders_raw.split(',') if part.strip()]
+        if loaders_raw else None
+    )
 
     if not mc_version:
         return jsonify({"error": "mc_version parameter is required"}), 400
@@ -267,7 +275,8 @@ def resolve_project_version(project_id):
         resolved = modrinth_client.resolve_project_version(
             project_id=project_id,
             mc_version=mc_version,
-            loader=loader
+            loader=loader,
+            loaders=loaders
         )
     except ModrinthApiError as exc:
         return _modrinth_error_response(exc)

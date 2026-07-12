@@ -81,6 +81,22 @@ def test_get_minecraft_versions_newest_first_and_stability(tmp_path):
     assert stability["1.21.4-rc1"] is False  # prerelease marked non-stable
 
 
+def test_get_minecraft_versions_sorts_shuffled_input(tmp_path):
+    """Ordering must not depend on the API's list order."""
+    from backend.server.installer.papermc import PaperInstaller
+    inst = PaperInstaller(tmp_path)
+    _patch_session(
+        inst,
+        versions_map={
+            "1.20": ["1.20.1", "1.20.6"],       # out of order within family
+            "1.21": ["1.21", "1.21.10", "1.21.4"],
+        },
+        builds=[],
+    )
+    versions = [v["version"] for v in inst.get_minecraft_versions()]
+    assert versions == ["1.21.10", "1.21.4", "1.21", "1.20.6", "1.20.1"]
+
+
 def test_install_success_writes_jar_eula_launch(tmp_path):
     from backend.server.installer.papermc import PaperInstaller
     inst = PaperInstaller(tmp_path)

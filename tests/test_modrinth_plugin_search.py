@@ -33,6 +33,33 @@ def test_search_rejects_bogus_project_type(client, tmp_servers_root):
     assert mock_search.call_args.kwargs["project_type"] == "mod"
 
 
+def test_resolve_version_accepts_loader_facet_chain(client, tmp_servers_root):
+    """The dependency precheck resolves against the plugin facet chain."""
+    with patch(
+        "backend.modrinth.routes.modrinth_client.resolve_project_version"
+    ) as mock_resolve:
+        mock_resolve.return_value = {"version": {"dependencies": []}, "download_url": "u"}
+        resp = client.get(
+            "/api/modrinth/project/SOMEPLUGIN/resolve-version"
+            "?mc_version=1.21.4&loaders=paper,spigot,bukkit"
+        )
+    assert resp.status_code == 200
+    assert mock_resolve.call_args.kwargs["loaders"] == ["paper", "spigot", "bukkit"]
+
+
+def test_resolve_version_single_loader_still_works(client, tmp_servers_root):
+    with patch(
+        "backend.modrinth.routes.modrinth_client.resolve_project_version"
+    ) as mock_resolve:
+        mock_resolve.return_value = {"version": {"dependencies": []}, "download_url": "u"}
+        resp = client.get(
+            "/api/modrinth/project/SOMEMOD/resolve-version?mc_version=1.21.4&loader=fabric"
+        )
+    assert resp.status_code == 200
+    assert mock_resolve.call_args.kwargs["loader"] == "fabric"
+    assert mock_resolve.call_args.kwargs["loaders"] is None
+
+
 def test_install_uses_server_loader_facets_for_paper(client, tmp_servers_root):
     """A Paper server resolves plugins against the paper/spigot/bukkit chain."""
     from backend.server import storage

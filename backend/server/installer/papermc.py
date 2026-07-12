@@ -131,6 +131,9 @@ class PaperMCInstaller(InstallerBase):
                     "stable": stable,
                     "type": "release" if stable else "snapshot",
                 })
+        # Sort newest-first explicitly rather than trusting the API's list order
+        # — the frontend takes the first stable entry as the default selection.
+        out.sort(key=lambda e: self._mc_version_sort_key(e["version"]), reverse=True)
         return out
 
     def get_available_versions(

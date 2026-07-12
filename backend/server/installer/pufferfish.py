@@ -117,13 +117,7 @@ class PufferfishInstaller(InstallerBase):
             if match:
                 versions.append(match.group(1))
 
-        def _sort_key(v: str) -> List[int]:
-            try:
-                return [int(p) for p in v.split(".")]
-            except ValueError:
-                return []
-
-        versions.sort(key=_sort_key, reverse=True)
+        versions.sort(key=self._mc_version_sort_key, reverse=True)
         return [
             {
                 "version": self._canonicalize_mc_version(v),
@@ -164,6 +158,12 @@ class PufferfishInstaller(InstallerBase):
         ``pufferfish-server/build/libs/pufferfish-paperclip-<mc>-...jar``),
         skipping ``-sources``/``-javadoc`` classifier jars. Returns ``None`` if
         the layout doesn't match expectations.
+
+        Selection is deterministic when a build publishes more than one
+        candidate jar: the ``paperclip`` bootstrap jar (the one you actually
+        run) is preferred, then ``mojmap`` mappings, otherwise the first
+        candidate in listing order. Without this a multi-artefact build could
+        arbitrarily pick a non-runnable bundler/reobf jar.
         """
         url = (
             f"{self.CI_BASE}/job/{job_name}/lastSuccessfulBuild/"
@@ -177,6 +177,7 @@ class PufferfishInstaller(InstallerBase):
             )
             return None
 
+        candidates: List[str] = []
         for artifact in payload.get("artifacts") or []:
             rel = str(artifact.get("relativePath") or "")
             name = str(artifact.get("fileName") or "")
@@ -184,8 +185,23 @@ class PufferfishInstaller(InstallerBase):
                 continue
             if "-sources" in name or "-javadoc" in name:
                 continue
-            return rel
-        return None
+            candidates.append(rel)
+
+        if not candidates:
+            return None
+
+        def _score(rel: str) -> int:
+            lower = rel.lower()
+            score = 0
+            if "paperclip" in lower:
+                score += 2
+            if "mojmap" in lower:
+                score += 1
+            return score
+
+        # max() keeps the first candidate on a score tie, preserving listing
+        # order as the stable fallback.
+        return max(candidates, key=_score)
 
     # ---------- Install ----------
 

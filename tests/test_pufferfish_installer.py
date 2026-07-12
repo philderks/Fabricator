@@ -80,6 +80,25 @@ def test_install_success(tmp_path):
     )
 
 
+def test_resolve_artifact_prefers_paperclip(tmp_path):
+    """When multiple runnable jars exist, the paperclip bootstrap jar wins."""
+    from backend.server.installer.pufferfish import PufferfishInstaller
+    inst = PufferfishInstaller(tmp_path)
+    _patch_session(
+        inst,
+        jobs=[{"name": "Pufferfish-1.21"}],
+        artifacts=[
+            {"fileName": "pufferfish-bundler-1.21.jar",
+             "relativePath": "pufferfish-server/build/libs/pufferfish-bundler-1.21.jar"},
+            {"fileName": "pufferfish-paperclip-1.21-mojmap.jar",
+             "relativePath": "pufferfish-server/build/libs/pufferfish-paperclip-1.21-mojmap.jar"},
+        ],
+    )
+    assert inst._resolve_artifact_path("Pufferfish-1.21") == (
+        "pufferfish-server/build/libs/pufferfish-paperclip-1.21-mojmap.jar"
+    )
+
+
 def test_install_missing_job_fails(tmp_path):
     from backend.server.installer.pufferfish import PufferfishInstaller
     inst = PufferfishInstaller(tmp_path)

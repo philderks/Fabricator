@@ -562,6 +562,29 @@ class InstallerBase(ABC):
             return v[:-2]
         return v
 
+    @staticmethod
+    def _mc_version_sort_key(version: str) -> "tuple[list[int], bool]":
+        """Comparable key ordering Minecraft versions newest-first (reverse=True).
+
+        Parses the leading dotted-integer portion (``1.21.11`` -> ``[1, 21, 11]``)
+        so numeric ordering is correct across families and patch levels rather
+        than relying on an upstream API's list order. A plain release sorts
+        above its own prereleases: ``1.21.11`` before ``1.21.11-rc1`` (the
+        ``is_release`` tiebreaker), because with ``reverse=True`` the ``True``
+        flag outranks ``False`` on an otherwise-equal numeric tuple.
+
+        Unparseable segments degrade to ``0`` so a malformed token never raises.
+        """
+        s = str(version)
+        base = s.split("-", 1)[0]
+        parts: list[int] = []
+        for token in base.split("."):
+            try:
+                parts.append(int(token))
+            except ValueError:
+                parts.append(0)
+        return parts, "-" not in s
+
     def __init__(self, install_path: Path):
         """Initialize installer with target path.
 

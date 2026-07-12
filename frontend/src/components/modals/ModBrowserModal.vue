@@ -238,7 +238,11 @@ export default {
     },
     effectiveSearchVersion() {
       if (!this.versionFilterExpanded) {
-        return this.mcVersion || ''
+        // Bukkit plugins commonly tag only the minor line (e.g. "1.21"), not
+        // every patch, so searching by the exact server patch ("1.21.4") hides
+        // them. Broaden plugin browse to the minor line; the per-result
+        // compatibility indicator still flags anything that doesn't fit.
+        return this.isPlugin ? this.minorLine(this.mcVersion) : (this.mcVersion || '')
       }
       return this.selectedVersion
     },
@@ -465,7 +469,10 @@ export default {
       try {
         const resolved = await resolveProjectVersion(mod.project_id, {
           mc_version: preferredVersion,
-          loader
+          loader,
+          // Plugin servers resolve against the full facet chain so a
+          // spigot/bukkit-only plugin's dependencies are still detected.
+          loaders: this.isPlugin ? this.loaderFacets : undefined
         })
         const version = resolved?.version
         if (!version || !Array.isArray(version.dependencies)) {
@@ -636,6 +643,13 @@ export default {
         return mod.versions
       }
       return []
+    },
+
+    // "1.21.4" -> "1.21"; leaves 2-part versions and non-standard ids as-is.
+    minorLine(version) {
+      const v = String(version || '')
+      const parts = v.split('.')
+      return parts.length >= 3 ? parts.slice(0, 2).join('.') : v
     },
 
     modSupportsLoader(mod, loader) {
