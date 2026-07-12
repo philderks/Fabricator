@@ -216,10 +216,23 @@ class ModrinthClient:
         return file_obj.get("url")
 
     def get_project_download_url(
-        self, project_id: str, mc_version: str, loader: str = "fabric"
+        self,
+        project_id: str,
+        mc_version: str,
+        loader: str = "fabric",
+        loaders: Optional[List[str]] = None,
     ) -> Optional[Dict[str, Any]]:
+        """Resolve the best download for a project at ``mc_version``.
+
+        ``loaders`` (a list) takes precedence over the single ``loader`` when
+        provided — used for plugin servers, where the accepted loader facets
+        are a compatibility chain (e.g. Paper accepts ``paper``/``spigot``/
+        ``bukkit``-tagged plugins). Falls back to ``[loader]`` for the classic
+        single-loader mod case.
+        """
+        loader_facets = loaders if loaders else [loader]
         versions = self.get_project_versions(
-            project_id=project_id, loaders=[loader], game_versions=[mc_version]
+            project_id=project_id, loaders=loader_facets, game_versions=[mc_version]
         )
         best_version = self.pick_best_version(versions)
         if not best_version:

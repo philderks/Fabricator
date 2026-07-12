@@ -95,6 +95,24 @@ def _create_server_backup(install_path: Path) -> str:
     return backup_name
 
 
+def _server_loader_facets(server: dict, fallback_loader: str) -> list:
+    """Modrinth loader facets accepted for ``server``.
+
+    For plugin servers this is the platform's compatibility chain (e.g. Paper
+    accepts paper/spigot/bukkit plugins); for mod loaders it's just the single
+    loader. Falls back to the request-supplied loader if the installer can't be
+    resolved. Used so plugin resolution matches versions tagged with any
+    accepted facet, not only the exact loader name.
+    """
+    from backend.server.installer import get_installer_for
+
+    loader = str(server.get('loader') or '').strip().lower()
+    installer = get_installer_for(loader, Path('.'))
+    if installer and installer.modrinth_loader_facets:
+        return installer.modrinth_loader_facets
+    return [fallback_loader] if fallback_loader else []
+
+
 def _resolve_mods_folder(server: dict):
     """Resolve ``server``'s mods folder via the registry.
 
@@ -115,6 +133,11 @@ def search_mods():
     query = request.args.get('query', '')
     mc_version = request.args.get('mc_version')
     loader = request.args.get('loader')
+    # Bukkit-family servers browse Modrinth *plugins* through this same route;
+    # only 'mod' and 'plugin' are accepted so a bad value can't reshape the facet.
+    project_type = request.args.get('project_type', 'mod')
+    if project_type not in ('mod', 'plugin'):
+        project_type = 'mod'
     try:
         limit = int(request.args.get('limit', 20))
     except (TypeError, ValueError):
@@ -127,7 +150,7 @@ def search_mods():
 
     try:
         result = modrinth_client.search(
-            project_type='mod',
+            project_type=project_type,
             query=query,
             mc_version=mc_version,
             loader=loader,
@@ -318,9 +341,15 @@ def install_mod(mod_id, server):
 
     target_path = Path(mods_folder)
 
+    # Plugin servers accept a facet chain (paper/spigot/bukkit); mod loaders
+    # resolve as the single loader. Derive from the server so a plugin tagged
+    # only 'spigot' still resolves for a Paper server.
+    loader_facets = _server_loader_facets(server, loader)
+
     try:
         resolved = modrinth_client.get_project_download_url(
-            project_id=mod_id, mc_version=mc_version, loader=loader
+            project_id=mod_id, mc_version=mc_version, loader=loader,
+            loaders=loader_facets,
         )
     except ModrinthApiError as exc:
         return _modrinth_error_response(exc)
