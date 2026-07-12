@@ -74,9 +74,7 @@ class PaperMCInstaller(InstallerBase):
             "Accept": "application/json",
         })
 
-    @property
-    def content_kind(self) -> str:
-        return "plugin"
+    content_kind = "plugin"
 
     # ---------- API helpers ----------
 

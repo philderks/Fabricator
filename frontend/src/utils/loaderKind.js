@@ -11,6 +11,8 @@
 
 const PLUGIN_LOADERS = new Set(['paper', 'purpur', 'folia', 'pufferfish'])
 const MOD_LOADERS = new Set(['fabric', 'quilt', 'forge', 'neoforge'])
+// Loaders with no add-on surface at all — only these hide the add-on tab.
+const NO_CONTENT_LOADERS = new Set(['vanilla'])
 
 // Modrinth loader-category compatibility chains for plugin platforms — mirror
 // of the backend installers' `modrinth_loader_facets`. A Paper server runs
@@ -43,8 +45,11 @@ export function loaderModrinthFacets(loader) {
 export function loaderContentKind(loader) {
   const key = String(loader || '').trim().toLowerCase()
   if (PLUGIN_LOADERS.has(key)) return 'plugin'
-  if (MOD_LOADERS.has(key)) return 'mod'
-  return 'none'
+  if (NO_CONTENT_LOADERS.has(key)) return 'none'
+  // Mod loaders AND any unrecognised loader fall through to 'mod' so the add-on
+  // tab fails open (shown as "Mods") instead of vanishing for a loader that
+  // isn't in this list — mirrors the backend's loader_content_kind default.
+  return 'mod'
 }
 
 /** True for Paper/Purpur/Folia/Pufferfish. */

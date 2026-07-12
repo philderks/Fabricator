@@ -577,24 +577,24 @@ class InstallerBase(ABC):
         """Return the name of the mod loader (e.g., 'fabric', 'forge')."""
         pass
 
-    @property
-    def content_kind(self) -> str | None:
-        """What kind of add-on content this server type consumes.
-
-        - ``"mod"``    — jars live in ``mods/`` and are Modrinth
-          ``project_type=mod`` (Fabric, Quilt, Forge, NeoForge).
-        - ``"plugin"`` — jars live in ``plugins/`` and are Modrinth
-          ``project_type=plugin`` (Paper, Purpur, Folia, Pufferfish).
-        - ``None``     — the server type has no add-on content surface at all
-          (Vanilla).
-
-        Drives ``registry.resolve_content_path`` (which on-disk folder the
-        install/list/delete routes touch) and the Modrinth search
-        ``project_type``. Defaults to ``"mod"`` so the existing mod loaders
-        keep their behaviour without changes; Vanilla overrides to ``None`` and
-        the Bukkit-family installers override to ``"plugin"``.
-        """
-        return "mod"
+    #: What kind of add-on content this server type consumes.
+    #:
+    #: - ``"mod"``    — jars live in ``mods/`` and are Modrinth
+    #:   ``project_type=mod`` (Fabric, Quilt, Forge, NeoForge).
+    #: - ``"plugin"`` — jars live in ``plugins/`` and are Modrinth
+    #:   ``project_type=plugin`` (Paper, Purpur, Folia, Pufferfish).
+    #: - ``None``     — the server type has no add-on content surface at all
+    #:   (Vanilla).
+    #:
+    #: Drives ``registry.resolve_content_path`` (which on-disk folder the
+    #: install/list/delete routes touch) and the Modrinth search
+    #: ``project_type``. A **class attribute** (not a property) so it can be
+    #: read straight off the registry class via ``loader_content_kind`` without
+    #: constructing an installer — construction opens a ``requests.Session``,
+    #: and the mods-/plugins-folder is resolved on the polled server-list hot
+    #: path. Defaults to ``"mod"``; Vanilla overrides to ``None`` and the
+    #: Bukkit-family installers override to ``"plugin"``.
+    content_kind: "str | None" = "mod"
 
     @property
     def modrinth_loader_facets(self) -> List[str]:

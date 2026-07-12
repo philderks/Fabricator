@@ -61,9 +61,7 @@ class PurpurInstaller(InstallerBase):
     def loader_name(self) -> str:
         return "purpur"
 
-    @property
-    def content_kind(self) -> str:
-        return "plugin"
+    content_kind = "plugin"
 
     @property
     def modrinth_loader_facets(self) -> List[str]:

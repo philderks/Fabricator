@@ -306,12 +306,11 @@ class ServerProcessRegistry:
         so the loader registry stays the single source of truth. Creates the
         folder if missing and returns its path.
         """
-        from backend.server.installer import get_installer_for
+        from backend.server.installer import loader_content_kind
 
         install_path = self.resolve_install_path(server)
         loader = str(server.get('loader') or '').strip().lower()
-        installer = get_installer_for(loader, install_path)
-        kind = installer.content_kind if installer else 'mod'
+        kind = loader_content_kind(loader)
         folder = 'plugins' if kind == 'plugin' else 'mods'
         content_path = install_path / folder
         content_path.mkdir(parents=True, exist_ok=True)
