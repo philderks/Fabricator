@@ -13,6 +13,9 @@ from .vanilla import VanillaInstaller  # noqa: F401
 from .neoforge import NeoForgeInstaller  # noqa: F401
 from .quilt import QuiltInstaller  # noqa: F401
 from .forge import ForgeInstaller  # noqa: F401
+from .papermc import PaperInstaller, FoliaInstaller  # noqa: F401
+from .purpur import PurpurInstaller  # noqa: F401
+from .pufferfish import PufferfishInstaller  # noqa: F401
 
 
 LOADER_REGISTRY: Dict[str, Type[InstallerBase]] = {
@@ -21,6 +24,10 @@ LOADER_REGISTRY: Dict[str, Type[InstallerBase]] = {
     "neoforge": NeoForgeInstaller,
     "quilt": QuiltInstaller,
     "forge": ForgeInstaller,
+    "paper": PaperInstaller,
+    "folia": FoliaInstaller,
+    "purpur": PurpurInstaller,
+    "pufferfish": PufferfishInstaller,
 }
 
 
