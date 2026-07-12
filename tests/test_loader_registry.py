@@ -6,8 +6,12 @@ from pathlib import Path
 from backend.server.installer import (
     LOADER_REGISTRY,
     FabricInstaller,
+    FoliaInstaller,
     ForgeInstaller,
     NeoForgeInstaller,
+    PaperInstaller,
+    PufferfishInstaller,
+    PurpurInstaller,
     QuiltInstaller,
     VanillaInstaller,
     get_installer_for,
@@ -75,3 +79,20 @@ def test_registry_contains_forge():
 def test_get_installer_for_forge(tmp_path):
     inst = get_installer_for("forge", tmp_path)
     assert isinstance(inst, ForgeInstaller)
+
+
+def test_registry_contains_bukkit_family(tmp_path):
+    for name, cls in (
+        ("paper", PaperInstaller),
+        ("folia", FoliaInstaller),
+        ("purpur", PurpurInstaller),
+        ("pufferfish", PufferfishInstaller),
+    ):
+        assert name in LOADER_REGISTRY
+        assert LOADER_REGISTRY[name] is cls
+        assert isinstance(get_installer_for(name, tmp_path), cls)
+
+
+def test_bukkit_family_are_plugin_kind(tmp_path):
+    for name in ("paper", "folia", "purpur", "pufferfish"):
+        assert get_installer_for(name, tmp_path).content_kind == "plugin"
