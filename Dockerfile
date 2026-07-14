@@ -45,7 +45,8 @@ ENV FLASK_ENV=production \
     SERVER_INDEX_FILE=/data/servers.json \
     JAVA_ROOT=/data/java \
     BACKUPS_DIR=/data/backups \
-    PLAYIT_RUNTIME_DIR=/data/playit
+    PLAYIT_RUNTIME_DIR=/data/playit \
+    PYTHONUNBUFFERED=1
 # Every persistent path is pinned onto /data (the only VOLUME). FLASK_ENV=
 # production otherwise hardcodes them under /var/lib/fabricator (off-volume,
 # ephemeral). FABRICATOR_APPDATA is deliberately NOT set: ProductionConfig
