@@ -153,6 +153,7 @@ export const useServerStore = defineStore('server', () => {
     viewDistance: data.viewDistance ?? 10,
     simulationDistance: data.simulationDistance ?? 10,
     memory: data.memory ?? 4,
+    memoryUnit: data.memoryUnit === 'MB' ? 'MB' : 'GB',
     levelName: data.levelName || 'world',
     levelType: data.levelType || 'default',
     seed: data.seed || '',
@@ -226,7 +227,12 @@ export const useServerStore = defineStore('server', () => {
   const ramMetrics = computed(() => {
     const runtimeRam = server.value?.runtime?.ram
     const runtimeLimit = typeof runtimeRam?.limitGB === 'number' ? runtimeRam.limitGB : null
-    const configuredTotal = Number(server.value?.memory ?? serverSettings.value?.memory ?? 0)
+    // Fallback total (used while stopped, before a real -Xmx limit is known).
+    // memory is expressed in memoryUnit; normalize MB to GB so the bar's units
+    // stay consistent with used (always GB).
+    const configuredUnit = server.value?.memoryUnit ?? serverSettings.value?.memoryUnit ?? 'GB'
+    const configuredValue = Number(server.value?.memory ?? serverSettings.value?.memory ?? 0)
+    const configuredTotal = configuredUnit === 'MB' ? configuredValue / 1024 : configuredValue
     let total = runtimeLimit ?? configuredTotal
     if (!Number.isFinite(total) || total <= 0) total = 1
     let used = 0

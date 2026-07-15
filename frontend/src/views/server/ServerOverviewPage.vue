@@ -23,8 +23,13 @@ const backupsRouteLocation = computed(() => {
 
 const RECENT_LOG_PREVIEW_LINES = 16
 
-const ramUsedDisplay = computed(() => store.ramMetrics.used.toFixed(1))
-const ramTotalDisplay = computed(() => store.ramMetrics.total.toFixed(1))
+// ramMetrics is always in GB; the Overview memory-unit preference only changes
+// how we present it here (GB with one decimal, or whole MB).
+const ramUnitLabel = computed(() => prefs.memoryUnit)
+const formatRam = (gb) =>
+  prefs.memoryUnit === 'MB' ? String(Math.round(gb * 1024)) : gb.toFixed(1)
+const ramUsedDisplay = computed(() => formatRam(store.ramMetrics.used))
+const ramTotalDisplay = computed(() => formatRam(store.ramMetrics.total))
 const ramPercent = computed(() => {
   const m = store.ramMetrics
   if (!m.total) return 0
@@ -159,7 +164,7 @@ onUnmounted(() => {
           <div class="overview-page__perf">
             <div class="overview-page__perf-row">
               <span class="overview-page__perf-label">RAM</span>
-              <span class="overview-page__perf-value">{{ ramUsedDisplay }} / {{ ramTotalDisplay }} GB</span>
+              <span class="overview-page__perf-value">{{ ramUsedDisplay }} / {{ ramTotalDisplay }} {{ ramUnitLabel }}</span>
               <span class="overview-page__perf-pct">{{ ramPercent }}%</span>
             </div>
             <div class="overview-page__bar">

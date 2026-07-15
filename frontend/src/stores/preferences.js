@@ -43,5 +43,11 @@ export const usePreferencesStore = defineStore('preferences', () => {
   )
   watch(cpuDisplayMode, (mode) => persist({ cpuDisplayMode: mode }))
 
-  return { cpuDisplayMode }
+  // Unit used to show and enter server memory allocation. 'GB' (default) or
+  // 'MB' for finer control (e.g. 1536 MB). Purely how the value is presented —
+  // the underlying allocation is identical either way.
+  const memoryUnit = ref(persisted.memoryUnit === 'MB' ? 'MB' : 'GB')
+  watch(memoryUnit, (unit) => persist({ memoryUnit: unit }))
+
+  return { cpuDisplayMode, memoryUnit }
 })

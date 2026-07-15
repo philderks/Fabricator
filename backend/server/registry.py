@@ -45,6 +45,12 @@ class ServerProcessRegistry:
                 return [str(part) for part in custom_command]
 
         memory = server.get('memory', 4)
+        # memoryUnit selects the JVM heap suffix: 'MB' -> M, anything else
+        # (default/legacy records without the field) -> G. The value itself is
+        # taken verbatim, so 1536 + MB yields -Xmx1536M.
+        mem_suffix = 'M' if str(server.get('memoryUnit', 'GB')).upper() == 'MB' else 'G'
+        xms = f'-Xms{memory}{mem_suffix}'
+        xmx = f'-Xmx{memory}{mem_suffix}'
         java_exec = self._resolve_java_exec(server)
         launch = server.get('launch')
         launch_type = launch.get('type') if isinstance(launch, dict) else None
@@ -59,8 +65,8 @@ class ServerProcessRegistry:
             jar_name = str(launch.get('jar') or 'server.jar')
             return [
                 java_exec,
-                f'-Xms{memory}G',
-                f'-Xmx{memory}G',
+                xms,
+                xmx,
                 *jvm_args,
                 '-jar',
                 jar_name,
@@ -82,8 +88,8 @@ class ServerProcessRegistry:
             )
             return [
                 java_exec,
-                f'-Xms{memory}G',
-                f'-Xmx{memory}G',
+                xms,
+                xmx,
                 *jvm_args,
                 f'@{args_file}',
                 *program_args,
@@ -94,8 +100,8 @@ class ServerProcessRegistry:
             # Matches the historical hardcoded default exactly.
             return [
                 java_exec,
-                f'-Xms{memory}G',
-                f'-Xmx{memory}G',
+                xms,
+                xmx,
                 '-jar',
                 'server.jar',
                 'nogui',

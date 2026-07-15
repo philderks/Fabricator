@@ -80,6 +80,12 @@ onMounted(async () => {
 
     <Panel title="Display">
       <ToggleRow
+        :model-value="prefs.memoryUnit === 'MB'"
+        label="Show RAM in MB on the Overview"
+        hint="Off shows the Overview RAM readout in gigabytes; on shows megabytes. Display only — it does not change how much memory the server is allocated."
+        @update:model-value="prefs.memoryUnit = $event ? 'MB' : 'GB'"
+      />
+      <ToggleRow
         :model-value="prefs.cpuDisplayMode === 'total'"
         label="Show total CPU across all cores"
         hint="Off shows average system load (0–100%, like Task Manager). On shows the raw process usage, which can exceed 100% on multi-core hosts."
