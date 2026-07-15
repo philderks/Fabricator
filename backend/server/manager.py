@@ -479,6 +479,11 @@ class ServerManager:
         cpu_percent = self._get_cpu_percent()
         if cpu_percent is not None:
             status["cpu"] = cpu_percent
+            # Ship the host core count so the UI can render either the raw
+            # total or the per-core average without a second round-trip.
+            cores = psutil.cpu_count() if psutil else None
+            if cores:
+                status["cpuCores"] = cores
         if self._process and running:
             status["pid"] = self._process.pid
         with self._lock:
@@ -614,6 +619,10 @@ class ServerManager:
         if not process:
             return None
         try:
+            # Raw psutil CPU% — can exceed 100 on multi-core hosts (e.g. 400 on
+            # 4 cores). We report it unnormalized and ship the core count
+            # (see status()) so the UI can show either the per-core average
+            # (Task-Manager style) or the raw total, per user preference.
             return round(process.cpu_percent(interval=None), 1)
         except (psutil.Error, ProcessLookupError):
             self._ps_process = None

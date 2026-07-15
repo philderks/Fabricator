@@ -10,6 +10,10 @@ const props = defineProps({
     type: String,
     required: true
   },
+  hint: {
+    type: String,
+    default: ''
+  },
   disabled: {
     type: Boolean,
     default: false
@@ -24,7 +28,23 @@ const inputId = useId()
 <template>
   <div class="toggle-row" :class="{ 'toggle-row--disabled': disabled }">
     <div class="toggle-row__text">
-      <label :for="inputId" class="toggle-row__label">{{ label }}</label>
+      <label :for="inputId" class="toggle-row__label">
+        {{ label }}
+        <span
+          v-if="hint"
+          class="toggle-row__hint"
+          :title="hint"
+          role="img"
+          :aria-label="hint"
+          tabindex="0"
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <circle cx="8" cy="8" r="6.5" />
+            <path d="M8 7.25v3.5" stroke-linecap="round" />
+            <circle cx="8" cy="5" r="0.75" fill="currentColor" stroke="none" />
+          </svg>
+        </span>
+      </label>
     </div>
     <label class="toggle-row__switch" :for="inputId">
       <input
@@ -60,11 +80,26 @@ const inputId = useId()
 }
 
 .toggle-row__label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
   font-size: var(--text-sm);
   font-weight: 500;
   color: var(--text-primary);
   line-height: var(--leading-tight);
   cursor: pointer;
+}
+
+.toggle-row__hint {
+  display: inline-flex;
+  color: var(--text-muted);
+  cursor: help;
+}
+
+.toggle-row__hint:hover,
+.toggle-row__hint:focus-visible {
+  color: var(--text-secondary);
+  outline: none;
 }
 
 .toggle-row--disabled .toggle-row__label {
