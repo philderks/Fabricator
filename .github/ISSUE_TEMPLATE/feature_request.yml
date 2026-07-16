@@ -1,0 +1,56 @@
+name: Feature request
+description: Suggest something Fabricator doesn't do yet.
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please describe the problem you're running into, not only the solution
+        you have in mind. There's often a simpler fix than the one we'd reach for.
+
+        If you want to change something that already exists rather than add
+        something new, use the **Improvement** template instead. It's shorter.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: What's the situation, and what's stopping you today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: What would you like Fabricator to do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What are you doing instead right now?
+      description: Workarounds, other tools, or why the current behavior doesn't cover it.
+
+  - type: input
+    id: setup
+    attributes:
+      label: How do you run Fabricator?
+      description: |
+        Optional, but useful. Number of servers and which loader. Most people run
+        one server, and that shapes what we build.
+      placeholder: 1 server, Fabric 1.21.1
+
+  - type: dropdown
+    id: implement
+    attributes:
+      label: Would you like to implement this?
+      description: |
+        Either answer is fine. Offering to implement doesn't mean the request is
+        accepted, so please wait for a reply before writing code.
+      options:
+        - I'm hoping someone else picks it up
+        - I'd like to implement it myself
+        - Not sure yet
+    validations:
+      required: true

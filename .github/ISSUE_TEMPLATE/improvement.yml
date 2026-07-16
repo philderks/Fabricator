@@ -1,0 +1,45 @@
+name: Improvement
+description: Something that already exists but should work, read, or behave differently.
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Small changes are welcome and this is the right place for them. A
+        confusing label, a unit that should be different, a default that's wrong,
+        a value that's too coarse to be useful. If you noticed it, it's worth
+        filing.
+
+  - type: textarea
+    id: current
+    attributes:
+      label: What does it do today?
+      placeholder: RAM allocation is set in GB.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed
+    attributes:
+      label: What should it do instead?
+      placeholder: Allocation should be in MB, so you can pick something between 4 GB and 6 GB.
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why does the current behavior get in the way?
+      description: Skip this if it's obvious from the above.
+
+  - type: dropdown
+    id: implement
+    attributes:
+      label: Would you like to implement this?
+      description: Either answer is fine.
+      options:
+        - I'm hoping someone else picks it up
+        - I'd like to implement it myself
+        - Not sure yet
+    validations:
+      required: true
