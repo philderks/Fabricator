@@ -20,6 +20,13 @@ Trigger choice:
 - Otherwise → :class:`IntervalTrigger` aligned to the configured
   ``timeOfDay`` for its ``start_date``. Interval triggers handle the
   "every N hours" sub-daily case cleanly.
+
+Both triggers are built with the schedule's ``timezone`` (an IANA zone
+like ``"Europe/Amsterdam"`` captured from the user's browser) so
+``timeOfDay`` is interpreted as *the user's* wall-clock time, not the
+server's. Without it APScheduler resolves the host zone — UTC on the
+usual container — which is why a "03:00" schedule used to fire at 03:00
+GMT for everyone. See :func:`_resolve_timezone` for the fallback.
 """
 from __future__ import annotations
 
@@ -27,6 +34,7 @@ import logging
 import os
 from datetime import datetime, time as dtime, timedelta, timezone
 from typing import Any, Dict, Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
@@ -209,21 +217,56 @@ def _parse_time_of_day(value: str | None) -> dtime:
     return dtime(hour=hour, minute=minute)
 
 
+def _resolve_timezone(schedule: Dict[str, Any]) -> Optional[ZoneInfo]:
+    """Resolve the schedule's IANA timezone, or ``None`` for the host default.
+
+    A schedule created through the UI carries the user's browser zone (e.g.
+    ``"America/New_York"``); handing that to the trigger makes the wall-clock
+    ``timeOfDay`` fire in the *user's* zone rather than the server's — the bug
+    was that an absent zone let APScheduler resolve the host zone (UTC on the
+    usual container), so "03:00" meant 03:00 GMT for everyone.
+
+    Returns ``None`` when the zone is missing or unknown (pre-fix configs,
+    hand-edited JSON). The trigger then resolves the host local zone exactly as
+    before, so no existing schedule silently shifts; re-saving in the UI stamps
+    a real zone and heals it.
+    """
+    raw = (schedule.get("timezone") or "").strip()
+    if not raw:
+        return None
+    try:
+        return ZoneInfo(raw)
+    except (ZoneInfoNotFoundError, ValueError):
+        logger.warning(
+            "Unknown backup schedule timezone %r; falling back to host default",
+            raw,
+        )
+        return None
+
+
 def _build_trigger(schedule: Dict[str, Any]):
     """Build the APScheduler trigger from a config's ``schedule`` block."""
     frequency_hours = int(schedule.get("frequencyHours") or 24)
     time_of_day = _parse_time_of_day(schedule.get("timeOfDay"))
+    tz = _resolve_timezone(schedule)
 
     if frequency_hours == 24:
-        return CronTrigger(hour=time_of_day.hour, minute=time_of_day.minute)
+        return CronTrigger(
+            hour=time_of_day.hour, minute=time_of_day.minute, timezone=tz
+        )
 
     # IntervalTrigger anchored at the next occurrence of ``timeOfDay`` so
-    # "every 6h at :30" stays predictable. Anchor in LOCAL time — the same frame
-    # CronTrigger(hour=, minute=) uses for daily schedules — so a sub-daily and a
+    # "every 6h at :30" stays predictable. Anchor in the schedule's zone — the
+    # same frame CronTrigger uses for daily schedules — so a sub-daily and a
     # daily schedule with the same timeOfDay fire at the same wall-clock time
-    # instead of drifting by the host's UTC offset.
-    anchor = _interval_anchor(time_of_day, frequency_hours, datetime.now())
-    return IntervalTrigger(hours=frequency_hours, start_date=anchor)
+    # instead of drifting by the host's UTC offset. ``tz`` is None for pre-fix
+    # configs; then ``now`` is naive local and the trigger resolves the host
+    # zone, preserving the old behaviour.
+    now = datetime.now(tz) if tz is not None else datetime.now()
+    anchor = _interval_anchor(time_of_day, frequency_hours, now)
+    return IntervalTrigger(
+        hours=frequency_hours, start_date=anchor, timezone=tz
+    )
 
 
 def _interval_anchor(

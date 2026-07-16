@@ -35,6 +35,21 @@ const JOB_POLL_INTERVAL_MS = 1000
 
 const FREQUENCY_PRESETS = [1, 6, 12, 24, 168]
 
+/**
+ * The viewer's IANA time zone (e.g. "Europe/Amsterdam"). Sent with the
+ * schedule so the backend fires `timeOfDay` at the user's wall-clock time
+ * rather than the server's (which is UTC on the usual container). Empty
+ * string if the browser can't report one — the backend then falls back to
+ * the host zone.
+ */
+function browserTimeZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || ''
+  } catch (_) {
+    return ''
+  }
+}
+
 const DEFAULT_CONFIG_DRAFT = () => ({
   id: null,
   name: '',
@@ -47,7 +62,8 @@ const DEFAULT_CONFIG_DRAFT = () => ({
   schedule: {
     enabled: true,
     frequencyHours: 24,
-    timeOfDay: '03:00'
+    timeOfDay: '03:00',
+    timezone: browserTimeZone()
   }
 })
 
@@ -68,7 +84,10 @@ function draftFromConfig(config) {
       frequencyHours: typeof config.schedule?.frequencyHours === 'number'
         ? config.schedule.frequencyHours
         : 24,
-      timeOfDay: config.schedule?.timeOfDay || '03:00'
+      timeOfDay: config.schedule?.timeOfDay || '03:00',
+      // Keep a stored zone (a schedule may have been created elsewhere); an
+      // empty one (pre-fix config) heals to the current browser zone on save.
+      timezone: config.schedule?.timezone || browserTimeZone()
     }
   }
 }
@@ -89,7 +108,8 @@ function draftToPayload(draft) {
     schedule: {
       enabled: Boolean(draft.schedule.enabled),
       frequencyHours: Number(draft.schedule.frequencyHours) || 24,
-      timeOfDay: draft.schedule.timeOfDay || '03:00'
+      timeOfDay: draft.schedule.timeOfDay || '03:00',
+      timezone: draft.schedule.timezone || browserTimeZone()
     }
   }
 }
