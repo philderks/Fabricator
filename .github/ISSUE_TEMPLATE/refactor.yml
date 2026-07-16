@@ -1,0 +1,70 @@
+name: Refactor, tooling, or CI change
+description: Restructuring, build tooling, CI pipeline, packaging, or dependency changes.
+labels: ["refactor", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Structural changes need to be agreed on before they're written. They have
+        knock-on effects for the installer, the release pipeline, and the packaged
+        Docker image that aren't obvious from the diff, and a good change to the
+        repo can still be one we can't take right now.
+
+        Please open this before writing code.
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you change?
+    validations:
+      required: true
+
+  - type: textarea
+    id: motivation
+    attributes:
+      label: What problem does this solve?
+      description: What's concretely worse today because of the current setup?
+    validations:
+      required: true
+
+  - type: textarea
+    id: blast-radius
+    attributes:
+      label: What does this touch?
+      description: |
+        Call out anything affecting `tools/install.sh`, the release workflow, the
+        Docker image, the `fabricator` CLI entrypoint, or the paths used by
+        existing installs.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: breaking
+    attributes:
+      label: Does this break existing installs or in-place updates?
+      options:
+        - "No"
+        - "Yes"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: implement
+    attributes:
+      label: Would you like to implement this?
+      description: Please wait for agreement before opening a PR.
+      options:
+        - I'd like to implement it myself
+        - I'm hoping someone else picks it up
+        - Not sure yet
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: ack
+    attributes:
+      label: Acknowledgement
+      options:
+        - label: I understand that unsolicited restructuring PRs may be declined or only partially taken.
+          required: true

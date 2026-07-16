@@ -1,0 +1,96 @@
+name: Bug report
+description: Something isn't working the way it should.
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. The fields below are the
+        things we end up asking for in almost every bug thread, so filling
+        them in saves a round trip.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Go to ...
+        2. Click ...
+        3. See ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Fabricator version
+      description: Shown in the panel sidebar, or run `fabricator version`.
+      placeholder: v0.5.2
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: Install method
+      options:
+        - Docker
+        - One-line installer (systemd)
+        - Manual / from source
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: Distro and version. For Docker, the host OS.
+      placeholder: Debian 12
+    validations:
+      required: true
+
+  - type: dropdown
+    id: loader
+    attributes:
+      label: Server loader
+      description: If the bug isn't tied to a specific server, pick "Not applicable".
+      options:
+        - Fabric
+        - Quilt
+        - NeoForge
+        - Forge
+        - Vanilla
+        - Not applicable
+    validations:
+      required: true
+
+  - type: input
+    id: mc-version
+    attributes:
+      label: Minecraft version
+      placeholder: "1.21.1"
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Relevant output from the Fabricator log, and the Minecraft server log if
+        the bug involves a server. systemd installs: `journalctl -u fabricator -n 200`.
+        Docker: `docker compose logs --tail 200`. This will be formatted as code.
+      render: shell
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Screenshots, reverse proxy setup, anything unusual about your environment.

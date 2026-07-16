@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://docs.fabricator.site
+    about: Install, configuration, reverse proxy, and troubleshooting guides.
+  - name: Question or setup help
+    url: https://github.com/philderks/Fabricator/discussions
+    about: Ask here if something isn't working but you're not sure it's a bug.
+  - name: Report a security vulnerability
+    url: https://github.com/philderks/Fabricator/security/advisories/new
+    about: Please report vulnerabilities privately, not as a public issue.
