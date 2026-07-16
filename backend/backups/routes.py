@@ -32,6 +32,7 @@ import uuid
 import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from flask import Blueprint, after_this_request, jsonify, request, send_file
 from werkzeug.utils import secure_filename
@@ -434,6 +435,17 @@ def _validate_config_payload(
                     return "schedule.frequencyHours must be > 0"
             except (TypeError, ValueError):
                 return "schedule.frequencyHours must be an integer"
+        # An empty timezone is allowed (falls back to the host zone); a
+        # non-empty one must be a real IANA zone so the scheduler doesn't
+        # silently drop back to UTC on a typo.
+        tz = schedule.get("timezone")
+        if tz not in (None, ""):
+            if not isinstance(tz, str):
+                return "schedule.timezone must be a string"
+            try:
+                ZoneInfo(tz)
+            except (ZoneInfoNotFoundError, ValueError):
+                return f"schedule.timezone '{tz}' is not a valid IANA time zone"
 
     return None
 

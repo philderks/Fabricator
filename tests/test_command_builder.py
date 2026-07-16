@@ -117,6 +117,36 @@ def test_build_command_explicit_empty_program_args_is_respected(tmp_path, monkey
     assert cmd == ["java", "-Xms2G", "-Xmx2G", "-jar", "server.jar"]
 
 
+def test_build_command_memory_unit_mb_uses_m_suffix(tmp_path, monkeypatch):
+    """memoryUnit='MB' emits -Xms/-Xmx with an M suffix and the raw value."""
+    reg = _make_registry(tmp_path)
+    monkeypatch.setattr(reg, "_resolve_java_exec", lambda s: "java")
+
+    server = {
+        "id": "srv_x",
+        "memory": 1536,
+        "memoryUnit": "MB",
+        "launch": {
+            "type": "jar",
+            "jar": "server.jar",
+            "jvm_args": [],
+            "program_args": ["nogui"],
+        },
+    }
+    cmd = reg._build_command(server)
+    assert cmd == ["java", "-Xms1536M", "-Xmx1536M", "-jar", "server.jar", "nogui"]
+
+
+def test_build_command_memory_unit_defaults_to_gb(tmp_path, monkeypatch):
+    """A record with no memoryUnit (legacy) keeps the G suffix."""
+    reg = _make_registry(tmp_path)
+    monkeypatch.setattr(reg, "_resolve_java_exec", lambda s: "java")
+
+    server = {"id": "srv_x", "memory": 4}
+    cmd = reg._build_command(server)
+    assert cmd == ["java", "-Xms4G", "-Xmx4G", "-jar", "server.jar", "nogui"]
+
+
 def test_build_command_args_file_launch(tmp_path, monkeypatch):
     reg = _make_registry(tmp_path)
     monkeypatch.setattr(reg, "_resolve_java_exec", lambda s: "/opt/java/bin/java")

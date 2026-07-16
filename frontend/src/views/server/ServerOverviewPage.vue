@@ -6,11 +6,13 @@ import Panel from '../../components/ui/Panel.vue'
 import { installedModDisplayName, installedModInitial } from '../../utils/installedModDisplay'
 import { useServerStore } from '../../stores/server'
 import { usePlayitStore } from '../../stores/playit'
+import { usePreferencesStore } from '../../stores/preferences'
 import { copyToClipboard } from '../../utils/clipboard'
 
 const route = useRoute()
 const store = useServerStore()
 const playit = usePlayitStore()
+const prefs = usePreferencesStore()
 
 /** Matches sidebar Backups nav — always derive :id from the URL to avoid store/route drift. */
 const backupsRouteLocation = computed(() => {
@@ -21,20 +23,44 @@ const backupsRouteLocation = computed(() => {
 
 const RECENT_LOG_PREVIEW_LINES = 16
 
-const ramUsedDisplay = computed(() => store.ramMetrics.used.toFixed(1))
-const ramTotalDisplay = computed(() => store.ramMetrics.total.toFixed(1))
+// ramMetrics is always in GB; the Overview memory-unit preference only changes
+// how we present it here (GB with one decimal, or whole MB).
+const ramUnitLabel = computed(() => prefs.memoryUnit)
+const formatRam = (gb) =>
+  prefs.memoryUnit === 'MB' ? String(Math.round(gb * 1024)) : gb.toFixed(1)
+const ramUsedDisplay = computed(() => formatRam(store.ramMetrics.used))
+const ramTotalDisplay = computed(() => formatRam(store.ramMetrics.total))
 const ramPercent = computed(() => {
   const m = store.ramMetrics
   if (!m.total) return 0
   return Math.round((m.used / m.total) * 100)
 })
-const cpuPercent = computed(() => {
+// Backend reports the raw process CPU% (can exceed 100 on multi-core hosts)
+// plus the host core count. We mirror the RAM row — a used/total pair plus a
+// utilization percent — and let the setting choose the units.
+const cpuCores = computed(() => {
+  const cores = store.server?.runtime?.cpuCores
+  return typeof cores === 'number' && cores > 0 ? cores : 1
+})
+const cpuRaw = computed(() => {
   const cpu = store.server?.runtime?.cpu
-  return typeof cpu === 'number' ? Math.min(100, Math.round(cpu)) : null
+  return typeof cpu === 'number' ? cpu : null
 })
-const cpuDisplay = computed(() => {
-  return cpuPercent.value !== null ? `${cpuPercent.value}%` : '—'
-})
+// Utilization as a 0–100% share of total capacity: identical in both modes,
+// drives the bar, and reads 0% (not blank) when idle or stopped.
+const cpuPercent = computed(() => Math.round((cpuRaw.value ?? 0) / cpuCores.value))
+// Left-hand "used / total" figures, in the units the current mode reports:
+// total mode counts every core (e.g. 250% / 400%), average mode is 0–100%.
+const cpuUsedDisplay = computed(() =>
+  prefs.cpuDisplayMode === 'total'
+    ? Math.round(cpuRaw.value ?? 0)
+    : cpuPercent.value
+)
+const cpuTotalDisplay = computed(() =>
+  prefs.cpuDisplayMode === 'total' ? cpuCores.value * 100 : 100
+)
+// Cap the bar fill at 100% so it never overflows.
+const cpuBarWidth = computed(() => Math.min(100, cpuPercent.value))
 const recentLogLines = computed(() => {
   const lines = store.logs.stdout || []
   // Entries are { ts, text }; tolerate plain strings from an older backend.
@@ -138,7 +164,7 @@ onUnmounted(() => {
           <div class="overview-page__perf">
             <div class="overview-page__perf-row">
               <span class="overview-page__perf-label">RAM</span>
-              <span class="overview-page__perf-value">{{ ramUsedDisplay }} / {{ ramTotalDisplay }} GB</span>
+              <span class="overview-page__perf-value">{{ ramUsedDisplay }} / {{ ramTotalDisplay }} {{ ramUnitLabel }}</span>
               <span class="overview-page__perf-pct">{{ ramPercent }}%</span>
             </div>
             <div class="overview-page__bar">
@@ -146,11 +172,11 @@ onUnmounted(() => {
             </div>
             <div class="overview-page__perf-row">
               <span class="overview-page__perf-label">CPU</span>
-              <span class="overview-page__perf-value">{{ cpuDisplay }}</span>
-              <span class="overview-page__perf-pct">{{ cpuPercent !== null ? cpuPercent + '%' : '' }}</span>
+              <span class="overview-page__perf-value">{{ cpuUsedDisplay }}% / {{ cpuTotalDisplay }}%</span>
+              <span class="overview-page__perf-pct">{{ cpuPercent }}%</span>
             </div>
             <div class="overview-page__bar">
-              <div class="overview-page__bar-fill overview-page__bar-fill--cpu" :style="{ width: (cpuPercent ?? 0) + '%' }"></div>
+              <div class="overview-page__bar-fill overview-page__bar-fill--cpu" :style="{ width: cpuBarWidth + '%' }"></div>
             </div>
           </div>
         </Panel>

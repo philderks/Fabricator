@@ -23,7 +23,8 @@ File shape::
           "schedule": {
             "enabled": true,
             "frequencyHours": 24,
-            "timeOfDay": "03:00"
+            "timeOfDay": "03:00",
+            "timezone": "Europe/Amsterdam"
           },
           "createdAt": "...",
           "updatedAt": "..."
@@ -203,6 +204,9 @@ def _normalise_config_payload(data: Dict[str, Any]) -> Dict[str, Any]:
             "enabled": bool(sched.get("enabled", False)),
             "frequencyHours": int(sched.get("frequencyHours") or 24),
             "timeOfDay": str(sched.get("timeOfDay") or "03:00"),
+            # IANA zone the user's browser reported; empty means "fall back to
+            # the host zone" (the scheduler resolves it — see _resolve_timezone).
+            "timezone": str(sched.get("timezone") or "").strip(),
         }
     return out
 
@@ -225,6 +229,7 @@ def create_config(server_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
             "enabled": False,
             "frequencyHours": 24,
             "timeOfDay": "03:00",
+            "timezone": "",
         },
         **normalised,
         "createdAt": now,

@@ -1,15 +1,18 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import Panel from '../../components/ui/Panel.vue'
+import ToggleRow from '../../components/ui/ToggleRow.vue'
 import JavaManagerPanel from '../../components/settings/JavaManagerPanel.vue'
 import ChangePasswordPanel from '../../components/settings/ChangePasswordPanel.vue'
 import { useAuthStore } from '../../stores/auth'
 import { useServerStore } from '../../stores/server'
+import { usePreferencesStore } from '../../stores/preferences'
 import { version as appVersion } from '../../../package.json'
 import { getUpdateStatus } from '../../api/servers'
 
 const auth = useAuthStore()
 const store = useServerStore()
+const prefs = usePreferencesStore()
 
 // Boot auto-start mode — saves instantly via its own endpoint, so it stays
 // editable even while the server is running (unlike server.properties).
@@ -73,6 +76,21 @@ onMounted(async () => {
           </span>
         </label>
       </div>
+    </Panel>
+
+    <Panel title="Display">
+      <ToggleRow
+        :model-value="prefs.memoryUnit === 'MB'"
+        label="Show RAM in MB on the Overview"
+        hint="Off shows the Overview RAM readout in gigabytes; on shows megabytes. Display only — it does not change how much memory the server is allocated."
+        @update:model-value="prefs.memoryUnit = $event ? 'MB' : 'GB'"
+      />
+      <ToggleRow
+        :model-value="prefs.cpuDisplayMode === 'total'"
+        label="Show total CPU across all cores"
+        hint="Off shows average system load (0–100%, like Task Manager). On shows the raw process usage, which can exceed 100% on multi-core hosts."
+        @update:model-value="prefs.cpuDisplayMode = $event ? 'total' : 'average'"
+      />
     </Panel>
 
     <JavaManagerPanel />

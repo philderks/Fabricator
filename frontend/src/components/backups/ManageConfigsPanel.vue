@@ -23,6 +23,14 @@ const heading = computed(() => (isEditing.value ? 'Edit schedule' : 'New schedul
 const sortedConfigs = computed(() => store.sortedConfigs)
 const draft = computed(() => store.draft)
 
+// Surface the schedule's time zone so "03:00" is unambiguous — the backend
+// fires timeOfDay in this zone, not the server's.
+const timeOfDayHint = computed(() => {
+  const tz = draft.value?.schedule?.timezone
+  const base = 'Anchor for daily runs and start time for intervals.'
+  return tz ? `${base} Fires in your time zone (${tz}).` : base
+})
+
 function statsForConfig(configId) {
   const snaps = store.snapshotsByConfigId.get(configId) || []
   const count = snaps.length
@@ -209,7 +217,7 @@ function onClose() {
                     </template>
                   </FormField>
 
-                  <FormField label="Time of day" hint="Used as anchor for daily runs and start time for intervals.">
+                  <FormField label="Time of day" :hint="timeOfDayHint">
                     <template #default="{ id, describedBy }">
                       <input
                         :id="id"

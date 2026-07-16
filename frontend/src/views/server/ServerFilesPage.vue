@@ -1,5 +1,6 @@
 <script setup>
-import { computed, nextTick, onUnmounted, ref } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onUnmounted, ref, watch } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
 import AppButton from '../../components/ui/AppButton.vue'
 import Panel from '../../components/ui/Panel.vue'
 import ConfirmModal from '../../components/modals/ConfirmModal.vue'
@@ -7,9 +8,14 @@ import { formatFileSize } from '../../utils/format'
 import { copyToClipboard } from '../../utils/clipboard'
 import { useServerStore } from '../../stores/server'
 
+// Async-loaded so CodeMirror lands in its own chunk instead of the main bundle
+// (the Files route is imported statically by the router).
+const CodeEditor = defineAsyncComponent(() => import('../../components/ui/CodeEditor.vue'))
+
 const store = useServerStore()
 
 const editorRef = ref(null)
+const codeEditorRef = ref(null)
 
 // CC6: modal-based confirm instead of window.confirm. Local state with a
 // promise-resolver lets the call sites keep their `if (!await ...) return`
@@ -41,10 +47,81 @@ const handleDiscardCancel = () => {
   }
 }
 
+// Invalid-save confirm — same promise-resolver shape as the discard dialog, so
+// onSave can keep its `if (!await ...) return` flow.
+const hasSyntaxErrors = ref(false)
+const showInvalidSaveConfirm = ref(false)
+let invalidSaveResolver = null
+
+const onValidity = ({ hasErrors }) => {
+  hasSyntaxErrors.value = hasErrors
+}
+
+const confirmInvalidSave = () => {
+  // Prefer the editor's synchronous, live check (no lint-debounce staleness);
+  // fall back to the last emitted flag if the editor ref isn't resolved.
+  const hasErrors = codeEditorRef.value?.hasErrors?.() ?? hasSyntaxErrors.value
+  if (!hasErrors) return Promise.resolve(true)
+  return new Promise((resolve) => {
+    invalidSaveResolver = resolve
+    showInvalidSaveConfirm.value = true
+  })
+}
+
+const handleInvalidSaveConfirm = () => {
+  showInvalidSaveConfirm.value = false
+  if (invalidSaveResolver) {
+    invalidSaveResolver(true)
+    invalidSaveResolver = null
+  }
+}
+
+const handleInvalidSaveCancel = () => {
+  showInvalidSaveConfirm.value = false
+  if (invalidSaveResolver) {
+    invalidSaveResolver(false)
+    invalidSaveResolver = null
+  }
+}
+
+const onSave = async () => {
+  if (store.fileEditor.loading || store.fileEditor.saving || !store.hasFileChanges) return
+  if (!(await confirmInvalidSave())) return
+  await store.saveFile()
+}
+
+// Warn before a hard reload/close drops unsaved edits. The in-app file-switch,
+// close, and route-leave paths are handled by confirmDiscardChanges.
+const beforeUnloadHandler = (event) => {
+  event.preventDefault()
+  event.returnValue = ''
+}
+
+watch(
+  () => store.hasFileChanges,
+  (dirty) => {
+    if (dirty) {
+      window.addEventListener('beforeunload', beforeUnloadHandler)
+    } else {
+      window.removeEventListener('beforeunload', beforeUnloadHandler)
+    }
+  }
+)
+
+onBeforeRouteLeave(async () => {
+  if (!(await confirmDiscardChanges())) return false
+  return true
+})
+
 onUnmounted(() => {
+  window.removeEventListener('beforeunload', beforeUnloadHandler)
   if (discardResolver) {
     discardResolver(false)
     discardResolver = null
+  }
+  if (invalidSaveResolver) {
+    invalidSaveResolver(false)
+    invalidSaveResolver = null
   }
 })
 
@@ -194,7 +271,7 @@ const onCopyPath = async () => {
     <Panel
       v-if="store.fileEditor.path || store.fileEditor.loading"
       ref="editorRef"
-      :title="store.fileEditor.path || 'Loading…'"
+      :title="(store.fileEditor.path || 'Loading…') + (store.hasFileChanges ? ' •' : '')"
     >
       <template #action>
         <div class="files-page__editor-actions">
@@ -209,19 +286,21 @@ const onCopyPath = async () => {
             size="sm"
             :loading="store.fileEditor.saving"
             :disabled="store.fileEditor.loading || !store.hasFileChanges"
-            @click="store.saveFile"
+            @click="onSave"
           >Save</AppButton>
         </div>
       </template>
 
       <div v-if="store.fileEditor.loading" class="files-page__state">Loading file…</div>
       <div v-else>
-        <textarea
+        <CodeEditor
+          ref="codeEditorRef"
           v-model="store.fileEditor.content"
-          class="files-page__editor-textarea"
+          :path="store.fileEditor.path"
           :disabled="store.fileEditor.saving"
-          spellcheck="false"
-        ></textarea>
+          @save="onSave"
+          @validity="onValidity"
+        />
         <p v-if="store.fileEditor.error" class="files-page__editor-error">{{ store.fileEditor.error }}</p>
       </div>
     </Panel>
@@ -236,6 +315,18 @@ const onCopyPath = async () => {
       cancel-text="Keep editing"
       @confirm="handleDiscardConfirm"
       @cancel="handleDiscardCancel"
+    />
+
+    <ConfirmModal
+      :show="showInvalidSaveConfirm"
+      title="Save file with syntax errors?"
+      message="This file has syntax errors."
+      description="Saving an invalid config may prevent the server from starting. Save anyway?"
+      type="warning"
+      confirm-text="Save anyway"
+      cancel-text="Keep editing"
+      @confirm="handleInvalidSaveConfirm"
+      @cancel="handleInvalidSaveCancel"
     />
   </div>
 </template>
@@ -438,30 +529,6 @@ const onCopyPath = async () => {
 .files-page__editor-actions {
   display: flex;
   gap: var(--space-2);
-}
-
-.files-page__editor-textarea {
-  width: 100%;
-  min-height: 320px;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  line-height: var(--leading-normal);
-  padding: var(--space-3);
-  resize: vertical;
-}
-
-.files-page__editor-textarea:focus {
-  outline: none;
-  border-color: var(--primary);
-}
-
-.files-page__editor-textarea:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
 }
 
 .files-page__editor-error {
