@@ -1,7 +1,7 @@
 <template>
   <BaseModal
     :show="show"
-    title="Browse Mods"
+    :title="`Browse ${nounPlural}`"
     size="xlarge"
     @close="$emit('close')"
   >
@@ -15,7 +15,7 @@
         <input
           v-model="searchQuery"
           type="text"
-          placeholder="Search mods..."
+          :placeholder="`Search ${nounLower}...`"
           @input="debouncedSearch"
         >
       </div>
@@ -70,7 +70,7 @@
     <!-- Loading State -->
     <div v-if="loading" class="loading-state">
       <div class="spinner"></div>
-      <p>Searching mods...</p>
+      <p>Searching {{ nounLower }}...</p>
     </div>
 
     <!-- Results -->
@@ -88,7 +88,7 @@
           :variant="isModInstalled(mod) ? 'ghost' : getInstallButtonVariant(mod)"
           size="sm"
           :disabled="isModInstalled(mod)"
-          :title="isModInstalled(mod) ? 'This mod is already in your mods folder' : getInstallButtonTitle(mod)"
+          :title="isModInstalled(mod) ? `This ${nounLower.slice(0, -1)} is already in your ${folderLabel} folder` : getInstallButtonTitle(mod)"
           @click.stop="installMod(mod)"
         >
           {{ isModInstalled(mod) ? 'Installed' : 'Install' }}
@@ -103,7 +103,7 @@
         <path d="M21 21L16.5 16.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
         <path d="M11 8V14M8 11H14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
       </svg>
-      <h3 class="mod-browser-empty__heading">No mods found</h3>
+      <h3 class="mod-browser-empty__heading">No {{ nounLower }} found</h3>
       <p class="mod-browser-empty__body">Try adjusting your search or filters</p>
     </div>
 
@@ -113,8 +113,8 @@
         <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="2"/>
         <path d="M9 9H15M9 13H13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
       </svg>
-      <h3 class="mod-browser-empty__heading">Search for mods</h3>
-      <p class="mod-browser-empty__body">Start typing to find mods for your server</p>
+      <h3 class="mod-browser-empty__heading">Search for {{ nounLower }}</h3>
+      <p class="mod-browser-empty__body">Start typing to find {{ nounLower }} for your server</p>
     </div>
 
     <template #footer>
@@ -158,8 +158,9 @@ import {
   getModDetails
 } from '../../api/modrinth'
 import { useServerStore } from '../../stores/server'
-import { installedJarMatchesBrowseHit, installedJarMatchesProjectRef } from '../../utils/modrinthJarMatch'
+import { installedEntryMatchesBrowseHit, installedEntryMatchesProjectRef } from '../../utils/modrinthJarMatch'
 import { formatNumber, truncate } from '../../utils/format'
+import { contentLabel, loaderProjectType, loaderModrinthFacets } from '../../utils/loaderKind'
 
 export default {
   name: 'ModBrowserModal',
@@ -207,6 +208,28 @@ export default {
     };
   },
   computed: {
+    // Add-on vocabulary derived from the loader (Mods vs Plugins).
+    projectType() {
+      return loaderProjectType(this.loader)
+    },
+    isPlugin() {
+      return this.projectType === 'plugin'
+    },
+    nounPlural() {
+      return contentLabel(this.loader, true)
+    },
+    nounLower() {
+      return this.nounPlural.toLowerCase()
+    },
+    folderLabel() {
+      return this.isPlugin ? 'plugins' : 'mods'
+    },
+    // Modrinth loader facets to match against — the platform's compat chain
+    // for plugin servers, or the single loader for mod servers.
+    loaderFacets() {
+      const facets = loaderModrinthFacets(this.loader)
+      return facets.length ? facets : (this.selectedLoader ? [this.selectedLoader] : [])
+    },
     pendingDependencyModTitle() {
       return this.pendingDependencyContext?.mod?.title || ''
     },
@@ -215,7 +238,11 @@ export default {
     },
     effectiveSearchVersion() {
       if (!this.versionFilterExpanded) {
-        return this.mcVersion || ''
+        // Bukkit plugins commonly tag only the minor line (e.g. "1.21"), not
+        // every patch, so searching by the exact server patch ("1.21.4") hides
+        // them. Broaden plugin browse to the minor line; the per-result
+        // compatibility indicator still flags anything that doesn't fit.
+        return this.isPlugin ? this.minorLine(this.mcVersion) : (this.mcVersion || '')
       }
       return this.selectedVersion
     },
@@ -249,9 +276,7 @@ export default {
   methods: {
     isModInstalled(mod) {
       const store = useServerStore()
-      return store.installedMods.some((file) =>
-        installedJarMatchesBrowseHit(file.filename || file.name, mod)
-      )
+      return store.installedMods.some((file) => installedEntryMatchesBrowseHit(file, mod))
     },
     toggleVersionFilter() {
       this.versionFilterExpanded = !this.versionFilterExpanded
@@ -339,8 +364,11 @@ export default {
 
       try {
         const filters = {}
-        if (this.selectedLoader) {
-          filters.loaders = [this.selectedLoader]
+        // Use the platform's facet chain for plugin servers so a spigot-only
+        // plugin still surfaces compatible game versions.
+        const loaderFilters = this.loaderFacets
+        if (loaderFilters.length) {
+          filters.loaders = loaderFilters
         }
         const response = await getModVersions(modId, filters)
         const collected = new Set()
@@ -395,13 +423,17 @@ export default {
         const data = await searchMods({
           query: this.searchQuery,
           version: this.effectiveSearchVersion,
-          loader: this.selectedLoader,
+          // Plugin platforms span multiple Modrinth categories (paper/spigot/
+          // bukkit); narrowing the search facet to one would hide the others,
+          // so we search unfiltered and intersect the facet chain client-side.
+          loader: this.isPlugin ? '' : this.selectedLoader,
+          projectType: this.projectType,
           sort: this.sortBy,
           limit: 20
         })
 
         const hits = data.hits || []
-        this.results = hits.filter((mod) => this.modSupportsLoader(mod, this.selectedLoader))
+        this.results = hits.filter((mod) => this.modSupportsAnyLoader(mod))
       } catch (error) {
         console.error('Search failed:', error)
         this.results = []
@@ -435,7 +467,10 @@ export default {
       try {
         const resolved = await resolveProjectVersion(mod.project_id, {
           mc_version: preferredVersion,
-          loader
+          loader,
+          // Plugin servers resolve against the full facet chain so a
+          // spigot/bukkit-only plugin's dependencies are still detected.
+          loaders: this.isPlugin ? this.loaderFacets : undefined
         })
         const version = resolved?.version
         if (!version || !Array.isArray(version.dependencies)) {
@@ -461,7 +496,7 @@ export default {
             slug: details.slug
           }
           const installed = store.installedMods.some((file) =>
-            installedJarMatchesProjectRef(file.filename || file.name, ref)
+            installedEntryMatchesProjectRef(file, ref)
           )
           if (!installed) {
             const key = details.id || pid
@@ -608,6 +643,13 @@ export default {
       return []
     },
 
+    // "1.21.4" -> "1.21"; leaves 2-part versions and non-standard ids as-is.
+    minorLine(version) {
+      const v = String(version || '')
+      const parts = v.split('.')
+      return parts.length >= 3 ? parts.slice(0, 2).join('.') : v
+    },
+
     modSupportsLoader(mod, loader) {
       if (!loader) {
         return true
@@ -617,6 +659,22 @@ export default {
         return true
       }
       return loaders.map((entry) => (entry || '').toLowerCase()).includes(loader.toLowerCase())
+    },
+
+    // True if the result declares any loader in the server's facet chain
+    // (paper/spigot/bukkit for a Paper server, or [loader] for a mod server).
+    // Untagged results pass — matches the single-loader helper's leniency.
+    modSupportsAnyLoader(mod) {
+      const facets = this.loaderFacets
+      if (!facets.length) {
+        return true
+      }
+      const loaders = mod.loaders || []
+      if (!Array.isArray(loaders) || loaders.length === 0) {
+        return true
+      }
+      const lower = loaders.map((entry) => (entry || '').toLowerCase())
+      return facets.some((facet) => lower.includes(facet.toLowerCase()))
     }
   },
   created() {

@@ -8,11 +8,16 @@ import { useServerStore } from '../../stores/server'
 import { usePlayitStore } from '../../stores/playit'
 import { usePreferencesStore } from '../../stores/preferences'
 import { copyToClipboard } from '../../utils/clipboard'
+import { contentLabel } from '../../utils/loaderKind'
 
 const route = useRoute()
 const store = useServerStore()
 const playit = usePlayitStore()
 const prefs = usePreferencesStore()
+
+// "Mods" vs "Plugins" for the installed-content panel, per loader.
+const contentNoun = computed(() => contentLabel(store.server?.loader, true))
+const contentNounLower = computed(() => contentNoun.value.toLowerCase())
 
 /** Matches sidebar Backups nav — always derive :id from the URL to avoid store/route drift. */
 const backupsRouteLocation = computed(() => {
@@ -198,14 +203,14 @@ onUnmounted(() => {
       </div>
 
       <div class="overview-page__col">
-        <Panel title="Installed mods">
+        <Panel :title="`Installed ${contentNoun}`">
           <template #action>
             <a class="overview-page__panel-link" @click.prevent="store.goToMods">
               Manage
               <svg class="icon-arrow-right" width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 6H7.5M7.5 3.25l3.25 2.75L7.5 8.75" /></svg>
             </a>
           </template>
-          <div v-if="!modPreview.length" class="overview-page__empty">No mods installed.</div>
+          <div v-if="!modPreview.length" class="overview-page__empty">No {{ contentNounLower }} installed.</div>
           <ul v-else class="overview-page__mods">
             <li v-for="mod in modPreview" :key="mod.path" class="overview-page__mod">
               <div class="overview-page__mod-main">

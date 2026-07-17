@@ -216,10 +216,23 @@ class ModrinthClient:
         return file_obj.get("url")
 
     def get_project_download_url(
-        self, project_id: str, mc_version: str, loader: str = "fabric"
+        self,
+        project_id: str,
+        mc_version: str,
+        loader: str = "fabric",
+        loaders: Optional[List[str]] = None,
     ) -> Optional[Dict[str, Any]]:
+        """Resolve the best download for a project at ``mc_version``.
+
+        ``loaders`` (a list) takes precedence over the single ``loader`` when
+        provided — used for plugin servers, where the accepted loader facets
+        are a compatibility chain (e.g. Paper accepts ``paper``/``spigot``/
+        ``bukkit``-tagged plugins). Falls back to ``[loader]`` for the classic
+        single-loader mod case.
+        """
+        loader_facets = loaders if loaders else [loader]
         versions = self.get_project_versions(
-            project_id=project_id, loaders=[loader], game_versions=[mc_version]
+            project_id=project_id, loaders=loader_facets, game_versions=[mc_version]
         )
         best_version = self.pick_best_version(versions)
         if not best_version:
@@ -235,18 +248,29 @@ class ModrinthClient:
                 hashes = f.get("hashes") or {}
                 break
 
-        return {"url": url, "hashes": hashes}
+        # version_id/version_number ride along so the install route can record
+        # which release landed on disk without re-resolving.
+        return {
+            "url": url,
+            "hashes": hashes,
+            "version_id": best_version.get("id"),
+            "version_number": best_version.get("version_number"),
+        }
 
     def resolve_project_version(
         self,
         project_id: str,
         mc_version: Optional[str] = None,
         loader: Optional[str] = None,
+        loaders: Optional[List[str]] = None,
     ) -> Optional[Dict[str, Any]]:
-        loaders = [loader] if loader else None
+        # ``loaders`` (a list) takes precedence over the single ``loader`` — used
+        # for plugin servers, whose accepted facets are a compatibility chain
+        # (paper/spigot/bukkit). Falls back to ``[loader]`` for mods.
+        loader_facets = loaders if loaders else ([loader] if loader else None)
         game_versions = [mc_version] if mc_version else None
 
-        versions = self.get_project_versions(project_id=project_id, loaders=loaders, game_versions=game_versions)
+        versions = self.get_project_versions(project_id=project_id, loaders=loader_facets, game_versions=game_versions)
         best_version = self.pick_best_version(versions)
         if not best_version:
             return None

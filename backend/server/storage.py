@@ -233,3 +233,90 @@ def update_server_status(server_id: str, status: str) -> Optional[Dict[str, Any]
         Updated server or None if not found
     """
     return update_server(server_id, {'status': status})
+
+
+# ── Installed-content manifest ─────────────────────────────────────────
+# Maps a jar filename in the server's mods/ or plugins/ folder to the
+# Modrinth project it came from. Recorded at install time because project
+# identity cannot be recovered from the filename afterwards: plugin authors
+# routinely ship a jar whose name has nothing to do with the project slug
+# (`simple-voice-chat` -> `voicechat-bukkit-2.6.20.jar`), so the old
+# filename-prefix guess mislabelled roughly a quarter of real plugins as
+# not-installed. Filenames are the key because that is the only identifier
+# the mods-list route (a plain directory scan) can produce.
+
+CONTENT_MANIFEST_KEY = 'modContent'
+
+
+def get_content_manifest(server_id: str) -> Dict[str, Any]:
+    """Return ``{filename: entry}`` for a server, or ``{}`` if none/unknown."""
+    server = get_server(server_id)
+    if not server:
+        return {}
+    manifest = server.get(CONTENT_MANIFEST_KEY)
+    return manifest if isinstance(manifest, dict) else {}
+
+
+def record_content_install(server_id: str, filename: str, entry: Dict[str, Any]) -> None:
+    """Record that ``filename`` was installed from a Modrinth project.
+
+    Read-modify-writes the manifest under ``_storage_lock`` rather than via
+    ``get_server`` + ``update_server``, so two concurrent installs into the
+    same server cannot drop each other's entry in the gap between the two
+    calls.
+    """
+    with _storage_lock:
+        servers = load_servers()
+        for server in servers:
+            if server.get('id') != server_id:
+                continue
+            manifest = server.get(CONTENT_MANIFEST_KEY)
+            if not isinstance(manifest, dict):
+                manifest = {}
+            manifest[filename] = entry
+            server[CONTENT_MANIFEST_KEY] = manifest
+            server['updatedAt'] = iso_z_now()
+            save_servers(servers)
+            return
+
+
+def forget_content(server_id: str, filenames: List[str]) -> None:
+    """Drop manifest entries for ``filenames`` (deleted/replaced jars).
+
+    Silently ignores names with no entry — hand-dropped jars never had one.
+    """
+    if not filenames:
+        return
+    with _storage_lock:
+        servers = load_servers()
+        for server in servers:
+            if server.get('id') != server_id:
+                continue
+            manifest = server.get(CONTENT_MANIFEST_KEY)
+            if not isinstance(manifest, dict):
+                return
+            removed = False
+            for filename in filenames:
+                if manifest.pop(filename, None) is not None:
+                    removed = True
+            if removed:
+                server[CONTENT_MANIFEST_KEY] = manifest
+                server['updatedAt'] = iso_z_now()
+                save_servers(servers)
+            return
+
+
+def clear_content_manifest(server_id: str) -> None:
+    """Wipe the whole manifest — for flows that replace the folder wholesale
+    (e.g. a clean modpack install)."""
+    with _storage_lock:
+        servers = load_servers()
+        for server in servers:
+            if server.get('id') != server_id:
+                continue
+            if not server.get(CONTENT_MANIFEST_KEY):
+                return
+            server[CONTENT_MANIFEST_KEY] = {}
+            server['updatedAt'] = iso_z_now()
+            save_servers(servers)
+            return

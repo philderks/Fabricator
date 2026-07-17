@@ -303,11 +303,33 @@ class ServerProcessRegistry:
         start_result = self.start_server(server)
         return {'stop': stop_result, 'start': start_result}
 
-    def resolve_mods_path(self, server: Dict[str, object]) -> Path:
+    def resolve_content_path(self, server: Dict[str, object]) -> Path:
+        """Resolve the per-server add-on content folder.
+
+        Bukkit-family loaders (Paper/Purpur/Folia/Pufferfish) keep their
+        add-ons in ``plugins/``; mod loaders (and the legacy default) use
+        ``mods/``. The distinction comes from the installer's ``content_kind``
+        so the loader registry stays the single source of truth. Creates the
+        folder if missing and returns its path.
+        """
+        from backend.server.installer import loader_content_kind
+
         install_path = self.resolve_install_path(server)
-        mods_path = install_path / 'mods'
-        mods_path.mkdir(parents=True, exist_ok=True)
-        return mods_path
+        loader = str(server.get('loader') or '').strip().lower()
+        kind = loader_content_kind(loader)
+        folder = 'plugins' if kind == 'plugin' else 'mods'
+        content_path = install_path / folder
+        content_path.mkdir(parents=True, exist_ok=True)
+        return content_path
+
+    def resolve_mods_path(self, server: Dict[str, object]) -> Path:
+        """Back-compat alias for :meth:`resolve_content_path`.
+
+        Retained because many call sites (mods list/delete, install, overview
+        stats) reference ``resolve_mods_path``; it now returns ``plugins/`` for
+        plugin-kind loaders too.
+        """
+        return self.resolve_content_path(server)
 
     def get_logs(self, server_id: str, limit: int = 200) -> Dict[str, object]:
         with self._lock:

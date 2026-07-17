@@ -322,6 +322,7 @@ def download_with_hash_verify(
     target: Path,
     *,
     sha1: str | None = None,
+    sha256: str | None = None,
     sha512: str | None = None,
     session: requests.Session | None = None,
     timeout: int = 60,
@@ -331,11 +332,13 @@ def download_with_hash_verify(
 ) -> None:
     """Download ``url`` to ``target`` and verify the body hash.
 
-    Lazy-init: only the requested hash algorithms run. Both ``sha1`` and
-    ``sha512`` are optional; passing ``None`` for both downloads without an
-    integrity check (the helper still streams + cleans up on network/OSError
-    errors, which is why Loader sites without an upstream-published hash —
-    e.g. Fabric Meta's ``/server/jar`` endpoint — still go through here).
+    Lazy-init: only the requested hash algorithms run. ``sha1``, ``sha256``,
+    and ``sha512`` are all optional; passing ``None`` for every one downloads
+    without an integrity check (the helper still streams + cleans up on
+    network/OSError errors, which is why Loader sites without an
+    upstream-published hash — e.g. Fabric Meta's ``/server/jar`` endpoint —
+    still go through here). ``sha256`` is the digest PaperMC's v2 API
+    publishes for its build artefacts.
 
     Clean-slate-on-failure (B12a contract): on ANY failure path — network
     error, OSError mid-stream, hash mismatch, or final ``os.replace`` failure
@@ -372,6 +375,7 @@ def download_with_hash_verify(
 
     def _attempt() -> None:
         sha1_hasher = hashlib.sha1() if sha1 else None
+        sha256_hasher = hashlib.sha256() if sha256 else None
         sha512_hasher = hashlib.sha512() if sha512 else None
 
         nonlocal_target = Path(target)
@@ -392,6 +396,8 @@ def download_with_hash_verify(
                         fh.write(chunk)
                         if sha1_hasher is not None:
                             sha1_hasher.update(chunk)
+                        if sha256_hasher is not None:
+                            sha256_hasher.update(chunk)
                         if sha512_hasher is not None:
                             sha512_hasher.update(chunk)
                         bytes_done += len(chunk)
@@ -420,6 +426,14 @@ def download_with_hash_verify(
                 raise HashVerifyError(
                     f"SHA512 mismatch for {url}: expected {sha512}, got {actual}"
                 )
+        if sha256_hasher is not None and sha256:
+            actual = sha256_hasher.hexdigest().lower()
+            if actual != sha256.lower():
+                tmp_path.unlink(missing_ok=True)
+                nonlocal_target.unlink(missing_ok=True)
+                raise HashVerifyError(
+                    f"SHA256 mismatch for {url}: expected {sha256}, got {actual}"
+                )
         if sha1_hasher is not None and sha1:
             actual = sha1_hasher.hexdigest().lower()
             if actual != sha1.lower():
@@ -434,7 +448,7 @@ def download_with_hash_verify(
         # detection. Chunked encoding (Content-Length absent → bytes_total=0)
         # is logged as a known limitation; truncation in that case stays
         # undetectable until the JAR fails to boot.
-        if sha1 is None and sha512 is None:
+        if sha1 is None and sha256 is None and sha512 is None:
             if bytes_total > 0 and bytes_done != bytes_total:
                 tmp_path.unlink(missing_ok=True)
                 nonlocal_target.unlink(missing_ok=True)
@@ -548,6 +562,29 @@ class InstallerBase(ABC):
             return v[:-2]
         return v
 
+    @staticmethod
+    def _mc_version_sort_key(version: str) -> "tuple[list[int], bool]":
+        """Comparable key ordering Minecraft versions newest-first (reverse=True).
+
+        Parses the leading dotted-integer portion (``1.21.11`` -> ``[1, 21, 11]``)
+        so numeric ordering is correct across families and patch levels rather
+        than relying on an upstream API's list order. A plain release sorts
+        above its own prereleases: ``1.21.11`` before ``1.21.11-rc1`` (the
+        ``is_release`` tiebreaker), because with ``reverse=True`` the ``True``
+        flag outranks ``False`` on an otherwise-equal numeric tuple.
+
+        Unparseable segments degrade to ``0`` so a malformed token never raises.
+        """
+        s = str(version)
+        base = s.split("-", 1)[0]
+        parts: list[int] = []
+        for token in base.split("."):
+            try:
+                parts.append(int(token))
+            except ValueError:
+                parts.append(0)
+        return parts, "-" not in s
+
     def __init__(self, install_path: Path):
         """Initialize installer with target path.
 
@@ -562,6 +599,41 @@ class InstallerBase(ABC):
     def loader_name(self) -> str:
         """Return the name of the mod loader (e.g., 'fabric', 'forge')."""
         pass
+
+    #: What kind of add-on content this server type consumes.
+    #:
+    #: - ``"mod"``    — jars live in ``mods/`` and are Modrinth
+    #:   ``project_type=mod`` (Fabric, Quilt, Forge, NeoForge).
+    #: - ``"plugin"`` — jars live in ``plugins/`` and are Modrinth
+    #:   ``project_type=plugin`` (Paper, Purpur, Folia, Pufferfish).
+    #: - ``None``     — the server type has no add-on content surface at all
+    #:   (Vanilla).
+    #:
+    #: Drives ``registry.resolve_content_path`` (which on-disk folder the
+    #: install/list/delete routes touch) and the Modrinth search
+    #: ``project_type``. A **class attribute** (not a property) so it can be
+    #: read straight off the registry class via ``loader_content_kind`` without
+    #: constructing an installer — construction opens a ``requests.Session``,
+    #: and the mods-/plugins-folder is resolved on the polled server-list hot
+    #: path. Defaults to ``"mod"``; Vanilla overrides to ``None`` and the
+    #: Bukkit-family installers override to ``"plugin"``.
+    content_kind: "str | None" = "mod"
+
+    @property
+    def modrinth_loader_facets(self) -> List[str]:
+        """Modrinth ``categories:`` loader facets to accept for this server.
+
+        For a mod loader this is just ``[loader_name]``. For a plugin server it
+        is the compatibility chain the platform can actually load — e.g. a
+        Paper server also runs Spigot/Bukkit plugins, so Paper returns
+        ``["paper", "spigot", "bukkit"]``. Used both to filter browse results
+        and to resolve the download version (Modrinth's version query takes a
+        loader list). Vanilla (no content) returns ``[]``.
+        """
+        kind = self.content_kind
+        if kind is None:
+            return []
+        return [self.loader_name]
 
     @property
     def requires_java_for_install(self) -> bool:

@@ -506,11 +506,21 @@ def list_server_mods(server_id, server):
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
 
-    files = [
-        _serialize_file_entry(path, mods_path)
-        for path in mods_path.iterdir()
-        if path.is_file()
-    ]
+    # Merge in the install manifest so each jar carries the Modrinth project it
+    # came from. Without it the client can only guess identity from the
+    # filename, which misses whenever the jar isn't named after its slug.
+    manifest = storage.get_content_manifest(server_id)
+
+    files = []
+    for path in mods_path.iterdir():
+        if not path.is_file():
+            continue
+        entry = _serialize_file_entry(path, mods_path)
+        recorded = manifest.get(path.name)
+        if recorded:
+            entry['modrinth'] = recorded
+        files.append(entry)
+
     return jsonify(sorted(files, key=lambda entry: entry['name'].lower()))
 
 
@@ -527,6 +537,7 @@ def delete_server_mod(server_id, filename, server):
         return jsonify({'error': 'Mod file not found'}), 404
 
     _unlink_with_retry(target)
+    storage.forget_content(server_id, [target.name])
     return jsonify({'success': True, 'message': f'{target.name} removed'})
 
 
@@ -545,6 +556,9 @@ def bulk_delete_server_mods(server_id, server):
 
     deleted = []
     errors = []
+    # Manifest keys are bare basenames; `filenames` may arrive as relative
+    # paths, so forget by the resolved target's name rather than the input.
+    forget_names = []
     for filename in filenames:
         try:
             target = _ensure_child_path(mods_path, filename)
@@ -556,7 +570,9 @@ def bulk_delete_server_mods(server_id, server):
             continue
         _unlink_with_retry(target)
         deleted.append(filename)
+        forget_names.append(target.name)
 
+    storage.forget_content(server_id, forget_names)
     return jsonify({'success': True, 'deleted': deleted, 'errors': errors})
 
 
