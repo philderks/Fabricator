@@ -101,6 +101,9 @@
                 :aria-describedby="describedBy"
                 required
               >
+                <!-- Default: no loader preselected, so the choice is always
+                     deliberate. Disabled so it can't be picked back. -->
+                <option value="" disabled>None</option>
                 <option
                   v-for="loaderOption in loaderOptions"
                   :key="loaderOption.value"
@@ -618,7 +621,7 @@ export default {
         modpackImportMethod: 'link',
         name: '',
         version: '',
-        loader: 'fabric',
+        loader: '',
         port: 25565,
         installPath: '',
         maxPlayers: 20,
@@ -654,7 +657,11 @@ export default {
   computed: {
     showModpackPanel() {
       // Only true mod loaders (Fabric/Quilt/Forge/NeoForge) support .mrpack.
-      return loaderContentKind(this.formData.loader) === 'mod'
+      // The empty "None" default is excluded explicitly: loaderContentKind
+      // fails open to 'mod' for anything it doesn't recognise, which is right
+      // for a real server whose loader tab must not vanish, but wrong here —
+      // no loader picked yet means no modpack story to offer.
+      return Boolean(this.formData.loader) && loaderContentKind(this.formData.loader) === 'mod'
     },
     filteredGameVersions() {
       if (this.showSnapshots) return this.gameVersions
@@ -842,7 +849,10 @@ export default {
     async loadGameVersions() {
       this.versionsLoading = true
       try {
-        const loader = this.formData.loader || 'fabric'
+        // With the "None" default nothing is picked yet, so list plain game
+        // versions rather than some loader's subset. Picking a loader resets
+        // the version and refetches, so this list is only ever a starting point.
+        const loader = this.formData.loader || 'vanilla'
         const versions = await getLoaderGameVersions(loader)
         this.gameVersions = Array.isArray(versions) ? versions : []
         const stableVersions = this.gameVersions.filter(v => v.stable)
@@ -1037,6 +1047,14 @@ export default {
         return
       }
 
+      // The loader select defaults to the empty "None" placeholder, so this is
+      // a real path, not a defensive check. Native `required` can't cover it:
+      // the Create button lives in the modal footer, outside the <form>.
+      if (!this.formData.loader) {
+        this.toast.warning('Please choose a mod loader.', 'Loader Required')
+        return
+      }
+
       if (!this.formData.acceptEula) {
         this.toast.warning('You must accept the Minecraft EULA to create a server.', 'EULA Required')
         return
@@ -1170,7 +1188,7 @@ export default {
         modpackImportMethod: 'link',
         name: '',
         version: preservedVersion || (this.gameVersions[0]?.version || ''),
-        loader: 'fabric',
+        loader: '',
         port: 25565,
         installPath: '',
         maxPlayers: 20,
