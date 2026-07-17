@@ -86,6 +86,10 @@ export async function enrichInstalledModsWithModrinth(mods, options = {}) {
     if (!filename || !filename.toLowerCase().endsWith('.jar')) {
       return null
     }
+    // Already identified by the install manifest — no guessing, no network.
+    if (mod.displayTitle) {
+      return null
+    }
     const key = filename.toLowerCase()
 
     // Cache fast-path: short-circuit network entirely.

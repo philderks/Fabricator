@@ -2,14 +2,24 @@
 import { computed } from 'vue'
 import AppButton from '../../components/ui/AppButton.vue'
 import Panel from '../../components/ui/Panel.vue'
+import SearchResultCard from '../../components/ui/SearchResultCard.vue'
 import { formatFileSize } from '../../utils/format'
-import { installedModDisplayName, installedModInitial } from '../../utils/installedModDisplay'
+import { installedModDisplayName } from '../../utils/installedModDisplay'
 import { useServerStore } from '../../stores/server'
 import { contentLabel, isPluginLoader } from '../../utils/loaderKind'
 
 const store = useServerStore()
 
 const onSearch = (event) => { store.modSearch = event.target.value }
+
+/** Version + size, matching the browse modal's meta line. Version is the
+ *  Modrinth release when the install manifest knows it, else 'local'. */
+const modMeta = (mod) => {
+  const parts = []
+  if (mod.version) parts.push(mod.version)
+  if (mod.size) parts.push(formatFileSize(mod.size))
+  return parts.join(' · ')
+}
 
 const showEmpty = computed(() => !store.modsLoading && store.filteredMods.length === 0)
 
@@ -85,43 +95,32 @@ const nounLower = computed(() => noun.value.toLowerCase())
         <template v-if="store.modSearch">No {{ nounLower }} match "{{ store.modSearch }}".</template>
         <template v-else>No {{ nounLower }} installed yet. Use "Browse {{ nounLower }}" to add one.</template>
       </div>
-      <ul v-else class="mods-page__list">
-        <li
+      <div v-else class="mods-page__grid">
+        <SearchResultCard
           v-for="mod in store.filteredMods"
           :key="mod.path"
-          class="mods-page__item"
-          :class="{ 'mods-page__item--selected': store.selectedModPaths.has(mod.path) }"
+          :icon-url="mod.iconUrl"
+          :title="installedModDisplayName(mod)"
+          :description="mod.filename"
+          :meta="modMeta(mod)"
+          :selected="store.selectedModPaths.has(mod.path)"
         >
-          <label class="mods-page__item-checkbox-label" :aria-label="`Select ${installedModDisplayName(mod)}`">
-            <input
-              type="checkbox"
-              class="mods-page__checkbox"
-              :checked="store.selectedModPaths.has(mod.path)"
-              @change="store.toggleModSelection(mod)"
-            />
-          </label>
-          <div class="mods-page__icon" aria-hidden="true">
-            <img
-              v-if="mod.iconUrl"
-              class="mods-page__icon-img"
-              :src="mod.iconUrl"
-              alt=""
-            />
-            <span v-else class="mods-page__icon-letter">{{ installedModInitial(mod) }}</span>
-          </div>
-          <div class="mods-page__item-info">
-            <div class="mods-page__item-name-row">
-              <span class="mods-page__item-name">{{ installedModDisplayName(mod) }}</span>
-              <span class="mods-page__item-version">{{ mod.version }}</span>
-            </div>
-            <span class="mods-page__item-meta">
-              <template v-if="mod.size">{{ formatFileSize(mod.size) }}</template>
-              <template v-else>—</template>
-            </span>
-          </div>
+          <template #lead>
+            <label
+              class="mods-page__item-checkbox-label"
+              :aria-label="`Select ${installedModDisplayName(mod)}`"
+            >
+              <input
+                type="checkbox"
+                class="mods-page__checkbox"
+                :checked="store.selectedModPaths.has(mod.path)"
+                @change="store.toggleModSelection(mod)"
+              />
+            </label>
+          </template>
           <button type="button" class="mods-page__remove" @click="store.handleRemoveMod(mod)">Remove</button>
-        </li>
-      </ul>
+        </SearchResultCard>
+      </div>
 
       <!-- Select-all footer (when no items selected, and list is non-empty) -->
       <div
@@ -240,27 +239,12 @@ const nounLower = computed(() => noun.value.toLowerCase())
 }
 
 /* ── Mod list ──────────────────────────────────────────── */
-.mods-page__list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.mods-page__item {
-  display: flex;
-  align-items: center;
+/* Cards, not rows — same SearchResultCard the browse modal uses, so an
+   installed item looks like the search hit it came from. */
+.mods-page__grid {
+  display: grid;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  border-bottom: 1px solid var(--border-color);
-  transition: background 0.1s ease;
-}
-
-.mods-page__item:last-child {
-  border-bottom: none;
-}
-
-.mods-page__item--selected {
-  background: color-mix(in srgb, var(--primary) 6%, transparent);
+  padding: var(--space-4);
 }
 
 .mods-page__item-checkbox-label {
@@ -275,72 +259,6 @@ const nounLower = computed(() => noun.value.toLowerCase())
   height: 15px;
   cursor: pointer;
   accent-color: var(--primary);
-}
-
-.mods-page__item-info {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.mods-page__item-name {
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.mods-page__item-meta {
-  font-size: var(--text-xs);
-  color: var(--text-disabled);
-}
-
-.mods-page__icon {
-  width: 44px;
-  height: 44px;
-  flex-shrink: 0;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-}
-
-.mods-page__icon-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.mods-page__icon-letter {
-  font-family: var(--font-mono);
-  font-size: var(--text-md);
-  font-weight: 700;
-  color: var(--text-muted);
-}
-
-.mods-page__item-name-row {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
-  min-width: 0;
-}
-
-.mods-page__item-version {
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-pill);
-  padding: 2px 8px;
-  flex-shrink: 0;
 }
 
 .mods-page__remove {

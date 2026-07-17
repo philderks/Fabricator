@@ -35,3 +35,43 @@ export function installedJarMatchesBrowseHit(jarName, mod) {
     slug: mod.slug
   })
 }
+
+/**
+ * Does an installed entry correspond to a Modrinth project?
+ *
+ * Prefers the install manifest (`entry.modrinth`), which records the project
+ * id at install time and is therefore exact. Only jars with no manifest entry
+ * — dropped into the folder by hand, or installed before the manifest existed
+ * — fall back to guessing from the filename, which misses whenever the jar
+ * isn't named after its project (`voicechat-bukkit-2.6.20.jar` for
+ * `simple-voice-chat`).
+ *
+ * @param {{ modrinth?: { projectId?: string, slug?: string } | null, filename?: string, name?: string }} entry
+ * @param {{ id?: string, slug?: string } | null} projectRef
+ */
+export function installedEntryMatchesProjectRef(entry, projectRef) {
+  if (!entry || !projectRef) return false
+
+  const recorded = entry.modrinth
+  if (recorded && (recorded.projectId || recorded.slug)) {
+    const wanted = [projectRef.id, projectRef.slug]
+      .filter(Boolean).map((s) => String(s).toLowerCase())
+    const owned = [recorded.projectId, recorded.slug]
+      .filter(Boolean).map((s) => String(s).toLowerCase())
+    return owned.some((id) => wanted.includes(id))
+  }
+
+  return installedJarMatchesProjectRef(entry.filename || entry.name, projectRef)
+}
+
+/**
+ * Manifest-aware variant of {@link installedJarMatchesBrowseHit}, taking a
+ * Modrinth search hit (`project_id` + `slug`) instead of a project ref.
+ *
+ * @param {object} entry - installed entry
+ * @param {{ project_id?: string, slug?: string } | null} mod - Modrinth search hit
+ */
+export function installedEntryMatchesBrowseHit(entry, mod) {
+  if (!mod) return false
+  return installedEntryMatchesProjectRef(entry, { id: mod.project_id, slug: mod.slug })
+}

@@ -355,23 +355,31 @@ export const useServerStore = defineStore('server', () => {
     modsLoading.value = true
     try {
       const files = await getInstalledMods(currentServerId.value)
-      const base = files.map((file) => ({
-        name: file.name,
-        filename: file.name,
-        displayTitle: null,
-        iconUrl: null,
-        version: file.version || 'local',
-        downloads: file.downloads || 'N/A',
-        size: file.size,
-        updatedAt: file.updatedAt,
-        path: file.path,
-        source: 'Local',
-        category: 'Mods Folder'
-      }))
+      const base = files.map((file) => {
+        // `modrinth` is the install manifest the backend recorded at install
+        // time — authoritative project identity, title and icon. Jars dropped
+        // in by hand have none and fall through to filename-based enrichment.
+        const recorded = file.modrinth || null
+        return {
+          name: file.name,
+          filename: file.name,
+          displayTitle: recorded?.title || null,
+          iconUrl: recorded?.iconUrl || null,
+          modrinth: recorded,
+          version: recorded?.versionNumber || file.version || 'local',
+          downloads: file.downloads || 'N/A',
+          size: file.size,
+          updatedAt: file.updatedAt,
+          path: file.path,
+          source: recorded ? 'Modrinth' : 'Local',
+          category: 'Mods Folder'
+        }
+      })
       installedMods.value = base
       // F11/S9: enrich returns a NEW list (does not mutate in place); await
       // it so the icon/title fields render in a single deterministic patch
-      // rather than appearing piecemeal via mutated refs.
+      // rather than appearing piecemeal via mutated refs. Manifest-backed
+      // entries are already complete and are skipped inside the enricher.
       installedMods.value = await enrichInstalledModsWithModrinth(base)
     } catch (error) {
       console.error('Failed to load mods:', error)

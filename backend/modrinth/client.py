@@ -248,7 +248,14 @@ class ModrinthClient:
                 hashes = f.get("hashes") or {}
                 break
 
-        return {"url": url, "hashes": hashes}
+        # version_id/version_number ride along so the install route can record
+        # which release landed on disk without re-resolving.
+        return {
+            "url": url,
+            "hashes": hashes,
+            "version_id": best_version.get("id"),
+            "version_number": best_version.get("version_number"),
+        }
 
     def resolve_project_version(
         self,

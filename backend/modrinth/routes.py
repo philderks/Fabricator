@@ -113,6 +113,38 @@ def _server_loader_facets(server: dict, fallback_loader: str) -> list:
     return [fallback_loader] if fallback_loader else []
 
 
+def _record_content_install(server_id: str, mod_id: str, filename: str, resolved: dict) -> None:
+    """Record ``filename`` -> Modrinth project in the server's manifest.
+
+    Best-effort: the jar is already on disk and usable, so a failure to fetch
+    project metadata (or to write the manifest) must not fail the install. The
+    UI degrades to the filename-prefix guess in that case, exactly as it did
+    before the manifest existed.
+    """
+    entry = {
+        'projectId': mod_id,
+        'versionId': resolved.get('version_id'),
+        'versionNumber': resolved.get('version_number'),
+        'installedAt': iso_z_now(),
+    }
+    try:
+        project = modrinth_client.get_project(mod_id)
+        entry.update({
+            'projectId': project.get('id') or mod_id,
+            'slug': project.get('slug'),
+            'title': project.get('title'),
+            'iconUrl': project.get('icon_url'),
+        })
+    except ModrinthApiError:
+        current_app.logger.warning(
+            'Could not fetch Modrinth project %s for manifest; recording id only', mod_id
+        )
+    try:
+        storage.record_content_install(server_id, filename, entry)
+    except OSError as exc:
+        current_app.logger.warning('Failed to record install manifest for %s: %s', filename, exc)
+
+
 def _resolve_mods_folder(server: dict):
     """Resolve ``server``'s mods folder via the registry.
 
@@ -373,6 +405,8 @@ def install_mod(mod_id, server):
     except ModrinthApiError as exc:
         return _modrinth_error_response(exc)
 
+    _record_content_install(server_id, mod_id, file_path.name, resolved)
+
     return jsonify({
         "success": True,
         "message": "Mod installed successfully",
@@ -438,6 +472,11 @@ def install_modpack(project_id, server):
         return jsonify({'error': f'Modpack install failed: {exc}'}), 500
 
     _update_install_progress(server_id, stage='done', current=0, total=0, detail='')
+
+    if clean_install:
+        # A clean install replaces mods/ wholesale, so every recorded jar is
+        # gone; stale entries would mislabel whatever the pack dropped in.
+        storage.clear_content_manifest(server_id)
 
     modpack_info = {
         'projectId': project_id,

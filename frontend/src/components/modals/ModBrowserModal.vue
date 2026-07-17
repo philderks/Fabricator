@@ -158,7 +158,7 @@ import {
   getModDetails
 } from '../../api/modrinth'
 import { useServerStore } from '../../stores/server'
-import { installedJarMatchesBrowseHit, installedJarMatchesProjectRef } from '../../utils/modrinthJarMatch'
+import { installedEntryMatchesBrowseHit, installedEntryMatchesProjectRef } from '../../utils/modrinthJarMatch'
 import { formatNumber, truncate } from '../../utils/format'
 import { contentLabel, loaderProjectType, loaderModrinthFacets } from '../../utils/loaderKind'
 
@@ -276,9 +276,7 @@ export default {
   methods: {
     isModInstalled(mod) {
       const store = useServerStore()
-      return store.installedMods.some((file) =>
-        installedJarMatchesBrowseHit(file.filename || file.name, mod)
-      )
+      return store.installedMods.some((file) => installedEntryMatchesBrowseHit(file, mod))
     },
     toggleVersionFilter() {
       this.versionFilterExpanded = !this.versionFilterExpanded
@@ -498,7 +496,7 @@ export default {
             slug: details.slug
           }
           const installed = store.installedMods.some((file) =>
-            installedJarMatchesProjectRef(file.filename || file.name, ref)
+            installedEntryMatchesProjectRef(file, ref)
           )
           if (!installed) {
             const key = details.id || pid
