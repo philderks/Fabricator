@@ -115,6 +115,8 @@ onBeforeRouteLeave(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('beforeunload', beforeUnloadHandler)
+  clearTimeout(searchTimer)
+  store.clearFileSearch()
   if (discardResolver) {
     discardResolver(false)
     discardResolver = null
@@ -125,9 +127,9 @@ onUnmounted(() => {
   }
 })
 
-const onFileClick = async (entry) => {
-  if (!(await confirmDiscardChanges())) return
-  await store.openFile(entry.relativePath || entry.name)
+// Callers confirm any pending discard first, so a search hit doesn't prompt twice.
+const openFileAndScroll = async (path) => {
+  await store.openFile(path)
   // Scroll the editor into view after Vue paints it.
   await nextTick()
   if (editorRef.value) {
@@ -136,6 +138,52 @@ const onFileClick = async (entry) => {
       el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
     }
   }
+}
+
+const onFileClick = async (entry) => {
+  if (!(await confirmDiscardChanges())) return
+  await openFileAndScroll(entry.relativePath || entry.name)
+}
+
+// Search runs against the whole server tree, so it's debounced rather than
+// fired per keystroke.
+const searchInput = ref('')
+let searchTimer = null
+
+const runSearch = (value) => {
+  clearTimeout(searchTimer)
+  if (!value.trim()) {
+    store.clearFileSearch()
+    return
+  }
+  searchTimer = setTimeout(() => store.searchFiles(value), 250)
+}
+
+watch(searchInput, runSearch)
+
+const onSearchSubmit = () => {
+  clearTimeout(searchTimer)
+  if (searchInput.value.trim()) store.searchFiles(searchInput.value)
+}
+
+const onClearSearch = () => {
+  searchInput.value = ''
+  clearTimeout(searchTimer)
+  store.clearFileSearch()
+}
+
+// Folder hits navigate into the folder; file hits leave search mode, park the
+// browser on the file's folder, and open it in the editor.
+const onSearchHitClick = async (entry) => {
+  if (entry.isDir) {
+    searchInput.value = ''
+    store.revealSearchHit(entry)
+    return
+  }
+  if (!(await confirmDiscardChanges())) return
+  searchInput.value = ''
+  store.revealSearchHit(entry)
+  await openFileAndScroll(entry.relativePath)
 }
 
 const onCloseEditor = async () => {
@@ -213,10 +261,83 @@ const onCopyPath = async () => {
           <span v-if="i < breadcrumbs.length - 1" class="files-page__crumb-sep">/</span>
         </template>
       </nav>
+      <div class="files-page__search">
+        <svg class="files-page__search-icon" width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+          <circle cx="6" cy="6" r="4" />
+          <path d="M9 9l4 4" />
+        </svg>
+        <input
+          v-model="searchInput"
+          type="search"
+          class="files-page__search-input"
+          placeholder="Search all files…"
+          aria-label="Search files by name"
+          @keydown.enter.prevent="onSearchSubmit"
+          @keydown.esc.prevent="onClearSearch"
+        />
+        <button
+          v-if="searchInput"
+          type="button"
+          class="files-page__search-clear"
+          title="Clear search"
+          @click="onClearSearch"
+        >×</button>
+      </div>
       <AppButton variant="ghost" size="sm" :loading="store.fileBrowser.loading" @click="onRefresh">Refresh</AppButton>
     </div>
 
-    <Panel :padded="false">
+    <Panel v-if="store.fileSearch.active" :padded="false">
+      <div v-if="store.fileSearch.loading" class="files-page__state">Searching…</div>
+      <div v-else-if="store.fileSearch.error" class="files-page__state files-page__state--error">{{ store.fileSearch.error }}</div>
+      <div v-else-if="!store.fileSearch.results.length" class="files-page__state">
+        No files match “{{ store.fileSearch.query }}”.
+      </div>
+      <template v-else>
+        <p class="files-page__search-summary">
+          {{ store.fileSearch.results.length }}
+          {{ store.fileSearch.results.length === 1 ? 'match' : 'matches' }}
+          for “{{ store.fileSearch.query }}”
+          <span v-if="store.fileSearch.truncated"> — showing the first results only, refine your search.</span>
+        </p>
+        <table class="files-page__table">
+          <thead>
+            <tr>
+              <th class="files-page__th-name">Name</th>
+              <th class="files-page__th-size">Size</th>
+              <th class="files-page__th-modified">Modified</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="entry in store.fileSearch.results"
+              :key="entry.relativePath"
+              class="files-page__row"
+              :class="{ 'is-dir': entry.isDir }"
+            >
+              <td class="files-page__td-name">
+                <button type="button" class="files-page__name-btn" @click="onSearchHitClick(entry)">
+                  <svg v-if="entry.isDir" class="files-page__icon" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+                    <path d="M2 3.5A1.5 1.5 0 013.5 2h2.5l1.5 2H11a1.5 1.5 0 011.5 1.5v6A1.5 1.5 0 0111 13H3.5A1.5 1.5 0 012 11.5v-8z" />
+                  </svg>
+                  <svg v-else class="files-page__icon" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+                    <path d="M3 1.5A0.5 0.5 0 013.5 1H8l3 3v8.5a0.5 0.5 0 01-0.5 0.5h-7A0.5 0.5 0 013 12.5v-11z" />
+                    <path d="M8 1v3h3" />
+                  </svg>
+                  <span class="files-page__hit">
+                    <span class="files-page__hit-name">{{ entry.name }}</span>
+                    <span class="files-page__hit-path">{{ entry.parentPath || 'server' }}</span>
+                  </span>
+                </button>
+              </td>
+              <td class="files-page__td-size">{{ entry.isDir ? '—' : formatFileSize(entry.size) }}</td>
+              <td class="files-page__td-modified">{{ formatModified(entry.updatedAt) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </template>
+    </Panel>
+
+    <Panel v-else :padded="false">
       <div v-if="store.fileBrowser.loading" class="files-page__state">Loading…</div>
       <div v-else-if="store.fileBrowser.error" class="files-page__state files-page__state--error">{{ store.fileBrowser.error }}</div>
       <div v-else-if="!store.fileBrowser.entries.length" class="files-page__state">This folder is empty.</div>
@@ -262,7 +383,7 @@ const onCopyPath = async () => {
               </button>
             </td>
             <td class="files-page__td-size">{{ formatFileSize(entry.size) }}</td>
-            <td class="files-page__td-modified">{{ formatModified(entry.modifiedAt) }}</td>
+            <td class="files-page__td-modified">{{ formatModified(entry.updatedAt) }}</td>
           </tr>
         </tbody>
       </table>
@@ -431,6 +552,81 @@ const onCopyPath = async () => {
 
 .files-page__crumb-sep {
   color: var(--text-disabled);
+}
+
+.files-page__search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-2);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-disabled);
+  flex-shrink: 0;
+}
+
+.files-page__search:focus-within {
+  border-color: var(--primary);
+}
+
+.files-page__search-icon {
+  flex-shrink: 0;
+}
+
+.files-page__search-input {
+  background: transparent;
+  border: none;
+  outline: none;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  padding: var(--space-2) 0;
+  width: 180px;
+}
+
+.files-page__search-input::placeholder {
+  color: var(--text-disabled);
+}
+
+/* The native search-field clear affordance duplicates our own button. */
+.files-page__search-input::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+.files-page__search-clear {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: var(--text-md);
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+}
+
+.files-page__search-clear:hover {
+  color: var(--text-primary);
+}
+
+.files-page__search-summary {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.files-page__hit {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.files-page__hit-path {
+  font-size: var(--text-xs);
+  color: var(--text-disabled);
+  font-family: var(--font-mono);
 }
 
 .files-page__state {

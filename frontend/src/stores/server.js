@@ -16,6 +16,7 @@ import {
   setServerAutoStart,
   sendServerCommand,
   browseServerFiles,
+  searchServerFiles,
   deleteServer,
   getServerFile,
   saveServerFile
@@ -87,6 +88,7 @@ export const useServerStore = defineStore('server', () => {
   const commandSending = ref(false)
   const fileBrowser = ref({ currentPath: '', entries: [], loading: false, error: null })
   const fileEditor = ref({ path: null, content: '', originalContent: '', loading: false, saving: false, error: null })
+  const fileSearch = ref({ query: '', results: [], active: false, loading: false, truncated: false, error: null })
   const showDeleteServerModal = ref(false)
   const deletingServer = ref(false)
   const modpackProgress = ref(null)
@@ -426,6 +428,57 @@ export const useServerStore = defineStore('server', () => {
 
   function enterFileEntry(entry) {
     if (entry.isDir) openFileBrowser(entry.relativePath)
+  }
+
+  // Bumped on every search/clear so a slow response from an abandoned query
+  // can't overwrite the results of the one the user is actually waiting on.
+  let fileSearchToken = 0
+
+  async function searchFiles(query) {
+    const trimmed = (query || '').trim()
+    const token = ++fileSearchToken
+
+    if (!trimmed) {
+      fileSearch.value = { query: '', results: [], active: false, loading: false, truncated: false, error: null }
+      return
+    }
+
+    fileSearch.value = { ...fileSearch.value, query: trimmed, active: true, loading: true, error: null }
+    try {
+      const data = await searchServerFiles(currentServerId.value, { q: trimmed })
+      if (token !== fileSearchToken) return
+      fileSearch.value = {
+        query: trimmed,
+        results: data.results || [],
+        active: true,
+        loading: false,
+        truncated: Boolean(data.truncated),
+        error: null,
+      }
+    } catch (error) {
+      if (token !== fileSearchToken) return
+      console.error('Failed to search files:', error)
+      fileSearch.value = {
+        query: trimmed,
+        results: [],
+        active: true,
+        loading: false,
+        truncated: false,
+        error: error.message || 'Search failed',
+      }
+    }
+  }
+
+  function clearFileSearch() {
+    fileSearchToken += 1
+    fileSearch.value = { query: '', results: [], active: false, loading: false, truncated: false, error: null }
+  }
+
+  // Leaves search mode and parks the browser on the hit's folder, so the entry
+  // the user picked is visible in its real location afterwards.
+  function revealSearchHit(entry) {
+    clearFileSearch()
+    openFileBrowser(entry.isDir ? entry.relativePath : entry.parentPath || '')
   }
 
   function goUpDirectory() {
@@ -946,6 +999,7 @@ export const useServerStore = defineStore('server', () => {
     commandSending,
     fileBrowser,
     fileEditor,
+    fileSearch,
     showDeleteServerModal,
     deletingServer,
     modpackProgress,
@@ -990,6 +1044,9 @@ export const useServerStore = defineStore('server', () => {
     openFileBrowser,
     enterFileEntry,
     goUpDirectory,
+    searchFiles,
+    clearFileSearch,
+    revealSearchHit,
     openFile,
     saveFile,
     closeFile,

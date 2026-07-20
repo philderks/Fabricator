@@ -175,6 +175,42 @@ def _serialize_file_entry(path: Path, base_path: Path | None = None) -> dict:
     }
 
 
+_SEARCH_DEFAULT_LIMIT = 200
+_SEARCH_MAX_LIMIT = 500
+_SEARCH_MAX_SCANNED = 200_000
+
+
+def _serialize_search_hit(path: Path, base_path: Path) -> dict | None:
+    """Directory-entry payload for a search hit.
+
+    Deliberately not _serialize_file_entry: that computes a recursive size for
+    directories, which would re-walk the tree once per matching folder. Search
+    results only need enough to render a row and open the target, so folders
+    report no size.
+    """
+    try:
+        stat_result = path.stat()
+        is_dir = path.is_dir()
+    except OSError:
+        return None
+
+    try:
+        relative_path = str(path.relative_to(base_path))
+    except ValueError:
+        return None
+
+    parent = str(path.parent.relative_to(base_path)) if path.parent != base_path else ''
+    return {
+        'name': path.name,
+        'size': None if is_dir else stat_result.st_size,
+        'updatedAt': iso_z_from_timestamp(stat_result.st_mtime),
+        'path': str(path),
+        'relativePath': relative_path,
+        'parentPath': parent,
+        'isDir': is_dir,
+    }
+
+
 def _ensure_child_path(base: Path, child: str) -> Path:
     candidate = (base / child).resolve()
     base_resolved = base.resolve()
@@ -438,6 +474,65 @@ def browse_server_files(server_id, server):
         'currentPath': current_relative,
         'absolutePath': str(target_path),
         'entries': entries,
+    })
+
+
+@server_bp.route('/servers/<server_id>/files/search', methods=['GET'])
+@require_server
+def search_server_files(server_id, server):
+    query = request.args.get('q', '').strip()
+    scope = request.args.get('path', '').strip()
+    limit = request.args.get('limit', default=_SEARCH_DEFAULT_LIMIT, type=int)
+    limit = max(1, min(limit or _SEARCH_DEFAULT_LIMIT, _SEARCH_MAX_LIMIT))
+
+    if not query:
+        return jsonify({'error': 'Query parameter q is required'}), 400
+
+    try:
+        # Resolve up front: _ensure_child_path returns a resolved path, and the
+        # hits are made relative to base_path, so both sides must agree.
+        base_path = _registry().resolve_install_path(server).resolve()
+        root_path = _ensure_child_path(base_path, scope) if scope else base_path
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    if not root_path.exists() or not root_path.is_dir():
+        return jsonify({'error': 'Directory not found'}), 404
+
+    needle = query.lower()
+    results = []
+    scanned = 0
+    truncated = False
+
+    # os.walk with followlinks=False keeps symlinked directories from turning the
+    # walk into a cycle. The scan cap stops a search inside a huge world folder
+    # from pinning the request thread; the client is told when it fires.
+    for dir_path, dir_names, file_names in os.walk(root_path, followlinks=False):
+        dir_names.sort(key=str.lower)
+        file_names.sort(key=str.lower)
+        for name in dir_names + file_names:
+            scanned += 1
+            if scanned > _SEARCH_MAX_SCANNED:
+                truncated = True
+                break
+            if needle not in name.lower():
+                continue
+            entry = _serialize_search_hit(Path(dir_path) / name, base_path)
+            if entry is not None:
+                results.append(entry)
+            # Collect one past the limit so an exact-limit result set isn't
+            # mislabelled as truncated.
+            if len(results) > limit:
+                truncated = True
+                break
+        if truncated:
+            break
+
+    return jsonify({
+        'query': query,
+        'scope': '' if root_path == base_path else str(root_path.relative_to(base_path)),
+        'results': results[:limit],
+        'truncated': truncated,
     })
 
 

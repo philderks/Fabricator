@@ -107,6 +107,19 @@ export async function browseServerFiles(serverId, params = {}) {
 }
 
 /**
+ * Search the server directory tree for files and folders by name
+ * @param {string|number} serverId - Server ID
+ * @param {Object} params - Query params
+ * @param {string} params.q - Case-insensitive substring to match against names
+ * @param {string} [params.path] - Relative subtree to search inside (defaults to the whole server)
+ * @param {number} [params.limit] - Maximum number of hits to return
+ * @returns {Promise<Object>} Matching entries plus a `truncated` flag
+ */
+export async function searchServerFiles(serverId, params = {}) {
+  return get(`/api/servers/${serverId}/files/search`, params)
+}
+
+/**
  * Fetch a text file's contents
  * @param {string|number} serverId - Server ID
  * @param {string} path - Relative file path
