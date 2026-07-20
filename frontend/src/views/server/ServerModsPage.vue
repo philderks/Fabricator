@@ -5,6 +5,7 @@ import Panel from '../../components/ui/Panel.vue'
 import SearchResultCard from '../../components/ui/SearchResultCard.vue'
 import { formatFileSize } from '../../utils/format'
 import { installedModDisplayName } from '../../utils/installedModDisplay'
+import { modrinthProjectUrl } from '../../utils/modrinthUrl'
 import { useServerStore } from '../../stores/server'
 import { contentLabel, isPluginLoader } from '../../utils/loaderKind'
 
@@ -56,6 +57,21 @@ const nounLower = computed(() => noun.value.toLowerCase())
       <div class="mods-page__modpack">
         <span class="mods-page__modpack-name">{{ store.activeModpack.name || store.activeModpack.projectId }}</span>
         <span class="mods-page__modpack-version">{{ store.activeModpack.version }}</span>
+        <a
+          v-if="modrinthProjectUrl(store.activeModpack)"
+          class="mods-page__modrinth-link"
+          :href="modrinthProjectUrl(store.activeModpack)"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Open this modpack on Modrinth (opens in a new tab)"
+        >
+          Modrinth
+          <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+            <path d="M4.5 1.5H10.5V7.5" />
+            <path d="M10.5 1.5L5 7" />
+            <path d="M9 8v2.5H1.5V3H4" />
+          </svg>
+        </a>
       </div>
     </Panel>
 
@@ -118,7 +134,25 @@ const nounLower = computed(() => noun.value.toLowerCase())
               />
             </label>
           </template>
-          <button type="button" class="mods-page__remove" @click="store.handleRemoveMod(mod)">Remove</button>
+          <div class="mods-page__item-actions">
+            <a
+              v-if="modrinthProjectUrl(mod)"
+              class="mods-page__modrinth-link"
+              :href="modrinthProjectUrl(mod)"
+              target="_blank"
+              rel="noopener noreferrer"
+              :title="`Open ${installedModDisplayName(mod)} on Modrinth`"
+              :aria-label="`Open ${installedModDisplayName(mod)} on Modrinth (opens in a new tab)`"
+            >
+              Modrinth
+              <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+                <path d="M4.5 1.5H10.5V7.5" />
+                <path d="M10.5 1.5L5 7" />
+                <path d="M9 8v2.5H1.5V3H4" />
+              </svg>
+            </a>
+            <button type="button" class="mods-page__remove" @click="store.handleRemoveMod(mod)">Remove</button>
+          </div>
         </SearchResultCard>
       </div>
 
@@ -172,7 +206,7 @@ const nounLower = computed(() => noun.value.toLowerCase())
 
 .mods-page__modpack {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--space-3);
 }
 
@@ -259,6 +293,38 @@ const nounLower = computed(() => noun.value.toLowerCase())
   height: 15px;
   cursor: pointer;
   accent-color: var(--primary);
+}
+
+.mods-page__item-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.mods-page__modrinth-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  text-decoration: none;
+  padding: 4px 10px;
+  white-space: nowrap;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.mods-page__modrinth-link:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
+.mods-page__modrinth-link:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 .mods-page__remove {
