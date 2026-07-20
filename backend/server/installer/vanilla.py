@@ -46,6 +46,9 @@ class VanillaInstaller(InstallerBase):
     def loader_name(self) -> str:
         return "vanilla"
 
+    # Vanilla has no mods/ or plugins/ surface.
+    content_kind = None
+
     def _fetch_manifest(self) -> Dict[str, Any]:
         """Fetch the Mojang piston-meta version manifest.
 

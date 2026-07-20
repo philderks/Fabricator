@@ -3,7 +3,7 @@ import { pLimit, withBackoff } from '../api/throttle'
 import { installedJarMatchesProjectRef } from './modrinthJarMatch'
 
 /**
- * @typedef {{ displayTitle: string, iconUrl: string | null }} ResolvedMeta
+ * @typedef {{ displayTitle: string, iconUrl: string | null, projectId: string, slug: string | null }} ResolvedMeta
  */
 
 /** @type {Map<string, ResolvedMeta | null>} */
@@ -55,7 +55,12 @@ export async function resolveJarFilenameToModrinthMeta(filename, options = {}) {
       if (!installedJarMatchesProjectRef(filename, ref)) continue
       return {
         displayTitle: d.title || d.slug || candidate,
-        iconUrl: d.icon_url || null
+        iconUrl: d.icon_url || null,
+        // Kept so the caller can link to the project page. The match was
+        // verified above, but it's still filename-derived — callers surface it
+        // as `modrinthGuess`, never as the install manifest.
+        projectId: d.id,
+        slug: d.slug || null
       }
     } catch (error) {
       if (error?.name === 'AbortError') return null
@@ -63,6 +68,25 @@ export async function resolveJarFilenameToModrinthMeta(filename, options = {}) {
     }
   }
   return null
+}
+
+/**
+ * Merge resolved metadata onto a mod entry, without mutating it.
+ *
+ * The project ref lands in `modrinthGuess`, kept distinct from `modrinth` (the
+ * backend's install manifest) so an inference is never mistaken for a record
+ * of where the jar actually came from.
+ *
+ * @param {object} mod
+ * @param {ResolvedMeta} meta
+ */
+function _withMeta(mod, meta) {
+  return {
+    ...mod,
+    displayTitle: meta.displayTitle,
+    iconUrl: meta.iconUrl,
+    modrinthGuess: meta.projectId ? { projectId: meta.projectId, slug: meta.slug } : null
+  }
 }
 
 /**
@@ -86,13 +110,17 @@ export async function enrichInstalledModsWithModrinth(mods, options = {}) {
     if (!filename || !filename.toLowerCase().endsWith('.jar')) {
       return null
     }
+    // Already identified by the install manifest — no guessing, no network.
+    if (mod.displayTitle) {
+      return null
+    }
     const key = filename.toLowerCase()
 
     // Cache fast-path: short-circuit network entirely.
     if (resolvedMetaByFilename.has(key)) {
       const cached = resolvedMetaByFilename.get(key)
       if (cached) {
-        result[idx] = { ...mod, displayTitle: cached.displayTitle, iconUrl: cached.iconUrl }
+        result[idx] = _withMeta(mod, cached)
       }
       return null
     }
@@ -106,7 +134,7 @@ export async function enrichInstalledModsWithModrinth(mods, options = {}) {
           if (signal?.aborted) return
           resolvedMetaByFilename.set(key, meta)
           if (meta) {
-            result[idx] = { ...mod, displayTitle: meta.displayTitle, iconUrl: meta.iconUrl }
+            result[idx] = _withMeta(mod, meta)
           }
         } catch (error) {
           if (error?.name === 'AbortError') return

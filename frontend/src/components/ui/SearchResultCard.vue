@@ -25,6 +25,9 @@ defineProps({
 
 <template>
   <article class="search-result-card" :class="{ 'is-selected': selected }">
+    <div v-if="$slots.lead" class="search-result-card__lead">
+      <slot name="lead" />
+    </div>
     <div class="search-result-card__icon">
       <img v-if="iconUrl" :src="iconUrl" :alt="title" loading="lazy" />
       <span v-else class="search-result-card__icon-placeholder" aria-hidden="true">
@@ -61,6 +64,14 @@ defineProps({
 .search-result-card.is-selected {
   border-color: var(--primary);
   box-shadow: 0 0 0 2px color-mix(in oklch, var(--primary) 20%, transparent);
+}
+
+/* Optional leading control (e.g. the installed list's bulk-select checkbox).
+   Absent in the browse modal, which renders no lead slot. */
+.search-result-card__lead {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
 }
 
 .search-result-card__icon {

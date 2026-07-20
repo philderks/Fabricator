@@ -101,6 +101,9 @@
                 :aria-describedby="describedBy"
                 required
               >
+                <!-- Default: no loader preselected, so the choice is always
+                     deliberate. Disabled so it can't be picked back. -->
+                <option value="" disabled>None</option>
                 <option
                   v-for="loaderOption in loaderOptions"
                   :key="loaderOption.value"
@@ -142,8 +145,10 @@
         </div>
       </Panel>
 
-      <!-- Modpack Setup — vanilla servers have no mod loader, so the Modrinth modpack flow doesn't apply. -->
-      <Panel v-if="formData.loader !== 'vanilla'" title="Modpack Setup">
+      <!-- Modpack Setup — only mod loaders use Modrinth modpacks (.mrpack).
+           Vanilla has no loader, and plugin servers (Paper/Purpur/Folia/Pufferfish)
+           use plugins, not modpacks. -->
+      <Panel v-if="showModpackPanel" title="Modpack Setup">
 
         <div class="mode-toggle" role="tablist" aria-label="Server setup mode">
           <button
@@ -553,6 +558,7 @@ import { installModpack, resolveProjectVersion } from '../../api/modrinth'
 import { useToast } from '../../composables/useToast'
 import { useModpackImport } from '../../composables/useModpackImport'
 import { formatNumber } from '../../utils/format'
+import { loaderContentKind } from '../../utils/loaderKind'
 
 export default {
   name: 'ServerCreateModal',
@@ -600,18 +606,22 @@ export default {
       javaStatus: null,
       javaRequirementWarning: '',
       loaderOptions: [
-        { value: 'fabric',   label: 'Fabric'   },
-        { value: 'quilt',    label: 'Quilt'    },
-        { value: 'neoforge', label: 'NeoForge' },
-        { value: 'forge',    label: 'Forge'    },
-        { value: 'vanilla',  label: 'Vanilla'  }
+        { value: 'fabric',     label: 'Fabric'     },
+        { value: 'quilt',      label: 'Quilt'      },
+        { value: 'neoforge',   label: 'NeoForge'   },
+        { value: 'forge',      label: 'Forge'      },
+        { value: 'paper',      label: 'Paper'      },
+        { value: 'purpur',     label: 'Purpur'     },
+        { value: 'folia',      label: 'Folia'      },
+        { value: 'pufferfish', label: 'Pufferfish' },
+        { value: 'vanilla',    label: 'Vanilla'    }
       ],
       formData: {
         setupMode: 'custom',
         modpackImportMethod: 'link',
         name: '',
         version: '',
-        loader: 'fabric',
+        loader: '',
         port: 25565,
         installPath: '',
         maxPlayers: 20,
@@ -645,6 +655,14 @@ export default {
     this.loadGameVersions()
   },
   computed: {
+    showModpackPanel() {
+      // Only true mod loaders (Fabric/Quilt/Forge/NeoForge) support .mrpack.
+      // The empty "None" default is excluded explicitly: loaderContentKind
+      // fails open to 'mod' for anything it doesn't recognise, which is right
+      // for a real server whose loader tab must not vanish, but wrong here —
+      // no loader picked yet means no modpack story to offer.
+      return Boolean(this.formData.loader) && loaderContentKind(this.formData.loader) === 'mod'
+    },
     filteredGameVersions() {
       if (this.showSnapshots) return this.gameVersions
       return this.gameVersions.filter(v => v.stable)
@@ -704,10 +722,10 @@ export default {
     'formData.loader'(newLoader, oldLoader) {
       if (newLoader === oldLoader) return
       this.formData.version = ''
-      // Vanilla has no modpack story — flip back to custom and drop any
-      // cached modpack selection so a stale modpack URL/object doesn't
-      // ride along into the create POST and trip a backend 409.
-      if (newLoader === 'vanilla') {
+      // Loaders without a modpack story (Vanilla + plugin servers) — flip back
+      // to custom and drop any cached modpack selection so a stale modpack
+      // URL/object doesn't ride along into the create POST and trip a 409.
+      if (loaderContentKind(newLoader) !== 'mod') {
         this.formData.setupMode = 'custom'
         if (this.imp?.selectedModpack) {
           this.imp.selectedModpack.value = null
@@ -831,7 +849,10 @@ export default {
     async loadGameVersions() {
       this.versionsLoading = true
       try {
-        const loader = this.formData.loader || 'fabric'
+        // With the "None" default nothing is picked yet, so list plain game
+        // versions rather than some loader's subset. Picking a loader resets
+        // the version and refetches, so this list is only ever a starting point.
+        const loader = this.formData.loader || 'vanilla'
         const versions = await getLoaderGameVersions(loader)
         this.gameVersions = Array.isArray(versions) ? versions : []
         const stableVersions = this.gameVersions.filter(v => v.stable)
@@ -1026,6 +1047,14 @@ export default {
         return
       }
 
+      // The loader select defaults to the empty "None" placeholder, so this is
+      // a real path, not a defensive check. Native `required` can't cover it:
+      // the Create button lives in the modal footer, outside the <form>.
+      if (!this.formData.loader) {
+        this.toast.warning('Please choose a mod loader.', 'Loader Required')
+        return
+      }
+
       if (!this.formData.acceptEula) {
         this.toast.warning('You must accept the Minecraft EULA to create a server.', 'EULA Required')
         return
@@ -1159,7 +1188,7 @@ export default {
         modpackImportMethod: 'link',
         name: '',
         version: preservedVersion || (this.gameVersions[0]?.version || ''),
-        loader: 'fabric',
+        loader: '',
         port: 25565,
         installPath: '',
         maxPlayers: 20,

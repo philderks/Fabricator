@@ -21,6 +21,7 @@ export async function searchMods({
   query = '',
   version = '',
   loader = '',
+  projectType = 'mod',
   sort = 'relevance',
   limit = 20,
   offset = 0
@@ -29,6 +30,7 @@ export async function searchMods({
     query,
     mc_version: version,
     loader,
+    project_type: projectType,
     index: sort,
     limit,
     offset
@@ -141,13 +143,18 @@ export async function getProjectDetails(projectIdOrSlug) {
  * @param {Object} options - Resolve options
  * @param {string} options.mc_version - Minecraft version
  * @param {string} options.loader - Loader (fabric, quilt, etc.)
+ * @param {string[]} [options.loaders] - Accepted loader facet chain (plugin
+ *   servers); when provided it supersedes `loader` server-side.
  * @returns {Promise<Object>} Resolved version payload
  */
-export async function resolveProjectVersion(projectId, { mc_version, loader }) {
-  return get(`/api/modrinth/project/${encodeURIComponent(projectId)}/resolve-version`, {
-    mc_version,
-    loader
-  })
+export async function resolveProjectVersion(projectId, { mc_version, loader, loaders }) {
+  const params = { mc_version }
+  if (Array.isArray(loaders) && loaders.length) {
+    params.loaders = loaders.join(',')
+  } else if (loader) {
+    params.loader = loader
+  }
+  return get(`/api/modrinth/project/${encodeURIComponent(projectId)}/resolve-version`, params)
 }
 
 /**

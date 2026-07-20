@@ -477,6 +477,34 @@ def test_download_with_hash_verify_happy_path_sha512(tmp_path):
     assert target.read_bytes() == payload
 
 
+def test_download_with_hash_verify_happy_path_sha256(tmp_path):
+    payload = b"hello world"
+    expected = hashlib.sha256(payload).hexdigest()
+    target = tmp_path / "out.bin"
+    session = _stub_session(payload)
+
+    download_with_hash_verify(
+        "https://example.invalid/x", target, sha256=expected, session=session
+    )
+
+    assert target.read_bytes() == payload
+
+
+def test_download_with_hash_verify_sha256_mismatch_unlinks(tmp_path):
+    payload = b"hello world"
+    target = tmp_path / "out.bin"
+    session = _stub_session(payload)
+
+    with pytest.raises(HashVerifyError):
+        download_with_hash_verify(
+            "https://example.invalid/x",
+            target,
+            sha256="00" * 32,  # 64 hex, wrong
+            session=session,
+        )
+    assert not target.exists()
+
+
 def test_download_with_hash_verify_handles_missing_content_length(tmp_path):
     """Chunked transfer encoding (no ``Content-Length``) is non-fatal.
 

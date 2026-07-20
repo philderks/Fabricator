@@ -257,6 +257,40 @@ sum of their contents.
 
 **Errors:** `400` invalid path · `404` directory not found
 
+#### `GET /api/servers/<server_id>/files/search`
+
+Recursive name search over the install directory.
+
+**Query:** `q` (string, **required**) — case-insensitive substring matched against entry names ·
+`path` (string, optional) — restrict the search to a subdirectory · `limit` (int, optional,
+default `200`, max `500`)
+
+```json
+{
+  "query": "properties",
+  "scope": "",
+  "results": [
+    {
+      "name": "mod.properties",
+      "size": 1420,
+      "updatedAt": "2026-01-04T12:00:00Z",
+      "path": "/srv/servers/srv_a1b2c3d4/config/mod.properties",
+      "relativePath": "config/mod.properties",
+      "parentPath": "config",
+      "isDir": false
+    }
+  ],
+  "truncated": false
+}
+```
+
+Symlinked directories are not followed. `size` is `null` for directories — unlike the browse
+endpoint, search does not compute recursive directory sizes. `truncated` is `true` when the hit
+`limit` was reached or the internal scan cap (200,000 entries) fired, meaning more matches may
+exist.
+
+**Errors:** `400` missing `q` or invalid path · `404` directory not found
+
 #### `GET /api/servers/<server_id>/files/content`
 
 **Query:** `path` (string, **required**)

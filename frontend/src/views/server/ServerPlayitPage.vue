@@ -12,6 +12,11 @@ const playit = usePlayitStore()
 
 let _unsubscribePlayit = null
 
+// Tunnels, account and agent approvals all live here. Surfaced persistently in
+// the panel header rather than only in the "no tunnel for this port" branch —
+// it's the place users go for every playit.gg task, not just that one.
+const PLAYIT_DASHBOARD_URL = 'https://playit.gg/account'
+
 // ─── Section A — global tunnel agent ────────────────────────────────────────
 
 // Binary-signature warning: non-blocking, but suppressed when the error state
@@ -117,6 +122,25 @@ onUnmounted(() => {
   <div class="playit-page">
     <!-- ─── Section A: tunnel agent (global) ─────────────────────────────── -->
     <Panel title="playit.gg tunnel agent">
+      <!-- Persistent dashboard link: visible in every agent state, so managing
+           tunnels never depends on reaching a particular branch below. -->
+      <template v-if="!playit.isUnsupported" #action>
+        <a
+          :href="PLAYIT_DASHBOARD_URL"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="pa-dashlink"
+          aria-label="Open the playit.gg dashboard (opens in a new tab)"
+        >
+          Dashboard
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+            <polyline points="15 3 21 3 21 9"/>
+            <line x1="10" y1="14" x2="21" y2="3"/>
+          </svg>
+        </a>
+      </template>
+
       <!-- unsupported short-circuits everything (Windows) -->
       <p v-if="playit.isUnsupported" class="pa-note">
         playit.gg isn't available on this platform.
@@ -220,7 +244,7 @@ onUnmounted(() => {
           No tunnel forwards to port <code>{{ port }}</code> yet. Create one in your
           playit.gg dashboard with <strong>local port → {{ port }}</strong>.
         </p>
-        <a href="https://playit.gg/account" target="_blank" rel="noopener noreferrer" class="pb-link">
+        <a :href="PLAYIT_DASHBOARD_URL" target="_blank" rel="noopener noreferrer" class="pb-link">
           Open playit.gg dashboard ↗
         </a>
       </div>
@@ -287,6 +311,22 @@ onUnmounted(() => {
   font-size: var(--text-sm);
   color: var(--text-muted);
 }
+
+/* Header link — deliberately quiet, so it never competes with the primary
+   action inside whichever state the panel is showing. */
+.pa-dashlink {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 0.12s ease;
+}
+
+.pa-dashlink:hover { color: var(--primary); }
+.pa-dashlink:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
 .pa-scope {
   margin: 0 0 var(--space-3) 0;
