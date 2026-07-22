@@ -362,7 +362,8 @@ registry rejected it (e.g. the server is not running).
 Lists the Minecraft and loader versions a registered loader can install. The frontend
 (`ServerCreateModal`) uses these as soon as a loader is picked. Loaders registered in
 `LOADER_REGISTRY` are exposed here automatically. Lookup is case-insensitive.
-Registered today: `fabric`, `forge`, `neoforge`, `quilt`, `vanilla`.
+Registered today: `fabric`, `forge`, `neoforge`, `quilt`, `paper`, `folia`,
+`purpur`, `pufferfish`, `vanilla`.
 
 #### `GET /api/loaders/<loader>/versions/game`
 
@@ -720,7 +721,9 @@ server-scoped.
 #### `GET /api/modrinth/search`
 
 **Query:** `query` (string) · `mc_version` (string, optional) · `loader` (string, optional) ·
-`limit` (int, default `20`) · `offset` (int, default `0`) ·
+`project_type` (`mod` default, or `plugin` — Bukkit-family servers browse plugins through this
+same route; any other value falls back to `mod`) · `limit` (int, default `20`) ·
+`offset` (int, default `0`) ·
 `index` (`downloads` default, `relevance`, `follows`, `newest`, `updated`)
 
 ```bash
@@ -1069,6 +1072,10 @@ three steps:
        "neoforge": NeoForgeInstaller,
        "quilt": QuiltInstaller,
        "forge": ForgeInstaller,
+       "paper": PaperInstaller,
+       "folia": FoliaInstaller,
+       "purpur": PurpurInstaller,
+       "pufferfish": PufferfishInstaller,
    }
    ```
 

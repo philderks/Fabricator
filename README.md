@@ -28,8 +28,8 @@
 
 | | Feature | Status |
 |---|---|---|
-| 🧩 | **Loaders**: Fabric, Quilt, NeoForge, Forge, Vanilla | ✅ Available |
-| 📦 | **Mod management**: install, remove, and browse Modrinth mods | ✅ Available |
+| 🧩 | **Loaders**: Fabric, Quilt, NeoForge, Forge, Paper, Purpur, Folia, Pufferfish, Vanilla | ✅ Available |
+| 📦 | **Mod & plugin management**: install, remove, and browse Modrinth mods and plugins | ✅ Available |
 | 📋 | **Logs & monitoring**: live log stream, TPS and RAM graphs | ✅ Available |
 | 👥 | **Player management**: online players, player heads, custom actions | ✅ Available |
 | 💾 | **Backups & restore**: manual snapshots, restore from any backup | ✅ Available |
@@ -43,11 +43,10 @@
 | ⬆️ | **Self-update**: from the web UI, or via the CLI or install script | ✅ Available |
 | ⌨️ | **CLI**: expanded server and mod management commands | 📋 Planned |
 | ⏰ | **Scheduled commands** | 📋 Planned |
-| 🔌 | **Paper, Purpur, etc.** with plugin support | 📋 Planned |
 | 🔄 | **One-click Minecraft / Fabric server upgrades** | 📋 Planned |
 | 📊 | **Metrics tab**: CPU, RAM, and usage over time | 📋 Planned |
 | 🔐 | **User roles and permissions** | 📋 Planned |
-| ✏️ | **Editor & files**: better text editor, file search, view archived logs | 📋 Planned |
+| ✏️ | **Editor & files**: better text editor, view archived logs | 📋 Planned |
 | 📥 | **More install targets**: Proxmox VE, CasaOS, Umbrel, Unraid, Coolify/Dokploy | 📋 Planned |
 
 ---
