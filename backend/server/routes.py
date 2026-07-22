@@ -1135,7 +1135,7 @@ def get_java_status():
     system = platform_utils.platform_label()
     mc_version = request.args.get('mc_version', '').strip()
     required_java_param = request.args.get('required_java')
-    java_path = request.args.get('java_path') or 'java'
+    java_path_param = request.args.get('java_path') or None
 
     compat = resolve_required_java(mc_version) if mc_version else None
     required_java = None
@@ -1149,24 +1149,39 @@ def get_java_status():
     if required_java is None and mc_version:
         required_java = java_manager.required_java_for(mc_version)
 
-    try:
-        result = subprocess.run(
-            [java_path, '-version'],
-            capture_output=True,
-            text=True,
-            **platform_utils.subprocess_no_window_kwargs(),
-        )
+    def _probe(path):
+        """Probe ``path -version`` — byte-same semantics as the old inline probe."""
+        try:
+            result = subprocess.run(
+                [path, '-version'],
+                capture_output=True,
+                text=True,
+                **platform_utils.subprocess_no_window_kwargs(),
+            )
+        except FileNotFoundError:
+            return False, None, None
         version_output = (result.stdout or '') + (result.stderr or '')
-        installed = result.returncode == 0
-        version = None
-        detected_major = None
-        if installed:
-            version = parse_java_version_string(version_output)
-            detected_major = parse_java_major(version_output)
-    except FileNotFoundError:
-        installed = False
-        version = None
-        detected_major = None
+        if result.returncode != 0:
+            return False, None, None
+        return (
+            True,
+            parse_java_version_string(version_output),
+            parse_java_major(version_output),
+        )
+
+    # The flat fields mirror the binary START would use (registry
+    # ``_resolve_java_exec``: explicit javaPath -> ``find_compatible_java``
+    # (system-if-sufficient -> managed) -> ``'java'`` on PATH). The trailing
+    # ``or 'java'`` mirrors the registry's fallback, so a present-but-too-old
+    # system Java keeps being reported instead of "not installed". Without a
+    # known required major there is no "effective Java" (the resolver needs a
+    # major), so the probe stays the plain PATH/param probe.
+    path_probe_target = java_path_param or 'java'
+    java_path = path_probe_target
+    if java_path_param is None and required_java is not None:
+        java_path = java_manager.find_compatible_java(int(required_java)) or 'java'
+
+    installed, version, detected_major = _probe(java_path)
 
     recommendation = (
         _build_java_recommendation(system, int(required_java))
@@ -1187,10 +1202,34 @@ def get_java_status():
     ):
         meets_requirement = True
 
+    # ``system_java`` stays a PATH-only (or explicit-param) probe: when the
+    # flat fields follow a managed install, this block keeps telling the PATH
+    # truth. Same meets_requirement formula (incl. the enforcement-skip
+    # override), applied to the PATH probe.
+    if java_path == path_probe_target:
+        system_installed = installed
+        system_major = detected_major
+        system_meets = meets_requirement
+    else:
+        system_installed, _, system_major = _probe(path_probe_target)
+        system_meets = (
+            system_installed and
+            required_java is not None and
+            system_major is not None and
+            system_major >= required_java
+        )
+        if (
+            enforcement_skipped and
+            required_java is not None and
+            system_installed and
+            isinstance(system_major, int)
+        ):
+            system_meets = True
+
     system_java_block = {
-        'path': java_path,
-        'version': detected_major,
-        'meets_requirement': bool(meets_requirement),
+        'path': path_probe_target,
+        'version': system_major,
+        'meets_requirement': bool(system_meets),
     }
 
     managed_block = None
