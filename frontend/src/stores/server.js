@@ -12,6 +12,8 @@ import {
   startServer,
   stopServer,
   restartServer,
+  installServer,
+  getServerInstallProgress,
   updateServerSettings,
   setServerAutoStart,
   sendServerCommand,
@@ -83,7 +85,7 @@ export const useServerStore = defineStore('server', () => {
   const bulkDeleting = ref(false)
   const installLoading = ref(false)
   const modpackInstalling = ref(false)
-  const actionState = ref({ start: false, stop: false, restart: false })
+  const actionState = ref({ start: false, stop: false, restart: false, install: false })
   const consoleCommand = ref('')
   const commandSending = ref(false)
   const fileBrowser = ref({ currentPath: '', entries: [], loading: false, error: null })
@@ -280,11 +282,13 @@ export const useServerStore = defineStore('server', () => {
     return s ? s.charAt(0).toUpperCase() + s.slice(1) : 'Unknown'
   })
 
-  const startLocked = computed(() => ['installing', 'pending'].includes(serverStatus.value.status))
+  const startLocked = computed(() => serverStatus.value.status === 'installing')
 
   const startButtonLabel = computed(() => {
     if (serverStatus.value.status === 'installing') return 'Installing…'
-    if (serverStatus.value.status === 'pending') return 'Install Required'
+    if (serverStatus.value.status === 'pending') {
+      return actionState.value.install ? 'Installing…' : 'Install'
+    }
     return actionState.value.start ? 'Starting…' : 'Start'
   })
 
@@ -867,11 +871,48 @@ export const useServerStore = defineStore('server', () => {
   function handleStop()  { return performServerAction('stop',  stopServer,  'Server stop requested') }
   function handleRestart() { return performServerAction('restart', restartServer, 'Server restart requested') }
 
+  async function handleInstall() {
+    if (actionState.value.install || !server.value) return
+    actionState.value.install = true
+    try {
+      // 202 + initial progress; the real outcome arrives via polling — the
+      // create modal's exact contract (750ms cadence, terminal on !active
+      // or done/failed; 'aborted' terminates via active:false).
+      await installServer(currentServerId.value)
+      let progress = null
+      for (;;) {
+        await new Promise(resolve => setTimeout(resolve, 750))
+        progress = await getServerInstallProgress(currentServerId.value)
+        if (!progress.active || progress.phase === 'done' || progress.phase === 'failed') break
+      }
+      if (progress.phase === 'done') {
+        toast.success('Server installed successfully.', 'Server Installation')
+      } else {
+        toast.error(progress.error || 'Installation failed', 'Server Installation')
+      }
+    } catch (error) {
+      console.error('Failed to install server:', error)
+      if (error.data?.java_missing || error.data?.java_too_old) {
+        // The backend's Java-guard 400 already cleared the install-progress
+        // marker, so the retry via the Java modal is unblocked. No polling
+        // on this path.
+        pendingJavaAction.value = 'install'
+        showJavaModal.value = true
+      } else {
+        toast.error(error.message || 'Failed to install server', 'Server Error')
+      }
+    } finally {
+      actionState.value.install = false
+      await loadServer()
+    }
+  }
+
   function handleJavaInstalled() {
     const action = pendingJavaAction.value
     showJavaModal.value = false
     pendingJavaAction.value = null
-    if (action === 'restart') handleRestart()
+    if (action === 'install') handleInstall()
+    else if (action === 'restart') handleRestart()
     else handleStart()
   }
 
@@ -957,7 +998,7 @@ export const useServerStore = defineStore('server', () => {
     showUncertainModsModal.value = false
     uncertainModsReport.value = []
     pendingUncertainModpackData.value = null
-    actionState.value = { start: false, stop: false, restart: false }
+    actionState.value = { start: false, stop: false, restart: false, install: false }
     showModBrowser.value = false
     showJavaModal.value = false
     pendingJavaAction.value = null
@@ -1080,6 +1121,7 @@ export const useServerStore = defineStore('server', () => {
     clearModSelection,
     handleBulkRemoveMods,
     handleStart,
+    handleInstall,
     handleStop,
     handleRestart,
     handleJavaInstalled,

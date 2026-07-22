@@ -136,6 +136,7 @@ onUnmounted(() => {
         @start="store.handleStart"
         @stop="store.handleStop"
         @restart="store.handleRestart"
+        @install="store.handleInstall"
       />
       <main class="server-layout__content">
         <div v-if="store.serverLoading && !store.server" class="server-layout__loading">Loading server data…</div>
