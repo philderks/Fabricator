@@ -226,6 +226,11 @@ class ServerProcessRegistry:
 
     def get_java_runtime(self, server: Dict[str, object]) -> Dict[str, object]:
         manager = self._get_or_create_manager(server)
+        # Same rebuild as start_server above: the guard probe must see a
+        # freshly-installed managed Java exactly like the launch path does —
+        # guard truth and launch truth are the same command field.
+        if not manager.is_running:
+            manager.command = self._build_command(server)
         return manager.probe_java()
 
     def stop_server(self, server_id: str) -> Dict[str, object]:
