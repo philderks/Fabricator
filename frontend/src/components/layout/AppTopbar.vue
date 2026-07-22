@@ -28,7 +28,7 @@ const props = defineProps({
   }
 })
 
-defineEmits(['start', 'stop', 'restart'])
+defineEmits(['start', 'stop', 'restart', 'install'])
 
 const route = useRoute()
 
@@ -67,6 +67,10 @@ const pillSub = computed(() => {
 })
 
 const isRunning = computed(() => props.serverStatus.status === 'running')
+
+// A 'pending' server (created but never installed) turns the start button
+// into an actionable Install control instead of a dead locked one.
+const isPending = computed(() => props.serverStatus.status === 'pending')
 </script>
 
 <template>
@@ -99,9 +103,9 @@ const isRunning = computed(() => props.serverStatus.status === 'running')
         v-else
         variant="primary"
         size="md"
-        :disabled="actionState.start || startLocked"
-        :loading="actionState.start"
-        @click="$emit('start')"
+        :disabled="isPending ? actionState.install : (actionState.start || startLocked)"
+        :loading="isPending ? actionState.install : actionState.start"
+        @click="$emit(isPending ? 'install' : 'start')"
       >
         {{ startButtonLabel }}
       </AppButton>
