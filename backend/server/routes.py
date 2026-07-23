@@ -688,6 +688,16 @@ def update_server_settings(server_id, server):
     if not data:
         return jsonify({'error': 'Request body is required'}), 400
 
+    # C2 managed reject: launch config (command / javaPath / the whole launch
+    # object) is installer-owned; no legitimate settings caller sets it. Refuse
+    # explicitly rather than silently strip so a managed override is loud.
+    if is_managed():
+        forbidden = [key for key in ('command', 'javaPath', 'launch') if key in data]
+        if forbidden:
+            return jsonify({
+                'error': f"Not editable in managed mode: {', '.join(forbidden)}"
+            }), 400
+
     protected_fields = ['id', 'createdAt']
     for field in protected_fields:
         data.pop(field, None)
