@@ -13,7 +13,12 @@ exercised directly here via monkeypatch.
 """
 from __future__ import annotations
 
-from backend.modrinth.client import ModrinthClient
+import json
+from unittest.mock import MagicMock
+
+import pytest
+
+from backend.modrinth.client import ModrinthApiError, ModrinthClient
 
 
 def test_modpack_switch_paths_and_protected_paths_are_disjoint():
@@ -49,3 +54,40 @@ def test_clean_modpack_switch_paths_guard_skips_protected_paths(tmp_path, monkey
     assert "world" not in removed
     assert not (tmp_path / "mods").exists()
     assert (tmp_path / "world" / "level.dat").read_text() == "savedata"
+
+
+def _fake_response(*, status=200, json_value=None, json_raises=False, text=""):
+    """A MagicMock standing in for a requests.Response the session returns."""
+    resp = MagicMock()
+    resp.status_code = status
+    resp.raise_for_status.return_value = None
+    if json_raises:
+        resp.json.side_effect = json.JSONDecodeError("Expecting value", text or "<html>", 0)
+    else:
+        resp.json.return_value = json_value
+    resp.text = text
+    return resp
+
+
+def test_non_json_success_response_raises_clean_error():
+    """A 200 whose body is not JSON (captive portal / WAF interstitial) must
+    surface as a clean ModrinthApiError, not a raw JSONDecodeError."""
+    client = ModrinthClient()
+    client.session = MagicMock()
+    client.session.request.return_value = _fake_response(
+        status=200, json_raises=True, text="<html>captive portal</html>"
+    )
+
+    with pytest.raises(ModrinthApiError):
+        client.get_project("sodium")
+
+
+def test_json_success_response_returned_unchanged():
+    """A valid JSON 200 is parsed and returned unchanged (pin)."""
+    client = ModrinthClient()
+    client.session = MagicMock()
+    client.session.request.return_value = _fake_response(
+        status=200, json_value={"id": "sodium", "title": "Sodium"}
+    )
+
+    assert client.get_project("sodium") == {"id": "sodium", "title": "Sodium"}

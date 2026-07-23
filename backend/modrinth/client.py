@@ -104,6 +104,23 @@ class ModrinthClient:
 
             raise ModrinthApiError(message, status_code=status_code) from exc
 
+    def _json(self, response: requests.Response, error_context: str) -> Any:
+        """Parse a success response body as JSON, mapping a non-JSON body to a
+        clean ModrinthApiError.
+
+        ``_request`` only guards ``.json()`` on the *error* path. A 200 can
+        still carry HTML (a captive portal, a WAF interstitial, a proxy error
+        page), where a raw ``JSONDecodeError`` would otherwise surface as a 500
+        instead of the client's normal ``ModrinthApiError`` shape.
+        """
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise ModrinthApiError(
+                f"{error_context}: unexpected non-JSON response from Modrinth",
+                status_code=502,
+            ) from exc
+
     def search(
         self,
         project_type: str,
@@ -140,7 +157,7 @@ class ModrinthClient:
             timeout=15,
             error_context=f"Failed to search {project_type}s",
         )
-        return response.json()
+        return self._json(response, f"Failed to search {project_type}s")
 
     def get_project(self, project_id: str) -> Dict[str, Any]:
         """Fetch a Modrinth project (mod, modpack, resource pack, etc.)."""
@@ -150,7 +167,7 @@ class ModrinthClient:
             timeout=15,
             error_context="Failed to fetch project",
         )
-        return response.json()
+        return self._json(response, "Failed to fetch project")
 
     def get_project_versions(
         self,
@@ -175,7 +192,7 @@ class ModrinthClient:
             timeout=15,
             error_context="Failed to fetch project versions",
         )
-        return response.json()
+        return self._json(response, "Failed to fetch project versions")
 
     def get_version(self, version_id: str) -> Dict[str, Any]:
         response = self._request(
@@ -184,7 +201,7 @@ class ModrinthClient:
             timeout=15,
             error_context="Failed to fetch version",
         )
-        return response.json()
+        return self._json(response, "Failed to fetch version")
 
     def pick_best_version(self, versions: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         if not versions:
@@ -1095,7 +1112,7 @@ class ModrinthClient:
             timeout=15,
             error_context="Failed to fetch categories",
         )
-        return response.json()
+        return self._json(response, "Failed to fetch categories")
 
     def get_loaders(self) -> List[Dict[str, Any]]:
         response = self._request(
@@ -1104,7 +1121,7 @@ class ModrinthClient:
             timeout=15,
             error_context="Failed to fetch loaders",
         )
-        return response.json()
+        return self._json(response, "Failed to fetch loaders")
 
     def get_game_versions(self) -> List[Dict[str, Any]]:
         response = self._request(
@@ -1113,4 +1130,4 @@ class ModrinthClient:
             timeout=15,
             error_context="Failed to fetch game versions",
         )
-        return response.json()
+        return self._json(response, "Failed to fetch game versions")
