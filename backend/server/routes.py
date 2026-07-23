@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 from backend.server.registry import get_server_process_registry
 from backend.server import storage
 from backend.server import install_progress
+from backend.managed import is_managed
 from backend.server.installer import (
     InstallStatus,
     get_installer_for,
@@ -396,6 +397,13 @@ def get_servers():
 
 @server_bp.route('/servers', methods=['POST'])
 def create_server():
+    # C1 managed cap-1 lock: the only legitimate create is the first-boot
+    # bootstrap while the host has zero records; every later create is refused.
+    if is_managed() and storage.get_all_servers():
+        return jsonify({
+            'error': 'Server creation is disabled in managed mode (one server per host)'
+        }), 403
+
     data = request.get_json()
 
     if not data:
@@ -679,6 +687,16 @@ def update_server_settings(server_id, server):
 
     if not data:
         return jsonify({'error': 'Request body is required'}), 400
+
+    # C2 managed reject: launch config (command / javaPath / the whole launch
+    # object) is installer-owned; no legitimate settings caller sets it. Refuse
+    # explicitly rather than silently strip so a managed override is loud.
+    if is_managed():
+        forbidden = [key for key in ('command', 'javaPath', 'launch') if key in data]
+        if forbidden:
+            return jsonify({
+                'error': f"Not editable in managed mode: {', '.join(forbidden)}"
+            }), 400
 
     protected_fields = ['id', 'createdAt']
     for field in protected_fields:

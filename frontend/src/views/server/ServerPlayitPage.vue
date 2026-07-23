@@ -5,10 +5,12 @@ import AppButton from '../../components/ui/AppButton.vue'
 import ConfirmModal from '../../components/modals/ConfirmModal.vue'
 import { useServerStore } from '../../stores/server'
 import { usePlayitStore } from '../../stores/playit'
+import { useAuthStore } from '../../stores/auth'
 import { copyToClipboard } from '../../utils/clipboard'
 
 const store = useServerStore()
 const playit = usePlayitStore()
+const auth = useAuthStore()
 
 let _unsubscribePlayit = null
 
@@ -104,6 +106,7 @@ async function copyAddress() {
 }
 
 onMounted(() => {
+  if (auth.managed) return
   _unsubscribePlayit = playit.subscribe()
 })
 
@@ -119,7 +122,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="playit-page">
+  <div v-if="!auth.managed" class="playit-page">
     <!-- ─── Section A: tunnel agent (global) ─────────────────────────────── -->
     <Panel title="playit.gg tunnel agent">
       <!-- Persistent dashboard link: visible in every agent state, so managing

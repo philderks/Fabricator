@@ -9,9 +9,11 @@ import ModBrowserModal from '../components/modals/ModBrowserModal.vue'
 import ModpackBrowserModal from '../components/modals/ModpackBrowserModal.vue'
 import ModSideDecisionModal from '../components/modals/ModSideDecisionModal.vue'
 import { useServerStore } from '../stores/server'
+import { useAuthStore } from '../stores/auth'
 
 const route = useRoute()
 const store = useServerStore()
+const auth = useAuthStore()
 
 // ---------- Polling (owned by layout per Phase 3 architecture) ----------
 
@@ -245,6 +247,7 @@ onUnmounted(() => {
     />
 
     <JavaInstallModal
+      v-if="!auth.managed"
       :show="store.showJavaModal"
       :mc-version="store.server?.version || ''"
       @close="store.closeJavaModal"
