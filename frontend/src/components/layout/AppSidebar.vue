@@ -37,16 +37,22 @@ const ALL_NAV_ITEMS = [
   { name: 'ServerSettings', label: 'Properties', icon: 'properties' }
 ]
 
+// Nav entries hidden under managed mode (surfaces the fleet gate denies).
+const MANAGED_HIDDEN_NAV = new Set(['ServerBackups'])
+
 // The add-on tab (ServerMods) is hidden for Vanilla (no add-on surface) and
 // relabelled "Plugins" for Bukkit-family loaders (Paper/Purpur/Folia/Pufferfish),
 // which install plugins rather than mods. The route name/path stay 'ServerMods'.
 const navItems = computed(() => {
   const loader = store.server?.loader
   const kind = loaderContentKind(loader)
+  const base = auth.managed
+    ? ALL_NAV_ITEMS.filter(item => !MANAGED_HIDDEN_NAV.has(item.name))
+    : ALL_NAV_ITEMS
   if (kind === 'none') {
-    return ALL_NAV_ITEMS.filter(item => item.name !== 'ServerMods')
+    return base.filter(item => item.name !== 'ServerMods')
   }
-  return ALL_NAV_ITEMS.map(item =>
+  return base.map(item =>
     item.name === 'ServerMods'
       ? { ...item, label: contentLabel(loader) }
       : item
