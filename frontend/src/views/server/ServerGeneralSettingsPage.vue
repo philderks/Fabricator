@@ -93,7 +93,7 @@ onMounted(async () => {
       />
     </Panel>
 
-    <JavaManagerPanel />
+    <JavaManagerPanel v-if="!auth.managed" />
 
     <ChangePasswordPanel v-if="auth.enabled" />
 
