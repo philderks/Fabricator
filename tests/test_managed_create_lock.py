@@ -19,12 +19,14 @@ def _payload(port, name, path):
 
 def test_managed_allows_first_create_when_empty(client, monkeypatch):
     monkeypatch.setenv("FABRICATOR_MANAGED", "1")
+    monkeypatch.setenv("FABRICATOR_MANAGED_MEMORY_GB", "4")
     resp = client.post("/api/servers", json=_payload(25811, "only", "only"))
     assert resp.status_code in (200, 201), resp.get_json()
 
 
 def test_managed_locks_create_once_a_record_exists(client, monkeypatch):
     monkeypatch.setenv("FABRICATOR_MANAGED", "1")
+    monkeypatch.setenv("FABRICATOR_MANAGED_MEMORY_GB", "4")
     # zero records -> the single bootstrap create is allowed
     assert client.post("/api/servers", json=_payload(25812, "a", "a")).status_code in (200, 201)
     # a record now exists -> managed locks further creates
@@ -35,6 +37,7 @@ def test_managed_locks_create_once_a_record_exists(client, monkeypatch):
 
 def test_managed_lock_precedes_body_validation(client, monkeypatch):
     monkeypatch.setenv("FABRICATOR_MANAGED", "1")
+    monkeypatch.setenv("FABRICATOR_MANAGED_MEMORY_GB", "4")
     assert client.post("/api/servers", json=_payload(25814, "a", "a")).status_code in (200, 201)
     # an empty body would normally 400; the managed lock must 403 first
     resp = client.post("/api/servers", json={})

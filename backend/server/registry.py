@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from backend.core.config import get_config
+from backend.managed import ManagedConfigError, is_managed, managed_memory_gb
 from backend.server import java_manager
 from backend.server.manager import ServerManager
 
@@ -37,6 +38,31 @@ class ServerProcessRegistry:
     """Keeps track of ServerManager instances per server ID."""
 
     def _build_command(self, server: Dict[str, object]) -> list[str]:
+        if is_managed():
+            # C3 memory pin (fail-closed): refuse to build without a valid heap.
+            gb = managed_memory_gb()
+            if gb is None:
+                raise ManagedConfigError(
+                    "managed mode is on but FABRICATOR_MANAGED_MEMORY_GB is unset "
+                    "or not a positive integer; refusing to start"
+                )
+            # Pin the heap and drop record-supplied launch overrides at the
+            # source (command / javaPath / launch.jvm_args). Operate on a shallow
+            # copy so the persisted record is never mutated; the assembly below
+            # then runs unchanged and lands the pin in its normal slot.
+            server = {
+                key: value
+                for key, value in server.items()
+                if key not in ('command', 'javaPath')
+            }
+            server['memory'] = gb
+            server['memoryUnit'] = 'GB'
+            launch = server.get('launch')
+            if isinstance(launch, dict):
+                server['launch'] = {
+                    key: value for key, value in launch.items() if key != 'jvm_args'
+                }
+
         custom_command = server.get('command')
         if custom_command:
             if isinstance(custom_command, str):
@@ -212,11 +238,16 @@ class ServerProcessRegistry:
         server: Dict[str, object],
         required_java_major: Optional[int] = None
     ) -> Dict[str, object]:
-        manager = self._get_or_create_manager(server)
-        # Rebuild command so a freshly-installed managed Java is picked up
-        # without requiring an explicit invalidate() between attempts.
-        if not manager.is_running:
-            manager.command = self._build_command(server)
+        try:
+            manager = self._get_or_create_manager(server)
+            # Rebuild command so a freshly-installed managed Java is picked up
+            # without requiring an explicit invalidate() between attempts.
+            if not manager.is_running:
+                manager.command = self._build_command(server)
+        except ManagedConfigError as exc:
+            # Fail-closed: map the launch-builder refusal to the clean stopped
+            # shape (no 500). Boot autostart logs this via _start_one and moves on.
+            return {"status": "stopped", "message": str(exc)}
         result = manager.start(required_java_major=required_java_major)
         if result.get('status') == 'running':
             server_id = str(server['id'])
