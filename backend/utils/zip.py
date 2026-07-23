@@ -10,8 +10,10 @@ use the same ``relative_to``-based check rather than a string
 
 from __future__ import annotations
 
+import os
 import shutil
 import tarfile
+import time
 import zipfile
 from pathlib import Path
 
@@ -35,6 +37,21 @@ def is_within(base: Path, candidate: Path) -> bool:
         return False
 
 
+def _zip_member_mtime(member: zipfile.ZipInfo) -> float | None:
+    """Convert a ``ZipInfo.date_time`` 6-tuple to epoch seconds.
+
+    Zip stores the modification time as ``(year, month, day, hour, minute,
+    second)`` in the archive's local time with no timezone. :func:`time.mktime`
+    interprets the tuple in the host's local zone (``isdst=-1`` lets libc pick
+    the DST offset). Returns ``None`` when the stored date is unusable (some
+    tools emit a zero/out-of-range date) so extraction never aborts on it.
+    """
+    try:
+        return time.mktime((*member.date_time, 0, 0, -1))
+    except (ValueError, OverflowError):
+        return None
+
+
 def safe_extract_zip(zf: zipfile.ZipFile, destination: Path) -> None:
     """Extract every member of ``zf`` into ``destination`` rejecting traversal.
 
@@ -47,8 +64,15 @@ def safe_extract_zip(zf: zipfile.ZipFile, destination: Path) -> None:
 
     Files are streamed via :func:`shutil.copyfileobj` to avoid loading
     entire members into memory.
+
+    Member modification times are restored from ``ZipInfo.date_time`` (see
+    :func:`safe_extract_tar` for the rationale — the two helpers are kept
+    symmetric on purpose). Directory mtimes are applied in a second pass
+    *after* every file is written, otherwise writing a child bumps its
+    parent directory's mtime back to "now".
     """
     destination = Path(destination).resolve()
+    dir_mtimes: list[tuple[Path, float]] = []
     for member in zf.infolist():
         # Symlink members carry the target path as the body, materialised
         # via the high byte of ``external_attr`` (Unix file mode). Refuse
@@ -68,13 +92,37 @@ def safe_extract_zip(zf: zipfile.ZipFile, destination: Path) -> None:
                 f"Archive member escapes destination: {member.filename!r}"
             )
 
+        mtime = _zip_member_mtime(member)
+
         if member.is_dir():
             target.mkdir(parents=True, exist_ok=True)
+            if mtime is not None:
+                dir_mtimes.append((target, mtime))
             continue
 
         target.parent.mkdir(parents=True, exist_ok=True)
         with zf.open(member, "r") as source, open(target, "wb") as sink:
             shutil.copyfileobj(source, sink)
+        if mtime is not None:
+            os.utime(target, (mtime, mtime))
+
+    _restore_dir_mtimes(dir_mtimes)
+
+
+def _restore_dir_mtimes(dir_mtimes: list[tuple[Path, float]]) -> None:
+    """Apply saved directory mtimes as a second pass.
+
+    Called only after every regular file has been written: setting a
+    directory's mtime is pointless while children are still being created
+    inside it (each create bumps the parent back to "now"). ``os.utime`` on
+    one directory does not touch any other, so the order here is irrelevant.
+    Best-effort — a missing/locked directory must not abort the extraction.
+    """
+    for target, mtime in dir_mtimes:
+        try:
+            os.utime(target, (mtime, mtime))
+        except OSError:
+            pass
 
 
 def safe_extract_tar(tf: tarfile.TarFile, destination: Path) -> None:
@@ -95,8 +143,17 @@ def safe_extract_tar(tf: tarfile.TarFile, destination: Path) -> None:
     Raises :class:`ValueError` for any traversal attempt or refused
     member type. Regular files are streamed via :func:`shutil.copyfileobj`
     to avoid loading entire members into memory.
+
+    Member modification times are restored from ``TarInfo.mtime`` — the
+    manual stream (``open(target, "wb")``) would otherwise stamp every file
+    with the extraction time, which breaks any consumer that reads a file's
+    mtime as a real event time (e.g. playerdata "last seen"). Directory
+    mtimes are applied in a second pass *after* every file is written,
+    otherwise writing a child bumps its parent directory's mtime back to
+    "now".
     """
     destination = Path(destination).resolve()
+    dir_mtimes: list[tuple[Path, float]] = []
     for member in tf.getmembers():
         if member.issym() or member.islnk():
             raise ValueError(
@@ -116,6 +173,7 @@ def safe_extract_tar(tf: tarfile.TarFile, destination: Path) -> None:
 
         if member.isdir():
             target.mkdir(parents=True, exist_ok=True)
+            dir_mtimes.append((target, member.mtime))
             continue
 
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -129,3 +187,6 @@ def safe_extract_tar(tf: tarfile.TarFile, destination: Path) -> None:
                 shutil.copyfileobj(source, sink)
         finally:
             source.close()
+        os.utime(target, (member.mtime, member.mtime))
+
+    _restore_dir_mtimes(dir_mtimes)
