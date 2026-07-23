@@ -201,6 +201,9 @@ const runUpdate = async () => {
 }
 
 onMounted(async () => {
+  // Managed: the self-update probe is gate-denied (silent recurring 403); do
+  // not fetch or arm either poll cadence.
+  if (auth.managed) return
   await loadUpdateState()
   scheduleNextPoll()
 })
@@ -328,6 +331,7 @@ onUnmounted(() => {
       </button>
 
       <component
+        v-if="!auth.managed"
         :is="updateAvailable ? 'button' : 'div'"
         :type="updateAvailable ? 'button' : undefined"
         class="app-sidebar__update-pill"
