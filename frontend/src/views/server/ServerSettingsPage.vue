@@ -760,7 +760,7 @@ const onReset = () => {
       </div>
 
       <div class="settings-page__grid settings-page__grid--three">
-        <FormField label="Memory Allocation">
+        <FormField v-if="!auth.managed" label="Memory Allocation">
           <template #default="{ id, describedBy }">
             <div class="settings-page__memory">
               <input
