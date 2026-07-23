@@ -20,6 +20,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
+from backend.utils.zip import is_within
+
 
 class ModrinthApiError(Exception):
     """Raised when a Modrinth API request fails."""
@@ -626,7 +628,7 @@ class ModrinthClient:
                 decision, _ = self._resolve_index_mod_side(entry_path, env, overrides)
                 if decision == "client":
                     existing = (install_path / entry_path).resolve()
-                    if existing.is_file() and str(existing).startswith(str(install_path)):
+                    if existing.is_file() and is_within(install_path, existing):
                         existing.unlink(missing_ok=True)
                     files_skipped.append(entry_path)
                     continue
@@ -644,7 +646,7 @@ class ModrinthClient:
             is_mod_jar = entry_path.lower().startswith("mods/") and entry_path.lower().endswith(".jar")
 
             target = (install_path / entry_path).resolve()
-            if not str(target).startswith(str(install_path)):
+            if not is_within(install_path, target):
                 raise ModrinthApiError(f"Invalid path in modpack index: {entry_path}")
 
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -779,13 +781,13 @@ class ModrinthClient:
                 forced = overrides.get(scoped_path, overrides.get(relative, ""))
                 if forced == "client":
                     existing = (install_path / relative).resolve()
-                    if existing.is_file() and str(existing).startswith(str(install_path)):
+                    if existing.is_file() and is_within(install_path, existing):
                         existing.unlink(missing_ok=True)
                     files_skipped.append(scoped_path)
                     continue
 
             target = (install_path / relative).resolve()
-            if not str(target).startswith(str(install_path)):
+            if not is_within(install_path, target):
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             with zf.open(member) as src, open(target, "wb") as dst:

@@ -16,6 +16,25 @@ import zipfile
 from pathlib import Path
 
 
+def is_within(base: Path, candidate: Path) -> bool:
+    """Return True iff ``candidate`` is ``base`` itself or a path beneath it.
+
+    The single source of truth for path containment. Uses
+    :py:meth:`Path.relative_to` rather than a ``str.startswith`` prefix compare
+    — the latter accepts sibling-prefix escapes (``base=/x/mc1`` and
+    ``candidate=/x/mc1-evil/...`` share the ``/x/mc1`` prefix but the second is
+    NOT inside the first). Both paths are resolved first so ``..`` segments and
+    symlinks are collapsed before the comparison.
+    """
+    base_resolved = Path(base).resolve()
+    candidate_resolved = Path(candidate).resolve()
+    try:
+        candidate_resolved.relative_to(base_resolved)
+        return True
+    except ValueError:
+        return False
+
+
 def safe_extract_zip(zf: zipfile.ZipFile, destination: Path) -> None:
     """Extract every member of ``zf`` into ``destination`` rejecting traversal.
 
@@ -44,12 +63,10 @@ def safe_extract_zip(zf: zipfile.ZipFile, destination: Path) -> None:
             )
 
         target = (destination / member.filename).resolve()
-        try:
-            target.relative_to(destination)
-        except ValueError as exc:
+        if not is_within(destination, target):
             raise ValueError(
                 f"Archive member escapes destination: {member.filename!r}"
-            ) from exc
+            )
 
         if member.is_dir():
             target.mkdir(parents=True, exist_ok=True)
@@ -92,12 +109,10 @@ def safe_extract_tar(tf: tarfile.TarFile, destination: Path) -> None:
             continue
 
         target = (destination / member.name).resolve()
-        try:
-            target.relative_to(destination)
-        except ValueError as exc:
+        if not is_within(destination, target):
             raise ValueError(
                 f"Archive member escapes destination: {member.name!r}"
-            ) from exc
+            )
 
         if member.isdir():
             target.mkdir(parents=True, exist_ok=True)

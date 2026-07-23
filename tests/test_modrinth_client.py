@@ -91,3 +91,33 @@ def test_json_success_response_returned_unchanged():
     )
 
     assert client.get_project("sodium") == {"id": "sodium", "title": "Sodium"}
+
+
+def test_extract_overrides_rejects_sibling_prefix_escape(tmp_path):
+    """A crafted override member whose path resolves into a prefix-sibling of
+    the install dir must NOT be written outside the server root.
+
+    The old str.startswith guard treated `.../mc1-evil` as "inside" `.../mc1`
+    (shared string prefix); the shared is_within guard rejects it. The write
+    path mkdir -p's the parent, so the escape CREATES the sibling dir — a
+    pre-existing sibling is not required.
+    """
+    import io
+    import zipfile
+
+    install_path = tmp_path / "mc1"
+    install_path.mkdir()
+    sibling_escape = tmp_path / "mc1-evil" / "pwn.txt"
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("overrides/config/ok.txt", "ok")
+        zf.writestr("overrides/../mc1-evil/pwn.txt", "pwn")
+    buf.seek(0)
+
+    client = ModrinthClient()
+    with zipfile.ZipFile(buf) as zf:
+        client._extract_overrides(zf, install_path, {}, [], [], [], loader="fabric")
+
+    assert not sibling_escape.exists(), "override escaped the server root into a prefix-sibling"
+    assert (install_path / "config" / "ok.txt").read_text() == "ok"
