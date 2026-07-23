@@ -236,7 +236,7 @@ onUnmounted(() => {
         <Panel title="Quick actions">
           <div class="overview-page__qa-grid">
             <router-link
-              v-if="backupsRouteLocation"
+              v-if="!auth.managed && backupsRouteLocation"
               class="overview-page__qa"
               :to="backupsRouteLocation"
             >
@@ -244,7 +244,7 @@ onUnmounted(() => {
               <span class="overview-page__qa-sub">Manage snapshots</span>
             </router-link>
             <button
-              v-else
+              v-else-if="!auth.managed"
               type="button"
               class="overview-page__qa"
               disabled
