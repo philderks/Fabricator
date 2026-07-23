@@ -9,9 +9,10 @@ from unittest.mock import MagicMock
 import tools.cli as cli
 
 
-def _resp(ok=True, json_body=None):
+def _resp(ok=True, json_body=None, status_code=200):
     r = MagicMock()
     r.ok = ok
+    r.status_code = status_code
     r.json.return_value = json_body
     return r
 
@@ -74,3 +75,45 @@ def test_render_status_summarises_running_servers(monkeypatch):
     assert "Servers:  1/2 running" in joined
     assert "Alpha" in joined
     assert "no Minecraft data available" not in joined  # the old, misleading message
+
+
+def test_collect_status_flags_auth_required_on_401(monkeypatch):
+    """When auth is enabled (the default), /api/servers returns 401. The
+    status must record that distinctly, not lump it in with a generic
+    unreadable-list failure."""
+    def fake_get(url, timeout=None):
+        if url.endswith("/api/health"):
+            return _resp(ok=True, json_body={"healthy": True})
+        if url.endswith("/api/servers"):
+            return _resp(ok=False, status_code=401)
+        return _resp(ok=False, status_code=404)
+
+    monkeypatch.setattr(cli.requests, "get", fake_get)
+    monkeypatch.setattr(cli.subprocess, "run",
+                        lambda *a, **k: MagicMock(stdout="active\n"))
+
+    data = cli._collect_status()
+
+    assert data["flask_up"] is True
+    assert data["servers"] is None
+    assert data["servers_error"] == "auth_required"
+
+
+def test_render_status_auth_required_is_honest(monkeypatch):
+    """The 401 line states what is true (auth enabled) and where the list is
+    (the web panel) — not the misleading 'could not read the server list'."""
+    lines = []
+    monkeypatch.setattr(cli.click, "echo", lambda msg="": lines.append(msg))
+    monkeypatch.setattr(cli.click, "style", lambda text, **k: text)
+
+    cli._render_status({
+        "systemd_state": "active",
+        "flask_up": True,
+        "servers": None,
+        "servers_error": "auth_required",
+    })
+
+    joined = "\n".join(lines)
+    assert "could not read the server list" not in joined
+    assert "authentication" in joined.lower()
+    assert "web panel" in joined.lower()

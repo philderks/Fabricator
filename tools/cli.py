@@ -127,6 +127,7 @@ def _collect_status() -> dict:
 
     flask_up = False
     servers: "list | None" = None
+    servers_error: "str | None" = None
 
     # /api/health is the always-available liveness endpoint (open even in the
     # setup/locked states). The old code hit a non-existent /api/status, which
@@ -139,19 +140,34 @@ def _collect_status() -> dict:
         flask_up = False
 
     if flask_up:
+        # /api/servers requires a session; the CLI has none, so with auth
+        # enabled (the default) it answers 401. Classify the outcome so the
+        # render layer can state what is actually true instead of a blanket
+        # "could not read the server list".
         try:
             resp = requests.get(f"{API_BASE}/api/servers", timeout=5)
-            if resp.ok:
+            if resp.status_code == 401:
+                servers_error = "auth_required"
+            elif resp.ok:
                 body = resp.json()
                 if isinstance(body, list):
                     servers = body
+                else:
+                    servers_error = "unexpected_response"
+            else:
+                servers_error = f"http_{resp.status_code}"
+        except requests.exceptions.ConnectionError:
+            servers_error = "connection_refused"
+        except requests.exceptions.Timeout:
+            servers_error = "timeout"
         except Exception:
-            servers = None
+            servers_error = "error"
 
     return {
         "systemd_state": systemd_state,
         "flask_up": flask_up,
         "servers": servers,
+        "servers_error": servers_error,
     }
 
 
@@ -169,7 +185,20 @@ def _render_status(data: dict) -> None:
 
     servers = data.get("servers")
     if servers is None:
-        click.echo("  (could not read the server list)")
+        reason = data.get("servers_error")
+        if reason == "auth_required":
+            click.echo(
+                "Servers:  authentication is enabled — "
+                "view the server list in the web panel"
+            )
+        elif reason == "connection_refused":
+            click.echo("Servers:  API not reachable")
+        elif reason == "timeout":
+            click.echo("Servers:  API request timed out")
+        elif reason and reason.startswith("http_"):
+            click.echo(f"Servers:  API error ({reason[len('http_'):]})")
+        else:
+            click.echo("  (could not read the server list)")
         return
 
     def _running(server: dict) -> bool:
