@@ -200,8 +200,11 @@ def main() -> None:
     # var for fresh / env-driven installs. Isolated in try/except so a missing
     # binary or runtime-dir permission error can't take down Flask.
     try:
+        from backend.managed import is_managed
         from backend.playit import agent as playit_agent
-        if playit_agent.is_enabled():
+        # C4: never re-arm the tunnel at boot under managed mode (belt — the
+        # agent.start() guard already refuses; this avoids even calling it).
+        if playit_agent.is_enabled() and not is_managed():
             playit_agent.start()
     except Exception as exc:
         logger.warning("playit auto-start failed: %s", exc)
