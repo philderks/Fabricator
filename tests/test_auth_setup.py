@@ -22,6 +22,7 @@ def test_setup_success_writes_hash_and_logs_in(setup_app, setup_client):
         "enabled": True,
         "authenticated": True,
         "needs_setup": False,
+        "managed": False,
     }
 
 
