@@ -8,12 +8,14 @@ Covers:
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
 from backend.server.players.routes import _patch_server_property
+from backend.utils.time import iso_z_from_timestamp
 
 
 # ---------------------------------------------------------------------------
@@ -97,6 +99,71 @@ def test_patch_only_replaces_exact_key_not_partial_match(tmp_path):
     lines = props.read_text().splitlines()
     assert "enforce-whitelist=true" in lines
     assert "white-list=false" in lines  # must not be touched
+
+
+# ---------------------------------------------------------------------------
+# GET /servers/<id>/players/state — knownPlayers[].lastSeen (issue #49)
+# ---------------------------------------------------------------------------
+
+def test_state_known_player_last_seen_from_playerdata(client, tmp_servers_root):
+    """knownPlayers carries a lastSeen sourced from the playerdata mtime, not
+    the usercache expiresOn."""
+    install = _seed_server(Path(tmp_servers_root), "srv_lastseen")
+    uuid = "11111111-2222-3333-4444-555555555555"
+    mtime = 1_600_000_000
+
+    from backend.server.players import files as players_files
+    players_files.write_json_list(install, "usercache.json", [
+        {"uuid": uuid, "name": "Linus", "expiresOn": "2099-01-01 00:00:00 +0000"},
+    ])
+    pd = install / "world" / "playerdata"
+    pd.mkdir(parents=True, exist_ok=True)
+    dat = pd / f"{uuid}.dat"
+    dat.write_bytes(b"NBT")
+    os.utime(dat, (mtime, mtime))
+
+    resp = client.get("/api/servers/srv_lastseen/players/state")
+    assert resp.status_code == 200
+    known = resp.get_json()["knownPlayers"]
+    assert len(known) == 1
+    assert known[0]["lastSeen"] == iso_z_from_timestamp(mtime)
+
+
+def test_state_known_player_last_seen_from_new_players_data_layout(client, tmp_servers_root):
+    """26.1+ world layout: the per-player file lives at
+    <level>/players/data/<uuid>.dat — the probing resolver must find it."""
+    install = _seed_server(Path(tmp_servers_root), "srv_newlayout")
+    uuid = "22222222-3333-4444-5555-666666666666"
+    mtime = 1_610_000_000
+
+    from backend.server.players import files as players_files
+    players_files.write_json_list(install, "usercache.json", [
+        {"uuid": uuid, "name": "Newlayout"},
+    ])
+    pd = install / "world" / "players" / "data"
+    pd.mkdir(parents=True, exist_ok=True)
+    dat = pd / f"{uuid}.dat"
+    dat.write_bytes(b"NBT")
+    os.utime(dat, (mtime, mtime))
+
+    resp = client.get("/api/servers/srv_newlayout/players/state")
+    assert resp.status_code == 200
+    known = resp.get_json()["knownPlayers"]
+    assert known[0]["lastSeen"] == iso_z_from_timestamp(mtime)
+
+
+def test_state_known_player_last_seen_null_when_never_joined(client, tmp_servers_root):
+    """A player in usercache with no playerdata file reports lastSeen: null."""
+    install = _seed_server(Path(tmp_servers_root), "srv_neverjoined")
+    from backend.server.players import files as players_files
+    players_files.write_json_list(install, "usercache.json", [
+        {"uuid": "99999999-8888-7777-6666-555555555555", "name": "Ghost"},
+    ])
+
+    resp = client.get("/api/servers/srv_neverjoined/players/state")
+    assert resp.status_code == 200
+    known = resp.get_json()["knownPlayers"]
+    assert known[0]["lastSeen"] is None
 
 
 # ---------------------------------------------------------------------------
