@@ -52,7 +52,7 @@ onMounted(async () => {
 
 <template>
   <div class="general-settings">
-    <Panel title="Auto-start">
+    <Panel v-if="!auth.managed" title="Auto-start">
       <p class="general-settings__autostart-intro">
         What should happen to this server when Fabricator starts up?
       </p>
