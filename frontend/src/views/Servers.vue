@@ -4,10 +4,12 @@ import { useRouter } from 'vue-router'
 import AppButton from '../components/ui/AppButton.vue'
 import { useToast } from '../composables/useToast'
 import { useServerStore } from '../stores/server'
+import { useAuthStore } from '../stores/auth'
 
 const router = useRouter()
 const toast = useToast()
 const store = useServerStore()
+const auth = useAuthStore()
 
 const loading = ref(true)
 const errorMessage = ref(null)
@@ -73,7 +75,7 @@ onMounted(() => {
       />
       <h2 class="servers-page__title">No servers yet</h2>
       <p class="servers-page__subtitle">Create your first Minecraft server to get started.</p>
-      <AppButton variant="primary" size="md" @click="showCreateModal = true">
+      <AppButton v-if="!auth.managed" variant="primary" size="md" @click="showCreateModal = true">
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <path d="M6 1v10M1 6h10"/>
         </svg>

@@ -224,7 +224,7 @@ onUnmounted(() => {
 
     <ServerSwitcher v-if="hasServerContext" />
     <button
-      v-else
+      v-else-if="!auth.managed"
       type="button"
       class="app-sidebar__no-server-chip"
       @click="showCreateModal = true"
