@@ -38,7 +38,7 @@ const ALL_NAV_ITEMS = [
 ]
 
 // Nav entries hidden under managed mode (surfaces the fleet gate denies).
-const MANAGED_HIDDEN_NAV = new Set(['ServerBackups'])
+const MANAGED_HIDDEN_NAV = new Set(['ServerBackups', 'ServerPlayit'])
 
 // The add-on tab (ServerMods) is hidden for Vanilla (no add-on surface) and
 // relabelled "Plugins" for Bukkit-family loaders (Paper/Purpur/Folia/Pufferfish),

@@ -6,6 +6,7 @@ import Panel from '../../components/ui/Panel.vue'
 import { installedModDisplayName, installedModInitial } from '../../utils/installedModDisplay'
 import { useServerStore } from '../../stores/server'
 import { usePlayitStore } from '../../stores/playit'
+import { useAuthStore } from '../../stores/auth'
 import { usePreferencesStore } from '../../stores/preferences'
 import { copyToClipboard } from '../../utils/clipboard'
 import { contentLabel } from '../../utils/loaderKind'
@@ -14,6 +15,7 @@ const route = useRoute()
 const store = useServerStore()
 const playit = usePlayitStore()
 const prefs = usePreferencesStore()
+const auth = useAuthStore()
 
 // "Mods" vs "Plugins" for the installed-content panel, per loader.
 const contentNoun = computed(() => contentLabel(store.server?.loader, true))
@@ -102,6 +104,7 @@ async function copyAddress() {
 }
 
 onMounted(() => {
+  if (auth.managed) return
   _unsubscribePlayit = playit.subscribe()
 })
 
