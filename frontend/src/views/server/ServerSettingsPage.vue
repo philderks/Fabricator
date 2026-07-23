@@ -5,8 +5,10 @@ import FormField from '../../components/ui/FormField.vue'
 import Panel from '../../components/ui/Panel.vue'
 import ToggleRow from '../../components/ui/ToggleRow.vue'
 import { useServerStore } from '../../stores/server'
+import { useAuthStore } from '../../stores/auth'
 
 const store = useServerStore()
+const auth = useAuthStore()
 
 const isDirty = computed(() => store.isDirtySettings)
 
@@ -920,7 +922,7 @@ const onReset = () => {
       </div>
     </Panel>
 
-    <Panel title="Danger zone">
+    <Panel v-if="!auth.managed" title="Danger zone">
       <div class="settings-page__danger">
         <p class="settings-page__danger-text">Deleting a server removes its files and backups. This cannot be undone.</p>
         <AppButton variant="danger" :loading="store.deletingServer" @click="store.openDeleteServerModal">
