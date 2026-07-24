@@ -118,6 +118,11 @@ _NEVER = [
     ("POST", "/api/auth/login"),
     ("POST", "/api/auth/change-password"),
     ("POST", "/api/auth/logout"),
+    # MCP integration management — a token can never manage tokens or the switch
+    ("GET", "/api/integrations/mcp"),
+    ("PUT", "/api/integrations/mcp"),
+    ("POST", "/api/integrations/mcp/tokens"),
+    ("DELETE", "/api/integrations/mcp/tokens/<token_id>"),
     # catch-all: any unknown /api path denies for every token
     ("GET", "/api/<path:_>"),
     ("POST", "/api/<path:_>"),
