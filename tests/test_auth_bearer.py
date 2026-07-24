@@ -84,12 +84,17 @@ def test_invalid_bearer_does_not_fall_back_to_session(authed_client):
     # SECURITY: authed_client carries a valid session cookie; an invalid bearer
     # token must still 401, not be rescued by the cookie.
     service.set_mcp_enabled(True)
+    # Positive control: the SAME client + route with NO bearer header is 200, so
+    # the 401 below cannot be a broken-session-fixture false positive.
+    assert authed_client.get(_READ_ROUTE).status_code == 200
     resp = authed_client.get(_READ_ROUTE, headers=_bearer("fab_deadbeef_wrong"))
     assert resp.status_code == 401
 
 
 def test_bearer_scheme_is_case_insensitive(authed_client):
     service.set_mcp_enabled(True)
+    # Positive control: the SAME client + route with NO bearer header is 200.
+    assert authed_client.get(_READ_ROUTE).status_code == 200
     resp = authed_client.get(
         _READ_ROUTE, headers={"Authorization": "bearer fab_deadbeef_wrong"}
     )
