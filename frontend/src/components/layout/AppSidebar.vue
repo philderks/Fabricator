@@ -302,6 +302,20 @@ onUnmounted(() => {
     </nav>
 
     <div class="app-sidebar__bottom">
+      <router-link
+        v-if="!auth.managed"
+        :to="{ name: 'Integrations' }"
+        active-class="is-active"
+        class="app-sidebar__nav-item"
+      >
+        <svg class="app-sidebar__nav-icon" width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+          <path d="M6.4 8.6l2.2-2.2"/>
+          <path d="M7.2 4.6l1-1a2.7 2.7 0 013.8 3.8l-1.4 1.4a2.7 2.7 0 01-3.8 0"/>
+          <path d="M7.8 10.4l-1 1a2.7 2.7 0 01-3.8-3.8l1.4-1.4a2.7 2.7 0 013.8 0"/>
+        </svg>
+        <span>Integrations</span>
+      </router-link>
+
       <component
         :is="hasServerContext ? 'router-link' : 'div'"
         v-bind="hasServerContext
