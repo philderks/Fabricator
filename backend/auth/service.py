@@ -17,6 +17,7 @@ import os
 import re
 import secrets
 import threading
+import time
 from pathlib import Path
 
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -457,3 +458,74 @@ def list_tokens() -> list:
         )
     out.sort(key=lambda t: (t.get("created_at") or "", t.get("id") or ""))
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Token last-used tracking (write-side only)
+# --------------------------------------------------------------------------- #
+#
+# A5 — WRITE-SIDE ONLY. These in-memory buffers are NEVER consulted for an
+# authentication or authorization decision. The bearer path always reads the
+# switch and token map FRESH from auth.json (see backend/auth/__init__.py); this
+# buffer exists solely to throttle how often last_used_at is written to disk. Do
+# NOT turn it into a read cache.
+_last_used_buffer: dict = {}   # token_id -> newest last-used ISO not yet persisted
+_last_flush_at: dict = {}      # token_id -> monotonic seconds of its last persist
+_FLUSH_INTERVAL_S = 60.0       # persist a given token's last_used at most this often
+
+
+def _now_monotonic() -> float:
+    """Monotonic clock read (indirected so tests can control the throttle)."""
+    return time.monotonic()
+
+
+def reset_for_tests() -> None:
+    """Clear the in-memory last-used buffers (test isolation)."""
+    _last_used_buffer.clear()
+    _last_flush_at.clear()
+
+
+def _flush_last_used_locked() -> set:
+    """Persist buffered last_used_at values; return the ids actually written.
+
+    Caller MUST hold ``_lock``. Whole-dict read-modify-write (re-reads the file
+    inside the lock, then atomic ``tmp + os.replace`` via ``_write_auth_file``),
+    so it never clobbers a concurrent password/key/token change. A buffered id
+    that is no longer present in the file (revoked) is DROPPED — never written,
+    never resurrected.
+    """
+    flushed = set()
+    if not _last_used_buffer:
+        return flushed
+    data = _read_auth_file()
+    block = data.get(_MCP_KEY)
+    tokens = block.get("tokens") if isinstance(block, dict) else None
+    if isinstance(tokens, dict):
+        for token_id, ts in _last_used_buffer.items():
+            entry = tokens.get(token_id)
+            if isinstance(entry, dict):
+                entry["last_used_at"] = ts
+                flushed.add(token_id)
+        if flushed:
+            _write_auth_file(data)
+    _last_used_buffer.clear()  # drop everything, including stale/revoked ids
+    return flushed
+
+
+def touch_token_last_used(token_id: str) -> None:
+    """Record that ``token_id`` was just used on an accepted request.
+
+    Persists ``last_used_at`` to auth.json at most once per minute per token;
+    between flushes the value is buffered, so the stored timestamp (and the UI)
+    may lag by up to ``_FLUSH_INTERVAL_S`` — the accepted, intended behaviour.
+
+    A5: this only ever WRITES; the buffer is never read for an auth decision.
+    """
+    now = _now_monotonic()
+    with _lock:
+        _last_used_buffer[token_id] = iso_z_now()
+        last = _last_flush_at.get(token_id)
+        if last is not None and now - last < _FLUSH_INTERVAL_S:
+            return  # inside this token's throttle window — keep buffered, no write
+        for tid in _flush_last_used_locked():
+            _last_flush_at[tid] = now
