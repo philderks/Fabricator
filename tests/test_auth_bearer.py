@@ -202,3 +202,37 @@ def test_rejected_insufficient_scope_records_nothing(auth_client):
     tok = service.create_token("t", "read")
     assert auth_client.post(_MANAGE_ROUTE, headers=_bearer(tok["token"])).status_code == 403
     assert _last_used(tok["id"]) is None
+
+
+def test_last_used_write_failure_does_not_500_and_leaks_no_secret(auth_client, monkeypatch):
+    # A cosmetic last-used write failure (e.g. os.replace PermissionError while
+    # an AV scanner holds auth.json) must degrade, never fail the authorized
+    # request, and never log the token secret.
+    #
+    # NOTE: another test module reloads backend.* into sys.modules, so the app
+    # can use a different backend.auth.service object than this file imported at
+    # collection time. Resolve the LIVE module (the one the app's gate uses) and
+    # patch THAT — patching this file's stale reference would miss the flush.
+    import backend.auth.service as svc
+
+    svc.set_mcp_enabled(True)
+    tok = svc.create_token("t", "read")
+
+    def _boom(_data):
+        raise PermissionError("auth.json is locked")
+
+    monkeypatch.setattr(svc, "_write_auth_file", _boom)
+
+    # Capture the guard's warning directly — robust to any global logging state.
+    warned = []
+    monkeypatch.setattr(
+        svc.log, "warning", lambda msg, *a, **k: warned.append(msg % a if a else msg)
+    )
+
+    resp = auth_client.get(_READ_ROUTE, headers=_bearer(tok["token"]))
+
+    assert resp.status_code == 200            # degraded, not a 500
+    logged = " ".join(warned)
+    assert tok["id"] in logged                # the guard fired and logged the id
+    assert "fab_" not in logged               # ...but never the secret / credential
+    assert tok["token"] not in logged

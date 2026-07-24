@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import secrets
@@ -24,6 +25,8 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from backend.utils.strings import bool_from_str
 from backend.utils.time import iso_z_now
+
+log = logging.getLogger(__name__)
 
 _PASSWORD_HASH_ENV = "FABRICATOR_AUTH_PASSWORD_HASH"
 _SECRET_KEY_ENV = "SECRET_KEY"
@@ -492,23 +495,27 @@ def _flush_last_used_locked() -> set:
     inside the lock, then atomic ``tmp + os.replace`` via ``_write_auth_file``),
     so it never clobbers a concurrent password/key/token change. A buffered id
     that is no longer present in the file (revoked) is DROPPED — never written,
-    never resurrected.
+    never resurrected. The buffer is ALWAYS drained (``finally``), even if the
+    write raises, so it can never grow unbounded; a write error propagates to
+    the caller (``touch_token_last_used``), which degrades it to a logged no-op.
     """
     flushed = set()
     if not _last_used_buffer:
         return flushed
-    data = _read_auth_file()
-    block = data.get(_MCP_KEY)
-    tokens = block.get("tokens") if isinstance(block, dict) else None
-    if isinstance(tokens, dict):
-        for token_id, ts in _last_used_buffer.items():
-            entry = tokens.get(token_id)
-            if isinstance(entry, dict):
-                entry["last_used_at"] = ts
-                flushed.add(token_id)
-        if flushed:
-            _write_auth_file(data)
-    _last_used_buffer.clear()  # drop everything, including stale/revoked ids
+    try:
+        data = _read_auth_file()
+        block = data.get(_MCP_KEY)
+        tokens = block.get("tokens") if isinstance(block, dict) else None
+        if isinstance(tokens, dict):
+            for token_id, ts in _last_used_buffer.items():
+                entry = tokens.get(token_id)
+                if isinstance(entry, dict):
+                    entry["last_used_at"] = ts
+                    flushed.add(token_id)
+            if flushed:
+                _write_auth_file(data)
+    finally:
+        _last_used_buffer.clear()  # drain regardless -> bounded even on failure
     return flushed
 
 
@@ -527,5 +534,19 @@ def touch_token_last_used(token_id: str) -> None:
         last = _last_flush_at.get(token_id)
         if last is not None and now - last < _FLUSH_INTERVAL_S:
             return  # inside this token's throttle window — keep buffered, no write
-        for tid in _flush_last_used_locked():
+        pending = tuple(_last_used_buffer)  # ids attempted by this flush
+        try:
+            _flush_last_used_locked()
+        except Exception:
+            # A cosmetic last-used timestamp must NEVER fail an authorized
+            # request. On a write error (e.g. Windows os.replace PermissionError
+            # while an AV scanner holds auth.json, or disk full) degrade to
+            # "not updated": the pending timestamps are dropped (the flush
+            # already drained the buffer, keeping it bounded) and re-recorded on
+            # the next accepted request. Log the token id ONLY — never the
+            # secret or the full credential.
+            log.warning("could not persist last_used_at for token %s", token_id)
+        # Advance the throttle for every attempted id (success or degrade) so a
+        # failing writer is not hammered once per accepted request.
+        for tid in pending:
             _last_flush_at[tid] = now
