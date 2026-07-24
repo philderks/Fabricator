@@ -149,3 +149,56 @@ def test_disable_auth_never_runs_the_bearer_clause(client, monkeypatch):
     assert client.get(_READ_ROUTE, headers=_bearer("fab_looks_valid")).status_code == 200
     # Belt: a syntactically broken token must also pass straight through.
     assert client.get(_READ_ROUTE, headers=_bearer("not-a-token")).status_code == 200
+
+
+# --- last-used is recorded on accepted requests, not on rejected ones -------- #
+
+def _last_used(token_id):
+    return next(t["last_used_at"] for t in service.list_tokens() if t["id"] == token_id)
+
+
+def test_accepted_request_records_last_used(auth_client):
+    service.set_mcp_enabled(True)
+    tok = service.create_token("t", "read")
+    assert _last_used(tok["id"]) is None
+    assert auth_client.get(_READ_ROUTE, headers=_bearer(tok["token"])).status_code == 200
+    assert _last_used(tok["id"]) is not None
+
+
+def test_authorized_but_handler_404_still_records(auth_client):
+    # Records AUTHORIZED use, not successful use: a manage token that passes the
+    # gate and then 404s (missing server) still updates last_used_at.
+    service.set_mcp_enabled(True)
+    tok = service.create_token("t", "manage")
+    resp = auth_client.post(_MANAGE_ROUTE, headers=_bearer(tok["token"]))
+    assert resp.status_code not in (401, 403)  # gate authorized; handler 404s
+    assert _last_used(tok["id"]) is not None
+
+
+def test_rejected_invalid_token_records_nothing(auth_client):
+    service.set_mcp_enabled(True)
+    tok = service.create_token("t", "read")
+    assert auth_client.get(
+        _READ_ROUTE, headers=_bearer("fab_deadbeef_wrong")
+    ).status_code == 401
+    assert _last_used(tok["id"]) is None
+
+
+def test_rejected_switch_off_records_nothing(auth_client):
+    tok = service.create_token("t", "read")  # switch left OFF
+    assert auth_client.get(_READ_ROUTE, headers=_bearer(tok["token"])).status_code == 401
+    assert _last_used(tok["id"]) is None
+
+
+def test_rejected_never_route_records_nothing(auth_client):
+    service.set_mcp_enabled(True)
+    tok = service.create_token("t", "read")
+    assert auth_client.post(_NEVER_ROUTE, headers=_bearer(tok["token"])).status_code == 403
+    assert _last_used(tok["id"]) is None
+
+
+def test_rejected_insufficient_scope_records_nothing(auth_client):
+    service.set_mcp_enabled(True)
+    tok = service.create_token("t", "read")
+    assert auth_client.post(_MANAGE_ROUTE, headers=_bearer(tok["token"])).status_code == 403
+    assert _last_used(tok["id"]) is None

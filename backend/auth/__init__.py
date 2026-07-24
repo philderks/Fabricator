@@ -75,7 +75,7 @@ def _bearer_decision(credential: str):
     match = service.match_token(state["tokens"], credential)
     if match is None:
         return jsonify({"error": "invalid token"}), 401
-    _token_id, scope = match
+    token_id, scope = match
     rule = request.url_rule
     if rule is None:
         # 405 / redirect / no matched rule: nothing to bucket -> fail closed.
@@ -86,6 +86,7 @@ def _bearer_decision(credential: str):
         return jsonify({"error": "forbidden for token"}), 403
     if bucket == "manage" and scope != "manage":
         return jsonify({"error": "insufficient scope"}), 403
+    service.touch_token_last_used(token_id)  # records AUTHORIZED use, not success
     return None  # read route (any scope) or manage route with a manage token
 
 
