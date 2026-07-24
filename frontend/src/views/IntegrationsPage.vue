@@ -120,7 +120,9 @@ function shortDate(iso) {
   if (!iso) return '—'
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return '—'
-  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+  // Locale pinned to English: the panel is otherwise English, and its relative
+  // times (ServerPlayersPage) are hand-rolled English, so both are fixed here.
+  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
 function relativeTime(iso) {
@@ -130,7 +132,8 @@ function relativeTime(iso) {
   const diffMs = then - Date.now()
   const mins = Math.round(diffMs / 60000)
   if (Math.abs(mins) < 1) return 'Just now'
-  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
+  const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' }) // pinned English
+
   if (Math.abs(mins) < 60) return rtf.format(mins, 'minute')
   const hours = Math.round(diffMs / 3600000)
   if (Math.abs(hours) < 24) return rtf.format(hours, 'hour')
