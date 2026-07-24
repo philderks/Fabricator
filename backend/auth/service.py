@@ -11,8 +11,10 @@ same persistent data dir — ``/var/lib/fabricator`` under the systemd service,
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import secrets
 import threading
 from pathlib import Path
@@ -20,6 +22,7 @@ from pathlib import Path
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from backend.utils.strings import bool_from_str
+from backend.utils.time import iso_z_now
 
 _PASSWORD_HASH_ENV = "FABRICATOR_AUTH_PASSWORD_HASH"
 _SECRET_KEY_ENV = "SECRET_KEY"
@@ -294,3 +297,163 @@ def set_mcp_enabled(enabled: bool) -> None:
         block.setdefault("tokens", {})
         data[_MCP_KEY] = block
         _write_auth_file(data)
+
+
+# --------------------------------------------------------------------------- #
+# MCP API tokens
+# --------------------------------------------------------------------------- #
+#
+# Token wire format: ``fab_<id>_<secret>``.
+#   * ``id``     — a non-secret lookup key (hex), also shown in the UI.
+#   * ``secret`` — 256 bits from ``secrets``; only its sha256 is persisted.
+# A fast hash (sha256, no KDF) is correct here: the secret is high-entropy, so
+# brute force is infeasible and a per-request KDF scan across all tokens is
+# avoided. The presented secret is compared in constant time.
+
+_TOKEN_PREFIX = "fab"
+_TOKEN_SCOPES = ("read", "manage")
+_MAX_TOKENS = 25
+_TOKEN_NAME_RE = re.compile(r"^[A-Za-z0-9 ._-]{1,64}$")
+
+
+class TokenLimitReached(Exception):
+    """Raised by ``create_token`` when the per-install token cap is reached."""
+
+
+def _validate_token_name(name) -> str:
+    """Return the trimmed name, or raise ``ValueError`` if not display-safe."""
+    cleaned = name.strip() if isinstance(name, str) else ""
+    if not _TOKEN_NAME_RE.match(cleaned):
+        raise ValueError(
+            "token name must be 1-64 characters of letters, digits, spaces, "
+            "'.', '_' or '-'"
+        )
+    return cleaned
+
+
+def _validate_token_scope(scope) -> str:
+    """Return the scope, or raise ``ValueError`` for anything but read/manage."""
+    if scope not in _TOKEN_SCOPES:
+        raise ValueError(f"scope must be one of {_TOKEN_SCOPES}")
+    return scope
+
+
+def _hash_secret(secret: str) -> str:
+    """Return the hex sha256 of a token secret (the persisted form)."""
+    return hashlib.sha256(secret.encode("utf-8")).hexdigest()
+
+
+def create_token(name: str, scope: str) -> dict:
+    """Mint an MCP token; return its metadata PLUS the one-time full token.
+
+    The returned ``token`` (``fab_<id>_<secret>``) is the ONLY time the secret
+    is available — only its sha256 is stored. Raises ``ValueError`` on a bad
+    name/scope and ``TokenLimitReached`` at the cap. Read-modify-write under
+    the lock so a concurrent password change is never clobbered. SENSITIVE:
+    never log the returned ``token``.
+    """
+    name = _validate_token_name(name)
+    scope = _validate_token_scope(scope)
+    with _lock:
+        data = _read_auth_file()
+        block = data.get(_MCP_KEY)
+        if not isinstance(block, dict):
+            block = {}
+        tokens = block.get("tokens")
+        if not isinstance(tokens, dict):
+            tokens = {}
+        if len(tokens) >= _MAX_TOKENS:
+            raise TokenLimitReached(f"token limit reached ({_MAX_TOKENS})")
+        token_id = secrets.token_hex(8)
+        while token_id in tokens:  # collision is astronomically unlikely; still checked
+            token_id = secrets.token_hex(8)
+        secret = secrets.token_urlsafe(32)  # 256 bits
+        created = iso_z_now()
+        tokens[token_id] = {
+            "name": name,
+            "scope": scope,
+            "hash": _hash_secret(secret),
+            "created_at": created,
+            "last_used_at": None,
+        }
+        block["tokens"] = tokens
+        block.setdefault("enabled", False)
+        data[_MCP_KEY] = block
+        _write_auth_file(data)
+    return {
+        "id": token_id,
+        "name": name,
+        "scope": scope,
+        "created_at": created,
+        "last_used_at": None,
+        "token": f"{_TOKEN_PREFIX}_{token_id}_{secret}",
+    }
+
+
+def match_token(tokens: dict, credential: str):
+    """Resolve a presented ``fab_<id>_<secret>`` against ``tokens``.
+
+    Returns ``(token_id, scope)`` on a valid match, else ``None``. Pure (no
+    I/O): the caller passes the token map from ``mcp_state()``. A malformed
+    credential fails closed; the secret is compared in constant time.
+    """
+    if not isinstance(credential, str):
+        return None
+    parts = credential.split("_", 2)
+    if len(parts) != 3 or parts[0] != _TOKEN_PREFIX:
+        return None
+    token_id, secret = parts[1], parts[2]
+    if not token_id or not secret:
+        return None
+    entry = tokens.get(token_id)
+    if not isinstance(entry, dict):
+        return None
+    stored = entry.get("hash")
+    if not isinstance(stored, str):
+        return None
+    if not secrets.compare_digest(_hash_secret(secret), stored):
+        return None
+    scope = entry.get("scope")
+    if scope not in _TOKEN_SCOPES:
+        return None
+    return token_id, scope
+
+
+def revoke_token(token_id: str) -> bool:
+    """Delete a token by id. Returns ``True`` iff it existed."""
+    with _lock:
+        data = _read_auth_file()
+        block = data.get(_MCP_KEY)
+        if not isinstance(block, dict):
+            return False
+        tokens = block.get("tokens")
+        if not isinstance(tokens, dict) or token_id not in tokens:
+            return False
+        del tokens[token_id]
+        block["tokens"] = tokens
+        data[_MCP_KEY] = block
+        _write_auth_file(data)
+        return True
+
+
+def list_tokens() -> list:
+    """Return token METADATA (never the secret hash), oldest first.
+
+    Each item: ``{id, name, scope, created_at, last_used_at}``.
+    """
+    tokens = mcp_state()["tokens"]
+    out = []
+    for token_id, entry in tokens.items():
+        if not isinstance(entry, dict):
+            continue
+        out.append(
+            {
+                "id": token_id,
+                "name": entry.get("name"),
+                "scope": entry.get("scope"),
+                "created_at": entry.get("created_at"),
+                "last_used_at": entry.get("last_used_at"),
+            }
+        )
+    out.sort(key=lambda t: (t.get("created_at") or "", t.get("id") or ""))
+    return out
