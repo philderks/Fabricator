@@ -233,3 +233,64 @@ def load_or_create_secret_key() -> str:
         data["secret_key"] = key
         _write_auth_file(data)
         return key
+
+
+# --------------------------------------------------------------------------- #
+# MCP integration (the switch + API-token store)
+# --------------------------------------------------------------------------- #
+#
+# Persisted as a single ``mcp`` block inside the same 0600 ``auth.json``:
+#
+#     "mcp": {
+#         "enabled": <bool>,
+#         "tokens": { "<id>": {"name", "scope", "hash", "created_at",
+#                              "last_used_at"} }
+#     }
+#
+# The switch and the token map are read fresh on every bearer-authenticated
+# request (see ``backend/auth/__init__.py``) so the off-switch and revocation
+# take effect live — deliberately un-cached.
+
+_MCP_KEY = "mcp"
+
+
+def _normalize_mcp(data: dict) -> dict:
+    """Return ``data``'s ``mcp`` block as a well-formed ``{enabled, tokens}``.
+
+    Fail-safe: a missing or malformed block yields the OFF, no-tokens default,
+    so an unreadable/absent block never enables token auth. SENSITIVE: token
+    entries hold secret hashes; never log the return value.
+    """
+    block = data.get(_MCP_KEY)
+    if not isinstance(block, dict):
+        return {"enabled": False, "tokens": {}}
+    tokens = block.get("tokens")
+    if not isinstance(tokens, dict):
+        tokens = {}
+    return {"enabled": bool(block.get("enabled")), "tokens": tokens}
+
+
+def mcp_state() -> dict:
+    """Return the current MCP switch + token map, read FRESH from ``auth.json``.
+
+    Called on every bearer request; intentionally un-cached so the switch and
+    token revocation are live. SENSITIVE: the token map holds secret hashes.
+    """
+    return _normalize_mcp(_read_auth_file())
+
+
+def set_mcp_enabled(enabled: bool) -> None:
+    """Persist the MCP on/off switch, preserving tokens + credential + key.
+
+    Read-modify-write under the lock (the whole file is rewritten atomically),
+    so a concurrent password change or token mint is never clobbered.
+    """
+    with _lock:
+        data = _read_auth_file()
+        block = data.get(_MCP_KEY)
+        if not isinstance(block, dict):
+            block = {}
+        block["enabled"] = bool(enabled)
+        block.setdefault("tokens", {})
+        data[_MCP_KEY] = block
+        _write_auth_file(data)
