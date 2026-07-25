@@ -874,15 +874,20 @@ export const useServerStore = defineStore('server', () => {
   async function handleInstall() {
     if (actionState.value.install || !server.value) return
     actionState.value.install = true
+    // Pin the id at the start: the poll must follow the server this install
+    // was launched for, not whichever server the user later navigates to.
+    // Reading currentServerId.value each iteration made a mid-install switch
+    // poll the wrong server, break early, and toast a false failure.
+    const installServerId = currentServerId.value
     try {
       // 202 + initial progress; the real outcome arrives via polling — the
       // create modal's exact contract (750ms cadence, terminal on !active
       // or done/failed; 'aborted' terminates via active:false).
-      await installServer(currentServerId.value)
+      await installServer(installServerId)
       let progress = null
       for (;;) {
         await new Promise(resolve => setTimeout(resolve, 750))
-        progress = await getServerInstallProgress(currentServerId.value)
+        progress = await getServerInstallProgress(installServerId)
         if (!progress.active || progress.phase === 'done' || progress.phase === 'failed') break
       }
       if (progress.phase === 'done') {

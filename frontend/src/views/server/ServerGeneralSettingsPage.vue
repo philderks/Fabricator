@@ -41,6 +41,9 @@ const reportedVersion = ref(null)
 const displayVersion = computed(() => reportedVersion.value || appVersion)
 
 onMounted(async () => {
+  // Managed: skip the one-shot self-update probe (gate-denied); the bundled
+  // version stays the displayed fallback.
+  if (auth.managed) return
   try {
     const status = await getUpdateStatus()
     reportedVersion.value = status?.currentVersion ?? null
@@ -52,7 +55,7 @@ onMounted(async () => {
 
 <template>
   <div class="general-settings">
-    <Panel title="Auto-start">
+    <Panel v-if="!auth.managed" title="Auto-start">
       <p class="general-settings__autostart-intro">
         What should happen to this server when Fabricator starts up?
       </p>
@@ -93,7 +96,7 @@ onMounted(async () => {
       />
     </Panel>
 
-    <JavaManagerPanel />
+    <JavaManagerPanel v-if="!auth.managed" />
 
     <ChangePasswordPanel v-if="auth.enabled" />
 

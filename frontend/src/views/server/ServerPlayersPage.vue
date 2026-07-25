@@ -48,14 +48,17 @@ const opMap = computed(() => new Map(store.ops.map(o => [o.name.toLowerCase(), o
 const bannedMap = computed(() => new Map(store.bans.map(b => [b.name.toLowerCase(), b])))
 const whitelistSet = computed(() => new Set(store.whitelist.map(w => (w.name || '').toLowerCase())))
 
-function lastSeenFromExpiresOn(expiresOn) {
-  if (!expiresOn) return null
-  // Minecraft caches UUID for 30 days from last login; subtract to approximate last-seen
-  return new Date(new Date(expiresOn).getTime() - 30 * 24 * 60 * 60 * 1000)
+// The backend derives last-seen from each player's playerdata file mtime and
+// ships it as an ISO-8601 string (or null). Parse to a Date; a missing or
+// unparseable value stays null and renders as "never seen".
+function parseLastSeen(iso) {
+  if (!iso) return null
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? null : d
 }
 
 function relativeTime(date) {
-  if (!date) return ''
+  if (!date || Number.isNaN(date.getTime())) return ''
   const m = Math.max(0, Math.floor((Date.now() - date.getTime()) / 60000))
   if (m < 1) return 'just now'
   if (m < 60) return `${m}m ago`
@@ -77,7 +80,7 @@ const allPlayers = computed(() => {
 
   for (const p of store.knownPlayers) {
     const row = ensure(p.name, p.uuid)
-    row.lastSeen = lastSeenFromExpiresOn(p.expiresOn)
+    row.lastSeen = parseLastSeen(p.lastSeen)
   }
   for (const w of store.whitelist) ensure(w.name, w.uuid)
   for (const o of store.ops) ensure(o.name, o.uuid)

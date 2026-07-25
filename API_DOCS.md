@@ -1016,6 +1016,8 @@ FABRICATOR_SKIP_JAVA_CHECK=1     # bypass Java version enforcement (dev/testing 
 FABRICATOR_DISABLE_SCHEDULER=1   # do not boot the backup scheduler
 FABRICATOR_DISABLE_SELF_UPDATE=1 # make POST /api/system/update return 403
 FABRICATOR_MAX_WORLD_UPLOAD_BYTES=...  # world-import cap; default 10 GiB
+FABRICATOR_MANAGED=1             # managed-hosting mode: lock deployment-owned controls (third-party hosts only)
+FABRICATOR_MANAGED_MEMORY_GB=... # managed mode: pinned per-server JVM heap in whole GB; required when managed
 
 # Self-updater
 FABRICATOR_REPO=philderks/Fabricator
@@ -1029,8 +1031,8 @@ PLAYIT_BINARY_VERIFIED=true      # must be the literal 'true'
 ```
 
 **Truthiness is not uniform.** Most flags (`FABRICATOR_DISABLE_AUTH`, `FABRICATOR_SKIP_JAVA_CHECK`,
-`FABRICATOR_SESSION_COOKIE_SECURE`) go through `bool_from_str`, which accepts `1`, `true`, `yes` or
-`on`, case-insensitively. But `FABRICATOR_DISABLE_SCHEDULER` and `FABRICATOR_DISABLE_SELF_UPDATE`
+`FABRICATOR_SESSION_COOKIE_SECURE`, `FABRICATOR_MANAGED`) go through `bool_from_str`, which accepts
+`1`, `true`, `yes` or `on`, case-insensitively. But `FABRICATOR_DISABLE_SCHEDULER` and `FABRICATOR_DISABLE_SELF_UPDATE`
 match the literal string `1` only, and `PLAYIT_ENABLED` / `PLAYIT_BINARY_VERIFIED` match the literal
 lowercase `true` only — `PLAYIT_ENABLED=1` does **not** work.
 

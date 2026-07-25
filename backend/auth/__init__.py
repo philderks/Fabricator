@@ -18,6 +18,7 @@ from flask import current_app, jsonify, request, session
 
 from backend.auth import service
 from backend.auth.routes import auth_bp
+from backend.managed import is_managed
 
 # Reachable without a session when CONFIGURED.
 _PUBLIC_ENDPOINTS = frozenset(
@@ -91,6 +92,9 @@ def init_auth(app) -> None:
         PERMANENT_SESSION_LIFETIME=_SESSION_LIFETIME,
     )
     app.config["FABRICATOR_AUTH_ENABLED"] = not disabled
+    # Managed-hosting flag, exposed to the SPA via GET /api/auth/status. Read
+    # once here alongside the auth flags; off for every self-host install.
+    app.config["FABRICATOR_MANAGED"] = is_managed()
 
     if disabled:
         app.config["FABRICATOR_NEEDS_SETUP"] = False

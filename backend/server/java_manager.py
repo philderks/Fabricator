@@ -28,7 +28,7 @@ from backend.server.java_compat import resolve_required_java
 from backend.utils import platform as platform_utils
 from backend.utils.java import parse_java_major
 from backend.utils.time import iso_z_now
-from backend.utils.zip import safe_extract_zip
+from backend.utils.zip import safe_extract_tar, safe_extract_zip
 
 
 logger = logging.getLogger(__name__)
@@ -506,21 +506,12 @@ def _find_single_top_level(root: Path) -> Path:
 def _extract_archive(archive: Path, staging: Path) -> None:
     if archive.suffixes[-2:] == [".tar", ".gz"] or archive.suffix == ".tgz":
         with tarfile.open(archive, "r:gz") as tar:
-            _safe_extract_tar(tar, staging)
+            safe_extract_tar(tar, staging)
     elif archive.suffix == ".zip":
         with zipfile.ZipFile(archive, "r") as zf:
             safe_extract_zip(zf, staging)
     else:
         raise RuntimeError(f"Unsupported archive format: {archive.name}")
-
-
-def _safe_extract_tar(tar: tarfile.TarFile, destination: Path) -> None:
-    destination = destination.resolve()
-    for member in tar.getmembers():
-        member_path = (destination / member.name).resolve()
-        if not str(member_path).startswith(str(destination)):
-            raise RuntimeError("Archive contains invalid paths")
-    tar.extractall(destination)
 
 
 def install_java(major: int, archive_path: Path) -> str:

@@ -59,6 +59,7 @@ from pathlib import Path
 from typing import Deque, Optional
 
 from backend.utils import platform as platform_utils
+from backend.managed import is_managed
 
 from . import binary as playit_binary
 
@@ -196,6 +197,12 @@ def start() -> None:
     are written to _status="error" + _error_reason rather than raised.
     """
     if platform_utils.is_windows():
+        return
+
+    if is_managed():
+        # C4: managed mode never brings the tunnel up, and must NOT persist
+        # enabled-state — returning before set_enabled() below keeps the run.py
+        # boot re-arm from resurrecting a tunnel enabled before managed mode.
         return
 
     global _proc, _exchange_proc, _status, _tunnels, _tunnels_known, _claim_url, _error_reason, _gen

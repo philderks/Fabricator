@@ -2,11 +2,13 @@
 import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useServerStore } from '../../stores/server'
+import { useAuthStore } from '../../stores/auth'
 import { getEffectiveStatus as statusOf } from '../../utils/getEffectiveStatus'
 
 const route = useRoute()
 const router = useRouter()
 const store = useServerStore()
+const auth = useAuthStore()
 const showCreateModal = inject('showCreateModal', ref(false))
 
 const open = ref(false)
@@ -135,6 +137,7 @@ onBeforeUnmount(() => {
       <div class="server-switcher__sep"></div>
 
       <button
+        v-if="!auth.managed"
         type="button"
         class="server-switcher__add"
         @click="goToAddServer"

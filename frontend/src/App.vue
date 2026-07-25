@@ -4,9 +4,11 @@ import { useRouter } from 'vue-router'
 import ToastContainer from './components/common/ToastContainer.vue'
 import ServerCreateModal from './components/modals/ServerCreateModal.vue'
 import { useToast } from './composables/useToast'
+import { useAuthStore } from './stores/auth'
 
 const router = useRouter()
 const toast = useToast()
+const auth = useAuthStore()
 
 // Single writable ref provided down to consumers. Both AppSidebar's
 // "No servers yet" chip / ServerSwitcher "Add server" item and Servers.vue's
@@ -43,6 +45,7 @@ const handleCreateServer = (createdServer) => {
 <template>
   <router-view />
   <ServerCreateModal
+    v-if="!auth.managed"
     :show="showCreateModal"
     @close="showCreateModal = false"
     @create="handleCreateServer"

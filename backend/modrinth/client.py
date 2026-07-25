@@ -20,6 +20,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
+from backend.utils.zip import is_within
+
 
 class ModrinthApiError(Exception):
     """Raised when a Modrinth API request fails."""
@@ -104,6 +106,23 @@ class ModrinthClient:
 
             raise ModrinthApiError(message, status_code=status_code) from exc
 
+    def _json(self, response: requests.Response, error_context: str) -> Any:
+        """Parse a success response body as JSON, mapping a non-JSON body to a
+        clean ModrinthApiError.
+
+        ``_request`` only guards ``.json()`` on the *error* path. A 200 can
+        still carry HTML (a captive portal, a WAF interstitial, a proxy error
+        page), where a raw ``JSONDecodeError`` would otherwise surface as a 500
+        instead of the client's normal ``ModrinthApiError`` shape.
+        """
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise ModrinthApiError(
+                f"{error_context}: unexpected non-JSON response from Modrinth",
+                status_code=502,
+            ) from exc
+
     def search(
         self,
         project_type: str,
@@ -140,7 +159,7 @@ class ModrinthClient:
             timeout=15,
             error_context=f"Failed to search {project_type}s",
         )
-        return response.json()
+        return self._json(response, f"Failed to search {project_type}s")
 
     def get_project(self, project_id: str) -> Dict[str, Any]:
         """Fetch a Modrinth project (mod, modpack, resource pack, etc.)."""
@@ -150,7 +169,7 @@ class ModrinthClient:
             timeout=15,
             error_context="Failed to fetch project",
         )
-        return response.json()
+        return self._json(response, "Failed to fetch project")
 
     def get_project_versions(
         self,
@@ -175,7 +194,7 @@ class ModrinthClient:
             timeout=15,
             error_context="Failed to fetch project versions",
         )
-        return response.json()
+        return self._json(response, "Failed to fetch project versions")
 
     def get_version(self, version_id: str) -> Dict[str, Any]:
         response = self._request(
@@ -184,7 +203,7 @@ class ModrinthClient:
             timeout=15,
             error_context="Failed to fetch version",
         )
-        return response.json()
+        return self._json(response, "Failed to fetch version")
 
     def pick_best_version(self, versions: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         if not versions:
@@ -609,7 +628,7 @@ class ModrinthClient:
                 decision, _ = self._resolve_index_mod_side(entry_path, env, overrides)
                 if decision == "client":
                     existing = (install_path / entry_path).resolve()
-                    if existing.is_file() and str(existing).startswith(str(install_path)):
+                    if existing.is_file() and is_within(install_path, existing):
                         existing.unlink(missing_ok=True)
                     files_skipped.append(entry_path)
                     continue
@@ -627,7 +646,7 @@ class ModrinthClient:
             is_mod_jar = entry_path.lower().startswith("mods/") and entry_path.lower().endswith(".jar")
 
             target = (install_path / entry_path).resolve()
-            if not str(target).startswith(str(install_path)):
+            if not is_within(install_path, target):
                 raise ModrinthApiError(f"Invalid path in modpack index: {entry_path}")
 
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -762,13 +781,13 @@ class ModrinthClient:
                 forced = overrides.get(scoped_path, overrides.get(relative, ""))
                 if forced == "client":
                     existing = (install_path / relative).resolve()
-                    if existing.is_file() and str(existing).startswith(str(install_path)):
+                    if existing.is_file() and is_within(install_path, existing):
                         existing.unlink(missing_ok=True)
                     files_skipped.append(scoped_path)
                     continue
 
             target = (install_path / relative).resolve()
-            if not str(target).startswith(str(install_path)):
+            if not is_within(install_path, target):
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             with zf.open(member) as src, open(target, "wb") as dst:
@@ -1095,7 +1114,7 @@ class ModrinthClient:
             timeout=15,
             error_context="Failed to fetch categories",
         )
-        return response.json()
+        return self._json(response, "Failed to fetch categories")
 
     def get_loaders(self) -> List[Dict[str, Any]]:
         response = self._request(
@@ -1104,7 +1123,7 @@ class ModrinthClient:
             timeout=15,
             error_context="Failed to fetch loaders",
         )
-        return response.json()
+        return self._json(response, "Failed to fetch loaders")
 
     def get_game_versions(self) -> List[Dict[str, Any]]:
         response = self._request(
@@ -1113,4 +1132,4 @@ class ModrinthClient:
             timeout=15,
             error_context="Failed to fetch game versions",
         )
-        return response.json()
+        return self._json(response, "Failed to fetch game versions")

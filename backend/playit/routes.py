@@ -8,9 +8,13 @@ from __future__ import annotations
 
 from flask import Blueprint, jsonify
 
+from backend.managed import is_managed
+
 from . import agent
 
 playit_bp = Blueprint("playit", __name__, url_prefix="/api/playit")
+
+_MANAGED_403 = ({"error": "playit is disabled in managed mode"}, 403)
 
 
 @playit_bp.route("/status", methods=["GET"])
@@ -20,6 +24,9 @@ def status():
 
 @playit_bp.route("/start", methods=["POST"])
 def start():
+    if is_managed():
+        body, code = _MANAGED_403
+        return jsonify(body), code
     agent.start()
     return jsonify(agent.get_status())
 
@@ -32,5 +39,8 @@ def stop():
 
 @playit_bp.route("/reset", methods=["POST"])
 def reset():
+    if is_managed():
+        body, code = _MANAGED_403
+        return jsonify(body), code
     agent.reset()
     return jsonify(agent.get_status())

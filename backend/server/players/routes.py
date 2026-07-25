@@ -8,6 +8,7 @@ from flask import Blueprint, jsonify, request
 
 from backend.server import storage
 from backend.server.players import files as players_files
+from backend.server.players import lastseen as players_lastseen
 from backend.server.players import live as players_live
 from backend.server.players import service as players_service
 from backend.server.players.mojang import MojangUnavailable, PlayerNotFound
@@ -94,6 +95,9 @@ def get_state(server_id, server):
     bans = players_files.read_json_list(install_path, players_service.BANS_FILE)
     ip_bans = players_files.read_json_list(install_path, players_service.BANS_IP_FILE)
     known = players_files.read_json_list(install_path, "usercache.json")
+    # Attach a real "last seen" (playerdata mtime) per known player — see
+    # players/lastseen.py for why usercache.json's expiresOn is not it.
+    known = players_lastseen.annotate_known_players(install_path, server, known)
     return jsonify({
         "whitelist": whitelist,
         "ops": ops,

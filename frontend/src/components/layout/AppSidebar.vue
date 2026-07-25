@@ -37,16 +37,22 @@ const ALL_NAV_ITEMS = [
   { name: 'ServerSettings', label: 'Properties', icon: 'properties' }
 ]
 
+// Nav entries hidden under managed mode (surfaces the fleet gate denies).
+const MANAGED_HIDDEN_NAV = new Set(['ServerBackups', 'ServerPlayit'])
+
 // The add-on tab (ServerMods) is hidden for Vanilla (no add-on surface) and
 // relabelled "Plugins" for Bukkit-family loaders (Paper/Purpur/Folia/Pufferfish),
 // which install plugins rather than mods. The route name/path stay 'ServerMods'.
 const navItems = computed(() => {
   const loader = store.server?.loader
   const kind = loaderContentKind(loader)
+  const base = auth.managed
+    ? ALL_NAV_ITEMS.filter(item => !MANAGED_HIDDEN_NAV.has(item.name))
+    : ALL_NAV_ITEMS
   if (kind === 'none') {
-    return ALL_NAV_ITEMS.filter(item => item.name !== 'ServerMods')
+    return base.filter(item => item.name !== 'ServerMods')
   }
-  return ALL_NAV_ITEMS.map(item =>
+  return base.map(item =>
     item.name === 'ServerMods'
       ? { ...item, label: contentLabel(loader) }
       : item
@@ -195,6 +201,9 @@ const runUpdate = async () => {
 }
 
 onMounted(async () => {
+  // Managed: the self-update probe is gate-denied (silent recurring 403); do
+  // not fetch or arm either poll cadence.
+  if (auth.managed) return
   await loadUpdateState()
   scheduleNextPoll()
 })
@@ -224,7 +233,7 @@ onUnmounted(() => {
 
     <ServerSwitcher v-if="hasServerContext" />
     <button
-      v-else
+      v-else-if="!auth.managed"
       type="button"
       class="app-sidebar__no-server-chip"
       @click="showCreateModal = true"
@@ -322,6 +331,7 @@ onUnmounted(() => {
       </button>
 
       <component
+        v-if="!auth.managed"
         :is="updateAvailable ? 'button' : 'div'"
         :type="updateAvailable ? 'button' : undefined"
         class="app-sidebar__update-pill"

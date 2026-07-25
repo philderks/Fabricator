@@ -133,7 +133,12 @@ def status():
     )
     return (
         jsonify(
-            {"enabled": enabled, "authenticated": authenticated, "needs_setup": needs_setup}
+            {
+                "enabled": enabled,
+                "authenticated": authenticated,
+                "needs_setup": needs_setup,
+                "managed": bool(current_app.config.get("FABRICATOR_MANAGED")),
+            }
         ),
         200,
     )

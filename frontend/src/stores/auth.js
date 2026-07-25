@@ -21,6 +21,10 @@ export const useAuthStore = defineStore('auth', () => {
   const enabled = ref(true)
   const isAuthenticated = ref(false)
   const needsSetup = ref(false)
+  // Managed-hosting mode (fleet). Absent field (older backend / SPA-ahead
+  // version skew) is treated as MANAGED — the fail-safe direction, since a
+  // wrongly-unmanaged UI would expose deployment-owned controls.
+  const managed = ref(false)
   const checked = ref(false)
   const loading = ref(false)
 
@@ -30,6 +34,9 @@ export const useAuthStore = defineStore('auth', () => {
     enabled.value = Boolean(status.enabled)
     isAuthenticated.value = Boolean(status.authenticated)
     needsSetup.value = Boolean(status.needs_setup)
+    // Default-true idiom (like playit binary_verified / players onlineMode): a
+    // missing field defaults to managed, not unmanaged.
+    managed.value = status.managed !== false
     checked.value = true
     return status
   }
@@ -92,6 +99,7 @@ export const useAuthStore = defineStore('auth', () => {
     enabled,
     isAuthenticated,
     needsSetup,
+    managed,
     checked,
     loading,
     checkStatus,

@@ -10,9 +10,11 @@ import QuickBackupModal from '../../components/modals/QuickBackupModal.vue'
 import ImportWorldModal from '../../components/modals/ImportWorldModal.vue'
 import ConfirmModal from '../../components/modals/ConfirmModal.vue'
 import { useBackupsStore } from '../../stores/backups'
+import { useAuthStore } from '../../stores/auth'
 import { useServerStore } from '../../stores/server'
 
 const store = useBackupsStore()
+const auth = useAuthStore()
 const serverStore = useServerStore()
 
 const TYPE_FILTERS = [
@@ -71,12 +73,14 @@ watch(
   () => serverStore.currentServerId,
   (id, oldId) => {
     if (!id || id === oldId) return
+    if (auth.managed) return
     store.resetState()
     store.loadAll()
   }
 )
 
 onMounted(() => {
+  if (auth.managed) return
   store.loadAll()
 })
 
@@ -86,7 +90,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="backups-page">
+  <div v-if="!auth.managed" class="backups-page">
     <!-- Top toolbar -->
     <header class="backups-page__toolbar">
       <div class="backups-page__title-block">
