@@ -504,9 +504,15 @@ def _find_single_top_level(root: Path) -> Path:
 
 
 def _extract_archive(archive: Path, staging: Path) -> None:
+    # ``allow_internal_links``: Temurin's Linux/macOS tarballs ship ~200
+    # relative symlinks under ``legal/`` (every module's LICENSE et al. point
+    # at ``../java.base/...``). Refusing links outright aborted the whole
+    # install on the first one (issue #51). Links that resolve outside the
+    # staging dir are still refused, and the archive itself is checksum-
+    # verified against the Adoptium API before it gets here.
     if archive.suffixes[-2:] == [".tar", ".gz"] or archive.suffix == ".tgz":
         with tarfile.open(archive, "r:gz") as tar:
-            safe_extract_tar(tar, staging)
+            safe_extract_tar(tar, staging, allow_internal_links=True)
     elif archive.suffix == ".zip":
         with zipfile.ZipFile(archive, "r") as zf:
             safe_extract_zip(zf, staging)

@@ -160,3 +160,157 @@ def test_safe_extract_zip_restores_file_and_dir_mtimes(tmp_path):
     assert (dest / "top.txt").stat().st_mtime == pytest.approx(expect_file, abs=2)
     assert (dest / "world" / "child.txt").stat().st_mtime == pytest.approx(expect_child, abs=2)
     assert (dest / "world").stat().st_mtime == pytest.approx(expect_dir, abs=2)
+
+
+def _tar_bytes(build) -> io.BytesIO:
+    """Build an in-memory tar via ``build(tf)`` and hand back a rewound buffer."""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tf:
+        build(tf)
+    buf.seek(0)
+    return buf
+
+
+def _add_file(tf, name, data=b"x", mode=0o644):
+    info = tarfile.TarInfo(name=name)
+    info.size = len(data)
+    info.mode = mode
+    tf.addfile(info, io.BytesIO(data))
+
+
+def _add_link(tf, name, linkname, kind=tarfile.SYMTYPE):
+    info = tarfile.TarInfo(name=name)
+    info.type = kind
+    info.linkname = linkname
+    tf.addfile(info)
+
+
+def test_safe_extract_tar_materialises_internal_symlink(tmp_path):
+    """opt-in ``allow_internal_links``: a relative symlink that stays inside the
+    destination is recreated as a symlink. This is the Temurin JDK ``legal/``
+    layout from issue #51 — every module's LICENSE points at
+    ``../java.base/LICENSE`` — which the blanket refusal used to abort on."""
+    from backend.utils.zip import safe_extract_tar
+
+    buf = _tar_bytes(lambda tf: (
+        _add_file(tf, "jdk/legal/java.base/LICENSE", b"GPLv2"),
+        _add_link(tf, "jdk/legal/jdk.jshell/LICENSE", "../java.base/LICENSE"),
+    ))
+
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    with tarfile.open(fileobj=buf, mode="r") as tf:
+        safe_extract_tar(tf, dest, allow_internal_links=True)
+
+    link = dest / "jdk" / "legal" / "jdk.jshell" / "LICENSE"
+    assert link.is_symlink()
+    assert link.read_bytes() == b"GPLv2"
+
+
+def test_safe_extract_tar_materialises_internal_hardlink(tmp_path):
+    """Hardlink members resolve against the archive root and are recreated as
+    a link (or a copy where ``os.link`` is unavailable) — either way the
+    content is there."""
+    from backend.utils.zip import safe_extract_tar
+
+    buf = _tar_bytes(lambda tf: (
+        _add_file(tf, "jdk/legal/java.base/LICENSE", b"GPLv2"),
+        _add_link(
+            tf,
+            "jdk/legal/java.rmi/LICENSE",
+            "jdk/legal/java.base/LICENSE",
+            kind=tarfile.LNKTYPE,
+        ),
+    ))
+
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    with tarfile.open(fileobj=buf, mode="r") as tf:
+        safe_extract_tar(tf, dest, allow_internal_links=True)
+
+    assert (dest / "jdk" / "legal" / "java.rmi" / "LICENSE").read_bytes() == b"GPLv2"
+
+
+def test_safe_extract_tar_refuses_links_by_default(tmp_path):
+    """The opt-in is opt-in: callers extracting untrusted archives (backup
+    restore, world import) keep the blanket refusal."""
+    from backend.utils.zip import safe_extract_tar
+
+    buf = _tar_bytes(lambda tf: _add_link(tf, "link", "../java.base/LICENSE"))
+
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    with tarfile.open(fileobj=buf, mode="r") as tf:
+        with pytest.raises(ValueError, match="link"):
+            safe_extract_tar(tf, dest)
+
+
+@pytest.mark.parametrize(
+    "linkname",
+    # The third is the prefix-sibling case: from ``dest/jdk/`` it lands on
+    # ``dest-evil/``, which shares the destination's string prefix but is not
+    # inside it.
+    ["/etc/passwd", "../../outside/secret", "../../dest-evil/secret"],
+)
+def test_safe_extract_tar_refuses_escaping_links_even_when_allowed(
+    tmp_path, linkname
+):
+    """``allow_internal_links`` only relaxes links whose target stays inside the
+    destination: absolute targets and ``..`` walks out are still refused, and
+    nothing is left behind."""
+    from backend.utils.zip import safe_extract_tar
+
+    buf = _tar_bytes(lambda tf: _add_link(tf, "jdk/evil", linkname))
+
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    with tarfile.open(fileobj=buf, mode="r") as tf:
+        with pytest.raises(ValueError, match="outside destination"):
+            safe_extract_tar(tf, dest, allow_internal_links=True)
+
+    assert not (dest / "jdk" / "evil").is_symlink()
+
+
+def test_safe_extract_tar_refuses_symlink_chain_escape(tmp_path):
+    """A symlink pointing at an in-archive symlink that itself points out must
+    be refused: the target is resolved (following links) *before* the
+    containment check, so the chain cannot launder an escape."""
+    from backend.utils.zip import safe_extract_tar
+
+    (tmp_path / "outside").mkdir()
+    (tmp_path / "outside" / "secret").write_text("s")
+
+    buf = _tar_bytes(lambda tf: (
+        _add_link(tf, "jdk/hop", "../../outside"),
+        _add_link(tf, "jdk/gotcha", "hop/secret"),
+    ))
+
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    with tarfile.open(fileobj=buf, mode="r") as tf:
+        with pytest.raises(ValueError, match="outside destination"):
+            safe_extract_tar(tf, dest, allow_internal_links=True)
+
+
+def test_safe_extract_tar_preserves_exec_bits(tmp_path):
+    """The manual write stream would leave every file 0o644 — a vendor JDK's
+    ``bin/java`` and ``lib/jspawnhelper`` must come out executable. setuid is
+    never carried over."""
+    from backend.utils.zip import safe_extract_tar
+
+    buf = _tar_bytes(lambda tf: (
+        _add_file(tf, "jdk/bin/java", b"ELF", mode=0o755),
+        _add_file(tf, "jdk/lib/modules", b"blob", mode=0o644),
+        _add_file(tf, "jdk/bin/sneaky", b"ELF", mode=0o4755),
+    ))
+
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    with tarfile.open(fileobj=buf, mode="r") as tf:
+        safe_extract_tar(tf, dest)
+
+    assert (dest / "jdk" / "bin" / "java").stat().st_mode & 0o111 == 0o111
+    assert (dest / "jdk" / "lib" / "modules").stat().st_mode & 0o111 == 0
+    sneaky = (dest / "jdk" / "bin" / "sneaky").stat().st_mode
+    assert sneaky & 0o111 == 0o111
+    assert sneaky & 0o4000 == 0
