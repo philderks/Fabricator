@@ -125,7 +125,12 @@ def _restore_dir_mtimes(dir_mtimes: list[tuple[Path, float]]) -> None:
             pass
 
 
-def safe_extract_tar(tf: tarfile.TarFile, destination: Path) -> None:
+def safe_extract_tar(
+    tf: tarfile.TarFile,
+    destination: Path,
+    *,
+    allow_internal_links: bool = False,
+) -> None:
     """Extract every member of ``tf`` into ``destination`` rejecting traversal.
 
     Symmetric with :func:`safe_extract_zip`:
@@ -136,7 +141,9 @@ def safe_extract_tar(tf: tarfile.TarFile, destination: Path) -> None:
     - Refuses symlink and hardlink members up-front — Python's tar
       extractor is happy to materialise a symlink that points outside the
       destination, and a later read through that symlink would silently
-      cross the boundary.
+      cross the boundary. ``allow_internal_links=True`` relaxes this to
+      links whose target also resolves *inside* ``destination`` (see
+      :func:`_materialise_links`); links pointing outside stay refused.
     - Skips device / fifo members (we don't need them for Minecraft
       server data and they're a footgun on POSIX hosts).
 
@@ -151,14 +158,25 @@ def safe_extract_tar(tf: tarfile.TarFile, destination: Path) -> None:
     mtimes are applied in a second pass *after* every file is written,
     otherwise writing a child bumps its parent directory's mtime back to
     "now".
+
+    Executable bits are carried over from ``TarInfo.mode`` (setuid/setgid/
+    sticky are never propagated): the manual stream creates every file
+    0o666-and-umask, which would leave a vendor JDK's ``bin/`` and
+    ``lib/jspawnhelper`` non-executable.
     """
     destination = Path(destination).resolve()
     dir_mtimes: list[tuple[Path, float]] = []
+    links: list[tarfile.TarInfo] = []
     for member in tf.getmembers():
         if member.issym() or member.islnk():
-            raise ValueError(
-                f"Archive member is a link (refusing): {member.name!r}"
-            )
+            if not allow_internal_links:
+                raise ValueError(
+                    f"Archive member is a link (refusing): {member.name!r}"
+                )
+            # Deferred to a second pass: a hardlink member's target is only
+            # guaranteed to exist once every regular file has been written.
+            links.append(member)
+            continue
         if member.isdev() or member.isfifo():
             # Silently skip — not relevant to MC server backups, refusing
             # outright would just confuse callers extracting a third-party
@@ -187,6 +205,92 @@ def safe_extract_tar(tf: tarfile.TarFile, destination: Path) -> None:
                 shutil.copyfileobj(source, sink)
         finally:
             source.close()
+        _apply_exec_bits(target, member.mode)
         os.utime(target, (member.mtime, member.mtime))
 
+    _materialise_links(links, destination)
     _restore_dir_mtimes(dir_mtimes)
+
+
+def _apply_exec_bits(target: Path, mode: int) -> None:
+    """Mirror the archive's executable bits onto an extracted file.
+
+    Only ``0o111`` is copied — the read/write bits stay as the process
+    umask created them, and setuid/setgid/sticky are never propagated out
+    of an archive. Best-effort: a chmod failure (e.g. a filesystem without
+    permission bits) must not abort the extraction.
+    """
+    exec_bits = mode & 0o111
+    if not exec_bits:
+        return
+    try:
+        current = target.stat().st_mode & 0o7777
+        os.chmod(target, current | exec_bits)
+    except OSError:
+        pass
+
+
+def _materialise_links(
+    links: list[tarfile.TarInfo],
+    destination: Path,
+) -> None:
+    """Create the link members held back by :func:`safe_extract_tar`.
+
+    Runs after every regular file is written, so a hardlink's target is
+    already on disk. Both link flavours are re-checked against
+    ``destination`` before anything is created:
+
+    - Hardlink ``linkname`` is a path relative to the archive root, so the
+      source is ``destination / linkname``.
+    - Symlink ``linkname`` is relative to the *link's own directory* (or
+      absolute), so it is resolved against ``target.parent``. Resolving
+      before the containment check is what stops a chain of in-archive
+      symlinks from walking out of ``destination``.
+
+    A link resolving outside ``destination`` raises :class:`ValueError`
+    exactly like the up-front refusal does. Symlinks are recreated as
+    symlinks (a vendor JDK's ``legal/`` tree is ~200 of them pointing at
+    ``../java.base/LICENSE`` and friends); hardlinks fall back to a copy
+    when :func:`os.link` is unsupported (Windows, cross-device).
+    """
+    for member in links:
+        # Resolve the *parent* and rejoin the final component: resolving the
+        # full path would follow an already-present symlink of the same name
+        # and we would unlink whatever it points at below.
+        parent = (destination / member.name).parent.resolve()
+        if not is_within(destination, parent):
+            raise ValueError(
+                f"Archive member escapes destination: {member.name!r}"
+            )
+        target = parent / Path(member.name).name
+
+        base = destination if member.islnk() else parent
+        source = (base / member.linkname).resolve()
+        if not is_within(destination, source):
+            raise ValueError(
+                f"Archive link points outside destination: "
+                f"{member.name!r} -> {member.linkname!r}"
+            )
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.is_symlink() or target.exists():
+            target.unlink()
+
+        if member.issym():
+            os.symlink(member.linkname, target)
+            # Never follow: the mtime belongs on the link, not on the file
+            # it points at (which has its own member in the archive).
+            try:
+                os.utime(
+                    target,
+                    (member.mtime, member.mtime),
+                    follow_symlinks=False,
+                )
+            except (NotImplementedError, OSError):
+                pass
+            continue
+
+        try:
+            os.link(source, target)
+        except (OSError, NotImplementedError):
+            shutil.copy2(source, target)
