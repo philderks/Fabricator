@@ -32,6 +32,25 @@ def _clear_platform_caches():
     _system_name.cache_clear()
 
 
+@pytest.fixture(autouse=True)
+def _reset_modrinth_state():
+    """Reset the process-wide Modrinth limiter and lookup caches per test.
+
+    Both are deliberately global (the API budget is per-IP, and hash lookups
+    are worth sharing across servers), so without this the tokens one test
+    spends — or a cooldown it triggers on purpose — would leak into the next
+    and make an unrelated test block or 429.
+    """
+    from backend.modrinth.installed import clear_caches
+    from backend.modrinth.ratelimit import shared_limiter
+
+    shared_limiter.reset()
+    clear_caches()
+    yield
+    shared_limiter.reset()
+    clear_caches()
+
+
 @pytest.fixture
 def tmp_servers_root(tmp_path, monkeypatch):
     """Redirect server/index/java roots to a temp dir.

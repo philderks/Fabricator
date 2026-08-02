@@ -392,7 +392,11 @@ export const useServerStore = defineStore('server', () => {
       // it so the icon/title fields render in a single deterministic patch
       // rather than appearing piecemeal via mutated refs. Manifest-backed
       // entries are already complete and are skipped inside the enricher.
-      installedMods.value = await enrichInstalledModsWithModrinth(base)
+      // `serverId` lets it identify the folder by content hash in one request
+      // instead of guessing project slugs per filename (#52).
+      installedMods.value = await enrichInstalledModsWithModrinth(base, {
+        serverId: currentServerId.value
+      })
     } catch (error) {
       console.error('Failed to load mods:', error)
       toast.error('Failed to load installed mods', 'Error')

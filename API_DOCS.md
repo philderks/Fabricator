@@ -718,6 +718,43 @@ server-scoped.
 
 ## Modrinth integration
 
+**Rate limiting.** Modrinth allows 300 requests/minute **per IP**. Every call Fabricator makes goes
+through one process-wide token bucket (250/min, leaving headroom for anything else sharing the IP),
+which also reads the `X-Ratelimit-Remaining` the API reports and pauses everyone on a 429 for as
+long as `Retry-After` asks. Any endpoint below can therefore return:
+
+**Error (429):** `{ "error": "...", "retry_after": 12.0 }` — also sent as a `Retry-After` header.
+`retry_after` is seconds; wait that long rather than retrying immediately.
+
+#### `GET /api/modrinth/servers/<server_id>/resolve-installed`
+
+Identify every `.jar` in the server's mods folder by content hash. One request covers the whole
+folder — the backend hashes the jars and asks Modrinth's bulk `version_files` endpoint, then caches
+the results (a file hash maps to one version permanently, so a page refresh costs nothing).
+
+Use this instead of looking mods up by name: filenames are not reliable identifiers, and per-file
+lookups do not fit in the rate limit for a large modpack.
+
+```json
+{
+  "resolved": {
+    "sodium-fabric-0.6.0+mc1.21.1.jar": {
+      "projectId": "AANobbMI",
+      "slug": "sodium",
+      "title": "Sodium",
+      "iconUrl": "https://cdn.modrinth.com/...",
+      "versionId": "xexnGRr6",
+      "versionNumber": "mc1.21.1-0.6.0"
+    }
+  }
+}
+```
+
+Jars Modrinth does not recognise — hand-modified, repackaged, or never published there — are simply
+absent from `resolved`. A missing mods folder returns `{ "resolved": {} }`.
+
+**Error (404):** unknown server · **(400):** mods folder could not be resolved
+
 #### `GET /api/modrinth/search`
 
 **Query:** `query` (string) · `mc_version` (string, optional) · `loader` (string, optional) ·

@@ -20,7 +20,26 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
+from backend.modrinth.ratelimit import RateLimitExceeded, shared_limiter
 from backend.utils.zip import is_within
+
+
+def _retry_after_seconds(response: Optional[requests.Response]) -> Optional[float]:
+    """Parse a ``Retry-After`` header (seconds form), or None.
+
+    Modrinth sends the integer-seconds form. The HTTP-date form is not parsed:
+    treating it as absent falls back to the limiter's own default cooldown,
+    which is safe, whereas mis-parsing it could pause for hours.
+    """
+    if response is None:
+        return None
+    raw = response.headers.get("Retry-After")
+    if raw is None:
+        return None
+    try:
+        return max(0.0, float(str(raw).strip()))
+    except (TypeError, ValueError):
+        return None
 
 
 class ModrinthApiError(Exception):
@@ -68,7 +87,13 @@ class ModrinthClient:
         b"net/minecraft/client/renderer/",
     )
 
-    def __init__(self):
+    # Modrinth caps a single bulk lookup implicitly (URL length for GET, body
+    # size for POST) rather than by a documented count. 200 keeps a
+    # `projects?ids=[...]` query string well inside any proxy's URL limit and
+    # keeps one slow request from stalling a whole mods folder.
+    BULK_CHUNK_SIZE = 200
+
+    def __init__(self, limiter=None):
         self.session = requests.Session()
         self.session.headers.update(
             {
@@ -76,10 +101,26 @@ class ModrinthClient:
                 "Accept": "application/json",
             }
         )
+        # Defaults to the process-wide bucket; the parameter exists so tests can
+        # supply an isolated one instead of leaking spent tokens between cases.
+        self.limiter = limiter if limiter is not None else shared_limiter
 
     def _request(self, method: str, url: str, *, timeout: int = 15, error_context: str, **kwargs) -> requests.Response:
+        # Every call spends from the process-wide budget before it goes out.
+        # Modrinth's limit is per-IP, so this is the only place that can keep
+        # the deployment inside it (issue #52).
+        try:
+            self.limiter.acquire()
+        except RateLimitExceeded as exc:
+            raise ModrinthApiError(
+                f"{error_context}: too many Modrinth requests, please retry shortly",
+                status_code=429,
+                details={"retry_after": round(exc.retry_after, 1)},
+            ) from exc
+
         try:
             response = self.session.request(method, url, timeout=timeout, **kwargs)
+            self.limiter.observe(response.headers)
             response.raise_for_status()
             return response
         except requests.exceptions.RequestException as exc:
@@ -94,6 +135,14 @@ class ModrinthClient:
                 except ValueError:
                     detail = ""
 
+            # The API says we overspent. Park every caller for as long as it
+            # asks, and pass Retry-After on so the frontend's backoff stops
+            # having to guess (it reads `retry_after` off the error body).
+            details: Dict[str, Any] = {}
+            if status_code == 429:
+                cooldown = self.limiter.penalize(_retry_after_seconds(response))
+                details["retry_after"] = round(cooldown, 1)
+
             lowered_context = error_context.lower()
             if status_code == 404 and "fetch project" in lowered_context:
                 message = f"{error_context}: Not found"
@@ -104,7 +153,7 @@ class ModrinthClient:
             else:
                 message = f"{error_context}: {exc}"
 
-            raise ModrinthApiError(message, status_code=status_code) from exc
+            raise ModrinthApiError(message, status_code=status_code, details=details) from exc
 
     def _json(self, response: requests.Response, error_context: str) -> Any:
         """Parse a success response body as JSON, mapping a non-JSON body to a
@@ -170,6 +219,61 @@ class ModrinthClient:
             error_context="Failed to fetch project",
         )
         return self._json(response, "Failed to fetch project")
+
+    def get_versions_by_hashes(
+        self, hashes: List[str], algorithm: str = "sha1"
+    ) -> Dict[str, Dict[str, Any]]:
+        """Look a batch of file hashes up against Modrinth.
+
+        ``POST /v2/version_files`` returns a ``{hash: version}`` map, omitting
+        hashes Modrinth has never seen. This is the endpoint the mods page is
+        supposed to use: one request identifies a whole folder exactly, where
+        guessing project slugs from filenames cost ~3.6 requests per jar and
+        still mis-identified anything not named after its slug (issue #52).
+        """
+        unique = list(dict.fromkeys(h.lower() for h in hashes if h))
+        if not unique:
+            return {}
+
+        resolved: Dict[str, Dict[str, Any]] = {}
+        for start in range(0, len(unique), self.BULK_CHUNK_SIZE):
+            chunk = unique[start:start + self.BULK_CHUNK_SIZE]
+            response = self._request(
+                "post",
+                f"{self.BASE_URL}/version_files",
+                json={"hashes": chunk, "algorithm": algorithm},
+                timeout=30,
+                error_context="Failed to look up files",
+            )
+            payload = self._json(response, "Failed to look up files")
+            if isinstance(payload, dict):
+                resolved.update(payload)
+        return resolved
+
+    def get_projects(self, project_ids: List[str]) -> List[Dict[str, Any]]:
+        """Fetch several projects in one request (``GET /v2/projects?ids=``).
+
+        Unknown ids are omitted rather than erroring, so callers must key the
+        result by id instead of assuming positional correspondence.
+        """
+        unique = list(dict.fromkeys(pid for pid in project_ids if pid))
+        if not unique:
+            return []
+
+        projects: List[Dict[str, Any]] = []
+        for start in range(0, len(unique), self.BULK_CHUNK_SIZE):
+            chunk = unique[start:start + self.BULK_CHUNK_SIZE]
+            response = self._request(
+                "get",
+                f"{self.BASE_URL}/projects",
+                params={"ids": json.dumps(chunk)},
+                timeout=30,
+                error_context="Failed to fetch projects",
+            )
+            payload = self._json(response, "Failed to fetch projects")
+            if isinstance(payload, list):
+                projects.extend(item for item in payload if isinstance(item, dict))
+        return projects
 
     def get_project_versions(
         self,

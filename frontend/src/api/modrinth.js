@@ -138,6 +138,27 @@ export async function getProjectDetails(projectIdOrSlug) {
 }
 
 /**
+ * Identify every jar in a server's mods folder by content hash.
+ *
+ * One request for the whole folder. The backend hashes the jars and asks
+ * Modrinth's bulk `version_files` endpoint, so this replaces the old
+ * per-filename slug guessing that issued ~3.6 requests per jar and tripped
+ * Modrinth's rate limit on any hand-populated modpack (#52).
+ *
+ * @param {string|number} serverId - Server identifier
+ * @param {{ signal?: AbortSignal }} [options]
+ * @returns {Promise<{resolved: Record<string, {projectId:string, slug:string|null, title:string|null, iconUrl:string|null, versionId:string|null, versionNumber:string|null}>}>}
+ *   Jars Modrinth doesn't recognise are absent from `resolved`.
+ */
+export async function resolveInstalledMods(serverId, options = {}) {
+  return get(
+    `/api/modrinth/servers/${encodeURIComponent(serverId)}/resolve-installed`,
+    {},
+    { signal: options.signal }
+  )
+}
+
+/**
  * Resolve a project version compatible with the requested game version/loader.
  * @param {string} projectId - Modrinth project ID or slug
  * @param {Object} options - Resolve options

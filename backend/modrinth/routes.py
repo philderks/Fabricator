@@ -6,6 +6,7 @@ from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, request
 
+from backend.modrinth import installed
 from backend.modrinth.client import ModrinthClient, ModrinthApiError
 from backend.server import storage
 from backend.server.registry import get_server_process_registry
@@ -46,12 +47,24 @@ def _clear_install_progress(server_id: str):
 
 
 def _modrinth_error_response(exc: ModrinthApiError):
+    """Map a client error onto a response, carrying `retry_after` through.
+
+    The client populates ``details['retry_after']`` for 429s (from Modrinth's
+    Retry-After, or from our own limiter cooldown). The frontend's backoff
+    helper reads exactly that field off the body, so forwarding it is what
+    lets a retry wait the right amount of time instead of guessing (#52).
+    """
     status = exc.status_code or 502
     payload = {'error': str(exc)}
     details = getattr(exc, 'details', None)
     if isinstance(details, dict):
         payload.update(details)
-    return jsonify(payload), status
+    response = jsonify(payload)
+    if status == 429 and isinstance(details, dict) and details.get('retry_after') is not None:
+        # Also as a real header, for anything that speaks HTTP rather than our
+        # JSON envelope (curl, a reverse proxy, the browser devtools panel).
+        response.headers['Retry-After'] = str(int(float(details['retry_after']) + 0.5))
+    return response, status
 
 
 def _parse_bool(value, default: bool = False) -> bool:
@@ -158,6 +171,42 @@ def _resolve_mods_folder(server: dict):
         return path, None
     except ValueError as exc:
         return None, ({'error': str(exc)}, 400)
+
+
+@modrinth_bp.route('/servers/<server_id>/resolve-installed', methods=['GET'])
+@require_server
+def resolve_installed_mods(server_id, server):
+    """Identify every jar in the server's mods folder by content hash.
+
+    Replaces the frontend's filename-prefix guessing, which issued ~3.6
+    requests per jar and blew Modrinth's 300/min budget on any hand-populated
+    modpack folder (#52). Costs ~2 upstream requests for a whole folder, and
+    none once cached.
+
+    Returns ``{resolved: {filename: meta}}``. Jars Modrinth doesn't recognise
+    (hand-modified, repackaged, or never published there) are simply absent —
+    the caller falls back to the filename for those.
+    """
+    mods_folder, error = _resolve_mods_folder(server)
+    if error:
+        payload, status = error
+        return jsonify(payload), status
+
+    mods_path = Path(mods_folder)
+    if not mods_path.is_dir():
+        return jsonify({'resolved': {}})
+
+    jars = sorted(
+        path for path in mods_path.iterdir()
+        if path.is_file() and path.suffix.lower() == '.jar'
+    )
+
+    try:
+        resolved = installed.resolve_jar_files(modrinth_client, jars)
+    except ModrinthApiError as exc:
+        return _modrinth_error_response(exc)
+
+    return jsonify({'resolved': resolved})
 
 
 @modrinth_bp.route('/search', methods=['GET'])
