@@ -126,7 +126,9 @@ def _server_loader_facets(server: dict, fallback_loader: str) -> list:
     return [fallback_loader] if fallback_loader else []
 
 
-def _record_content_install(server_id: str, mod_id: str, filename: str, resolved: dict) -> None:
+def _record_content_install(
+    server_id: str, mod_id: str, filename: str, resolved: dict, pinned: bool = False
+) -> None:
     """Record ``filename`` -> Modrinth project in the server's manifest.
 
     Best-effort: the jar is already on disk and usable, so a failure to fetch
@@ -139,6 +141,10 @@ def _record_content_install(server_id: str, mod_id: str, filename: str, resolved
         'versionId': resolved.get('version_id'),
         'versionNumber': resolved.get('version_number'),
         'installedAt': iso_z_now(),
+        # True when the user named this version rather than taking whatever
+        # resolved as newest. Lets the UI mark it, and lets a future
+        # update-all leave deliberate pins alone (#56).
+        'pinned': bool(pinned),
     }
     try:
         project = modrinth_client.get_project(mod_id)
@@ -156,6 +162,35 @@ def _record_content_install(server_id: str, mod_id: str, filename: str, resolved
         storage.record_content_install(server_id, filename, entry)
     except OSError as exc:
         current_app.logger.warning('Failed to record install manifest for %s: %s', filename, exc)
+
+
+def _resolve_replaceable_jar(mods_folder: Path, filename: str):
+    """Resolve the jar a version swap supersedes, or an error tuple.
+
+    ``replaces`` comes from the client and names a file we are about to delete,
+    so it is treated as untrusted: only a bare filename is accepted, and the
+    resolved path must still land inside the mods folder. That blocks
+    ``../../server.jar`` and a symlink pointing out of the tree alike.
+
+    A missing file is not an error — the user may have removed the old jar by
+    hand between opening the picker and confirming, and the install should
+    still proceed.
+    """
+    raw = str(filename).strip()
+    if not raw or raw != Path(raw).name:
+        return None, ({'error': 'replaces must be a bare filename'}, 400)
+    if not raw.lower().endswith('.jar'):
+        return None, ({'error': 'replaces must name a .jar file'}, 400)
+
+    candidate = (mods_folder / raw).resolve()
+    try:
+        candidate.relative_to(mods_folder.resolve())
+    except ValueError:
+        return None, ({'error': 'replaces must name a file in the mods folder'}, 400)
+
+    if not candidate.is_file():
+        return None, None
+    return candidate, None
 
 
 def _resolve_mods_folder(server: dict):
@@ -417,6 +452,11 @@ def install_mod(mod_id, server):
     loader = data.get('loader', 'fabric')
     server_id = data.get('server_id')
     mods_folder_override = data.get('mods_folder')
+    # #56: name a version instead of taking whatever resolves as newest. Also
+    # the mechanism behind "change version" on an installed mod, which is an
+    # install of a chosen version plus removal of the jar it supersedes.
+    version_id = data.get('version_id')
+    replaces = data.get('replaces')
 
     if not mc_version:
         return jsonify({"error": "mc_version is required"}), 400
@@ -431,21 +471,38 @@ def install_mod(mod_id, server):
 
     target_path = Path(mods_folder)
 
+    replaced_path = None
+    if replaces:
+        replaced_path, error = _resolve_replaceable_jar(target_path, replaces)
+        if error:
+            payload, status = error
+            return jsonify(payload), status
+
     # Plugin servers accept a facet chain (paper/spigot/bukkit); mod loaders
     # resolve as the single loader. Derive from the server so a plugin tagged
     # only 'spigot' still resolves for a Paper server.
     loader_facets = _server_loader_facets(server, loader)
 
     try:
-        resolved = modrinth_client.get_project_download_url(
-            project_id=mod_id, mc_version=mc_version, loader=loader,
-            loaders=loader_facets,
-        )
+        if version_id:
+            # No compatibility filtering: naming a version is an explicit
+            # override, and refusing it here would defeat the point — pinning
+            # an older build for compatibility is exactly the use case (#56).
+            # The frontend surfaces which versions target this server.
+            resolved = modrinth_client.get_pinned_download(mod_id, version_id)
+        else:
+            resolved = modrinth_client.get_project_download_url(
+                project_id=mod_id, mc_version=mc_version, loader=loader,
+                loaders=loader_facets,
+            )
     except ModrinthApiError as exc:
         return _modrinth_error_response(exc)
 
     if not resolved:
-        return jsonify({"error": "No suitable version found"}), 404
+        return jsonify({
+            "error": "That version has no downloadable file" if version_id
+            else "No suitable version found"
+        }), 404
 
     try:
         file_path = modrinth_client.download_mod(
@@ -454,13 +511,32 @@ def install_mod(mod_id, server):
     except ModrinthApiError as exc:
         return _modrinth_error_response(exc)
 
-    _record_content_install(server_id, mod_id, file_path.name, resolved)
+    _record_content_install(
+        server_id, mod_id, file_path.name, resolved, pinned=bool(version_id)
+    )
+
+    # Only after the replacement is on disk: a failed download must leave the
+    # old jar in place rather than the server with no copy of the mod at all.
+    replaced = None
+    if replaced_path is not None and replaced_path.name != file_path.name:
+        try:
+            replaced_path.unlink()
+            storage.forget_content(server_id, [replaced_path.name])
+            replaced = replaced_path.name
+        except OSError as exc:
+            current_app.logger.warning(
+                'Installed %s but could not remove the superseded %s: %s',
+                file_path.name, replaced_path.name, exc
+            )
 
     return jsonify({
         "success": True,
         "message": "Mod installed successfully",
         "file": str(file_path.name),
-        "path": str(file_path)
+        "path": str(file_path),
+        "versionId": resolved.get("version_id"),
+        "versionNumber": resolved.get("version_number"),
+        "replaced": replaced,
     })
 
 

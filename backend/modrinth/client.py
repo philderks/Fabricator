@@ -380,6 +380,51 @@ class ModrinthClient:
             "version_number": best_version.get("version_number"),
         }
 
+    def get_pinned_download(
+        self, project_id: str, version_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Resolve the download for one explicitly chosen version.
+
+        The counterpart to :meth:`get_project_download_url`, which picks the
+        newest release itself. Here the caller has named a version, so no
+        selection happens — but the version is checked to actually belong to
+        ``project_id`` first. Without that, a caller could pass any version id
+        and install a completely different mod under this project's name, and
+        the install manifest would record the lie (#56).
+
+        ``project_id`` may be a slug, so the check compares against both it and
+        the project's canonical id. Returns None when the version has no
+        downloadable primary file; raises ModrinthApiError for unknown ids.
+        """
+        version = self.get_version(version_id)
+        owner = str(version.get("project_id") or "")
+
+        if owner.lower() != str(project_id).lower():
+            # Slug was passed — resolve it before declaring a mismatch.
+            project = self.get_project(project_id)
+            if owner != str(project.get("id") or ""):
+                raise ModrinthApiError(
+                    f"Version {version_id} does not belong to {project_id}",
+                    status_code=400,
+                )
+
+        url = self.get_primary_file_url(version)
+        if not url:
+            return None
+
+        hashes: Dict[str, str] = {}
+        for f in version.get("files", []):
+            if f.get("url") == url:
+                hashes = f.get("hashes") or {}
+                break
+
+        return {
+            "url": url,
+            "hashes": hashes,
+            "version_id": version.get("id"),
+            "version_number": version.get("version_number"),
+        }
+
     def resolve_project_version(
         self,
         project_id: str,
