@@ -31,6 +31,17 @@ COPY backend/ ./backend/
 COPY run.py pyproject.toml ./
 # tools/ (host installer + Windows spec-gen) is intentionally not copied.
 
+# playit.gg tunnel agent. install.sh installs these on native hosts, but it is
+# not in the image (see above), which is why the tunnel could never start in
+# Docker (#55). Same pinned release and sha256 verification, driven from the
+# one Python copy of the pin (backend/playit/release.py) instead of a second
+# transcription in shell. ~12 MB for both binaries; arch is resolved from the
+# build platform, so buildx emits the right pair per --platform.
+#
+# A failure here fails the build ON PURPOSE: an image without playit is exactly
+# the bug being fixed, and it would be invisible until a user clicked Enable.
+RUN python -m backend.playit.provision --dest /usr/local/bin
+
 COPY --from=frontend /app/frontend/dist ./frontend/dist
 
 ARG VERSION=unknown

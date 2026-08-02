@@ -26,6 +26,12 @@ main() {
     # Bumping this constant requires refreshing every sha256 in PLAYIT_SHA256
     # from https://api.github.com/repos/playit-cloud/playit-agent/releases/tags/<ver>
     # (the per-asset `digest` field).
+    #
+    # SECOND COPY: backend/playit/release.py holds the same pin for the Docker
+    # image and the runtime download. Bump BOTH — a Python pin left behind makes
+    # the panel report `binary_trust: "unverified"` for binaries this script just
+    # installed. (Folding this block into `python -m backend.playit.provision`
+    # would remove the duplication; deliberately not done in the #55 bugfix.)
     PLAYIT_VERSION="v1.0.5"
     declare -A PLAYIT_SHA256=(
         [playit-linux-amd64]=217bd341b3ea88f982ce45bb68aa8b795bf8d6866be841cc675d36f3c6b90277
@@ -464,7 +470,10 @@ FABRICATOR_UPDATE_DIR=${DATA_DIR}/update
 # playit.gg tunnel agent — set to "true" to start automatically on boot.
 PLAYIT_ENABLED=false
 # Reflects whether install.sh verified the pinned playit binary sha256.
-# Backend reads this; UI shows a non-blocking warning when "false".
+# INFORMATIONAL ONLY — the backend no longer reads this. It hashes the binaries
+# on disk against the pin (backend/playit/release.py) on every status call, so a
+# value asserted once here cannot go stale or be missing (as it was for Docker
+# installs, which never run this script). Kept for operator visibility.
 PLAYIT_BINARY_VERIFIED=${PLAYIT_BINARY_VERIFIED}
 EOF
         $SUDO chown root:fabricator "$ENV_FILE"

@@ -7,10 +7,10 @@
  * moment the last one unmounts.
  *
  * Response shape (matches backend.playit.routes / agent.get_status):
- *   { status, claim_url, error_reason, binary_verified, tunnels, tunnels_known }
+ *   { status, claim_url, error_reason, binary_trust, tunnels, tunnels_known }
  *
  * `status` is DAEMON/ACCOUNT level:
- *   stopped | claiming | starting | running | error | unsupported
+ *   stopped | provisioning | claiming | starting | running | error | unsupported
  *
  * Per-server state is derived: match a tunnel's local_port to a server's port
  * via tunnelForPort(port). `tunnels_known` is false until the first successful
@@ -31,7 +31,8 @@ export const usePlayitStore = defineStore('playit', () => {
   const tunnelsKnown   = ref(false)
   const claimUrl       = ref(null)
   const errorReason    = ref(null)
-  const binaryVerified = ref(true)
+  // verified | unverified | system | missing — see backend binary_trust().
+  const binaryTrust    = ref('verified')
 
   // Internal — ref-counted poller and a debounce so two consumers mounting in
   // the same tick don't trigger two parallel fetches.
@@ -43,14 +44,21 @@ export const usePlayitStore = defineStore('playit', () => {
   // `isActive` is the on/off truth for the agent toggle: the daemon is live or
   // being brought up.
   const isActive     = computed(() =>
-    ['claiming', 'starting', 'running'].includes(status.value)
+    ['provisioning', 'claiming', 'starting', 'running'].includes(status.value)
   )
-  const isStopped     = computed(() => status.value === 'stopped')
-  const isClaiming    = computed(() => status.value === 'claiming')
-  const isStarting    = computed(() => status.value === 'starting')
-  const isRunning     = computed(() => status.value === 'running')
-  const isError       = computed(() => status.value === 'error')
-  const isUnsupported = computed(() => status.value === 'unsupported')
+  const isStopped      = computed(() => status.value === 'stopped')
+  const isProvisioning = computed(() => status.value === 'provisioning')
+  const isClaiming     = computed(() => status.value === 'claiming')
+  const isStarting     = computed(() => status.value === 'starting')
+  const isRunning      = computed(() => status.value === 'running')
+  const isError        = computed(() => status.value === 'error')
+  const isUnsupported  = computed(() => status.value === 'unsupported')
+
+  // Trust getters. `missing` is intentionally silent: the agent's own error
+  // state already explains an absent binary, and warning twice reads as two
+  // separate problems.
+  const binaryUnverified = computed(() => binaryTrust.value === 'unverified')
+  const binarySystem     = computed(() => binaryTrust.value === 'system')
 
   /**
    * The tunnel forwarding to `port`, or null. local_port arrives as a JSON
@@ -70,9 +78,8 @@ export const usePlayitStore = defineStore('playit', () => {
     tunnelsKnown.value   = data?.tunnels_known === true
     claimUrl.value       = data?.claim_url    ?? null
     errorReason.value    = data?.error_reason ?? null
-    // binary_verified defaults to true so the absence of the field doesn't
-    // flash the warning.
-    binaryVerified.value = data?.binary_verified !== false
+    // Defaults to 'verified' so an absent field never flashes a warning.
+    binaryTrust.value    = data?.binary_trust ?? 'verified'
   }
 
   // ---------- Actions ----------
@@ -149,9 +156,10 @@ export const usePlayitStore = defineStore('playit', () => {
 
   return {
     // state
-    status, tunnels, tunnelsKnown, claimUrl, errorReason, binaryVerified,
+    status, tunnels, tunnelsKnown, claimUrl, errorReason, binaryTrust,
     // getters
-    isActive, isStopped, isClaiming, isStarting, isRunning, isError, isUnsupported,
+    isActive, isStopped, isProvisioning, isClaiming, isStarting, isRunning,
+    isError, isUnsupported, binaryUnverified, binarySystem,
     tunnelForPort,
     // actions
     fetch, start, stop, reset, subscribe,

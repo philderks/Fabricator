@@ -1,7 +1,7 @@
 """Binary discovery and CLI subprocess wrapper for playit.gg.
 
-The agent code uses two binaries from playit-cloud/playit-agent (pinned to
-v1.0.5 by tools/install.sh):
+The agent code uses two binaries from playit-cloud/playit-agent (pinned in
+backend/playit/release.py):
 
 * `playit`      — the daemon (playitd). Long-running tunnel process.
 * `playit-cli`  — orchestrator. We invoke it for the headless claim flow
@@ -9,7 +9,8 @@ v1.0.5 by tools/install.sh):
                   status cross-check against the running daemon.
 
 Discovery probes $PATH first so dev-machine installs (e.g. `apt install
-playit`) take precedence over the installer-managed binaries.
+playit`) take precedence over the installer-managed binaries, then the two
+directories Fabricator itself installs into (see MANAGED_BIN_DIRS).
 """
 from __future__ import annotations
 
@@ -17,14 +18,24 @@ import logging
 import os
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 from typing import Optional
 
 from backend.utils import platform as platform_utils
 
+from . import release
+
 logger = logging.getLogger(__name__)
 
 _RUNTIME_DIR_DEFAULT = "/var/lib/fabricator/playit"
+
+# Directories whose contents Fabricator put there itself: tools/install.sh and
+# the Docker build write /usr/local/bin, runtime provisioning writes
+# runtime_dir()/bin. A binary here that does NOT match the pin is a real
+# anomaly (tampering, a half-finished update); the same mismatch elsewhere just
+# means the operator supplied their own build. binary_trust() tells them apart.
+_SYSTEM_MANAGED_BIN_DIR = "/usr/local/bin"
 
 
 def runtime_dir() -> Path:
@@ -89,6 +100,13 @@ def runtime_dir_writable() -> bool:
     return _writable_or_creatable(runtime_dir())
 
 
+def managed_bin_dir() -> Path:
+    """Directory runtime provisioning installs into. Volume-backed in Docker,
+    inside ReadWritePaths under systemd — the one place writable by the service
+    user on every install method."""
+    return runtime_dir() / "bin"
+
+
 def _first_executable(*candidates: str) -> Optional[str]:
     for c in candidates:
         if os.access(c, os.X_OK):
@@ -96,23 +114,109 @@ def _first_executable(*candidates: str) -> Optional[str]:
     return None
 
 
+def _find(name: str) -> Optional[str]:
+    """Resolve an installed playit binary by name, or None.
+
+    $PATH wins (operator-supplied builds take precedence), then the two
+    Fabricator-managed locations, then /usr/bin for distro packages that are
+    somehow off $PATH.
+    """
+    return shutil.which(name) or _first_executable(
+        f"{_SYSTEM_MANAGED_BIN_DIR}/{name}",
+        str(managed_bin_dir() / name),
+        f"/usr/bin/{name}",
+    )
+
+
 def find_daemon() -> Optional[str]:
     """Locate the `playit` daemon binary, or None if not installed."""
-    return shutil.which("playit") or _first_executable(
-        "/usr/local/bin/playit", "/usr/bin/playit"
-    )
+    return _find(release.DAEMON_NAME)
 
 
 def find_cli() -> Optional[str]:
     """Locate the `playit-cli` orchestrator binary, or None if not installed."""
-    return shutil.which("playit-cli") or _first_executable(
-        "/usr/local/bin/playit-cli", "/usr/bin/playit-cli"
-    )
+    return _find(release.CLI_NAME)
 
 
-def binary_verified() -> bool:
-    """True when install.sh successfully sha256-verified the pinned binaries."""
-    return os.environ.get("PLAYIT_BINARY_VERIFIED", "").strip().lower() == "true"
+# ---------------------------------------------------------------------------
+# Trust classification
+# ---------------------------------------------------------------------------
+
+TRUST_VERIFIED = "verified"      # both binaries match the pinned release
+TRUST_UNVERIFIED = "unverified"  # in a dir WE manage, but not the pinned build
+TRUST_SYSTEM = "system"          # operator-supplied (distro package, custom $PATH)
+TRUST_MISSING = "missing"        # nothing installed — the agent error covers it
+
+# Digest cache. /api/playit/status is polled every ~3s and each binary is ~6 MB,
+# so re-hashing per poll would burn ~4 MB/s of I/O forever. Keyed by the
+# identity triple: a replaced binary always changes mtime_ns or size.
+_digest_cache: dict[str, tuple[int, int, Optional[str]]] = {}
+_digest_lock = threading.Lock()
+
+
+def _cached_sha256(path: str) -> Optional[str]:
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    key = (stat.st_mtime_ns, stat.st_size)
+
+    with _digest_lock:
+        cached = _digest_cache.get(path)
+        if cached is not None and cached[:2] == key:
+            return cached[2]
+
+    # Hashed outside the lock: a concurrent status poll may duplicate the work
+    # once, which is far cheaper than serialising every caller behind ~6 MB of
+    # I/O while holding a lock the rest of the module's fast paths need.
+    from .provision import sha256_file  # local: provision imports this module
+
+    digest = sha256_file(Path(path))
+    with _digest_lock:
+        _digest_cache[path] = (*key, digest)
+    return digest
+
+
+def _is_managed_path(path: str) -> bool:
+    """True when `path` lives in a directory Fabricator installs into."""
+    parent = os.path.dirname(os.path.abspath(path))
+    return parent in {_SYSTEM_MANAGED_BIN_DIR, str(managed_bin_dir())}
+
+
+def binary_trust() -> str:
+    """How much we can vouch for the playit binaries currently resolved.
+
+    Computed from the bytes on disk rather than declared by the installer: the
+    old PLAYIT_BINARY_VERIFIED env var was written once at install time and
+    stayed "true" even if the binary was later replaced, and was never set at
+    all for Docker installs (issue #55).
+
+    `system` exists so an operator who installed playit themselves (e.g. `apt
+    install playit`, which discovery deliberately prefers) is told we did not
+    verify it, without being warned about a setup that is working as intended.
+    """
+    daemon = find_daemon()
+    cli = find_cli()
+    if daemon is None or cli is None:
+        return TRUST_MISSING
+
+    resolved = ((release.DAEMON_NAME, daemon), (release.CLI_NAME, cli))
+    if all(_matches_pin(name, path) for name, path in resolved):
+        return TRUST_VERIFIED
+
+    if all(_is_managed_path(path) for _, path in resolved):
+        return TRUST_UNVERIFIED
+    return TRUST_SYSTEM
+
+
+def _matches_pin(name: str, path: str) -> bool:
+    """True only on a positive digest match. An unsupported arch (no pinned
+    digest) or an unreadable file both yield None, and None == None must NOT
+    read as verified — hence the explicit guard."""
+    expected = release.expected_sha256(name)
+    if expected is None:
+        return False
+    return _cached_sha256(path) == expected
 
 
 def run_cli(
