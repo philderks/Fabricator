@@ -158,6 +158,10 @@ export const useServerStore = defineStore('server', () => {
     simulationDistance: data.simulationDistance ?? 10,
     memory: data.memory ?? 4,
     memoryUnit: data.memoryUnit === 'MB' ? 'MB' : 'GB',
+    // Launch tuning (#54). Empty string means "no override": javaPath falls
+    // back to the managed JDK matching the MC version, jvmArgs adds nothing.
+    javaPath: data.javaPath || '',
+    jvmArgs: data.jvmArgs || '',
     levelName: data.levelName || 'world',
     levelType: data.levelType || 'default',
     seed: data.seed || '',

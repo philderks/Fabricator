@@ -122,8 +122,23 @@ Single server, augmented with runtime state. `404` if unknown.
 
 Update server settings and rewrite `server.properties`. `id` and `createdAt` are ignored if sent.
 
-**Errors:** `409` if the server is running (stop it first) · `404` unknown server · `500` if
-`server.properties` cannot be written
+Two fields are launch tuning rather than `server.properties`, and take effect on the next start:
+
+| Field | Meaning |
+| --- | --- |
+| `javaPath` | JVM to run this server on. A path is checked for existence and the executable bit; a bare command name (`java`, `java21`) is accepted and resolved on `PATH` at launch. Empty string clears the override, falling back to a managed runtime matching the MC version. |
+| `jvmArgs` | Extra JVM flags, as the string the user typed (split shell-style at launch). Appended **after** the installer's own `launch.jvm_args`, so a repeated option resolves in the user's favour. Empty string clears them. |
+
+`jvmArgs` refuses arguments that would contradict other settings or the installer: `-Xmx`/`-Xms`
+and friends (use the `memory` field, or the two would silently disagree), `-jar` / `-cp` /
+`--class-path` / `--module-path`, and `@argfile`. Max 2000 characters and 64 arguments.
+
+**Errors:** `409` if the server is running (stop it first) · `404` unknown server · `400` invalid
+`javaPath` / `jvmArgs`, with a message naming the offending value · `500` if `server.properties`
+cannot be written
+
+In managed mode `javaPath`, `jvmArgs`, `command` and `launch` are all rejected with `400` — the
+deployment owns the JVM. `POST /api/servers` validates `javaPath` and `jvmArgs` the same way.
 
 #### `PUT /api/servers/<server_id>/autostart`
 
