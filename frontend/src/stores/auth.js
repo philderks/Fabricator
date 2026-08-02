@@ -34,7 +34,7 @@ export const useAuthStore = defineStore('auth', () => {
     enabled.value = Boolean(status.enabled)
     isAuthenticated.value = Boolean(status.authenticated)
     needsSetup.value = Boolean(status.needs_setup)
-    // Default-true idiom (like playit binary_verified / players onlineMode): a
+    // Safe-default idiom (like playit binary_trust / players onlineMode): a
     // missing field defaults to managed, not unmanaged.
     managed.value = status.managed !== false
     checked.value = true

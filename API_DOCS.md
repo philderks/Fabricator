@@ -926,7 +926,7 @@ then reports `status: "unsupported"`.
   "status": "running",
   "claim_url": null,
   "error_reason": null,
-  "binary_verified": true,
+  "binary_trust": "verified",
   "tunnels": [
     {
       "local_port": 25565,
@@ -940,9 +940,22 @@ then reports `status: "unsupported"`.
 }
 ```
 
-`status` is daemon/account level and is one of `unsupported`, `stopped`, `claiming`, `starting`,
-`running`, `error`. `error` means a real account/daemon failure — a per-tunnel `disabled_reason` is
-not a global error and rides on the tunnel instead.
+`status` is daemon/account level and is one of `unsupported`, `stopped`, `provisioning`, `claiming`,
+`starting`, `running`, `error`. `error` means a real account/daemon failure — a per-tunnel
+`disabled_reason` is not a global error and rides on the tunnel instead. `provisioning` appears on
+the first start of an install that has no playit binaries yet: Fabricator downloads the pinned
+release itself, then continues into the normal `claiming`/`starting` sequence.
+
+`binary_trust` describes the binaries currently on disk, computed by hashing them against the pinned
+release (it replaces the former `binary_verified` boolean, which was declared once at install time
+and was never set at all for Docker installs):
+
+| Value | Meaning |
+| --- | --- |
+| `verified` | Both binaries match the release Fabricator pins. |
+| `unverified` | A binary in a Fabricator-managed directory does not match the pin — worth surfacing. |
+| `system` | The binaries came from the operator's own install (e.g. a distro package, which discovery prefers). Not verified, and not a fault. |
+| `missing` | Nothing installed. `error_reason` covers it once a start is attempted. |
 
 Derive a server's public address by matching `tunnel.local_port` to that server's port; `address`
 may be `null`. "No matching tunnel" is a per-server hint, not an error. `tunnels_known` stays
@@ -1026,14 +1039,18 @@ FABRICATOR_UPDATE_DIR=/var/lib/fabricator/update
 
 # playit.gg
 PLAYIT_ENABLED=true              # must be the literal 'true' (see below)
-PLAYIT_RUNTIME_DIR=...           # writable dir for the agent's secret; often needs setting
-PLAYIT_BINARY_VERIFIED=true      # must be the literal 'true'
+PLAYIT_RUNTIME_DIR=...           # writable dir for the agent's secret and, if the binaries are
+                                 # missing, the ones Fabricator downloads (<dir>/bin)
 ```
+
+`PLAYIT_BINARY_VERIFIED` is **no longer read**. `binary_trust` is now computed by hashing the
+binaries on disk against the pinned release, so a value asserted once at install time can no longer
+go stale. `tools/install.sh` still writes the variable into the env file; it is inert.
 
 **Truthiness is not uniform.** Most flags (`FABRICATOR_DISABLE_AUTH`, `FABRICATOR_SKIP_JAVA_CHECK`,
 `FABRICATOR_SESSION_COOKIE_SECURE`, `FABRICATOR_MANAGED`) go through `bool_from_str`, which accepts
 `1`, `true`, `yes` or `on`, case-insensitively. But `FABRICATOR_DISABLE_SCHEDULER` and `FABRICATOR_DISABLE_SELF_UPDATE`
-match the literal string `1` only, and `PLAYIT_ENABLED` / `PLAYIT_BINARY_VERIFIED` match the literal
+match the literal string `1` only, and `PLAYIT_ENABLED` matches the literal
 lowercase `true` only — `PLAYIT_ENABLED=1` does **not** work.
 
 `PLAYIT_ENABLED` is only a fallback: the state file written by the dashboard toggle wins when present.

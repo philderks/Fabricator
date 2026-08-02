@@ -70,7 +70,8 @@ def agent(tmp_path, monkeypatch):
     deadline = time.monotonic() + 3.0
     while time.monotonic() < deadline:
         alive = [t for t in threading.enumerate()
-                 if t.name.startswith(("playit-lifecycle-", "playit-rundata-"))
+                 if t.name.startswith(("playit-lifecycle-", "playit-rundata-",
+                                       "playit-provision-"))
                  and t.is_alive()]
         if not alive:
             break
@@ -91,27 +92,92 @@ def _wait_for(condition, timeout: float = 2.0, interval: float = 0.02) -> bool:
     return False
 
 
+def _blocking_stub(timeout: float = 1.0):
+    """A provisioning stand-in that outlives the assertions in its test.
+
+    Keeps the agent pinned in `provisioning` so an assertion cannot race the
+    background thread, and guarantees the real (network) download is never
+    reached. It then fails cleanly — ProvisionError is an expected outcome the
+    thread logs as a warning, so no traceback lands in the test output — and
+    the bounded wait lets the fixture teardown drain the thread.
+    """
+    def _stub(*_args, **_kwargs):
+        from backend.playit.provision import ProvisionError
+
+        threading.Event().wait(timeout=timeout)
+        raise ProvisionError("blocking provisioning stub released")
+    return _stub
+
+
 # ---------------------------------------------------------------------------
 # Missing-binary error surfacing
 # ---------------------------------------------------------------------------
 
-def test_start_without_daemon_binary_sets_error(agent):
-    """start() must surface a structured error, not raise."""
+def test_start_without_daemon_binary_provisions(agent):
+    """A missing binary is self-healed, not dead-ended (issue #55)."""
     with patch("backend.playit.binary.find_daemon", return_value=None), \
-         patch("backend.playit.binary.find_cli", return_value="/fake/playit-cli"):
+         patch("backend.playit.binary.find_cli", return_value="/fake/playit-cli"), \
+         patch("backend.playit.provision.ensure_binaries") as ensure:
+        ensure.side_effect = _blocking_stub()
         agent.start()
         status = agent.get_status()
-    assert status["status"] == "error"
-    assert "daemon binary not found" in status["error_reason"]
+    assert status["status"] == "provisioning"
+    assert _wait_for(lambda: ensure.called)
 
 
-def test_start_without_cli_binary_sets_error(agent):
+def test_start_without_cli_binary_provisions(agent):
+    """The CLI is provisioned by the same path as the daemon — a half install
+    (one binary present) must not be mistaken for a complete one."""
     with patch("backend.playit.binary.find_daemon", return_value="/fake/playit"), \
-         patch("backend.playit.binary.find_cli", return_value=None):
+         patch("backend.playit.binary.find_cli", return_value=None), \
+         patch("backend.playit.provision.ensure_binaries") as ensure:
+        ensure.side_effect = _blocking_stub()
         agent.start()
         status = agent.get_status()
-    assert status["status"] == "error"
-    assert "playit-cli binary not found" in status["error_reason"]
+    assert status["status"] == "provisioning"
+    assert _wait_for(lambda: ensure.called)
+
+
+def test_provisioning_failure_surfaces_actionable_error(agent):
+    """A failed download ends in `error` with the reason — and never tells a
+    Docker user to run tools/install.sh, which the image does not ship."""
+    from backend.playit.provision import ProvisionError
+
+    with patch("backend.playit.binary.find_daemon", return_value=None), \
+         patch("backend.playit.binary.find_cli", return_value=None), \
+         patch("backend.playit.provision.ensure_binaries",
+               side_effect=ProvisionError("could not download the playit agent from GitHub")):
+        agent.start()
+        assert _wait_for(lambda: agent.get_status()["status"] == "error")
+
+    reason = agent.get_status()["error_reason"]
+    assert "could not download" in reason
+    assert "install.sh" not in reason
+
+
+def test_provisioning_aborted_by_stop_does_not_start_daemon(agent):
+    """stop() during the download bumps the generation; the provisioning thread
+    must exit instead of resurrecting a tunnel the user switched off."""
+    entered = threading.Event()
+    release_it = threading.Event()
+
+    def _slow_provision(*_args, **_kwargs):
+        entered.set()
+        release_it.wait(timeout=5)
+        return Path("/fake/bin")
+
+    with patch("backend.playit.binary.find_daemon", return_value=None), \
+         patch("backend.playit.binary.find_cli", return_value=None), \
+         patch("backend.playit.provision.ensure_binaries", side_effect=_slow_provision), \
+         patch("backend.playit.agent._lifecycle_thread") as lifecycle:
+        agent.start()
+        assert entered.wait(timeout=5)
+        agent.stop()
+        release_it.set()
+        time.sleep(0.2)
+
+    assert agent.get_status()["status"] == "stopped"
+    lifecycle.assert_not_called()
 
 
 def test_redundant_start_does_not_reap_own_running_daemon(agent):
@@ -803,18 +869,29 @@ def test_windows_guard_returns_unsupported(agent):
 
 
 # ---------------------------------------------------------------------------
-# binary_verified passthrough
+# binary_trust passthrough
 # ---------------------------------------------------------------------------
 
-def test_binary_verified_reflects_env(agent, monkeypatch):
+def test_binary_trust_passthrough(agent):
+    """get_status() reports whatever binary_trust() computed — no env var."""
+    with patch("backend.playit.binary.binary_trust", return_value="system"):
+        assert agent.get_status()["binary_trust"] == "system"
+
+
+def test_binary_trust_missing_when_nothing_installed(agent):
+    with patch("backend.playit.binary.find_daemon", return_value=None), \
+         patch("backend.playit.binary.find_cli", return_value=None):
+        assert agent.get_status()["binary_trust"] == "missing"
+
+
+def test_legacy_verified_env_var_is_ignored(agent, monkeypatch):
+    """PLAYIT_BINARY_VERIFIED was written once at install time and could go
+    stale (and was never set at all under Docker). Trust is now computed from
+    the bytes on disk, so the old var must not be able to claim otherwise."""
     monkeypatch.setenv("PLAYIT_BINARY_VERIFIED", "true")
-    assert agent.get_status()["binary_verified"] is True
-
-    monkeypatch.setenv("PLAYIT_BINARY_VERIFIED", "false")
-    assert agent.get_status()["binary_verified"] is False
-
-    monkeypatch.delenv("PLAYIT_BINARY_VERIFIED", raising=False)
-    assert agent.get_status()["binary_verified"] is False
+    with patch("backend.playit.binary.find_daemon", return_value=None), \
+         patch("backend.playit.binary.find_cli", return_value=None):
+        assert agent.get_status()["binary_trust"] == "missing"
 
 
 # ---------------------------------------------------------------------------

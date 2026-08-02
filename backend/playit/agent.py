@@ -6,6 +6,10 @@ derived client-side from the `tunnels` list (see get_status()):
 
     unsupported  ──── (Windows only — no playit support)
     stopped      ──── initial / after stop() / after reset()
+    provisioning ──── binaries absent; downloading the pinned release before
+                      the daemon can be launched. Only reachable from start(),
+                      and only on the first enable of an install that never
+                      got them (Docker, a failed install.sh download, dev).
     claiming     ──── claim URL is published AND the exchange subprocess is
                       blocking on the user's browser-approval.
     starting     ──── daemon Popen launched, rundata poll not yet completed.
@@ -62,6 +66,7 @@ from backend.utils import platform as platform_utils
 from backend.managed import is_managed
 
 from . import binary as playit_binary
+from . import provision as playit_provision
 
 logger = logging.getLogger(__name__)
 
@@ -145,16 +150,20 @@ def get_status() -> dict:
             "status": "unsupported",
             "claim_url": None,
             "error_reason": "playit is not supported on Windows",
-            "binary_verified": False,
+            "binary_trust": playit_binary.TRUST_MISSING,
             "tunnels": [],
             "tunnels_known": False,
         }
+    # Resolved BEFORE taking the lock: on a cold digest cache this stats and
+    # hashes ~12 MB, and holding _lock across that would stall start()/stop()
+    # (and every other status poll) behind disk I/O.
+    trust = playit_binary.binary_trust()
     with _lock:
         return {
             "status": _status,
             "claim_url": _claim_url,
             "error_reason": _error_reason,
-            "binary_verified": playit_binary.binary_verified(),
+            "binary_trust": trust,
             "tunnels": list(_tunnels),
             "tunnels_known": _tunnels_known,
         }
@@ -238,26 +247,22 @@ def start() -> None:
         _error_reason = None
 
     daemon = playit_binary.find_daemon()
-    if daemon is None:
+    if daemon is None or playit_binary.find_cli() is None:
+        # Nothing installed. Rather than dead-ending on advice the user often
+        # cannot act on (issue #55: the Docker image ships no tools/install.sh,
+        # and the panel cannot write /usr/local/bin anywhere), fetch the pinned
+        # release ourselves and continue. Runs off-thread — it is a ~12 MB
+        # download and start() must stay non-blocking.
         with _lock:
             if my_gen != _gen:
                 return
-            _status = "error"
-            _error_reason = (
-                "playit daemon binary not found — run tools/install.sh "
-                "or place it at /usr/local/bin/playit"
-            )
-        return
-
-    if playit_binary.find_cli() is None:
-        with _lock:
-            if my_gen != _gen:
-                return
-            _status = "error"
-            _error_reason = (
-                "playit-cli binary not found — run tools/install.sh "
-                "or place it at /usr/local/bin/playit-cli"
-            )
+            _status = "provisioning"
+        threading.Thread(
+            target=_provision_thread,
+            args=(my_gen,),
+            name=f"playit-provision-{my_gen}",
+            daemon=True,
+        ).start()
         return
 
     threading.Thread(
@@ -266,6 +271,57 @@ def start() -> None:
         name=f"playit-lifecycle-{my_gen}",
         daemon=True,
     ).start()
+
+
+def _provision_thread(my_gen: int) -> None:
+    """Install the pinned binaries, then hand off to the lifecycle thread.
+
+    Generation-checked like every other background thread: a stop() during the
+    download invalidates `my_gen`, and we exit without starting a daemon the
+    user has since switched off. The download itself is not cancelled — it is
+    idempotent and its result is reused by the next start().
+    """
+    global _status, _error_reason
+
+    try:
+        playit_provision.ensure_binaries()
+    except playit_provision.ProvisionError as exc:
+        logger.warning("playit: provisioning failed: %s", exc)
+        with _lock:
+            if my_gen != _gen:
+                return
+            _status = "error"
+            _error_reason = f"playit could not be installed automatically — {exc}"
+        return
+    except Exception:  # noqa: BLE001 — a provisioning bug must not kill the toggle
+        logger.exception("playit: unexpected error while provisioning")
+        with _lock:
+            if my_gen != _gen:
+                return
+            _status = "error"
+            _error_reason = "playit could not be installed automatically — see the server logs"
+        return
+
+    daemon = playit_binary.find_daemon()
+    if daemon is None or playit_binary.find_cli() is None:
+        # Installed, yet still not discoverable: the install dir is outside the
+        # search path (an explicit --dest), or the filesystem is mounted noexec.
+        with _lock:
+            if my_gen != _gen:
+                return
+            _status = "error"
+            _error_reason = (
+                "playit was downloaded but cannot be executed — check that "
+                f"{playit_binary.managed_bin_dir()} is not mounted noexec"
+            )
+        return
+
+    with _lock:
+        if my_gen != _gen:
+            return
+        _status = "starting"
+
+    _lifecycle_thread(my_gen, daemon)
 
 
 def stop() -> None:

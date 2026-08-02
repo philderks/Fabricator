@@ -2,14 +2,14 @@
  * playit.gg Agent API
  * Thin wrappers around the four playit control endpoints. All four return the
  * same daemon-level snapshot shape:
- *   { status, claim_url, error_reason, binary_verified, tunnels, tunnels_known }
+ *   { status, claim_url, error_reason, binary_trust, tunnels, tunnels_known }
  */
 
 import { get, post } from './client'
 
 /**
  * Fetch the current agent state.
- * @returns {Promise<{status:string, claim_url:string|null, error_reason:string|null, binary_verified:boolean, tunnels:Array<object>, tunnels_known:boolean}>}
+ * @returns {Promise<{status:string, claim_url:string|null, error_reason:string|null, binary_trust:'verified'|'unverified'|'system'|'missing', tunnels:Array<object>, tunnels_known:boolean}>}
  */
 export function getPlayitStatus() {
   return get('/api/playit/status')

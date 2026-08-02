@@ -21,11 +21,23 @@ const PLAYIT_DASHBOARD_URL = 'https://playit.gg/account'
 
 // ─── Section A — global tunnel agent ────────────────────────────────────────
 
-// Binary-signature warning: non-blocking, but suppressed when the error state
-// already explains a missing binary (no point double-warning).
-const showBinaryWarning = computed(() =>
-  !playit.binaryVerified
-  && !(playit.isError && /binary not found/i.test(playit.errorReason || ''))
+// Binary provenance, three rendered states (backend binary_trust()):
+//   verified   → nothing to say.
+//   unverified → warning. A binary in a directory WE own does not match the
+//                pinned release, which should never happen on its own.
+//   system     → neutral note. The operator installed playit themselves and
+//                discovery prefers their build; not verifying it is expected,
+//                so this must not look like a fault.
+//   missing    → silent; the agent's error state already covers it.
+const showBinaryWarning = computed(() => playit.binaryUnverified)
+const showBinaryNote    = computed(() => playit.binarySystem)
+
+// The catch-all busy branch covers provisioning as well as starting; only the
+// first-run download is slow enough to be worth naming.
+const busyText = computed(() =>
+  playit.isProvisioning
+    ? 'Downloading the playit.gg agent…'
+    : 'Connecting tunnel agent…'
 )
 
 // ─── Destructive-action confirms (running state only) ───────────────────────
@@ -85,6 +97,7 @@ const tunnel = computed(() => (port.value === null ? null : playit.tunnelForPort
 // Muted deferral hint shown in Section B while the agent isn't running yet.
 const deferralHint = computed(() => {
   switch (playit.status) {
+    case 'provisioning': return 'Downloading the tunnel agent…'
     case 'starting': return 'Agent is connecting…'
     case 'claiming': return 'Finish the playit.gg sign-in above.'
     case 'error':    return 'Resolve the tunnel agent error above.'
@@ -156,7 +169,10 @@ onUnmounted(() => {
         </p>
 
         <div v-if="showBinaryWarning" class="pa-warn" role="status">
-          playit binary signature unverified — see install logs.
+          The installed playit binary doesn't match the release Fabricator pins — see install logs.
+        </div>
+        <div v-else-if="showBinaryNote" class="pa-note-inline" role="status">
+          Using the playit binary already installed on this system — Fabricator didn't verify it.
         </div>
 
         <!-- stopped → benefit-framed CTA -->
@@ -221,10 +237,10 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- starting (fallback) → quiet connecting + cancel -->
+        <!-- starting / provisioning (fallback) → quiet progress + cancel -->
         <div v-else class="pa-starting">
           <span class="pa-starting__dot" aria-hidden="true"></span>
-          <span class="pa-starting__text">Connecting tunnel agent…</span>
+          <span class="pa-starting__text">{{ busyText }}</span>
           <button type="button" class="pa-pillbtn" @click="playit.stop">Cancel</button>
         </div>
       </template>
@@ -350,6 +366,17 @@ onUnmounted(() => {
   border-radius: var(--radius-sm);
   background: color-mix(in oklch, var(--warning) 10%, transparent);
   color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+/* Same slot as .pa-warn, but for the `system` trust state: informational, so
+   it borrows the panel's neutral surface instead of the warning colour. */
+.pa-note-inline {
+  margin-bottom: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
   font-size: var(--text-xs);
 }
 
