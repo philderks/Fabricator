@@ -65,14 +65,20 @@ export async function getModVersions(modId, filters = {}, options = {}) {
  * @param {string} options.mc_version - Minecraft version
  * @param {string} options.loader - Mod loader
  * @param {string|number} options.server_id - Target server identifier
- * @returns {Promise<Object>} Installation result
+ * @param {string} [options.version_id] - Install this exact version instead of
+ *   letting the backend resolve the newest compatible one (#56). Recorded as a
+ *   pin, so it is distinguishable from an auto-resolved install.
+ * @param {string} [options.replaces] - Filename of the jar this supersedes;
+ *   removed only after the new one is safely on disk. Must be a bare filename
+ *   inside the mods folder. This is what makes a version *change* rather than
+ *   a second copy.
+ * @returns {Promise<Object>} `{ success, file, path, versionId, versionNumber, replaced }`
  */
-export async function installMod(modId, { mc_version, loader, server_id }) {
-  return post(`/api/modrinth/mod/${modId}/install`, {
-    mc_version,
-    loader,
-    server_id
-  })
+export async function installMod(modId, { mc_version, loader, server_id, version_id, replaces }) {
+  const body = { mc_version, loader, server_id }
+  if (version_id) body.version_id = version_id
+  if (replaces) body.replaces = replaces
+  return post(`/api/modrinth/mod/${modId}/install`, body)
 }
 
 /**

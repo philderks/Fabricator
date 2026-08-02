@@ -604,8 +604,84 @@ export const useServerStore = defineStore('server', () => {
     }
   }
 
-  function handleUpdateMod(_mod) {
-    toast.info('Mod updates coming soon', 'Not Implemented')
+  // ── Version picker (#56) ───────────────────────────────────────────────
+  // `versionPickerMod` doubles as the open flag and the subject. Null when
+  // closed; an installed-mod entry when changing a version; a bare project ref
+  // ({ projectId, slug, title }) when picking at install time.
+  const versionPickerMod = ref(null)
+  const showVersionPicker = computed(() => versionPickerMod.value !== null)
+
+  /**
+   * Project identity for the picker, from the manifest when we have it and the
+   * filename-derived guess otherwise. Without either there is nothing to list.
+   */
+  function modProjectRef(mod) {
+    const ref_ = mod?.modrinth || mod?.modrinthGuess || null
+    if (!ref_?.projectId && !ref_?.slug) return null
+    return {
+      projectId: ref_.slug || ref_.projectId,
+      title: ref_.title || mod?.displayTitle || mod?.name || '',
+      // From the manifest when we installed it, otherwise from the hash match
+      // (also exact) so a hand-added jar still highlights its current version.
+      installedVersionId:
+        mod?.modrinth?.versionId || mod?.modrinthGuess?.versionId || '',
+      filename: mod?.filename || mod?.name || ''
+    }
+  }
+
+  function openVersionPicker(mod) {
+    const ref_ = modProjectRef(mod)
+    if (!ref_) {
+      toast.info(
+        'This jar could not be matched to a Modrinth project, so its versions are unknown.',
+        'No version list'
+      )
+      return
+    }
+    versionPickerMod.value = ref_
+  }
+
+  function closeVersionPicker() { versionPickerMod.value = null }
+
+  /**
+   * Install the chosen version, replacing the jar currently on disk.
+   *
+   * `replaces` is handled server-side so the old jar is removed only after the
+   * new one lands — a failed download leaves the server with the version it
+   * already had rather than none at all.
+   */
+  async function handleSelectVersion({ versionId, versionNumber }) {
+    const target = versionPickerMod.value
+    if (!target || !server.value) return
+    versionPickerMod.value = null
+    installLoading.value = true
+    try {
+      await installMod(target.projectId, {
+        mc_version: server.value.version,
+        loader: server.value.loader,
+        server_id: currentServerId.value,
+        version_id: versionId,
+        replaces: target.filename || undefined
+      })
+      // The swapped-out jar's cached title/icon must not stick to the new
+      // filename, and the new one needs resolving on the next list.
+      if (target.filename) invalidateModrinthMetaCache(target.filename)
+      toast.success(
+        `${target.title || 'Mod'} is now on version ${versionNumber}`,
+        'Version changed'
+      )
+      await loadMods()
+    } catch (error) {
+      console.error('Version change failed:', error)
+      toast.error(error.message || 'Could not change the mod version', 'Install Failed')
+      try {
+        await loadMods()
+      } catch {
+        // non-fatal
+      }
+    } finally {
+      installLoading.value = false
+    }
   }
 
   async function handleInstallModpack(modpackData) {
@@ -1038,6 +1114,8 @@ export const useServerStore = defineStore('server', () => {
     logs,
     serverSettings,
     showModBrowser,
+    showVersionPicker,
+    versionPickerMod,
     showJavaModal,
     pendingJavaAction,
     showModpackBrowser,
@@ -1087,6 +1165,9 @@ export const useServerStore = defineStore('server', () => {
     isDirtySettings,
     // Actions
     closeModBrowser,
+    openVersionPicker,
+    closeVersionPicker,
+    handleSelectVersion,
     closeModpackBrowser,
     closeJavaModal,
     setConsoleCommand,
@@ -1115,7 +1196,6 @@ export const useServerStore = defineStore('server', () => {
     goToSettings,
     goToMods,
     handleInstallMod,
-    handleUpdateMod,
     handleInstallModpack,
     cancelModpackInstallConfirmation,
     fetchModpackProgress,
