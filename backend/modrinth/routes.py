@@ -1,12 +1,14 @@
 """Modrinth API routes."""
 import threading
+import uuid
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, request
+from werkzeug.utils import secure_filename
 
-from backend.modrinth import installed
+from backend.modrinth import installed, mrpack
 from backend.modrinth.client import ModrinthClient, ModrinthApiError
 from backend.server import storage
 from backend.server.registry import get_server_process_registry
@@ -14,6 +16,7 @@ from backend.server.java_compat import resolve_required_java, skip_java_enforcem
 from backend.utils.routes import require_server, with_server_lock
 from backend.utils.strings import bool_from_str
 from backend.utils.time import iso_z_now
+from backend.utils.upload import UploadTooLargeError, stream_upload_to_temp
 
 modrinth_bp = Blueprint('modrinth', __name__, url_prefix='/api/modrinth')
 modrinth_client = ModrinthClient()
@@ -540,21 +543,22 @@ def install_mod(mod_id, server):
     })
 
 
-@modrinth_bp.route('/modpack/<project_id>/install', methods=['POST'])
-@require_server(source='body')
-@with_server_lock(
-    source='body',
-    busy_message='A modpack install is already in progress for this server',
-)
-def install_modpack(project_id, server):
-    data = request.get_json() or {}
-    mc_version = data.get('mc_version')
-    loader = data.get('loader')
+def _run_modpack_install(server, data, run_install, build_modpack_info, *, log_label):
+    """Run a modpack install and everything that has to happen around one.
+
+    The pack's origin — a Modrinth project or an uploaded .mrpack (#53) —
+    changes only ``run_install`` (how the files get there) and
+    ``build_modpack_info`` (what identity is recorded on the server). The
+    stopped-server guard, the pre-install backup, progress bookkeeping, the
+    content-manifest reset and the Java warning are the same either way.
+
+    ``run_install(install_path, progress_cb)`` returns the client's result
+    dict. Returns a Flask response — a bare one on success, a
+    ``(body, status)`` tuple on every failure path.
+    """
     server_id = data.get('server_id')
     clean_install = _parse_bool(data.get('clean_install'), default=True)
     create_backup = _parse_bool(data.get('create_backup'), default=True)
-    allow_missing = _parse_bool(data.get('allow_missing'), default=False)
-    mod_side_overrides = data.get('mod_side_overrides')
 
     runtime_status = _registry().get_status(server_id)
     if runtime_status.get('status') == 'running':
@@ -578,22 +582,13 @@ def install_modpack(project_id, server):
     _update_install_progress(server_id, stage='starting', current=0, total=0, detail='')
 
     try:
-        result = modrinth_client.install_modpack(
-            project_id=project_id,
-            install_path=install_path,
-            mc_version=mc_version,
-            loader=loader,
-            clean_install=clean_install,
-            allow_missing=allow_missing,
-            mod_side_overrides=mod_side_overrides,
-            progress_callback=_progress_cb,
-        )
+        result = run_install(install_path, _progress_cb)
     except ModrinthApiError as exc:
         _clear_install_progress(server_id)
         return _modrinth_error_response(exc)
     except Exception as exc:  # pragma: no cover - defensive error mapping
         _clear_install_progress(server_id)
-        current_app.logger.exception('Unexpected modpack install failure for %s', project_id)
+        current_app.logger.exception('Unexpected modpack install failure for %s', log_label)
         return jsonify({'error': f'Modpack install failed: {exc}'}), 500
 
     _update_install_progress(server_id, stage='done', current=0, total=0, detail='')
@@ -603,16 +598,7 @@ def install_modpack(project_id, server):
         # gone; stale entries would mislabel whatever the pack dropped in.
         storage.clear_content_manifest(server_id)
 
-    modpack_info = {
-        'projectId': project_id,
-        'versionId': result.get('version_id'),
-        'name': result.get('name'),
-        'version': result.get('version'),
-        'mcVersion': result.get('mc_version'),
-        'loaders': result.get('loaders', []),
-        'installedAt': iso_z_now(),
-    }
-    storage.update_server(server_id, {'modpack': modpack_info})
+    storage.update_server(server_id, {'modpack': build_modpack_info(result)})
     _clear_install_progress(server_id)
 
     # NOTE: with @with_server_lock the per-server lock now covers this
@@ -621,7 +607,7 @@ def install_modpack(project_id, server):
     # observable effect is that a contending request waits a few extra
     # ms — acceptable and arguably safer.
     java_warning = None
-    effective_mc = result.get('mc_version') or mc_version or server.get('version', '')
+    effective_mc = result.get('mc_version') or data.get('mc_version') or server.get('version', '')
     if effective_mc and not skip_java_enforcement():
         compat = resolve_required_java(effective_mc)
         if compat.enforceable:
@@ -643,6 +629,172 @@ def install_modpack(project_id, server):
     if java_warning:
         payload['java_warning'] = java_warning
     return jsonify(payload)
+
+
+@modrinth_bp.route('/modpack/<project_id>/install', methods=['POST'])
+@require_server(source='body')
+@with_server_lock(
+    source='body',
+    busy_message='A modpack install is already in progress for this server',
+)
+def install_modpack(project_id, server):
+    data = request.get_json() or {}
+
+    def _run(install_path, progress_cb):
+        return modrinth_client.install_modpack(
+            project_id=project_id,
+            install_path=install_path,
+            mc_version=data.get('mc_version'),
+            loader=data.get('loader'),
+            clean_install=_parse_bool(data.get('clean_install'), default=True),
+            allow_missing=_parse_bool(data.get('allow_missing'), default=False),
+            mod_side_overrides=data.get('mod_side_overrides'),
+            progress_callback=progress_cb,
+        )
+
+    def _modpack_info(result):
+        return {
+            'projectId': project_id,
+            'versionId': result.get('version_id'),
+            'name': result.get('name'),
+            'version': result.get('version'),
+            'mcVersion': result.get('mc_version'),
+            'loaders': result.get('loaders', []),
+            'installedAt': iso_z_now(),
+        }
+
+    return _run_modpack_install(
+        server, data, _run, _modpack_info, log_label=project_id
+    )
+
+
+@modrinth_bp.route('/modpack/upload', methods=['POST'])
+def upload_modpack_archive():
+    """Stage an uploaded .mrpack and report what it declares.
+
+    The raw archive bytes are the request body (``fetch(url, {body: file})``);
+    the display filename comes from the ``filename`` query param or the
+    ``X-Filename`` header — the same shape as the world-import upload.
+
+    Nothing is installed here. The response carries the Minecraft version and
+    loader the pack was built against so the create form can fill itself in
+    before the server it will be installed on even exists (#53).
+    """
+    original_name = (
+        request.args.get('filename')
+        or request.headers.get('X-Filename')
+        or 'modpack.mrpack'
+    )
+    safe_display = secure_filename(original_name) or 'modpack.mrpack'
+
+    max_bytes = mrpack.max_upload_bytes()
+    if request.content_length and request.content_length > max_bytes:
+        return jsonify({'error': f'Upload exceeds the {max_bytes}-byte limit'}), 413
+
+    # Abandoned uploads (a create dialog closed without installing) are swept
+    # here rather than on a timer: an upload is the only moment this feature
+    # is guaranteed to be running.
+    mrpack.sweep_expired()
+
+    temp_path = mrpack.staging_dir() / f'mrpack-{uuid.uuid4().hex}.mrpack'
+    try:
+        written = stream_upload_to_temp(request.stream, temp_path, max_bytes=max_bytes)
+    except UploadTooLargeError as exc:
+        return jsonify({'error': str(exc)}), 413
+    except OSError as exc:
+        temp_path.unlink(missing_ok=True)
+        return jsonify({'error': f'Failed to save the upload: {exc}'}), 500
+
+    if written == 0:
+        temp_path.unlink(missing_ok=True)
+        return jsonify({'error': 'Empty upload — no file received'}), 400
+
+    try:
+        index = mrpack.read_index(temp_path)
+    except mrpack.InvalidMrpackError as exc:
+        temp_path.unlink(missing_ok=True)
+        return jsonify({'error': str(exc)}), 400
+
+    summary = mrpack.describe(index, temp_path)
+    staged = mrpack.stage(
+        temp_path, filename=safe_display, size_bytes=written, summary=summary
+    )
+    return jsonify({'success': True, **staged.to_payload()}), 201
+
+
+@modrinth_bp.route('/modpack/upload/<upload_id>', methods=['DELETE'])
+def discard_modpack_upload(upload_id):
+    """Drop a staged .mrpack the user decided not to install."""
+    if not mrpack.discard(upload_id):
+        return jsonify({'error': 'Upload not found'}), 404
+    return jsonify({'success': True})
+
+
+@modrinth_bp.route('/modpack/upload/<upload_id>/install', methods=['POST'])
+@require_server(source='body')
+@with_server_lock(
+    source='body',
+    busy_message='A modpack install is already in progress for this server',
+)
+def install_uploaded_modpack(upload_id, server):
+    """Install a previously staged .mrpack onto a server (#53)."""
+    data = request.get_json() or {}
+    staged = mrpack.get(upload_id)
+    if staged is None:
+        return jsonify({
+            'error': 'That modpack upload is no longer available — upload the .mrpack again',
+        }), 404
+
+    # A pack declares what it was built against. Installing it onto a server
+    # running something else generally produces a server that will not boot,
+    # so the caller has to say so explicitly rather than find out later.
+    if not _parse_bool(data.get('force'), default=False):
+        mismatch = mrpack.compare_with_server(staged.summary, server)
+        if mismatch:
+            return jsonify({
+                'error': 'This modpack does not match the server: ' + '; '.join(mismatch['reasons']),
+                'can_continue_with_mismatch': True,
+                **mismatch,
+            }), 409
+
+    loader = data.get('loader') or staged.summary.get('loader') or server.get('loader')
+
+    def _run(install_path, progress_cb):
+        return modrinth_client.install_mrpack_archive(
+            staged.path,
+            install_path,
+            loader=loader,
+            clean_install=_parse_bool(data.get('clean_install'), default=True),
+            allow_missing=_parse_bool(data.get('allow_missing'), default=False),
+            mod_side_overrides=data.get('mod_side_overrides'),
+            progress_callback=progress_cb,
+        )
+
+    def _modpack_info(result):
+        return {
+            'projectId': None,
+            'versionId': None,
+            'name': result.get('name') or staged.filename,
+            'version': result.get('version'),
+            'mcVersion': result.get('mc_version'),
+            'loaders': result.get('loaders', []),
+            'source': 'upload',
+            'fileName': staged.filename,
+            'installedAt': iso_z_now(),
+        }
+
+    response = _run_modpack_install(
+        server, data, _run, _modpack_info, log_label=staged.filename
+    )
+
+    # The staged archive outlives a failed install on purpose: the missing-files
+    # and uncertain-mod-side flows retry the same pack once the user answers,
+    # and re-uploading it to do that would be a poor trade. Anything left
+    # behind is swept on the next upload.
+    status = response[1] if isinstance(response, tuple) else response.status_code
+    if status == 200:
+        mrpack.discard(upload_id)
+    return response
 
 
 @modrinth_bp.route('/modpack/install-progress/<server_id>', methods=['GET'])
