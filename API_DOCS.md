@@ -939,6 +939,66 @@ made) and `java_warning` (when the pack's Minecraft version needs a newer Java t
 **Errors:** `400` server running, or install path unresolvable · `404` server not found ·
 `409` an install is already in progress · `500` backup or install failure
 
+#### `POST /api/modrinth/modpack/upload`
+
+Stage a `.mrpack` exported from the Modrinth app. Nothing is installed — the response describes
+what the pack declares, so a server can be created to match it before the pack is installed.
+
+**Body:** the raw archive bytes (`Content-Type: application/octet-stream`). The display filename
+comes from the `filename` query param or the `X-Filename` header.
+
+**Response (201):**
+
+```json
+{
+  "success": true,
+  "upload_id": "8f14e45fceea167a5a36dedd4bea2543",
+  "filename": "my-pack.mrpack",
+  "size_bytes": 41233,
+  "name": "My Pack",
+  "version": "1.2.3",
+  "summary": "...",
+  "minecraft_version": "1.20.1",
+  "loader": "fabric",
+  "loader_version": "0.15.7",
+  "file_count": 118,
+  "client_only_count": 24,
+  "dependencies": { "minecraft": "1.20.1", "fabric-loader": "0.15.7" },
+  "has_overrides": true,
+  "has_server_overrides": false
+}
+```
+
+Staged uploads expire after 6 hours and are swept on the next upload.
+
+**Errors:** `400` empty body, not a zip, no `modrinth.index.json`, malformed index, or a pack for
+another game · `413` over `FABRICATOR_MAX_MRPACK_UPLOAD_BYTES` (default 2 GiB), or expanding past
+`FABRICATOR_MAX_MRPACK_EXTRACTED_BYTES` (default 16 GiB)
+
+#### `POST /api/modrinth/modpack/upload/<upload_id>/install`
+
+Install a staged `.mrpack` onto a server. The server must be stopped. Same install semantics as
+`/modpack/<project_id>/install` — side classification, overrides, missing-file and uncertain-side
+409s all behave identically.
+
+**Body:** `server_id` (string, **required**) · `loader` (string, optional — defaults to what the
+pack declares) · `clean_install` (bool, default `true`) · `create_backup` (bool, default `true`) ·
+`allow_missing` (bool, default `false`) · `mod_side_overrides` (object, optional) ·
+`force` (bool, default `false`)
+
+The upload survives a failed install so the missing-file and uncertain-side retries can reuse it;
+a successful install consumes it.
+
+**Errors:** `400` server running, or install path unresolvable · `404` server not found, or the
+upload expired · `409` an install is already in progress; missing files; uncertain mod sides; or —
+without `force` — the pack targets a different Minecraft version or loader than the server runs, in
+which case the body carries `can_continue_with_mismatch`, `pack_mc_version`, `pack_loader`,
+`server_mc_version`, `server_loader` and `reasons`
+
+#### `DELETE /api/modrinth/modpack/upload/<upload_id>`
+
+Discard a staged upload. **Errors:** `404` unknown or already-consumed upload.
+
 #### `GET /api/modrinth/modpack/install-progress/<server_id>`
 
 **Response (200):** `{ "active": true, "stage": "downloading", "current": 12, "total": 80, "detail": "..." }`
@@ -1081,6 +1141,8 @@ FABRICATOR_SKIP_JAVA_CHECK=1     # bypass Java version enforcement (dev/testing 
 FABRICATOR_DISABLE_SCHEDULER=1   # do not boot the backup scheduler
 FABRICATOR_DISABLE_SELF_UPDATE=1 # make POST /api/system/update return 403
 FABRICATOR_MAX_WORLD_UPLOAD_BYTES=...  # world-import cap; default 10 GiB
+FABRICATOR_MAX_MRPACK_UPLOAD_BYTES=... # .mrpack upload cap; default 2 GiB
+FABRICATOR_MAX_MRPACK_EXTRACTED_BYTES=...  # .mrpack uncompressed-size cap; default 16 GiB
 FABRICATOR_MANAGED=1             # managed-hosting mode: lock deployment-owned controls (third-party hosts only)
 FABRICATOR_MANAGED_MEMORY_GB=... # managed mode: pinned per-server JVM heap in whole GB; required when managed
 
@@ -1187,7 +1249,8 @@ Key methods:
 - `resolve_project_version(project_id, mc_version, loader)` — best matching version + URL
 - `get_project_download_url(project_id, mc_version, loader)` — resolve straight to a URL + hashes
 - `download_mod(url, target_folder, hashes=...)` — hash-verified download
-- `install_modpack(project_id, install_path, ...)` — full modpack install
+- `install_modpack(project_id, install_path, ...)` — resolve a Modrinth pack, download, install
+- `install_mrpack_archive(mrpack_path, install_path, ...)` — install an on-disk `.mrpack`
 
 Failures raise `ModrinthApiError`, which carries the upstream `status_code` and any `details`.
 
