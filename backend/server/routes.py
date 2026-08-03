@@ -1490,10 +1490,28 @@ def get_server_metrics(server_id, server):
     return jsonify(metrics)
 
 
+def _validated_loader(loader):
+    """Return the normalised loader name, or None when it is not a known loader.
+
+    Called BEFORE anything builds a path out of ``loader``: the metadata staging
+    directory is named after this value and created with ``mkdir(parents=True)``,
+    and creating a directory from an unvalidated request path segment is wrong
+    regardless of who asked. Validated against the same LOADER_REGISTRY that
+    ``get_installer_for`` resolves against, so the two can never disagree.
+    """
+    normalised = (loader or '').strip().lower()
+    if normalised not in supported_loaders():
+        return None
+    return normalised
+
+
 @server_bp.route('/loaders/<loader>/versions/game', methods=['GET'])
 def get_loader_game_versions(loader):
     """Return Minecraft versions supported by ``loader``."""
-    installer = _get_installer(loader, _loader_meta_dir(loader.lower()))
+    normalised = _validated_loader(loader)
+    if normalised is None:
+        return jsonify({'error': f'Unknown loader: {loader}'}), 404
+    installer = _get_installer(normalised, _loader_meta_dir(normalised))
     if installer is None:
         return jsonify({'error': f'Unknown loader: {loader}'}), 404
     return jsonify(installer.get_minecraft_versions())
@@ -1506,7 +1524,10 @@ def get_loader_loader_versions(loader):
     Some loaders (e.g. Vanilla) do not have a separate loader version; those
     return an empty list.
     """
-    installer = _get_installer(loader, _loader_meta_dir(loader.lower()))
+    normalised = _validated_loader(loader)
+    if normalised is None:
+        return jsonify({'error': f'Unknown loader: {loader}'}), 404
+    installer = _get_installer(normalised, _loader_meta_dir(normalised))
     if installer is None:
         return jsonify({'error': f'Unknown loader: {loader}'}), 404
     mc_version = request.args.get('mc_version')
