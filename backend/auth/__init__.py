@@ -14,9 +14,9 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from flask import current_app, jsonify, request, session
+from flask import current_app, g, jsonify, request, session
 
-from backend.auth import buckets, service
+from backend.auth import buckets, redaction, service
 from backend.auth.routes import auth_bp
 from backend.managed import is_managed
 
@@ -87,6 +87,9 @@ def _bearer_decision(credential: str):
     if bucket == "manage" and scope != "manage":
         return jsonify({"error": "insufficient scope"}), 403
     service.touch_token_last_used(token_id)  # records AUTHORIZED use, not success
+    # Mark the request for the response filter. This is the ONLY place a request
+    # is declared token-authenticated, so redaction cannot apply to a session.
+    setattr(g, redaction.TOKEN_REQUEST_FLAG, True)
     return None  # read route (any scope) or manage route with a manage token
 
 
@@ -159,3 +162,6 @@ def init_auth(app) -> None:
 
     app.register_blueprint(auth_bp)
     app.before_request(_auth_gate)
+    # Response half of the token path, registered beside the gate: one filter
+    # that sees every response body a token can ever receive.
+    app.after_request(redaction.redact_token_response)
