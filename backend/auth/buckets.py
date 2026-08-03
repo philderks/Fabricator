@@ -42,12 +42,15 @@ _READ = [
     ("GET", "/api/modrinth/project/<project_id>/versions"),
     ("GET", "/api/modrinth/search"),
     ("GET", "/api/modrinth/version/<version_id>"),
+    # Identifies the mods folder's jars against Modrinth by content hash.
+    # Audited CLEAN: no caller input reaches a path (the folder comes from the
+    # stored record), the upstream host is fixed, and the response is bare
+    # filenames plus public catalog metadata.
+    ("GET", "/api/modrinth/servers/<server_id>/resolve-installed"),
     ("GET", "/api/servers/<server_id>/snapshots"),
     ("GET", "/api/servers/<server_id>/backup-summary"),
     ("GET", "/api/servers/<server_id>/backup-configs"),
     ("GET", "/api/backup-jobs/<job_id>"),
-    ("GET", "/api/servers/<server_id>/players/state"),
-    ("GET", "/api/servers/<server_id>/players/online"),
     ("GET", "/api/auth/status"),
 ]
 
@@ -100,6 +103,11 @@ _NEVER = [
     ("POST", "/api/servers/<server_id>/backup-quick"),
     # modpack install (can plant files including an @args_file)
     ("POST", "/api/modrinth/modpack/<project_id>/install"),
+    # players reads: personal data (names, UUIDs, IP addresses, per-player
+    # "last seen"). No redaction makes these safe to hand an assistant, and they
+    # answer no question the diagnosis use case asks.
+    ("GET", "/api/servers/<server_id>/players/state"),
+    ("GET", "/api/servers/<server_id>/players/online"),
     # players surface (bans / kick / ops / whitelist)
     ("POST", "/api/servers/<server_id>/players/bans"),
     ("DELETE", "/api/servers/<server_id>/players/bans"),

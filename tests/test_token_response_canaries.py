@@ -53,6 +53,8 @@ _UNEXERCISED = {
     ("GET", "/api/modrinth/project/<project_id>/versions"): "live Modrinth API",
     ("GET", "/api/modrinth/search"): "live Modrinth API",
     ("GET", "/api/modrinth/version/<version_id>"): "live Modrinth API",
+    ("GET", "/api/modrinth/servers/<server_id>/resolve-installed"):
+        "live Modrinth API (hashes every jar in the mods folder and looks them up)",
     ("POST", "/api/modrinth/mod/<mod_id>/install"): "live Modrinth API + a real download",
     ("GET", "/api/loaders/<loader>/versions/game"): "live loader/Mojang metadata API",
     ("GET", "/api/loaders/<loader>/versions/loader"): "live loader/Mojang metadata API",
