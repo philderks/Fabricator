@@ -50,6 +50,11 @@ from backend.backups import progress, storage
 from backend.server import storage as server_storage
 from backend.server.locks import get_server_lock
 from backend.server.registry import get_server_process_registry
+from backend.utils.upload import (  # noqa: F401  (re-exported for callers/tests)
+    UploadTooLargeError,
+    env_max_bytes,
+    stream_upload_to_temp,
+)
 from backend.utils.zip import safe_extract_tar, safe_extract_zip
 
 
@@ -64,21 +69,9 @@ _DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024 * 1024
 
 def max_upload_bytes() -> int:
     """Return the configured upload cap in bytes (env override, clamped >0)."""
-    raw = os.environ.get("FABRICATOR_MAX_WORLD_UPLOAD_BYTES")
-    if raw:
-        try:
-            value = int(raw)
-            if value > 0:
-                return value
-        except (TypeError, ValueError):
-            logger.warning(
-                "Ignoring invalid FABRICATOR_MAX_WORLD_UPLOAD_BYTES=%r", raw
-            )
-    return _DEFAULT_MAX_UPLOAD_BYTES
-
-
-class UploadTooLargeError(Exception):
-    """Raised when the streamed upload exceeds :func:`max_upload_bytes`."""
+    return env_max_bytes(
+        "FABRICATOR_MAX_WORLD_UPLOAD_BYTES", _DEFAULT_MAX_UPLOAD_BYTES
+    )
 
 
 class InvalidWorldArchiveError(Exception):
@@ -93,34 +86,6 @@ _SP_DIM_DIRS = ("DIM-1", "DIM1")  # nether, end inside a singleplayer save
 # ---------------------------------------------------------------------------
 # Upload streaming + cheap validation (called synchronously by the route)
 # ---------------------------------------------------------------------------
-
-
-def stream_upload_to_temp(stream, dest: Path, *, max_bytes: int) -> int:
-    """Stream ``stream`` to ``dest`` in chunks, capping at ``max_bytes``.
-
-    Returns the number of bytes written. Raises :class:`UploadTooLargeError`
-    (and unlinks the partial file) once the cap is exceeded, so a hostile or
-    fat-fingered upload can't fill the disk.
-    """
-    written = 0
-    chunk_size = 1024 * 1024
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        with open(dest, "wb") as sink:
-            while True:
-                chunk = stream.read(chunk_size)
-                if not chunk:
-                    break
-                written += len(chunk)
-                if written > max_bytes:
-                    raise UploadTooLargeError(
-                        f"Upload exceeds the {max_bytes}-byte limit"
-                    )
-                sink.write(chunk)
-    except BaseException:
-        dest.unlink(missing_ok=True)
-        raise
-    return written
 
 
 def validate_upload_archive(path: Path) -> str:
