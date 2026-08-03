@@ -788,9 +788,9 @@ def install_uploaded_modpack(upload_id, server):
     )
 
     # The staged archive outlives a failed install on purpose: the missing-files
-    # and uncertain-mod-side flows retry the same pack once the user answers,
-    # and re-uploading it to do that would be a poor trade. Anything left
-    # behind is swept on the next upload.
+    # flow retries the same pack once the user answers, and re-uploading it to
+    # do that would be a poor trade. Anything left behind is swept on the next
+    # upload.
     status = response[1] if isinstance(response, tuple) else response.status_code
     if status == 200:
         mrpack.discard(upload_id)

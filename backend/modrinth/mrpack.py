@@ -15,8 +15,8 @@ Uploads are **staged** rather than installed on arrival, because during
 server creation the server does not exist yet when the file is uploaded:
 the create form reads the loader and Minecraft version off the parsed index
 to fill itself in, and the install happens later, once the loader is on
-disk. Staging also means the retry paths (missing files, uncertain mod
-sides) can re-run an install without asking for the file a second time.
+disk. Staging also means the missing-files retry can re-run an install
+without asking for the file a second time.
 """
 from __future__ import annotations
 

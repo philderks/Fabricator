@@ -602,7 +602,7 @@ class ModrinthClient:
         Installs every server-side file listed in modrinth.index.json and
         extracts overrides/ and server-overrides/ into the server root. The
         archive is only read, never consumed, so a caller can re-run the
-        install after the user resolves missing files or uncertain mod sides.
+        install once the user has decided what to do about missing files.
 
         Pack identity in the returned dict comes from the index (``name``,
         ``versionId``, ``dependencies``); a caller that knows better — the
@@ -658,16 +658,6 @@ class ModrinthClient:
                 result["files_skipped"],
                 result["uncertain_mod_files"],
                 loader=loader,
-            )
-
-        if result["uncertain_mod_files"]:
-            raise ModrinthApiError(
-                "Some mods could not be classified as client or server",
-                status_code=409,
-                details={
-                    "uncertain_mod_files": result["uncertain_mod_files"],
-                    "can_continue_with_uncertain": True,
-                },
             )
 
         dependencies = index.get("dependencies") or {}
@@ -925,6 +915,15 @@ class ModrinthClient:
             files_installed.append(entry_path)
             return "installed"
 
+        # The modpack index is the pack author's authoritative file list.
+        # Explicit ``env.server=required|optional`` means this JAR belongs on
+        # the server, even if it bundles client classes or declares stale
+        # client-only JAR metadata. JAR inspection remains a fallback only for
+        # index entries without a server-side decision.
+        if index_env_decision == "server":
+            files_installed.append(entry_path)
+            return "installed"
+
         classification, class_reason = self._classify_mod_jar_for_server(target, loader=loader)
 
         if classification == "client":
@@ -933,14 +932,15 @@ class ModrinthClient:
             return "skipped"
 
         if classification == "uncertain":
-            if index_env_decision == "server":
-                files_installed.append(entry_path)
-                return "installed"
+            # Missing metadata is not evidence that a JAR is client-only. Keep
+            # it for a server modpack, but return the reason so callers can
+            # surface a non-blocking compatibility warning.
+            files_installed.append(entry_path)
             uncertain_mod_files.append({
                 "path": entry_path,
                 "reason": class_reason or "Unable to detect dedicated-server compatibility from mod metadata",
             })
-            return "uncertain"
+            return "installed"
 
         return None
 

@@ -374,9 +374,12 @@ side="SERVER"
     assert uncertain_mod_files == []
 
 
-def test_overrides_uncertain_jar_kept_for_modal_review(mod_client, tmp_path):
-    """Uncertain jar stays on disk (so the modal can resolve it) but is
-    NOT reported as installed — install_modpack raises 409 for these.
+def test_overrides_uncertain_jar_is_installed_with_a_warning(mod_client, tmp_path):
+    """Unclassified override JARs remain installed and are reported.
+
+    A missing side declaration is not evidence that a mod is client-only. The
+    installer must retain it for a server modpack while returning the reason so
+    the UI can show a non-blocking warning.
     """
     install_path = tmp_path / "server"
     install_path.mkdir()
@@ -410,8 +413,8 @@ version="2.5.0"
         )
 
     extracted = install_path / "mods" / "configured.jar"
-    assert extracted.is_file(), "uncertain jar must stay on disk for modal review"
-    assert "overrides/mods/configured.jar" not in files_installed
+    assert extracted.is_file(), "unclassified jar must remain installed"
+    assert "overrides/mods/configured.jar" in files_installed
     assert "overrides/mods/configured.jar" not in files_skipped
     assert len(uncertain_mod_files) == 1
     assert uncertain_mod_files[0]["path"] == "overrides/mods/configured.jar"
@@ -542,12 +545,13 @@ def _stub_download_with_payloads(monkeypatch, payloads: Dict[str, bytes]) -> Non
     monkeypatch.setattr(ModrinthClient, "_download_and_verify", fake_download)
 
 
-def test_install_e2e_filters_client_mods_from_index(mod_client, tmp_path, monkeypatch):
-    """Two forge index entries: one client-only, one uncertain-but-server.
+def test_install_e2e_keeps_mods_explicitly_required_by_modpack_index(mod_client, tmp_path, monkeypatch):
+    """The modpack index outranks a conflicting JAR-side client heuristic.
 
-    Pipeline must skip the client jar (deleted from disk) and install the
-    uncertain one because the index declares ``env.server=required`` (the
-    saving fallback inside ``_classify_installed_mod``).
+    An entry explicitly marked ``env.server=required`` must stay installed,
+    even when its JAR claims ``clientSideOnly=true``. The index is the
+    pack author's authoritative server-file list; embedded metadata is only
+    a fallback for entries without an explicit server decision.
     """
     install_path = tmp_path / "server"
     install_path.mkdir()
@@ -586,19 +590,21 @@ def test_install_e2e_filters_client_mods_from_index(mod_client, tmp_path, monkey
         entries, install_path, overrides={}, allow_missing=False, loader="forge",
     )
 
-    assert result["files_installed"] == ["mods/uncertain-server.jar"]
-    assert result["files_skipped"] == ["mods/entityculling.jar"]
+    assert result["files_installed"] == [
+        "mods/entityculling.jar",
+        "mods/uncertain-server.jar",
+    ]
+    assert result["files_skipped"] == []
     assert result["uncertain_mod_files"] == []
-    assert not (install_path / "mods" / "entityculling.jar").exists()
+    assert (install_path / "mods" / "entityculling.jar").is_file()
     assert (install_path / "mods" / "uncertain-server.jar").is_file()
 
 
-def test_install_e2e_classifier_catches_lwjgl_mod(mod_client, tmp_path, monkeypatch):
-    """Forge jar with empty mods.toml + an LWJGL class ref must be skipped.
+def test_install_e2e_classifier_catches_lwjgl_mod_without_index_environment(mod_client, tmp_path, monkeypatch):
+    """A JAR heuristic remains a fallback when the index has no side data.
 
-    Metadata reader returns uncertain, the constant-pool scan promotes it
-    to ``client``, and ``_install_index_files`` records the skip + unlinks
-    the freshly downloaded jar.
+    With no ``env.server`` decision, an LWJGL class reference is sufficient to
+    classify the JAR as client-only and skip it.
     """
     install_path = tmp_path / "server"
     install_path.mkdir()
@@ -616,7 +622,7 @@ def test_install_e2e_classifier_catches_lwjgl_mod(mod_client, tmp_path, monkeypa
     entries = [
         {
             "path": "mods/lwjgl-mod.jar",
-            "env": {"server": "required", "client": "required"},
+            "env": {},
             "downloads": ["https://stub.invalid/lwjgl.jar"],
             "hashes": {},
         },

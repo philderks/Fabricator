@@ -978,22 +978,22 @@ another game · `413` over `FABRICATOR_MAX_MRPACK_UPLOAD_BYTES` (default 2 GiB),
 #### `POST /api/modrinth/modpack/upload/<upload_id>/install`
 
 Install a staged `.mrpack` onto a server. The server must be stopped. Same install semantics as
-`/modpack/<project_id>/install` — side classification, overrides, missing-file and uncertain-side
-409s all behave identically.
+`/modpack/<project_id>/install` — side classification, overrides, the missing-file 409 and the
+non-blocking `uncertain_mod_files` report all behave identically.
 
 **Body:** `server_id` (string, **required**) · `loader` (string, optional — defaults to what the
 pack declares) · `clean_install` (bool, default `true`) · `create_backup` (bool, default `true`) ·
 `allow_missing` (bool, default `false`) · `mod_side_overrides` (object, optional) ·
 `force` (bool, default `false`)
 
-The upload survives a failed install so the missing-file and uncertain-side retries can reuse it;
-a successful install consumes it.
+The upload survives a failed install so the missing-file retry can reuse it; a successful install
+consumes it.
 
 **Errors:** `400` server running, or install path unresolvable · `404` server not found, or the
-upload expired · `409` an install is already in progress; missing files; uncertain mod sides; or —
-without `force` — the pack targets a different Minecraft version or loader than the server runs, in
-which case the body carries `can_continue_with_mismatch`, `pack_mc_version`, `pack_loader`,
-`server_mc_version`, `server_loader` and `reasons`
+upload expired · `409` an install is already in progress; missing files; or — without `force` —
+the pack targets a different Minecraft version or loader than the server runs, in which case the
+body carries `can_continue_with_mismatch`, `pack_mc_version`, `pack_loader`, `server_mc_version`,
+`server_loader` and `reasons`
 
 #### `DELETE /api/modrinth/modpack/upload/<upload_id>`
 

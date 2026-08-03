@@ -726,8 +726,8 @@ export const useServerStore = defineStore('server', () => {
     try {
       // An uploaded .mrpack (#53) is already staged on the backend, so it is
       // installed by upload id rather than resolved from a Modrinth project.
-      // The retry paths reuse the same staged archive, which is why the
-      // backend only discards it once an install actually succeeds.
+      // The missing-files retry reuses the same staged archive, which is why
+      // the backend only discards it once an install actually succeeds.
       const result = modpackData.uploadId
         ? await installUploadedModpack(modpackData.uploadId, {
           server_id: currentServerId.value,
@@ -754,11 +754,16 @@ export const useServerStore = defineStore('server', () => {
       const cleanedCount = Array.isArray(result?.cleaned_paths) ? result.cleaned_paths.length : 0
       const missingCount = Array.isArray(result?.missing_files) ? result.missing_files.length : 0
       const skippedCount = Array.isArray(result?.files_skipped) ? result.files_skipped.length : 0
+      const uncertainCount = Array.isArray(result?.uncertain_mod_files) ? result.uncertain_mod_files.length : 0
       const cleanedNote = ` Replaced folders: ${cleanedCount}.`
       const missingNote = missingCount ? ` Missing files skipped: ${missingCount}.` : ''
       const skippedNote = skippedCount ? ` Skipped ${skippedCount} client-only mod${skippedCount === 1 ? '' : 's'}.` : ''
+      const uncertainNote = uncertainCount ? ` Installed ${uncertainCount} mod${uncertainCount === 1 ? '' : 's'} with unknown server compatibility.` : ''
       const backupNote = result?.backup_file ? ` Backup: ${result.backup_file}.` : ''
-      toast.success(`${modpackData.title} installed successfully.${cleanedNote}${missingNote}${skippedNote}${backupNote}`, 'Modpack Installed')
+      toast.success(`${modpackData.title} installed successfully.${cleanedNote}${missingNote}${skippedNote}${uncertainNote}${backupNote}`, 'Modpack Installed')
+      if (uncertainCount) {
+        toast.warning('Unknown-side mods were kept because missing metadata is not evidence they are client-only. Check server logs if startup fails.', 'Compatibility Warning')
+      }
       if (result?.java_warning) toast.warning(result.java_warning.message, 'Java Version Mismatch')
       await Promise.all([loadServer({ silent: true }), loadMods()])
     } catch (error) {
