@@ -565,16 +565,6 @@ class ModrinthClient:
                     loader=loader,
                 )
 
-        if result["uncertain_mod_files"]:
-            raise ModrinthApiError(
-                "Some mods could not be classified as client or server",
-                status_code=409,
-                details={
-                    "uncertain_mod_files": result["uncertain_mod_files"],
-                    "can_continue_with_uncertain": True,
-                },
-            )
-
         return {
             "version": best.get("version_number"),
             "name": project_title,
@@ -846,14 +836,15 @@ class ModrinthClient:
             return "skipped"
 
         if classification == "uncertain":
-            if index_env_decision == "server":
-                files_installed.append(entry_path)
-                return "installed"
+            # Missing metadata is not evidence that a JAR is client-only. Keep
+            # it for a server modpack, but return the reason so callers can
+            # surface a non-blocking compatibility warning.
+            files_installed.append(entry_path)
             uncertain_mod_files.append({
                 "path": entry_path,
                 "reason": class_reason or "Unable to detect dedicated-server compatibility from mod metadata",
             })
-            return "uncertain"
+            return "installed"
 
         return None
 

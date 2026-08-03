@@ -655,11 +655,16 @@ export const useServerStore = defineStore('server', () => {
       const cleanedCount = Array.isArray(result?.cleaned_paths) ? result.cleaned_paths.length : 0
       const missingCount = Array.isArray(result?.missing_files) ? result.missing_files.length : 0
       const skippedCount = Array.isArray(result?.files_skipped) ? result.files_skipped.length : 0
+      const uncertainCount = Array.isArray(result?.uncertain_mod_files) ? result.uncertain_mod_files.length : 0
       const cleanedNote = ` Replaced folders: ${cleanedCount}.`
       const missingNote = missingCount ? ` Missing files skipped: ${missingCount}.` : ''
       const skippedNote = skippedCount ? ` Skipped ${skippedCount} client-only mod${skippedCount === 1 ? '' : 's'}.` : ''
+      const uncertainNote = uncertainCount ? ` Installed ${uncertainCount} mod${uncertainCount === 1 ? '' : 's'} with unknown server compatibility.` : ''
       const backupNote = result?.backup_file ? ` Backup: ${result.backup_file}.` : ''
-      toast.success(`${modpackData.title} installed successfully.${cleanedNote}${missingNote}${skippedNote}${backupNote}`, 'Modpack Installed')
+      toast.success(`${modpackData.title} installed successfully.${cleanedNote}${missingNote}${skippedNote}${uncertainNote}${backupNote}`, 'Modpack Installed')
+      if (uncertainCount) {
+        toast.warning('Unknown-side mods were kept because missing metadata is not evidence they are client-only. Check server logs if startup fails.', 'Compatibility Warning')
+      }
       if (result?.java_warning) toast.warning(result.java_warning.message, 'Java Version Mismatch')
       await Promise.all([loadServer({ silent: true }), loadMods()])
     } catch (error) {

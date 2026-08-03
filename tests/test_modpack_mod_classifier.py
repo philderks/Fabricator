@@ -374,9 +374,12 @@ side="SERVER"
     assert uncertain_mod_files == []
 
 
-def test_overrides_uncertain_jar_kept_for_modal_review(mod_client, tmp_path):
-    """Uncertain jar stays on disk (so the modal can resolve it) but is
-    NOT reported as installed — install_modpack raises 409 for these.
+def test_overrides_uncertain_jar_is_installed_with_a_warning(mod_client, tmp_path):
+    """Unclassified override JARs remain installed and are reported.
+
+    A missing side declaration is not evidence that a mod is client-only. The
+    installer must retain it for a server modpack while returning the reason so
+    the UI can show a non-blocking warning.
     """
     install_path = tmp_path / "server"
     install_path.mkdir()
@@ -410,8 +413,8 @@ version="2.5.0"
         )
 
     extracted = install_path / "mods" / "configured.jar"
-    assert extracted.is_file(), "uncertain jar must stay on disk for modal review"
-    assert "overrides/mods/configured.jar" not in files_installed
+    assert extracted.is_file(), "unclassified jar must remain installed"
+    assert "overrides/mods/configured.jar" in files_installed
     assert "overrides/mods/configured.jar" not in files_skipped
     assert len(uncertain_mod_files) == 1
     assert uncertain_mod_files[0]["path"] == "overrides/mods/configured.jar"
