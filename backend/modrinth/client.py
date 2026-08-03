@@ -829,6 +829,15 @@ class ModrinthClient:
             files_installed.append(entry_path)
             return "installed"
 
+        # The modpack index is the pack author's authoritative file list.
+        # Explicit ``env.server=required|optional`` means this JAR belongs on
+        # the server, even if it bundles client classes or declares stale
+        # client-only JAR metadata. JAR inspection remains a fallback only for
+        # index entries without a server-side decision.
+        if index_env_decision == "server":
+            files_installed.append(entry_path)
+            return "installed"
+
         classification, class_reason = self._classify_mod_jar_for_server(target, loader=loader)
 
         if classification == "client":
