@@ -51,6 +51,15 @@ _CREDENTIAL_MARKERS = (
 _CREDENTIAL_KEYS = frozenset({"key", "apikey", "api_key"})
 
 
+def is_token_request() -> bool:
+    """True when the gate authorised this request via an MCP bearer token.
+
+    Lives here (a leaf module importing only Flask) so route modules can ask the
+    question without importing the auth package and creating a cycle.
+    """
+    return bool(g.get(TOKEN_REQUEST_FLAG))
+
+
 def _is_credential_key(key: str) -> bool:
     lowered = key.lower()
     if lowered in _CREDENTIAL_KEYS:

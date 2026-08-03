@@ -11,6 +11,7 @@ from flask import Blueprint, jsonify, request
 
 logger = logging.getLogger(__name__)
 
+from backend.auth.redaction import is_token_request
 from backend.server.manager import ServerManager
 from backend.server.registry import get_server_process_registry
 from backend.server import storage
@@ -1211,6 +1212,16 @@ def get_java_status():
     mc_version = request.args.get('mc_version', '').strip()
     required_java_param = request.args.get('required_java')
     java_path_param = request.args.get('java_path') or None
+
+    # java_path names a binary this handler then executes (``_probe`` below), so
+    # honouring it for a token caller is arbitrary process execution from a READ
+    # route. Rejected rather than ignored: silently probing a different binary
+    # would answer a question the caller did not ask, and a hard 400 makes an
+    # attempt visible instead of quietly succeeding. Session behaviour unchanged.
+    if java_path_param is not None and is_token_request():
+        return jsonify({
+            'error': 'java_path is not accepted for token-authenticated requests'
+        }), 400
 
     compat = resolve_required_java(mc_version) if mc_version else None
     required_java = None
