@@ -1,7 +1,12 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { useRouter } from 'vue-router'
-import { installMod, installModpack, getModpackInstallProgress } from '../api/modrinth'
+import {
+  installMod,
+  installModpack,
+  installUploadedModpack,
+  getModpackInstallProgress
+} from '../api/modrinth'
 import {
   getServer,
   getServers,
@@ -719,15 +724,29 @@ export const useServerStore = defineStore('server', () => {
       showModpackInstallConfirmModal.value = true
     }
     try {
-      const result = await installModpack(modpackData.projectId, {
-        mc_version: modpackData.mcVersion,
-        loader: modpackData.loader,
-        server_id: currentServerId.value,
-        clean_install: !isRetry,
-        create_backup: isRetry ? false : modpackData.createBackup,
-        allow_missing: Boolean(modpackData.allowMissing),
-        mod_side_overrides: modpackData.modSideOverrides || null
-      })
+      // An uploaded .mrpack (#53) is already staged on the backend, so it is
+      // installed by upload id rather than resolved from a Modrinth project.
+      // The retry paths reuse the same staged archive, which is why the
+      // backend only discards it once an install actually succeeds.
+      const result = modpackData.uploadId
+        ? await installUploadedModpack(modpackData.uploadId, {
+          server_id: currentServerId.value,
+          loader: modpackData.loader,
+          clean_install: !isRetry,
+          create_backup: isRetry ? false : modpackData.createBackup,
+          allow_missing: Boolean(modpackData.allowMissing),
+          mod_side_overrides: modpackData.modSideOverrides || null,
+          force: Boolean(modpackData.force)
+        })
+        : await installModpack(modpackData.projectId, {
+          mc_version: modpackData.mcVersion,
+          loader: modpackData.loader,
+          server_id: currentServerId.value,
+          clean_install: !isRetry,
+          create_backup: isRetry ? false : modpackData.createBackup,
+          allow_missing: Boolean(modpackData.allowMissing),
+          mod_side_overrides: modpackData.modSideOverrides || null
+        })
       showModpackBrowser.value = false
       showModpackInstallConfirmModal.value = false
       pendingModpackInstall.value = null
