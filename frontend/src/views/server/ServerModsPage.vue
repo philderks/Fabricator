@@ -151,6 +151,15 @@ const nounLower = computed(() => noun.value.toLowerCase())
                 <path d="M9 8v2.5H1.5V3H4" />
               </svg>
             </a>
+            <button
+              v-if="modrinthProjectUrl(mod)"
+              type="button"
+              class="mods-page__version-btn"
+              :title="`Change the installed version of ${installedModDisplayName(mod)}`"
+              @click="store.openVersionPicker(mod)"
+            >
+              Version
+            </button>
             <button type="button" class="mods-page__remove" @click="store.handleRemoveMod(mod)">Remove</button>
           </div>
         </SearchResultCard>
@@ -337,6 +346,25 @@ const nounLower = computed(() => noun.value.toLowerCase())
   padding: 4px 10px;
   cursor: pointer;
   transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+/* Same quiet chip as Remove, but non-destructive — it keeps the neutral
+   hover colour rather than turning red. */
+.mods-page__version-btn {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.mods-page__version-btn:hover {
+  color: var(--primary);
+  border-color: var(--primary);
 }
 
 .mods-page__remove:hover {

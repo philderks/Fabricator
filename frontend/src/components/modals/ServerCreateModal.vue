@@ -170,7 +170,8 @@
         </div>
 
         <p class="form-hint">
-          Use custom mode for manual setup, or choose a Modrinth modpack by link or search.
+          Use custom mode for manual setup, or choose a Modrinth modpack by link, by search,
+          or by uploading a .mrpack file you exported yourself.
         </p>
 
         <div v-if="formData.setupMode === 'modpack'" class="modpack-panel">
@@ -184,6 +185,10 @@
               <label class="choice-pill">
                 <input type="radio" v-model="formData.modpackImportMethod" value="search">
                 <span>Search</span>
+              </label>
+              <label class="choice-pill">
+                <input type="radio" v-model="formData.modpackImportMethod" value="file">
+                <span>Upload .mrpack</span>
               </label>
             </div>
           </div>
@@ -216,7 +221,7 @@
             </div>
           </div>
 
-          <div v-else>
+          <div v-else-if="formData.modpackImportMethod === 'search'">
             <div class="form-row modpack-input-row">
               <div class="form-group modpack-grow">
                 <FormField label="Search Modpacks">
@@ -275,6 +280,42 @@
             </p>
           </div>
 
+          <!-- Upload a .mrpack exported from the Modrinth app (#53). The pack
+               declares its own Minecraft version and loader, so selecting one
+               fills those fields in — editable afterwards, with a warning if
+               they end up disagreeing with the pack. -->
+          <div v-else class="mrpack-upload">
+            <FormField
+              label="Modpack File"
+              hint="A .mrpack exported by the Modrinth app. Mods are fetched from Modrinth; config and other extras come from the pack's overrides."
+            >
+              <template #default="{ id, describedBy }">
+                <input
+                  :id="id"
+                  ref="mrpackInput"
+                  type="file"
+                  accept=".mrpack,application/zip"
+                  :disabled="packUploading"
+                  :aria-describedby="describedBy"
+                  @change="handlePackFileChange"
+                >
+              </template>
+            </FormField>
+
+            <div v-if="packUploading" class="mrpack-progress">
+              <div class="mrpack-progress-track">
+                <div
+                  class="mrpack-progress-fill"
+                  :class="{ indeterminate: packUploadPercent < 0 }"
+                  :style="packUploadPercent >= 0 ? { width: `${packUploadPercent}%` } : null"
+                ></div>
+              </div>
+              <span>{{ packUploadPercent >= 0 ? `Uploading ${packUploadPercent}%` : 'Uploading…' }}</span>
+            </div>
+
+            <p v-if="packUploadError" class="modpack-error">{{ packUploadError }}</p>
+          </div>
+
           <p v-if="modpackError" class="modpack-error">{{ modpackError }}</p>
 
           <div v-if="selectedModpack" class="modpack-selected">
@@ -287,6 +328,19 @@
               Clear
             </AppButton>
           </div>
+
+          <div v-if="uploadedPack" class="modpack-selected">
+            <div>
+              <p class="selected-label">Uploaded Modpack</p>
+              <strong>{{ uploadedPackTitle }}</strong>
+              <p>{{ uploadedPackDetail }}</p>
+            </div>
+            <AppButton variant="ghost" size="sm" :disabled="creating" @click="clearUploadedPack">
+              Clear
+            </AppButton>
+          </div>
+
+          <p v-if="packMismatchWarning" class="modpack-warning">{{ packMismatchWarning }}</p>
 
         </div>
       </Panel>
@@ -554,7 +608,13 @@ import AppButton from '../ui/AppButton.vue'
 import FormField from '../ui/FormField.vue'
 import { createServer, installServer, getLoaderGameVersions, getJavaStatus, getServerInstallProgress } from '../../api/servers'
 import ModSideDecisionModal from './ModSideDecisionModal.vue'
-import { installModpack, resolveProjectVersion } from '../../api/modrinth'
+import {
+  installModpack,
+  resolveProjectVersion,
+  uploadModpackArchive,
+  installUploadedModpack,
+  discardModpackUpload
+} from '../../api/modrinth'
 import { useToast } from '../../composables/useToast'
 import { useModpackImport } from '../../composables/useModpackImport'
 import { formatNumber } from '../../utils/format'
@@ -601,6 +661,14 @@ export default {
       showUncertainModsModal: false,
       uncertainModsReport: [],
       pendingUncertainModsResolver: null,
+      uploadedPack: null,
+      packUploading: false,
+      packUploadPercent: 0,
+      packUploadError: '',
+      packUploadAbort: null,
+      // A pack's Minecraft version, held until the version list that has to
+      // contain it finishes loading. See applyPendingPackVersion.
+      pendingPackVersion: '',
       gameVersions: [],
       showSnapshots: false,
       javaStatus: null,
@@ -694,6 +762,42 @@ export default {
       get() { return this.imp?.errorMessage?.value ?? '' },
       set(v) { if (this.imp?.errorMessage) this.imp.errorMessage.value = v }
     },
+    uploadedPackTitle() {
+      return this.uploadedPack?.name || this.uploadedPack?.filename || 'Uploaded modpack'
+    },
+    uploadedPackDetail() {
+      if (!this.uploadedPack) {
+        return ''
+      }
+      const parts = []
+      if (this.uploadedPack.version) parts.push(`Version ${this.uploadedPack.version}`)
+      if (this.uploadedPack.minecraft_version) parts.push(`Minecraft ${this.uploadedPack.minecraft_version}`)
+      if (this.uploadedPack.loader) parts.push(this.loaderLabelFor(this.uploadedPack.loader))
+      const fileCount = this.uploadedPack.file_count || 0
+      if (fileCount) parts.push(`${fileCount} file${fileCount === 1 ? '' : 's'}`)
+      return parts.join(' · ')
+    },
+    packMismatchWarning() {
+      // The fields stay editable after a pack fills them in, so say plainly
+      // when they have drifted from what the pack was built against. Creating
+      // anyway is allowed — only the user knows if the pack is portable.
+      if (!this.uploadedPack) {
+        return ''
+      }
+      const differences = []
+      const packMc = this.uploadedPack.minecraft_version || ''
+      const packLoader = (this.uploadedPack.loader || '').toLowerCase()
+      if (packMc && this.formData.version && packMc !== this.formData.version) {
+        differences.push(`Minecraft ${packMc}`)
+      }
+      if (packLoader && this.formData.loader && packLoader !== this.formData.loader) {
+        differences.push(this.loaderLabelFor(packLoader))
+      }
+      if (!differences.length) {
+        return ''
+      }
+      return `This pack was built for ${differences.join(' and ')}. You can create the server anyway, but the pack may not run on this setup.`
+    },
     requiredJavaText() {
       const required = this.javaStatus?.required_java
       if (!required) {
@@ -719,6 +823,16 @@ export default {
         }
       }
     },
+    'formData.modpackImportMethod'(method) {
+      // Link/search and upload are two answers to the same question. Leaving
+      // both populated would make the install path ambiguous — and the one
+      // still on screen is the one the user means.
+      if (method === 'file') {
+        this.clearSelectedModpack()
+      } else {
+        this.clearUploadedPack()
+      }
+    },
     'formData.loader'(newLoader, oldLoader) {
       if (newLoader === oldLoader) return
       this.formData.version = ''
@@ -730,6 +844,8 @@ export default {
         if (this.imp?.selectedModpack) {
           this.imp.selectedModpack.value = null
         }
+        this.pendingPackVersion = ''
+        this.clearUploadedPack()
       }
       this.loadGameVersions()
     }
@@ -781,6 +897,131 @@ export default {
       this.imp.clearSelection()
     },
 
+    loaderLabelFor(loader) {
+      const value = String(loader || '').toLowerCase()
+      const known = this.loaderOptions.find(option => option.value === value)
+      return known ? known.label : value
+    },
+
+    async handlePackFileChange(event) {
+      const file = event?.target?.files?.[0]
+      if (!file) {
+        return
+      }
+
+      // Replacing one file with another: release the pack already staged.
+      await this.clearUploadedPack({ keepInput: true })
+
+      this.packUploading = true
+      this.packUploadPercent = 0
+      this.packUploadError = ''
+      try {
+        const pack = await uploadModpackArchive(file, {
+          onProgress: (pct) => { this.packUploadPercent = pct },
+          registerAbort: (abort) => { this.packUploadAbort = abort }
+        })
+        this.uploadedPack = pack
+        await this.applyPackDefaults(pack)
+      } catch (error) {
+        this.resetPackFileInput()
+        // Cancelling is something the user just did (closed the dialog); only
+        // a real failure is news. The message is the one api/modrinth.js
+        // raises on xhr.onabort.
+        if (error?.message === 'Upload cancelled') {
+          return
+        }
+        this.packUploadError = error?.message || 'Could not read that .mrpack file.'
+        this.toast.error(this.packUploadError, 'Modpack Upload Failed')
+      } finally {
+        this.packUploading = false
+        this.packUploadAbort = null
+      }
+    },
+
+    /** Fill the loader and Minecraft version in from what the pack declares. */
+    async applyPackDefaults(pack) {
+      const packLoader = String(pack?.loader || '').toLowerCase()
+      const packVersion = pack?.minecraft_version || ''
+
+      if (packVersion) {
+        this.pendingPackVersion = packVersion
+      }
+
+      const supported = this.loaderOptions.some(option => option.value === packLoader)
+      if (packLoader && !supported) {
+        this.toast.warning(
+          `This pack targets ${packLoader}, which Fabricator cannot install. Pick a loader yourself.`,
+          'Unsupported Loader',
+        )
+      }
+
+      if (packLoader && supported && packLoader !== this.formData.loader) {
+        // The loader watcher reloads the version list; the pack's version is
+        // applied from there, once the list that must contain it exists.
+        this.formData.loader = packLoader
+        return
+      }
+
+      await this.applyPendingPackVersion()
+      await this.refreshJavaRequirement()
+    },
+
+    /** Apply a pack's Minecraft version against the loaded version list. */
+    async applyPendingPackVersion() {
+      const wanted = this.pendingPackVersion
+      if (!wanted) {
+        return
+      }
+      this.pendingPackVersion = ''
+
+      const match = this.gameVersions.find(v => v.version === wanted)
+      if (!match) {
+        this.toast.warning(
+          `This pack targets Minecraft ${wanted}, which this loader has no build for. Pick a version yourself.`,
+          'Version Unavailable',
+        )
+        return
+      }
+      // A pack pinned to a snapshot would otherwise be filtered out of the
+      // select the moment we set it.
+      if (!match.stable) {
+        this.showSnapshots = true
+      }
+      this.formData.version = wanted
+    },
+
+    resetPackFileInput() {
+      const input = this.$refs.mrpackInput
+      if (input) {
+        input.value = ''
+      }
+    },
+
+    async clearUploadedPack({ keepInput = false } = {}) {
+      if (this.packUploadAbort) {
+        // Stops an in-flight upload from staging an archive nobody will
+        // install — otherwise it sits until the backend's TTL sweep.
+        this.packUploadAbort()
+        this.packUploadAbort = null
+      }
+      const pack = this.uploadedPack
+      this.uploadedPack = null
+      this.packUploadError = ''
+      this.packUploadPercent = 0
+      if (!keepInput) {
+        this.resetPackFileInput()
+      }
+      if (pack?.upload_id) {
+        // Best effort: a staged pack the backend still holds expires on its
+        // own, so a failed discard is not worth surfacing.
+        try {
+          await discardModpackUpload(pack.upload_id)
+        } catch (_) {
+          // ignore
+        }
+      }
+    },
+
     async validateSelectedModpackCompatibility() {
       if (this.formData.setupMode !== 'modpack' || !this.selectedModpack) {
         return true
@@ -829,6 +1070,19 @@ export default {
     },
 
     async installSelectedModpackOnServer(serverId, modSideOverrides = null) {
+      if (this.uploadedPack) {
+        return installUploadedModpack(this.uploadedPack.upload_id, {
+          server_id: serverId,
+          loader: this.formData.loader,
+          clean_install: false,
+          create_backup: false,
+          mod_side_overrides: modSideOverrides,
+          // The mismatch warning is shown on the form, so by the time we get
+          // here the user has already answered it. A 409 at this point would
+          // strand a server that has just been created with no way to reply.
+          force: true
+        })
+      }
       return installModpack(this.selectedModpack.id, {
         mc_version: this.formData.version,
         loader: this.formData.loader,
@@ -861,6 +1115,10 @@ export default {
         if ((!this.formData.version || !versionExists) && preferred) {
           this.formData.version = preferred.version
         }
+        // An uploaded pack's own Minecraft version outranks the newest-stable
+        // default: switching the loader to match a pack reloads this list, and
+        // the default would otherwise land on top of the pack's choice.
+        await this.applyPendingPackVersion()
         await this.refreshJavaRequirement()
       } catch (error) {
         console.error('Failed to load game versions:', error)
@@ -1060,12 +1318,22 @@ export default {
         return
       }
 
-      if (this.formData.setupMode === 'modpack' && !this.selectedModpack) {
-        this.toast.warning('Choose a modpack by link or search before creating the server.', 'Modpack Required')
+      if (this.formData.setupMode === 'modpack' && !this.selectedModpack && !this.uploadedPack) {
+        this.toast.warning(
+          'Choose a modpack by link or search, or upload a .mrpack, before creating the server.',
+          'Modpack Required',
+        )
         return
       }
 
-      if (this.formData.setupMode === 'modpack') {
+      if (this.packUploading) {
+        this.toast.warning('Wait for the modpack upload to finish.', 'Upload In Progress')
+        return
+      }
+
+      // Only a Modrinth-hosted pack needs resolving; an uploaded one is
+      // already here, and its mismatch warning has been on the form all along.
+      if (this.formData.setupMode === 'modpack' && this.selectedModpack) {
         const compatible = await this.validateSelectedModpackCompatibility()
         if (!compatible) {
           return
@@ -1113,8 +1381,9 @@ export default {
         } else if (finalProgress.phase === 'done') {
           // Modpack install (if any) runs AFTER loader install succeeds.
           let modpackInstallError = null
-          if (this.formData.setupMode === 'modpack' && this.selectedModpack) {
-            this.toast.info(`Installing ${this.selectedModpack.title}…`, 'Modpack')
+          if (this.formData.setupMode === 'modpack' && (this.selectedModpack || this.uploadedPack)) {
+            const modpackTitle = this.selectedModpack?.title || this.uploadedPackTitle
+            this.toast.info(`Installing ${modpackTitle}…`, 'Modpack')
             try {
               let mpResult = null
               let overrideMap = null
@@ -1144,7 +1413,10 @@ export default {
                   'Modpack Choices Applied',
                 )
               }
-              this.toast.success(`${this.selectedModpack.title} installed successfully!`, 'Modpack Installed')
+              // The backend consumes a staged upload once it lands, so drop
+              // our handle before resetForm can try to discard it again.
+              this.uploadedPack = null
+              this.toast.success(`${modpackTitle} installed successfully!`, 'Modpack Installed')
             } catch (modpackError) {
               modpackInstallError = modpackError?.message || 'Modpack installation failed. You can install it manually from the server dashboard.'
               this.toast.error(modpackInstallError, 'Modpack Failed')
@@ -1226,6 +1498,13 @@ export default {
       this.showUncertainModsModal = false
       this.uncertainModsReport = []
       this.pendingUncertainModsResolver = null
+
+      // Releases the staged archive server-side too, so closing the dialog
+      // does not leave an upload sitting in the staging folder until it ages
+      // out. A pack that was installed has already been cleared above.
+      this.pendingPackVersion = ''
+      this.packUploading = false
+      this.clearUploadedPack()
 
       // Phase 3c: clear install-progress state so re-opening the modal starts clean.
       this.installState = null
@@ -1435,6 +1714,72 @@ export default {
   margin: 0;
   color: var(--danger);
   font-size: var(--text-xs);
+}
+
+.modpack-warning {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklch, var(--warning) 12%, transparent);
+  border: 1px solid color-mix(in oklch, var(--warning) 28%, transparent);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+/* .mrpack upload */
+.mrpack-upload {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.mrpack-upload input[type="file"] {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.mrpack-upload input[type="file"]:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.mrpack-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.mrpack-progress-track {
+  flex: 1;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+}
+
+.mrpack-progress-fill {
+  height: 100%;
+  background: var(--primary);
+  transition: width 0.2s ease;
+}
+
+/* No length in the progress events — show motion rather than a false number. */
+.mrpack-progress-fill.indeterminate {
+  width: 40%;
+  animation: mrpack-progress-slide 1.1s ease-in-out infinite;
+}
+
+@keyframes mrpack-progress-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
 }
 
 .modpack-selected {

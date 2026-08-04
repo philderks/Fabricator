@@ -3,7 +3,7 @@
  * Handles all Modrinth-related API requests
  */
 
-import { get, post } from './client'
+import { get, post, del, ApiError } from './client'
 
 
 /**
@@ -65,14 +65,20 @@ export async function getModVersions(modId, filters = {}, options = {}) {
  * @param {string} options.mc_version - Minecraft version
  * @param {string} options.loader - Mod loader
  * @param {string|number} options.server_id - Target server identifier
- * @returns {Promise<Object>} Installation result
+ * @param {string} [options.version_id] - Install this exact version instead of
+ *   letting the backend resolve the newest compatible one (#56). Recorded as a
+ *   pin, so it is distinguishable from an auto-resolved install.
+ * @param {string} [options.replaces] - Filename of the jar this supersedes;
+ *   removed only after the new one is safely on disk. Must be a bare filename
+ *   inside the mods folder. This is what makes a version *change* rather than
+ *   a second copy.
+ * @returns {Promise<Object>} `{ success, file, path, versionId, versionNumber, replaced }`
  */
-export async function installMod(modId, { mc_version, loader, server_id }) {
-  return post(`/api/modrinth/mod/${modId}/install`, {
-    mc_version,
-    loader,
-    server_id
-  })
+export async function installMod(modId, { mc_version, loader, server_id, version_id, replaces }) {
+  const body = { mc_version, loader, server_id }
+  if (version_id) body.version_id = version_id
+  if (replaces) body.replaces = replaces
+  return post(`/api/modrinth/mod/${modId}/install`, body)
 }
 
 /**
@@ -215,4 +221,98 @@ export async function installModpack(projectId, {
     allow_missing,
     mod_side_overrides
   })
+}
+
+/**
+ * Upload a .mrpack exported from the Modrinth app (#53).
+ *
+ * The archive is staged, not installed: the response describes what the pack
+ * declares (`name`, `minecraft_version`, `loader`, ...) so the create form can
+ * fill itself in before the target server exists. Install it later with
+ * `installUploadedModpack(upload_id, ...)`.
+ *
+ * Uses XMLHttpRequest rather than fetch for the one thing fetch cannot give
+ * us: upload progress events. Same shape as `uploadWorld` in api/backups.js.
+ *
+ * @param {File} file
+ * @param {object} [opts]
+ * @param {(pct:number)=>void} [opts.onProgress] 0–100, or -1 when indeterminate
+ * @param {(abort:()=>void)=>void} [opts.registerAbort] receives a cancel fn
+ * @returns {Promise<Object>} staged pack summary including `upload_id`
+ */
+export function uploadModpackArchive(file, { onProgress, registerAbort } = {}) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', `/api/modrinth/modpack/upload?filename=${encodeURIComponent(file.name)}`)
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream')
+
+    if (typeof registerAbort === 'function') {
+      registerAbort(() => xhr.abort())
+    }
+
+    xhr.upload.onprogress = (event) => {
+      if (typeof onProgress !== 'function') return
+      onProgress(event.lengthComputable ? Math.round((event.loaded / event.total) * 100) : -1)
+    }
+
+    xhr.onload = () => {
+      let data = {}
+      try {
+        data = JSON.parse(xhr.responseText || '{}')
+      } catch (_) {
+        data = {}
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(data)
+      } else {
+        reject(new ApiError(
+          data.error || data.message || `Upload failed with status ${xhr.status}`,
+          xhr.status,
+          data && Object.keys(data).length ? data : null
+        ))
+      }
+    }
+
+    xhr.onerror = () => reject(new ApiError('Network error during upload', 0, null))
+    xhr.onabort = () => reject(new ApiError('Upload cancelled', 0, null))
+
+    xhr.send(file)
+  })
+}
+
+/**
+ * Install a previously uploaded .mrpack onto a server.
+ *
+ * `force` acknowledges a pack built for a different Minecraft version or
+ * loader than the server runs; without it the backend answers 409 with the
+ * mismatch spelled out. The upload survives a failed install so the
+ * missing-files / uncertain-mod-side retries can reuse it.
+ *
+ * @param {string} uploadId
+ * @param {Object} options
+ * @returns {Promise<Object>} Installation result
+ */
+export async function installUploadedModpack(uploadId, {
+  server_id,
+  loader,
+  clean_install = false,
+  create_backup = false,
+  allow_missing = false,
+  mod_side_overrides = null,
+  force = false
+}) {
+  return post(`/api/modrinth/modpack/upload/${encodeURIComponent(uploadId)}/install`, {
+    server_id,
+    loader,
+    clean_install,
+    create_backup,
+    allow_missing,
+    mod_side_overrides,
+    force
+  })
+}
+
+/** Drop a staged .mrpack the user decided not to install. */
+export async function discardModpackUpload(uploadId) {
+  return del(`/api/modrinth/modpack/upload/${encodeURIComponent(uploadId)}`)
 }

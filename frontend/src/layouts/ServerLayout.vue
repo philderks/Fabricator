@@ -8,8 +8,10 @@ import JavaInstallModal from '../components/modals/JavaInstallModal.vue'
 import ModBrowserModal from '../components/modals/ModBrowserModal.vue'
 import ModpackBrowserModal from '../components/modals/ModpackBrowserModal.vue'
 import ModSideDecisionModal from '../components/modals/ModSideDecisionModal.vue'
+import ModVersionModal from '../components/modals/ModVersionModal.vue'
 import { useServerStore } from '../stores/server'
 import { useAuthStore } from '../stores/auth'
+import { loaderModrinthFacets } from '../utils/loaderKind'
 
 const route = useRoute()
 const store = useServerStore()
@@ -154,6 +156,19 @@ onUnmounted(() => {
       :loader="(store.server?.loader || store.serverStatus.loader).toLowerCase()"
       @close="store.closeModBrowser"
       @install="store.handleInstallMod"
+    />
+
+    <!-- #56: pick which version of a mod is installed. Hosted here like the
+         other modals so it survives navigation away from the Mods tab. -->
+    <ModVersionModal
+      :show="store.showVersionPicker"
+      :project-id="store.versionPickerMod?.projectId || ''"
+      :project-title="store.versionPickerMod?.title || ''"
+      :mc-version="store.server?.version || store.serverStatus.version"
+      :loaders="loaderModrinthFacets(store.server?.loader || store.serverStatus.loader)"
+      :installed-version-id="store.versionPickerMod?.installedVersionId || ''"
+      @close="store.closeVersionPicker"
+      @select="store.handleSelectVersion"
     />
 
     <ModpackBrowserModal
