@@ -428,7 +428,7 @@ export const useServerStore = defineStore('server', () => {
     }
   }
 
-  async function loadLogs(limit = 200) {
+  async function loadLogs(limit = 1000) {
     if (!server.value || logsLoading.value) return
     logsLoading.value = true
     try {

@@ -41,6 +41,10 @@ class ServerManager:
 
     DEFAULT_COMMAND = "java -Xmx2G -jar server.jar nogui"
     MAX_LOG_LINES = 10_000
+    # How much of the previous run's tail stays visible after a restart. The
+    # console is where a crash gets diagnosed, and restarting to recover used to
+    # wipe exactly the output that explained the crash.
+    PREV_RUN_LINES = 500
     # Player join/leave detection from server stdout. The log prefix is pinned
     # to the START of the line — "[<timestamp>] [<thread>/INFO]" (plus Forge's
     # optional "[<category>]") — so a player who types "INFO]: Ghost joined the
@@ -85,6 +89,13 @@ class ServerManager:
         # (below).
         self._stdout_buffer: List[tuple[str, str]] = []
         self._stderr_buffer: List[tuple[str, str]] = []
+        # Tail of the previous run, carried across a restart. Deliberately kept
+        # in its own pair of buffers rather than left in the live ones: the
+        # immediate-exit diagnostics and wait_for_log()/_stdout_total must keep
+        # seeing ONLY the current run, or a server that dies before printing
+        # anything would be diagnosed from the previous run's output.
+        self._prev_stdout_buffer: List[tuple[str, str]] = []
+        self._prev_stderr_buffer: List[tuple[str, str]] = []
         # Monotonic count of stdout lines ever appended — never reset by the
         # MAX_LOG_LINES front-truncation. wait_for_log() diffs this instead of
         # absolute buffer indices, which stop advancing once the buffer
@@ -289,6 +300,10 @@ class ServerManager:
             pipe.close()
 
         with self._buffer_lock:
+            # Demote the finished run's tail instead of dropping it, so a
+            # restart no longer erases the output that prompted the restart.
+            self._prev_stdout_buffer = self._stdout_buffer[-self.PREV_RUN_LINES:]
+            self._prev_stderr_buffer = self._stderr_buffer[-self.PREV_RUN_LINES:]
             self._stdout_buffer = []
             self._stderr_buffer = []
             self._stdout_total = 0
@@ -492,16 +507,49 @@ class ServerManager:
             status["players"] = {"online": len(self._players)}
         return status
 
-    def tail_logs(self, limit: int = 200) -> dict:
+    @staticmethod
+    def _serialize_run_tail(
+        previous: List[tuple[str, str]],
+        current: List[tuple[str, str]],
+        limit: int,
+        boundary: bool = False,
+    ) -> List[dict]:
+        """Previous run's tail, an optional restart marker, then the current run.
+
+        ``boundary`` is set for stdout only — emitting it on both streams would
+        render two dividers in a console that interleaves them. The marker
+        borrows the first current-run timestamp (falling back to the last
+        previous-run one) so it stays sortable: the frontend only interleaves
+        stdout and stderr when EVERY line has a parseable ts, and a null here
+        would silently drop it back to stdout-then-stderr ordering.
+
+        Once the current run alone fills ``limit`` the older lines and the
+        marker fall off the front on their own.
+        """
+        if limit <= 0:
+            return []
+        entries: List[dict] = [{"ts": ts, "text": text} for ts, text in previous]
+        if boundary and previous:
+            marker_ts = current[0][0] if current else previous[-1][0]
+            entries.append({"ts": marker_ts, "text": "Server restarted", "boundary": True})
+        entries.extend({"ts": ts, "text": text} for ts, text in current)
+        return entries[-limit:]
+
+    def tail_logs(self, limit: int = 1000) -> dict:
+        # Buffers are guarded by _buffer_lock (the writer's lock), not _lock.
+        with self._buffer_lock:
+            stdout = self._serialize_run_tail(
+                self._prev_stdout_buffer, self._stdout_buffer, limit, boundary=True
+            )
+            stderr = self._serialize_run_tail(
+                self._prev_stderr_buffer, self._stderr_buffer, limit
+            )
+        # Taken separately, never nested inside _buffer_lock: the stream thread
+        # releases _buffer_lock before acquiring _lock for player tracking, and
+        # nesting them the other way round here would invert that order.
         with self._lock:
-            stdout = self._stdout_buffer[-limit:]
-            stderr = self._stderr_buffer[-limit:]
             running = self.is_running
-        return {
-            "stdout": [{"ts": ts, "text": text} for ts, text in stdout],
-            "stderr": [{"ts": ts, "text": text} for ts, text in stderr],
-            "running": running
-        }
+        return {"stdout": stdout, "stderr": stderr, "running": running}
 
     def wait_for_log(
         self,

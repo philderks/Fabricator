@@ -11,6 +11,7 @@ from flask import Blueprint, jsonify, request
 
 logger = logging.getLogger(__name__)
 
+from backend.server.manager import ServerManager
 from backend.server.registry import get_server_process_registry
 from backend.server import storage
 from backend.server import install_progress
@@ -180,6 +181,11 @@ def _serialize_file_entry(path: Path, base_path: Path | None = None) -> dict:
 _SEARCH_DEFAULT_LIMIT = 200
 _SEARCH_MAX_LIMIT = 500
 _SEARCH_MAX_SCANNED = 200_000
+
+# Console window served per request. The manager buffers ServerManager
+# .MAX_LOG_LINES, so anything above that ceiling returns the same lines.
+_LOG_DEFAULT_LIMIT = 1000
+_LOG_MAX_LIMIT = ServerManager.MAX_LOG_LINES
 
 
 def _serialize_search_hit(path: Path, base_path: Path) -> dict | None:
@@ -488,7 +494,13 @@ def get_server_details(server_id, server):
 
 @server_bp.route('/servers/<server_id>/logs', methods=['GET'])
 def get_server_logs(server_id):
-    limit = request.args.get('limit', default=200, type=int)
+    # type=int yields None on unparseable input, so fall back explicitly rather
+    # than passing None through to the slice. Clamped to the manager's retained
+    # window — a larger limit can't return more than is buffered anyway.
+    limit = request.args.get('limit', default=_LOG_DEFAULT_LIMIT, type=int)
+    if not limit or limit <= 0:
+        limit = _LOG_DEFAULT_LIMIT
+    limit = min(limit, _LOG_MAX_LIMIT)
     logs = _registry().get_logs(server_id, limit)
     return jsonify(logs)
 

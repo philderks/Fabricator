@@ -382,7 +382,7 @@ class ServerProcessRegistry:
         """
         return self.resolve_content_path(server)
 
-    def get_logs(self, server_id: str, limit: int = 200) -> Dict[str, object]:
+    def get_logs(self, server_id: str, limit: int = 1000) -> Dict[str, object]:
         with self._lock:
             manager = self._instances.get(server_id)
         if not manager:

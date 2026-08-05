@@ -44,6 +44,12 @@ const parseLine = (entry, defaultLevel = 'INFO') => {
   // backend during a rolling update.
   const text = typeof entry === 'string' ? entry : (entry?.text ?? '')
   const ts = entry && typeof entry === 'object' ? entry.ts : null
+  // Synthetic restart marker separating the retained previous run from the
+  // current one. It carries a real ts (so it still sorts into place) but no
+  // level or message parsing — it renders as a divider, not a log line.
+  if (entry && typeof entry === 'object' && entry.boundary) {
+    return { tsMs: ts ? Date.parse(ts) : NaN, time: '', level: 'INFO', message: text, boundary: true }
+  }
   const m = text.match(LEVEL_PATTERN)
   // Derive the level from the line itself; fall back to the stream's default
   // (stderr lines without a recognizable level are treated as errors).
@@ -92,7 +98,9 @@ const allLines = computed(() => {
 
 const filteredLines = computed(() => {
   if (activeFilter.value === 'ALL') return allLines.value
-  return allLines.value.filter((l) => l.level === activeFilter.value)
+  // Drop the restart divider under a level filter: it defaults to INFO, so it
+  // would otherwise show up as the lone "entry" in an empty INFO view.
+  return allLines.value.filter((l) => !l.boundary && l.level === activeFilter.value)
 })
 
 watch(filteredLines, async () => {
@@ -159,7 +167,9 @@ const onHistoryNext = () => {
             <path d="M7 2v9M3 7l4 4 4-4" />
           </svg>
         </button>
-        <AppButton variant="ghost" size="sm" :loading="store.logsLoading" @click="store.loadLogs">Refresh</AppButton>
+        <!-- Wrapped, not passed by reference: @click would hand loadLogs the
+             MouseEvent as its `limit` argument. -->
+        <AppButton variant="ghost" size="sm" :loading="store.logsLoading" @click="() => store.loadLogs()">Refresh</AppButton>
       </div>
     </div>
 
@@ -169,16 +179,20 @@ const onHistoryNext = () => {
         <template v-else-if="activeFilter === 'ALL'">No logs yet.</template>
         <template v-else>No {{ activeFilter }} entries.</template>
       </div>
-      <div
-        v-for="line in filteredLines"
-        :key="line.id"
-        class="console-page__line"
-        :class="`console-page__line--${line.level.toLowerCase()}`"
-      >
-        <span v-if="line.time" class="console-page__line-time">{{ line.time }}</span>
-        <span class="console-page__line-level">{{ line.level }}</span>
-        <span class="console-page__line-msg">{{ line.message }}</span>
-      </div>
+      <template v-for="line in filteredLines" :key="line.id">
+        <div v-if="line.boundary" class="console-page__boundary" role="separator">
+          <span class="console-page__boundary-label">{{ line.message }}</span>
+        </div>
+        <div
+          v-else
+          class="console-page__line"
+          :class="`console-page__line--${line.level.toLowerCase()}`"
+        >
+          <span v-if="line.time" class="console-page__line-time">{{ line.time }}</span>
+          <span class="console-page__line-level">{{ line.level }}</span>
+          <span class="console-page__line-msg">{{ line.message }}</span>
+        </div>
+      </template>
     </div>
 
     <form class="console-page__cmd" @submit="onSubmit">
@@ -343,6 +357,30 @@ const onHistoryNext = () => {
 .console-page__line-msg {
   color: var(--text-secondary);
   word-break: break-word;
+}
+
+/* Marks where the retained previous run ends and the current one begins. */
+.console-page__boundary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+  color: var(--text-disabled);
+  font-size: var(--text-xs);
+}
+
+.console-page__boundary::before,
+.console-page__boundary::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-color);
+}
+
+.console-page__boundary-label {
+  flex-shrink: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .console-page__cmd {
