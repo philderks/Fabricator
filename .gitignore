@@ -78,3 +78,6 @@ docs
 
 # Local MCP server config — machine-specific, not shared
 .mcp.json
+
+# Dev container feature lockfile — let features resolve to latest on rebuild
+.devcontainer/devcontainer-lock.json

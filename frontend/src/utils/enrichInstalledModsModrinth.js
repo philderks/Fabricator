@@ -108,7 +108,19 @@ function _withMeta(mod, meta) {
     ...mod,
     displayTitle: meta.displayTitle,
     iconUrl: meta.iconUrl,
-    modrinthGuess: meta.projectId ? { projectId: meta.projectId, slug: meta.slug } : null
+    // A hash match knows exactly which release the jar is, so a jar dropped in
+    // by hand stops reporting "local" (#56 — the reporter's stated workaround
+    // was doing exactly that, and the panel then disagreed with reality).
+    // Filename-derived matches carry no version and leave it alone.
+    version: meta.versionNumber || mod.version,
+    modrinthGuess: meta.projectId
+      ? {
+          projectId: meta.projectId,
+          slug: meta.slug,
+          versionId: meta.versionId || null,
+          versionNumber: meta.versionNumber || null
+        }
+      : null
   }
 }
 
@@ -141,7 +153,10 @@ async function _resolveByHash(serverId, signal) {
       displayTitle: meta.title || meta.slug || filename,
       iconUrl: meta.iconUrl || null,
       projectId: meta.projectId || null,
-      slug: meta.slug || null
+      slug: meta.slug || null,
+      // Exact, because it came from the file's hash rather than its name.
+      versionId: meta.versionId || null,
+      versionNumber: meta.versionNumber || null
     })
   }
   return byFilename

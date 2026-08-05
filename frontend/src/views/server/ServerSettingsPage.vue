@@ -1,11 +1,12 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import AppButton from '../../components/ui/AppButton.vue'
 import FormField from '../../components/ui/FormField.vue'
 import Panel from '../../components/ui/Panel.vue'
 import ToggleRow from '../../components/ui/ToggleRow.vue'
 import { useServerStore } from '../../stores/server'
 import { useAuthStore } from '../../stores/auth'
+import { getInstalledJava, getJavaStatus } from '../../api/servers'
 
 const store = useServerStore()
 const auth = useAuthStore()
@@ -47,6 +48,118 @@ const onMemoryUnitChange = (nextUnit) => {
   }
   s.memoryUnit = nextUnit
 }
+
+// ─── Java runtime + launch flags (#54) ──────────────────────────────────────
+// Both were already honoured per server by the launch builder but had no UI
+// after creation, so the only way to pin a JVM was renaming managed JDK folders
+// and hand-editing files in the server directory.
+
+const installedJava = ref([])
+const requiredJava = ref(null)
+// Forces the custom-path row open while the field is still empty, which is
+// otherwise indistinguishable from "Automatic".
+const customJavaOpen = ref(false)
+const customJavaProbe = ref(null)
+
+const javaSelection = computed(() => {
+  const path = store.serverSettings?.javaPath || ''
+  if (!path) return customJavaOpen.value ? 'custom' : 'auto'
+  const managed = installedJava.value.find((entry) => entry.path === path)
+  return managed ? `managed:${managed.major}` : 'custom'
+})
+
+function onJavaSelectionChange(value) {
+  const settings = store.serverSettings
+  if (!settings) return
+  customJavaProbe.value = null
+  if (value === 'auto') {
+    customJavaOpen.value = false
+    settings.javaPath = ''
+    return
+  }
+  if (value === 'custom') {
+    customJavaOpen.value = true
+    // Keep whatever is already there so switching away and back isn't
+    // destructive; an unknown path already reads as 'custom'.
+    return
+  }
+  const major = Number(value.slice('managed:'.length))
+  const managed = installedJava.value.find((entry) => entry.major === major)
+  if (managed) {
+    customJavaOpen.value = false
+    settings.javaPath = managed.path
+  }
+}
+
+// The version a custom path actually reports — the whole point of the field is
+// choosing a specific JVM, so guessing from the path would defeat it.
+async function probeCustomJava() {
+  const path = store.serverSettings?.javaPath?.trim()
+  if (!path) {
+    customJavaProbe.value = null
+    return
+  }
+  try {
+    const status = await getJavaStatus({
+      javaPath: path,
+      mcVersion: store.server?.version
+    })
+    customJavaProbe.value = {
+      available: Boolean(status?.installed ?? status?.available),
+      major: status?.detected_java ?? status?.major_version ?? null
+    }
+  } catch {
+    customJavaProbe.value = null
+  }
+}
+
+const selectedJavaMajor = computed(() => {
+  if (javaSelection.value === 'auto') return null
+  if (javaSelection.value === 'custom') return customJavaProbe.value?.major ?? null
+  return Number(javaSelection.value.slice('managed:'.length))
+})
+
+const javaWarning = computed(() => {
+  if (customJavaProbe.value && customJavaProbe.value.available === false) {
+    return 'That path could not be run — check it points at a java executable.'
+  }
+  const required = requiredJava.value
+  const selected = selectedJavaMajor.value
+  if (!required || selected === null) return ''
+  if (selected < required) {
+    return `This server needs Java ${required} or newer; the selected runtime reports Java ${selected}.`
+  }
+  return ''
+})
+
+const javaAutoHint = computed(() =>
+  requiredJava.value
+    ? `Picks an installed Java ${requiredJava.value}+ runtime automatically.`
+    : 'Picks a compatible installed runtime automatically.'
+)
+
+onMounted(async () => {
+  if (auth.managed) return
+  try {
+    const payload = await getInstalledJava()
+    installedJava.value = Array.isArray(payload?.managed) ? payload.managed : []
+  } catch {
+    installedJava.value = []
+  }
+  try {
+    const status = await getJavaStatus({ mcVersion: store.server?.version })
+    requiredJava.value = status?.required_java ?? null
+  } catch {
+    requiredJava.value = null
+  }
+})
+
+// A saved or reset form replaces serverSettings wholesale; drop probe state so
+// a stale "Detected Java 17" can't linger next to a different path.
+watch(() => store.serverSettings, () => {
+  customJavaProbe.value = null
+  customJavaOpen.value = false
+})
 
 const modeLabel = computed(() => (showAdvanced.value ? 'Expert mode' : 'Basic mode'))
 const modeDescription = computed(() =>
@@ -746,6 +859,89 @@ const onReset = () => {
           :disabled="!store.canEditSettings"
         />
       </div>
+    </Panel>
+
+    <!-- Launch tuning. Hidden in managed mode, where the deployment owns the
+         JVM and the settings API rejects both fields outright. -->
+    <Panel v-if="!auth.managed" title="Java Runtime">
+      <div class="settings-page__notice settings-page__notice--info">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" />
+          <path d="M12 8V12M12 16H12.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+        </svg>
+        <div>
+          <strong>Heads up:</strong> These change how the server process is launched and take effect on the next start.
+        </div>
+      </div>
+
+      <div class="settings-page__grid">
+        <FormField label="Java Runtime" :hint="javaSelection === 'auto' ? javaAutoHint : ''">
+          <template #default="{ id, describedBy }">
+            <select
+              :id="id"
+              class="settings-page__select"
+              :value="javaSelection"
+              :disabled="!store.canEditSettings"
+              :aria-describedby="describedBy"
+              @change="onJavaSelectionChange($event.target.value)"
+            >
+              <option value="auto">Automatic (recommended)</option>
+              <option
+                v-for="entry in installedJava"
+                :key="entry.path"
+                :value="`managed:${entry.major}`"
+              >
+                Java {{ entry.major }} (managed)
+              </option>
+              <option value="custom">Custom path…</option>
+            </select>
+          </template>
+        </FormField>
+
+        <FormField
+          v-if="javaSelection === 'custom'"
+          label="Java Executable Path"
+          :hint="customJavaProbe?.major ? `Detected Java ${customJavaProbe.major}.` : 'Full path to a java executable, or a command on PATH.'"
+        >
+          <template #default="{ id, describedBy }">
+            <input
+              :id="id"
+              class="settings-page__input"
+              type="text"
+              placeholder="/usr/lib/jvm/java-25-openjdk/bin/java"
+              v-model.trim="store.serverSettings.javaPath"
+              :disabled="!store.canEditSettings"
+              :aria-describedby="describedBy"
+              @blur="probeCustomJava"
+            />
+          </template>
+        </FormField>
+      </div>
+
+      <div v-if="javaWarning" class="settings-page__notice settings-page__notice--warning" role="status">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 9V13M12 17H12.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        <div>{{ javaWarning }}</div>
+      </div>
+
+      <FormField
+        label="JVM Arguments"
+        hint="Extra flags passed to the JVM, e.g. -XX:+UseZGC -XX:+ZGenerational. Set the heap with Memory Allocation below, not with -Xmx."
+      >
+        <template #default="{ id, describedBy }">
+          <textarea
+            :id="id"
+            class="settings-page__input settings-page__textarea"
+            rows="2"
+            spellcheck="false"
+            placeholder="-XX:+UseG1GC -XX:MaxGCPauseMillis=130"
+            v-model.trim="store.serverSettings.jvmArgs"
+            :disabled="!store.canEditSettings"
+            :aria-describedby="describedBy"
+          ></textarea>
+        </template>
+      </FormField>
     </Panel>
 
     <Panel title="Performance">

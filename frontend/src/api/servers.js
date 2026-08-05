@@ -145,11 +145,10 @@ export async function saveServerFile(serverId, path, content) {
  * @param {string|number} serverId - Server ID
  * @param {Object} options - Log options
  * @param {number} options.limit - Number of log lines to retrieve
- * @param {number} options.offset - Offset for pagination
  * @returns {Promise<Object>} Server logs
  */
-export async function getServerLogs(serverId, { limit = 100, offset = 0 } = {}) {
-  return get(`/api/servers/${serverId}/logs`, { limit, offset })
+export async function getServerLogs(serverId, { limit = 1000 } = {}) {
+  return get(`/api/servers/${serverId}/logs`, { limit })
 }
 
 /**

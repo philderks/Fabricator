@@ -380,6 +380,51 @@ class ModrinthClient:
             "version_number": best_version.get("version_number"),
         }
 
+    def get_pinned_download(
+        self, project_id: str, version_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Resolve the download for one explicitly chosen version.
+
+        The counterpart to :meth:`get_project_download_url`, which picks the
+        newest release itself. Here the caller has named a version, so no
+        selection happens — but the version is checked to actually belong to
+        ``project_id`` first. Without that, a caller could pass any version id
+        and install a completely different mod under this project's name, and
+        the install manifest would record the lie (#56).
+
+        ``project_id`` may be a slug, so the check compares against both it and
+        the project's canonical id. Returns None when the version has no
+        downloadable primary file; raises ModrinthApiError for unknown ids.
+        """
+        version = self.get_version(version_id)
+        owner = str(version.get("project_id") or "")
+
+        if owner.lower() != str(project_id).lower():
+            # Slug was passed — resolve it before declaring a mismatch.
+            project = self.get_project(project_id)
+            if owner != str(project.get("id") or ""):
+                raise ModrinthApiError(
+                    f"Version {version_id} does not belong to {project_id}",
+                    status_code=400,
+                )
+
+        url = self.get_primary_file_url(version)
+        if not url:
+            return None
+
+        hashes: Dict[str, str] = {}
+        for f in version.get("files", []):
+            if f.get("url") == url:
+                hashes = f.get("hashes") or {}
+                break
+
+        return {
+            "url": url,
+            "hashes": hashes,
+            "version_id": version.get("id"),
+            "version_number": version.get("version_number"),
+        }
+
     def resolve_project_version(
         self,
         project_id: str,
@@ -497,11 +542,13 @@ class ModrinthClient:
         mod_side_overrides: Optional[Dict[str, str]] = None,
         progress_callback: Optional[Any] = None,
     ) -> Dict[str, Any]:
-        """Download and install a modpack into a server directory.
+        """Download a modpack from Modrinth and install it into a server dir.
 
-        Downloads the .mrpack file, installs all server-side files listed in
-        modrinth.index.json, and extracts overrides/ and server-overrides/ into
-        the server root.
+        Resolves the best version for ``mc_version``/``loader``, downloads its
+        .mrpack, then hands off to :meth:`install_mrpack_archive` — which is
+        the same code path an uploaded pack takes (#53). Upstream project and
+        version identity is layered on afterwards, since only a pack fetched
+        from Modrinth has any.
         """
         def _report(stage: str, current: int = 0, total: int = 0, detail: str = ""):
             if progress_callback:
@@ -516,56 +563,20 @@ class ModrinthClient:
         if not download_url:
             raise ModrinthApiError("No download URL found for modpack version")
 
-        install_path = Path(install_path).resolve()
-        normalized_overrides = self._normalize_mod_side_overrides(mod_side_overrides)
-        cleaned_paths: List[str] = []
-
-        if clean_install:
-            _report("cleaning")
-            cleaned_paths = self.clean_modpack_switch_paths(install_path)
-
         _report("downloading_pack")
         with tempfile.TemporaryDirectory() as tmp_dir:
             mrpack_path = self._download_mrpack(download_url, Path(tmp_dir))
+            result = self.install_mrpack_archive(
+                mrpack_path,
+                install_path,
+                loader=loader,
+                clean_install=clean_install,
+                allow_missing=allow_missing,
+                mod_side_overrides=mod_side_overrides,
+                progress_callback=progress_callback,
+            )
 
-            with zipfile.ZipFile(mrpack_path, "r") as zf:
-                with zf.open("modrinth.index.json") as fh:
-                    index = json.loads(fh.read())
-
-                if not allow_missing:
-                    _report("checking_availability")
-                    precheck_missing = self._collect_unavailable_modpack_entries(
-                        index.get("files", []),
-                        normalized_overrides,
-                    )
-                    if precheck_missing:
-                        raise ModrinthApiError(
-                            "Some modpack files could not be downloaded",
-                            status_code=409,
-                            details={
-                                "missing_files": precheck_missing,
-                                "can_continue_with_missing": True,
-                            },
-                        )
-
-                result = self._install_index_files(
-                    index.get("files", []),
-                    install_path,
-                    normalized_overrides,
-                    allow_missing,
-                    progress_callback=_report,
-                    loader=loader,
-                )
-                _report("extracting_overrides")
-                self._extract_overrides(
-                    zf, install_path, normalized_overrides,
-                    result["files_installed"],
-                    result["files_skipped"],
-                    result["uncertain_mod_files"],
-                    loader=loader,
-                )
-
-        return {
+        result.update({
             "version": best.get("version_number"),
             "name": project_title,
             "version_name": best.get("name"),
@@ -573,13 +584,98 @@ class ModrinthClient:
             "loaders": best.get("loaders", []),
             "project_id": project_id,
             "version_id": best.get("id"),
+        })
+        return result
+
+    def install_mrpack_archive(
+        self,
+        mrpack_path: Path,
+        install_path: Path,
+        loader: Optional[str] = None,
+        clean_install: bool = False,
+        allow_missing: bool = False,
+        mod_side_overrides: Optional[Dict[str, str]] = None,
+        progress_callback: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """Install an on-disk .mrpack into a server directory.
+
+        Installs every server-side file listed in modrinth.index.json and
+        extracts overrides/ and server-overrides/ into the server root. The
+        archive is only read, never consumed, so a caller can re-run the
+        install once the user has decided what to do about missing files.
+
+        Pack identity in the returned dict comes from the index (``name``,
+        ``versionId``, ``dependencies``); a caller that knows better — the
+        Modrinth download path — overwrites it.
+        """
+        def _report(stage: str, current: int = 0, total: int = 0, detail: str = ""):
+            if progress_callback:
+                progress_callback(stage=stage, current=current, total=total, detail=detail)
+
+        install_path = Path(install_path).resolve()
+        normalized_overrides = self._normalize_mod_side_overrides(mod_side_overrides)
+        cleaned_paths: List[str] = []
+
+        with zipfile.ZipFile(mrpack_path, "r") as zf:
+            with zf.open("modrinth.index.json") as fh:
+                index = json.loads(fh.read())
+
+            if not allow_missing:
+                _report("checking_availability")
+                precheck_missing = self._collect_unavailable_modpack_entries(
+                    index.get("files", []),
+                    normalized_overrides,
+                )
+                if precheck_missing:
+                    raise ModrinthApiError(
+                        "Some modpack files could not be downloaded",
+                        status_code=409,
+                        details={
+                            "missing_files": precheck_missing,
+                            "can_continue_with_missing": True,
+                        },
+                    )
+
+            # Cleaning happens only once the pack has been read and its files
+            # are known to be reachable: an install that fails at the first
+            # download should leave the server's mods/ as it found them.
+            if clean_install:
+                _report("cleaning")
+                cleaned_paths = self.clean_modpack_switch_paths(install_path)
+
+            result = self._install_index_files(
+                index.get("files", []),
+                install_path,
+                normalized_overrides,
+                allow_missing,
+                progress_callback=_report,
+                loader=loader,
+            )
+            _report("extracting_overrides")
+            self._extract_overrides(
+                zf, install_path, normalized_overrides,
+                result["files_installed"],
+                result["files_skipped"],
+                result["uncertain_mod_files"],
+                loader=loader,
+            )
+
+        dependencies = index.get("dependencies") or {}
+        return {
+            "version": index.get("versionId"),
+            "name": index.get("name"),
+            "version_name": index.get("versionId"),
+            "mc_version": dependencies.get("minecraft"),
+            "loaders": [loader] if loader else [],
+            "project_id": None,
+            "version_id": None,
             "files_installed": result["files_installed"],
             "files_skipped": result["files_skipped"],
             "clean_install": clean_install,
             "cleaned_paths": cleaned_paths,
             "missing_files": result["missing_files"],
             "allow_missing": allow_missing,
-            "dependencies": index.get("dependencies", {}),
+            "dependencies": dependencies,
             "uncertain_mod_files": result["uncertain_mod_files"],
         }
 

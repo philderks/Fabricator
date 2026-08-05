@@ -10,6 +10,7 @@ from typing import Dict, Optional
 from backend.core.config import get_config
 from backend.managed import ManagedConfigError, is_managed, managed_memory_gb
 from backend.server import java_manager
+from backend.server.jvm_args import parse_jvm_args
 from backend.server.manager import ServerManager
 
 DIR_PERMISSIONS = 0o775
@@ -47,13 +48,14 @@ class ServerProcessRegistry:
                     "or not a positive integer; refusing to start"
                 )
             # Pin the heap and drop record-supplied launch overrides at the
-            # source (command / javaPath / launch.jvm_args). Operate on a shallow
-            # copy so the persisted record is never mutated; the assembly below
-            # then runs unchanged and lands the pin in its normal slot.
+            # source (command / javaPath / jvmArgs / launch.jvm_args). Operate on
+            # a shallow copy so the persisted record is never mutated; the
+            # assembly below then runs unchanged and lands the pin in its normal
+            # slot.
             server = {
                 key: value
                 for key, value in server.items()
-                if key not in ('command', 'javaPath')
+                if key not in ('command', 'javaPath', 'jvmArgs')
             }
             server['memory'] = gb
             server['memoryUnit'] = 'GB'
@@ -81,6 +83,14 @@ class ServerProcessRegistry:
         launch = server.get('launch')
         launch_type = launch.get('type') if isinstance(launch, dict) else None
 
+        # User-tuned flags, appended AFTER the installer's own jvm_args in every
+        # branch below: the JVM takes the last occurrence of a repeated option,
+        # so this is what lets a user override an installer default rather than
+        # be overridden by it. Parsed leniently — this method also runs on the
+        # server-detail probe path, where raising would turn a page load into a
+        # 500 (the settings route validates on write instead).
+        user_jvm_args = parse_jvm_args(server.get('jvmArgs'), server.get('id'))
+
         if launch_type == 'jar':
             jvm_args_raw = launch.get('jvm_args')
             jvm_args = list(jvm_args_raw) if jvm_args_raw is not None else []
@@ -94,6 +104,7 @@ class ServerProcessRegistry:
                 xms,
                 xmx,
                 *jvm_args,
+                *user_jvm_args,
                 '-jar',
                 jar_name,
                 *program_args,
@@ -117,17 +128,21 @@ class ServerProcessRegistry:
                 xms,
                 xmx,
                 *jvm_args,
+                *user_jvm_args,
                 f'@{args_file}',
                 *program_args,
             ]
 
         if launch_type is None:
             # Legacy fallback for records created before LaunchSpec landed.
-            # Matches the historical hardcoded default exactly.
+            # Matches the historical hardcoded default exactly, plus the user's
+            # own flags — those are record-level, not LaunchSpec-level, so they
+            # apply to legacy records too.
             return [
                 java_exec,
                 xms,
                 xmx,
+                *user_jvm_args,
                 '-jar',
                 'server.jar',
                 'nogui',
@@ -367,7 +382,7 @@ class ServerProcessRegistry:
         """
         return self.resolve_content_path(server)
 
-    def get_logs(self, server_id: str, limit: int = 200) -> Dict[str, object]:
+    def get_logs(self, server_id: str, limit: int = 1000) -> Dict[str, object]:
         with self._lock:
             manager = self._instances.get(server_id)
         if not manager:

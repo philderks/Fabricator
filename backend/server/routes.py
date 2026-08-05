@@ -11,6 +11,7 @@ from flask import Blueprint, jsonify, request
 
 logger = logging.getLogger(__name__)
 
+from backend.server.manager import ServerManager
 from backend.server.registry import get_server_process_registry
 from backend.server import storage
 from backend.server import install_progress
@@ -22,6 +23,7 @@ from backend.server.installer import (
 )
 from backend.server.java_compat import resolve_required_java, skip_java_enforcement
 from backend.server import java_manager
+from backend.server import jvm_args
 from backend.server.locks import get_server_lock, try_acquire, discard_lock
 from backend.utils import platform as platform_utils
 from backend.utils.java import parse_java_major, parse_java_version_string
@@ -179,6 +181,11 @@ def _serialize_file_entry(path: Path, base_path: Path | None = None) -> dict:
 _SEARCH_DEFAULT_LIMIT = 200
 _SEARCH_MAX_LIMIT = 500
 _SEARCH_MAX_SCANNED = 200_000
+
+# Console window served per request. The manager buffers ServerManager
+# .MAX_LOG_LINES, so anything above that ceiling returns the same lines.
+_LOG_DEFAULT_LIMIT = 1000
+_LOG_MAX_LIMIT = ServerManager.MAX_LOG_LINES
 
 
 def _serialize_search_hit(path: Path, base_path: Path) -> dict | None:
@@ -360,6 +367,35 @@ def _java_compat_payload(mc_version: str) -> dict:
     return compat.to_dict()
 
 
+def _normalize_launch_overrides(data: dict) -> str | None:
+    """Validate and normalize ``javaPath`` / ``jvmArgs`` in-place.
+
+    Returns an error message, or None when the payload is fine. Both fields are
+    user-owned launch tuning (#54): the JVM binary the server runs on, and extra
+    flags appended after the installer's own. Validating on write is what keeps
+    the launch builder's read path total — it must not raise, since the
+    server-detail probe builds the command too.
+
+    Empty values are normalized to "" / "" so clearing a field in the UI removes
+    the override rather than persisting a blank that looks set.
+    """
+    for key in ('javaPath', 'jvmArgs'):
+        if key not in data:
+            continue
+        try:
+            if key == 'javaPath':
+                data[key] = jvm_args.validate_java_path(data[key])
+            else:
+                # Stored as the raw string the user typed so the settings form
+                # round-trips exactly; the launch builder re-splits it.
+                raw = data[key]
+                jvm_args.validate_jvm_args(raw)
+                data[key] = raw.strip() if isinstance(raw, str) else raw
+        except jvm_args.JvmArgsError as exc:
+            return str(exc)
+    return None
+
+
 def _server_java_check_payload(server: dict) -> dict:
     runtime = _registry().get_java_runtime(server)
     compat = resolve_required_java(server.get('version', ''))
@@ -422,6 +458,13 @@ def create_server():
     if any((server.get('port') or 25565) == requested_port for server in existing_servers):
         return jsonify({'error': f'Port {requested_port} is already in use by another server'}), 400
 
+    # Same validation as the settings route — the create modal offers javaPath
+    # too, and an unvalidated value here would produce a server that installs
+    # fine and then refuses to start.
+    error = _normalize_launch_overrides(data)
+    if error:
+        return jsonify({'error': error}), 400
+
     try:
         data['status'] = 'pending'
         compatibility = _java_compat_payload(data.get('version', ''))
@@ -451,7 +494,13 @@ def get_server_details(server_id, server):
 
 @server_bp.route('/servers/<server_id>/logs', methods=['GET'])
 def get_server_logs(server_id):
-    limit = request.args.get('limit', default=200, type=int)
+    # type=int yields None on unparseable input, so fall back explicitly rather
+    # than passing None through to the slice. Clamped to the manager's retained
+    # window — a larger limit can't return more than is buffered anyway.
+    limit = request.args.get('limit', default=_LOG_DEFAULT_LIMIT, type=int)
+    if not limit or limit <= 0:
+        limit = _LOG_DEFAULT_LIMIT
+    limit = min(limit, _LOG_MAX_LIMIT)
     logs = _registry().get_logs(server_id, limit)
     return jsonify(logs)
 
@@ -692,11 +741,19 @@ def update_server_settings(server_id, server):
     # object) is installer-owned; no legitimate settings caller sets it. Refuse
     # explicitly rather than silently strip so a managed override is loud.
     if is_managed():
-        forbidden = [key for key in ('command', 'javaPath', 'launch') if key in data]
+        forbidden = [
+            key for key in ('command', 'javaPath', 'jvmArgs', 'launch') if key in data
+        ]
         if forbidden:
             return jsonify({
                 'error': f"Not editable in managed mode: {', '.join(forbidden)}"
             }), 400
+
+    # Normalize the launch-tuning fields before anything is persisted: a bad
+    # value here would otherwise only surface as a server that refuses to start.
+    error = _normalize_launch_overrides(data)
+    if error:
+        return jsonify({'error': error}), 400
 
     protected_fields = ['id', 'createdAt']
     for field in protected_fields:

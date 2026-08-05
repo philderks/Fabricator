@@ -1,7 +1,12 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { useRouter } from 'vue-router'
-import { installMod, installModpack, getModpackInstallProgress } from '../api/modrinth'
+import {
+  installMod,
+  installModpack,
+  installUploadedModpack,
+  getModpackInstallProgress
+} from '../api/modrinth'
 import {
   getServer,
   getServers,
@@ -47,6 +52,10 @@ const TEXT_FILE_EXTENSIONS = new Set([
   'txt', 'json', 'properties', 'yml', 'yaml', 'toml', 'cfg', 'conf', 'log', 'md'
 ])
 
+// Cap on remembered console commands. Old entries fall off the front so a
+// long-lived session can't grow the history without bound.
+const MAX_COMMAND_HISTORY = 100
+
 function isTextFile(path) {
   if (!path || typeof path !== 'string') return false
   const segments = path.toLowerCase().split('.')
@@ -88,6 +97,16 @@ export const useServerStore = defineStore('server', () => {
   const actionState = ref({ start: false, stop: false, restart: false, install: false })
   const consoleCommand = ref('')
   const commandSending = ref(false)
+  // Sent console commands, oldest first — backs the arrow-key recall in
+  // ServerConsolePage. Lives in the store (not the component) so history
+  // survives navigating away from the console tab and back.
+  const commandHistory = ref([])
+  // Which history entry is currently being previewed. null means "not
+  // recalling" — the input holds the user's own in-progress line.
+  const historyIndex = ref(null)
+  // The in-progress line stashed when recall begins, so arrowing back down
+  // past the newest entry returns what was typed instead of dropping it.
+  const historyDraft = ref('')
   const fileBrowser = ref({ currentPath: '', entries: [], loading: false, error: null })
   const fileEditor = ref({ path: null, content: '', originalContent: '', loading: false, saving: false, error: null })
   const fileSearch = ref({ query: '', results: [], active: false, loading: false, truncated: false, error: null })
@@ -158,6 +177,10 @@ export const useServerStore = defineStore('server', () => {
     simulationDistance: data.simulationDistance ?? 10,
     memory: data.memory ?? 4,
     memoryUnit: data.memoryUnit === 'MB' ? 'MB' : 'GB',
+    // Launch tuning (#54). Empty string means "no override": javaPath falls
+    // back to the managed JDK matching the MC version, jvmArgs adds nothing.
+    javaPath: data.javaPath || '',
+    jvmArgs: data.jvmArgs || '',
     levelName: data.levelName || 'world',
     levelType: data.levelType || 'default',
     seed: data.seed || '',
@@ -405,7 +428,7 @@ export const useServerStore = defineStore('server', () => {
     }
   }
 
-  async function loadLogs(limit = 200) {
+  async function loadLogs(limit = 1000) {
     if (!server.value || logsLoading.value) return
     logsLoading.value = true
     try {
@@ -600,8 +623,84 @@ export const useServerStore = defineStore('server', () => {
     }
   }
 
-  function handleUpdateMod(_mod) {
-    toast.info('Mod updates coming soon', 'Not Implemented')
+  // ── Version picker (#56) ───────────────────────────────────────────────
+  // `versionPickerMod` doubles as the open flag and the subject. Null when
+  // closed; an installed-mod entry when changing a version; a bare project ref
+  // ({ projectId, slug, title }) when picking at install time.
+  const versionPickerMod = ref(null)
+  const showVersionPicker = computed(() => versionPickerMod.value !== null)
+
+  /**
+   * Project identity for the picker, from the manifest when we have it and the
+   * filename-derived guess otherwise. Without either there is nothing to list.
+   */
+  function modProjectRef(mod) {
+    const ref_ = mod?.modrinth || mod?.modrinthGuess || null
+    if (!ref_?.projectId && !ref_?.slug) return null
+    return {
+      projectId: ref_.slug || ref_.projectId,
+      title: ref_.title || mod?.displayTitle || mod?.name || '',
+      // From the manifest when we installed it, otherwise from the hash match
+      // (also exact) so a hand-added jar still highlights its current version.
+      installedVersionId:
+        mod?.modrinth?.versionId || mod?.modrinthGuess?.versionId || '',
+      filename: mod?.filename || mod?.name || ''
+    }
+  }
+
+  function openVersionPicker(mod) {
+    const ref_ = modProjectRef(mod)
+    if (!ref_) {
+      toast.info(
+        'This jar could not be matched to a Modrinth project, so its versions are unknown.',
+        'No version list'
+      )
+      return
+    }
+    versionPickerMod.value = ref_
+  }
+
+  function closeVersionPicker() { versionPickerMod.value = null }
+
+  /**
+   * Install the chosen version, replacing the jar currently on disk.
+   *
+   * `replaces` is handled server-side so the old jar is removed only after the
+   * new one lands — a failed download leaves the server with the version it
+   * already had rather than none at all.
+   */
+  async function handleSelectVersion({ versionId, versionNumber }) {
+    const target = versionPickerMod.value
+    if (!target || !server.value) return
+    versionPickerMod.value = null
+    installLoading.value = true
+    try {
+      await installMod(target.projectId, {
+        mc_version: server.value.version,
+        loader: server.value.loader,
+        server_id: currentServerId.value,
+        version_id: versionId,
+        replaces: target.filename || undefined
+      })
+      // The swapped-out jar's cached title/icon must not stick to the new
+      // filename, and the new one needs resolving on the next list.
+      if (target.filename) invalidateModrinthMetaCache(target.filename)
+      toast.success(
+        `${target.title || 'Mod'} is now on version ${versionNumber}`,
+        'Version changed'
+      )
+      await loadMods()
+    } catch (error) {
+      console.error('Version change failed:', error)
+      toast.error(error.message || 'Could not change the mod version', 'Install Failed')
+      try {
+        await loadMods()
+      } catch {
+        // non-fatal
+      }
+    } finally {
+      installLoading.value = false
+    }
   }
 
   async function handleInstallModpack(modpackData) {
@@ -639,15 +738,29 @@ export const useServerStore = defineStore('server', () => {
       showModpackInstallConfirmModal.value = true
     }
     try {
-      const result = await installModpack(modpackData.projectId, {
-        mc_version: modpackData.mcVersion,
-        loader: modpackData.loader,
-        server_id: currentServerId.value,
-        clean_install: !isRetry,
-        create_backup: isRetry ? false : modpackData.createBackup,
-        allow_missing: Boolean(modpackData.allowMissing),
-        mod_side_overrides: modpackData.modSideOverrides || null
-      })
+      // An uploaded .mrpack (#53) is already staged on the backend, so it is
+      // installed by upload id rather than resolved from a Modrinth project.
+      // The missing-files retry reuses the same staged archive, which is why
+      // the backend only discards it once an install actually succeeds.
+      const result = modpackData.uploadId
+        ? await installUploadedModpack(modpackData.uploadId, {
+          server_id: currentServerId.value,
+          loader: modpackData.loader,
+          clean_install: !isRetry,
+          create_backup: isRetry ? false : modpackData.createBackup,
+          allow_missing: Boolean(modpackData.allowMissing),
+          mod_side_overrides: modpackData.modSideOverrides || null,
+          force: Boolean(modpackData.force)
+        })
+        : await installModpack(modpackData.projectId, {
+          mc_version: modpackData.mcVersion,
+          loader: modpackData.loader,
+          server_id: currentServerId.value,
+          clean_install: !isRetry,
+          create_backup: isRetry ? false : modpackData.createBackup,
+          allow_missing: Boolean(modpackData.allowMissing),
+          mod_side_overrides: modpackData.modSideOverrides || null
+        })
       showModpackBrowser.value = false
       showModpackInstallConfirmModal.value = false
       pendingModpackInstall.value = null
@@ -930,12 +1043,49 @@ export const useServerStore = defineStore('server', () => {
     else handleStart()
   }
 
+  // Step back toward older commands (ArrowUp). Entering recall stashes the
+  // current draft; once at the oldest entry, further presses stay put.
+  function recallPreviousCommand() {
+    if (!commandHistory.value.length) return
+    if (historyIndex.value === null) {
+      historyDraft.value = consoleCommand.value
+      historyIndex.value = commandHistory.value.length - 1
+    } else if (historyIndex.value > 0) {
+      historyIndex.value -= 1
+    }
+    consoleCommand.value = commandHistory.value[historyIndex.value]
+  }
+
+  // Step back toward newer commands (ArrowDown). Moving past the newest entry
+  // leaves recall and restores the stashed draft, matching shell behaviour.
+  function recallNextCommand() {
+    if (historyIndex.value === null) return
+    if (historyIndex.value < commandHistory.value.length - 1) {
+      historyIndex.value += 1
+      consoleCommand.value = commandHistory.value[historyIndex.value]
+    } else {
+      historyIndex.value = null
+      consoleCommand.value = historyDraft.value
+      historyDraft.value = ''
+    }
+  }
+
   async function sendConsoleCommand() {
     if (!canSendCommand.value || !consoleCommand.value.trim()) return
+    const command = consoleCommand.value.trim()
     commandSending.value = true
     try {
-      await sendServerCommand(currentServerId.value, consoleCommand.value.trim())
+      await sendServerCommand(currentServerId.value, command)
       toast.success('Command sent to server', 'Console')
+      // Record only on success: a failed send leaves the text in the input for
+      // the user to retry, so adding it here would duplicate that line.
+      // Consecutive repeats collapse the way shells dedupe them.
+      if (commandHistory.value[commandHistory.value.length - 1] !== command) {
+        commandHistory.value.push(command)
+        if (commandHistory.value.length > MAX_COMMAND_HISTORY) commandHistory.value.shift()
+      }
+      historyIndex.value = null
+      historyDraft.value = ''
       consoleCommand.value = ''
       await loadLogs()
     } catch (error) {
@@ -1021,6 +1171,11 @@ export const useServerStore = defineStore('server', () => {
     confirmModalData.value = {}
     consoleCommand.value = ''
     commandSending.value = false
+    // Scoped per server — one server's command history must not surface in
+    // another's console after a switch.
+    commandHistory.value = []
+    historyIndex.value = null
+    historyDraft.value = ''
     showDeleteServerModal.value = false
     deletingServer.value = false
   }
@@ -1039,6 +1194,8 @@ export const useServerStore = defineStore('server', () => {
     logs,
     serverSettings,
     showModBrowser,
+    showVersionPicker,
+    versionPickerMod,
     showJavaModal,
     pendingJavaAction,
     showModpackBrowser,
@@ -1052,6 +1209,7 @@ export const useServerStore = defineStore('server', () => {
     actionState,
     consoleCommand,
     commandSending,
+    commandHistory,
     fileBrowser,
     fileEditor,
     fileSearch,
@@ -1088,9 +1246,14 @@ export const useServerStore = defineStore('server', () => {
     isDirtySettings,
     // Actions
     closeModBrowser,
+    openVersionPicker,
+    closeVersionPicker,
+    handleSelectVersion,
     closeModpackBrowser,
     closeJavaModal,
     setConsoleCommand,
+    recallPreviousCommand,
+    recallNextCommand,
     loadServers,
     loadServer,
     loadMods,
@@ -1116,7 +1279,6 @@ export const useServerStore = defineStore('server', () => {
     goToSettings,
     goToMods,
     handleInstallMod,
-    handleUpdateMod,
     handleInstallModpack,
     cancelModpackInstallConfirmation,
     fetchModpackProgress,

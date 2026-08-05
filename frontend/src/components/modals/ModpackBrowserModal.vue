@@ -19,9 +19,35 @@
           <input type="radio" v-model="importMethod" value="link">
           <span>Link</span>
         </label>
+        <label class="choice-pill">
+          <input type="radio" v-model="importMethod" value="file">
+          <span>Upload .mrpack</span>
+        </label>
       </div>
 
-      <div v-if="importMethod === 'search'" class="search-row">
+      <div v-if="importMethod === 'file'" class="upload-row">
+        <input
+          ref="fileInput"
+          type="file"
+          accept=".mrpack,application/zip"
+          :disabled="uploading"
+          @change="handleFileChange"
+        >
+        <p v-if="uploading" class="upload-status">
+          {{ uploadPercent >= 0 ? `Uploading ${uploadPercent}%` : 'Uploading…' }}
+        </p>
+        <div v-else-if="uploadedPack" class="uploaded-pack">
+          <div>
+            <strong>{{ uploadedPackTitle }}</strong>
+            <p>{{ uploadedPackDetail }}</p>
+          </div>
+          <AppButton variant="ghost" size="sm" @click="clearUploadedPack">Clear</AppButton>
+        </div>
+        <p v-if="mismatchWarning" class="warning-text">{{ mismatchWarning }}</p>
+        <p v-if="uploadError" class="error-text">{{ uploadError }}</p>
+      </div>
+
+      <div v-else-if="importMethod === 'search'" class="search-row">
         <div class="search-bar">
           <input
             v-model="imp.searchQuery.value"
@@ -93,10 +119,14 @@
         <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="2"/>
         <path d="M9 9H15M9 13H13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
       </svg>
-      <h3 class="modpack-browser-empty__heading" v-if="importMethod === 'search' && imp.searchDone.value">No modpacks found</h3>
+      <h3 class="modpack-browser-empty__heading" v-if="importMethod === 'file'">Upload a modpack file</h3>
+      <h3 class="modpack-browser-empty__heading" v-else-if="importMethod === 'search' && imp.searchDone.value">No modpacks found</h3>
       <h3 class="modpack-browser-empty__heading" v-else-if="importMethod === 'search'">Search for modpacks</h3>
       <h3 class="modpack-browser-empty__heading" v-else>Resolve a modpack link</h3>
-      <p class="modpack-browser-empty__body" v-if="importMethod === 'search' && imp.searchDone.value">
+      <p class="modpack-browser-empty__body" v-if="importMethod === 'file'">
+        Pick a .mrpack exported from the Modrinth app. Its mods are fetched from Modrinth; config and other extras come from the pack's overrides.
+      </p>
+      <p class="modpack-browser-empty__body" v-else-if="importMethod === 'search' && imp.searchDone.value">
         No modpacks found for "{{ imp.searchQuery.value }}" on {{ loaderLabel }} {{ mcVersion }}. Try different keywords or check that your server's MC version has compatible modpacks.
       </p>
       <p class="modpack-browser-empty__body" v-else-if="importMethod === 'search'">
@@ -112,7 +142,7 @@
       <AppButton
         variant="primary"
         size="md"
-        :disabled="!imp.selectedModpack.value"
+        :disabled="!canInstall"
         @click="confirmInstall"
       >
         Install Selected Modpack
@@ -132,6 +162,7 @@ import BaseModal from './BaseModal.vue'
 import SearchResultCard from '../ui/SearchResultCard.vue'
 import AppButton from '../ui/AppButton.vue'
 import { useModpackImport } from '../../composables/useModpackImport'
+import { uploadModpackArchive, discardModpackUpload } from '../../api/modrinth'
 import { formatNumber, truncate } from '../../utils/format'
 
 const props = defineProps({
@@ -143,6 +174,13 @@ const props = defineProps({
 const emit = defineEmits(['close', 'install'])
 
 const importMethod = ref('search')
+const fileInput = ref(null)
+const uploadedPack = ref(null)
+const uploading = ref(false)
+const uploadPercent = ref(0)
+const uploadError = ref('')
+// Not reactive: nothing renders it, it only needs to survive between calls.
+let abortUpload = null
 
 const loaderLabel = computed(() => {
   const value = (props.loader || 'fabric').toLowerCase()
@@ -154,12 +192,112 @@ const imp = useModpackImport({
   loader: () => props.loader
 })
 
+const uploadedPackTitle = computed(
+  () => uploadedPack.value?.name || uploadedPack.value?.filename || 'Uploaded modpack'
+)
+
+const uploadedPackDetail = computed(() => {
+  const pack = uploadedPack.value
+  if (!pack) return ''
+  const parts = []
+  if (pack.version) parts.push(`Version ${pack.version}`)
+  if (pack.minecraft_version) parts.push(`Minecraft ${pack.minecraft_version}`)
+  if (pack.loader) parts.push(pack.loader)
+  if (pack.file_count) parts.push(`${pack.file_count} file${pack.file_count === 1 ? '' : 's'}`)
+  return parts.join(' · ')
+})
+
+// An uploaded pack states what it was built for; this server is already fixed
+// on a version and loader, so say plainly when the two disagree rather than
+// letting the install produce a server that will not boot. It stays a warning:
+// only the user knows whether the pack happens to be portable.
+const mismatchWarning = computed(() => {
+  const pack = uploadedPack.value
+  if (!pack) return ''
+  const differences = []
+  const serverLoader = (props.loader || '').toLowerCase()
+  const packLoader = (pack.loader || '').toLowerCase()
+  if (pack.minecraft_version && props.mcVersion && pack.minecraft_version !== props.mcVersion) {
+    differences.push(`Minecraft ${pack.minecraft_version}`)
+  }
+  if (packLoader && serverLoader && packLoader !== serverLoader) {
+    differences.push(packLoader)
+  }
+  if (!differences.length) return ''
+  return `This pack was built for ${differences.join(' and ')}, but this server runs ${loaderLabel.value} ${props.mcVersion}. Installing it anyway may leave the server unable to start.`
+})
+
+const canInstall = computed(() =>
+  importMethod.value === 'file' ? Boolean(uploadedPack.value) : Boolean(imp.selectedModpack.value)
+)
+
 watch(() => props.show, (next) => {
   if (!next) {
     importMethod.value = 'search'
     imp.resetAll()
+    clearUploadedPack()
   }
 })
+
+watch(importMethod, (next) => {
+  // The two halves answer the same question; leaving both populated would
+  // make the footer button's target ambiguous.
+  if (next === 'file') {
+    imp.resetAll()
+  } else {
+    clearUploadedPack()
+  }
+})
+
+async function handleFileChange(event) {
+  const file = event?.target?.files?.[0]
+  if (!file) return
+
+  await clearUploadedPack({ keepInput: true })
+  uploading.value = true
+  uploadPercent.value = 0
+  uploadError.value = ''
+  try {
+    uploadedPack.value = await uploadModpackArchive(file, {
+      onProgress: (pct) => { uploadPercent.value = pct },
+      registerAbort: (abort) => { abortUpload = abort }
+    })
+  } catch (error) {
+    if (fileInput.value) fileInput.value.value = ''
+    // Cancelling is something the user just did (closed the modal, picked a
+    // different file); only a real failure is worth reporting.
+    if (error?.message !== 'Upload cancelled') {
+      uploadError.value = error?.message || 'Could not read that .mrpack file.'
+    }
+  } finally {
+    uploading.value = false
+    abortUpload = null
+  }
+}
+
+async function clearUploadedPack({ keepInput = false } = {}) {
+  if (abortUpload) {
+    // Stops an in-flight upload from staging an archive nobody will install.
+    abortUpload()
+    abortUpload = null
+  }
+  const pack = uploadedPack.value
+  uploadedPack.value = null
+  uploadError.value = ''
+  uploadPercent.value = 0
+  if (!keepInput && fileInput.value) {
+    fileInput.value.value = ''
+  }
+  if (pack?.upload_id) {
+    // Best effort: a staged pack expires on its own, so a failed discard is
+    // not worth putting in front of the user.
+    try {
+      await discardModpackUpload(pack.upload_id)
+    } catch (_) {
+      // ignore
+    }
+  }
+}
 
 function handleSelectPack(pack) {
   imp.selectPack(pack)
@@ -171,6 +309,23 @@ function handleInstallPack(pack) {
 }
 
 function confirmInstall() {
+  if (importMethod.value === 'file') {
+    if (!uploadedPack.value) {
+      return
+    }
+    emit('install', {
+      uploadId: uploadedPack.value.upload_id,
+      title: uploadedPackTitle.value,
+      mcVersion: props.mcVersion,
+      loader: (props.loader || 'fabric').toLowerCase(),
+      // The mismatch has already been shown above the Install button, so the
+      // backend's own 409 would only repeat a question that was answered.
+      force: true,
+    })
+    uploadedPack.value = null
+    if (fileInput.value) fileInput.value.value = ''
+    return
+  }
   if (!imp.selectedModpack.value) {
     return
   }
@@ -347,6 +502,65 @@ function formatModpackMeta(pack) {
 .error-text {
   margin: 0;
   color: var(--danger);
+  font-size: var(--text-sm);
+}
+
+.upload-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.upload-row input[type="file"] {
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.upload-row input[type="file"]:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.upload-status {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.uploaded-pack {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklch, var(--success) 12%, transparent);
+  border: 1px solid color-mix(in oklch, var(--success) 28%, transparent);
+}
+
+.uploaded-pack strong {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+
+.uploaded-pack p {
+  margin: 2px 0 0;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.warning-text {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklch, var(--warning) 12%, transparent);
+  border: 1px solid color-mix(in oklch, var(--warning) 28%, transparent);
+  color: var(--text-secondary);
   font-size: var(--text-sm);
 }
 
