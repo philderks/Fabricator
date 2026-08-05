@@ -109,6 +109,27 @@ const onSubmit = (event) => {
   event.preventDefault()
   store.sendConsoleCommand()
 }
+
+const cmdInputRef = ref(null)
+
+// Park the caret after the recalled text. The value lands via the store on the
+// next tick, and ArrowUp's suppressed default would otherwise have left the
+// caret at position 0 — so a recalled command reads as ready to edit or resend.
+const moveCaretToEnd = async () => {
+  await nextTick()
+  const el = cmdInputRef.value
+  if (el) el.setSelectionRange(el.value.length, el.value.length)
+}
+
+const onHistoryPrev = () => {
+  store.recallPreviousCommand()
+  moveCaretToEnd()
+}
+
+const onHistoryNext = () => {
+  store.recallNextCommand()
+  moveCaretToEnd()
+}
 </script>
 
 <template>
@@ -163,10 +184,13 @@ const onSubmit = (event) => {
     <form class="console-page__cmd" @submit="onSubmit">
       <span class="console-page__cmd-prompt">›</span>
       <input
+        ref="cmdInputRef"
         type="text"
         class="console-page__cmd-input"
         :value="store.consoleCommand"
         @input="store.setConsoleCommand($event.target.value)"
+        @keydown.up.exact.prevent="onHistoryPrev"
+        @keydown.down.exact.prevent="onHistoryNext"
         :disabled="!store.canSendCommand"
         :placeholder="store.canSendCommand ? 'Type a command and press Enter…' : 'Server not running'"
       />
