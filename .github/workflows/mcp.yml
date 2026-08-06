@@ -1,0 +1,74 @@
+name: MCP package
+
+# Path-scoped so panel-only changes do not run it — with one deliberate
+# exception: backend/auth/buckets.py. That file IS the thing the drift test
+# watches, so a change to the panel's permission table has to trigger this
+# workflow or the check would only ever run when we happen to touch mcp/.
+on:
+  push:
+    paths:
+      - 'mcp/**'
+      - 'backend/auth/buckets.py'
+      - '.github/workflows/mcp.yml'
+  pull_request:
+    paths:
+      - 'mcp/**'
+      - 'backend/auth/buckets.py'
+      - '.github/workflows/mcp.yml'
+
+jobs:
+  # The gate. Runs the exact closure recorded in uv.lock, so a green tick here
+  # means "this commit works with the dependencies we committed".
+  locked:
+    name: locked closure (gate)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mcp
+    env:
+      # Turns "panel source missing" from a skip into a failure, so the drift
+      # check can never quietly stop running here.
+      FABRICATOR_MCP_REQUIRE_PANEL: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install the locked closure
+        run: uv sync --frozen     # fails if uv.lock has drifted from pyproject.toml
+      - name: Run the suite
+        run: uv run pytest -q
+
+  # A warning, not a gate. Users do not install our lockfile: `uvx fabricator-mcp`
+  # resolves the published dependency ranges fresh every time, so the closure a
+  # user gets is the one this job tests, not the one above. Without it the first
+  # report of an SDK regression would come from a user. It is allowed to fail:
+  # a broken upstream release must be visible without blocking a release that is
+  # otherwise fine.
+  unlocked:
+    name: unlocked closure (warning only)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: mcp
+    env:
+      FABRICATOR_MCP_REQUIRE_PANEL: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Re-resolve the published dependency ranges
+        run: uv lock --upgrade    # discarded with the runner; never committed from CI
+      - name: Install what that resolved
+        run: uv sync
+      - name: Report what a user would actually get
+        run: |
+          uv run python - <<'PY'
+          from importlib.metadata import version
+          for dist in ("mcp", "httpx", "pydantic", "anyio"):
+              print(f"{dist}=={version(dist)}")
+          PY
+      - name: Run the suite against it
+        run: uv run pytest -q
