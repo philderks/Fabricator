@@ -16,6 +16,7 @@ from typing import Any
 
 from fabricator_mcp.client import PanelClient
 from fabricator_mcp.config import PanelConfig
+from fabricator_mcp.tools import manage as manage_tools
 from fabricator_mcp.tools import read as read_tools
 
 SERVER_NAME = "fabricator"
@@ -112,6 +113,49 @@ def register_read_tools(server, client: PanelClient) -> None:
         return await read_tools.check_mod_compatibility(client, project_id, mc_version, loader)
 
 
+def register_manage_tools(server, client: PanelClient) -> None:
+    """Attach the tools that change something. A manage token is required.
+
+    These stay advertised for a read token too: the panel answers 403 and the
+    client says so plainly. Hiding them would dress the tool list up as the
+    permission boundary, which it is not.
+    """
+
+    @server.tool()
+    async def control_server(server_id: str, action: str) -> dict[str, Any]:
+        """Start, stop or restart a server. action must be start, stop or restart.
+
+        Changes the state of a running server; players are disconnected by a
+        stop or a restart.
+        """
+        return await manage_tools.control_server(client, server_id, action)
+
+    @server.tool()
+    async def update_or_install_mod(
+        server_id: str, project_id: str, mc_version: str, loader: str | None = None
+    ) -> dict[str, Any]:
+        """Install or update one mod, by Modrinth project id.
+
+        The panel picks the best matching build for the Minecraft version and
+        loader and downloads it server-side. Adds or replaces a file in the
+        server's mods folder; restart the server for it to take effect.
+        """
+        return await manage_tools.update_or_install_mod(
+            client, server_id, project_id, mc_version, loader
+        )
+
+    @server.tool()
+    async def remove_mods(server_id: str, filenames: list[str]) -> dict[str, Any]:
+        """Delete installed mod jars by file name. DESTRUCTIVE AND NOT REVERSIBLE.
+
+        There is no undo: a removed jar must be reinstalled from Modrinth. Use
+        the exact names from list_installed_mods. Mods inside a subfolder of the
+        mods directory cannot be removed here and must be removed through the
+        panel UI.
+        """
+        return await manage_tools.remove_mods(client, server_id, filenames)
+
+
 def build_server(config: PanelConfig, *, client: PanelClient | None = None):
     """Return the MCP server for ``config``, with its tools registered."""
     from mcp.server.fastmcp import FastMCP
@@ -119,6 +163,7 @@ def build_server(config: PanelConfig, *, client: PanelClient | None = None):
     server = FastMCP(SERVER_NAME)
     panel = client if client is not None else PanelClient(config)
     register_read_tools(server, panel)
+    register_manage_tools(server, panel)
     return server
 
 

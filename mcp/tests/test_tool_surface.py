@@ -13,7 +13,7 @@ import pytest
 
 from fabricator_mcp.client import PanelClient
 from fabricator_mcp.config import PanelConfig
-from fabricator_mcp.routes import READ, TOOL_ROUTES, TOOL_SCOPES
+from fabricator_mcp.routes import MANAGE, TOOL_ROUTES, TOOL_SCOPES
 from fabricator_mcp.server import build_server
 
 pytestmark = pytest.mark.anyio
@@ -29,11 +29,30 @@ def _client(handler) -> PanelClient:
     return PanelClient(_CONFIG, transport=httpx.MockTransport(handler), sleep=_instant)
 
 
-async def test_advertised_tools_are_exactly_the_read_table():
+async def test_advertised_tools_are_exactly_the_route_table():
     server = build_server(_CONFIG, client=_client(lambda r: httpx.Response(200, json={})))
     advertised = {tool.name for tool in await server.list_tools()}
-    expected = {name for name, scope in TOOL_SCOPES.items() if scope == READ}
-    assert advertised == expected
+    assert advertised == set(TOOL_ROUTES)
+    assert len(advertised) == 14
+
+
+async def test_manage_tools_are_advertised_even_though_a_read_token_cannot_use_them():
+    """INHERIT, not MIRROR: the list is static and the panel does the refusing."""
+    server = build_server(_CONFIG, client=_client(lambda r: httpx.Response(200, json={})))
+    advertised = {tool.name for tool in await server.list_tools()}
+    manage = {name for name, scope in TOOL_SCOPES.items() if scope == MANAGE}
+    assert manage and manage <= advertised
+
+
+async def test_the_destructive_tool_says_so_without_claiming_a_gate():
+    server = build_server(_CONFIG, client=_client(lambda r: httpx.Response(200, json={})))
+    tool = next(t for t in await server.list_tools() if t.name == "remove_mods")
+    description = " ".join((tool.description or "").lower().split())
+    assert "destructive" in description
+    assert "not reversible" in description
+    assert "panel ui" in description
+    # Nothing may promise a confirmation step: that is the client's behaviour.
+    assert "confirm" not in description
 
 
 async def test_every_advertised_tool_has_a_description():
