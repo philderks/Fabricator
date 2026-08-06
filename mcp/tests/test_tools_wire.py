@@ -154,6 +154,36 @@ async def test_check_panel_hits_health_and_status():
     assert result["reachable"] is True
 
 
+async def test_check_panel_reports_a_real_version():
+    panel = Panel({
+        "/api/health": {"healthy": True},
+        "/api/auth/status": {"managed": False, "needs_setup": False, "panel_version": "v1.0.3"},
+    })
+    async with client_for(panel) as client:
+        result = await read_tools.check_panel(client)
+    assert result["panelVersion"] == "v1.0.3"
+    assert "panelVersionKnown" not in result
+
+
+@pytest.mark.parametrize(
+    "status_body",
+    [
+        {"managed": False, "needs_setup": False, "panel_version": "unknown"},
+        {"managed": False, "needs_setup": False, "panel_version": ""},
+        {"managed": False, "needs_setup": False},  # panel older than the field
+    ],
+)
+async def test_check_panel_does_not_pass_off_a_non_version_as_a_version(status_body):
+    """"unknown" is not a version, and a missing field is not a check."""
+    panel = Panel({"/api/health": {"healthy": True}, "/api/auth/status": status_body})
+    async with client_for(panel) as client:
+        result = await read_tools.check_panel(client)
+
+    assert "panelVersion" not in result
+    assert result["panelVersionKnown"] is False
+    assert "no version check was made" in result["panelVersionNote"]
+
+
 async def test_search_modrinth_sends_the_query_and_clamped_limit():
     panel = Panel({"/api/modrinth/search": {"hits": [{"project_id": "AANobbMI", "title": "Sodium"}]}})
     async with client_for(panel) as client:

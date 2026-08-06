@@ -148,18 +148,40 @@ async def get_install_progress(client: PanelClient, server_id: str) -> dict[str,
     })
 
 
+#: What the panel reports when it has no release marker to read — a source
+#: checkout has no .fabricator_version, only a built release does.
+_UNKNOWN_VERSION = "unknown"
+
+
 async def check_panel(client: PanelClient) -> dict[str, Any]:
     health = await client.get("/api/health")
     status = await client.get("/api/auth/status")
     health = health if isinstance(health, dict) else {}
     status = status if isinstance(status, dict) else {}
-    return drop_empty({
+
+    result = drop_empty({
         "reachable": bool(health.get("healthy")),
         "authOk": True,  # the gate let this request through
         "managed": status.get("managed"),
         "needsSetup": status.get("needs_setup"),
-        "panelVersion": status.get("panel_version"),
     })
+
+    # Only report a version when there is one. The panel answers "unknown" from
+    # a source checkout, and older panels omit the field entirely; passing
+    # either through as panelVersion reads like a version that was checked, and
+    # nothing was checked. Say so instead of implying otherwise.
+    raw = status.get("panel_version")
+    version = raw.strip() if isinstance(raw, str) else ""
+    if version and version.lower() != _UNKNOWN_VERSION:
+        result["panelVersion"] = version
+    else:
+        result["panelVersionKnown"] = False
+        result["panelVersionNote"] = (
+            "This panel did not report a version, so no version check was made. "
+            "A panel running from a source checkout reports none; a released "
+            "build does."
+        )
+    return result
 
 
 async def search_modrinth(
