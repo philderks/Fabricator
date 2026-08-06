@@ -134,8 +134,26 @@ def redact(value):
 
 _PLACEHOLDER = "<path>"
 
-# A drive-letter absolute path is unambiguous enough to replace generically.
-_WINDOWS_ABS_PATH = re.compile(r"[A-Za-z]:[\\/][^\s\"'<>|]*")
+# A drive-letter absolute path, and ONLY that.
+#
+# The obvious pattern -- [A-Za-z]:[\\/] -- also matches the "s:/" inside
+# "https://" and the "p:/" inside "http://", which silently destroyed every URL
+# a token caller received: a Modrinth download link came back as "http<path>".
+# A live run found that; no unit test did, because the fixtures on one side used
+# path values and the mocks on the other side never carried a real URL.
+#
+# The guard is a boundary, not a scheme blacklist: a drive letter is a SINGLE
+# letter, so anything alphanumeric immediately before it means this is the tail
+# of a longer word (the "s" of "https") and not a drive. That keeps the rule one
+# line and needs no list of schemes to stay current.
+#
+# What this deliberately does NOT catch:
+#   * a drive path glued to the preceding word with no separator
+#     ("openC:\x") -- real messages put a space, quote, or line start first;
+#   * UNC paths (\\server\share\...), which the old pattern did not catch either;
+#   * POSIX absolute paths outside the known roots (the pre-existing residual
+#     noted above).
+_WINDOWS_ABS_PATH = re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:[\\/][^\s\"'<>|]*")
 
 _ROOT_CONFIG_KEYS = ("SERVERS_ROOT", "JAVA_ROOT", "BACKUPS_DIR")
 
