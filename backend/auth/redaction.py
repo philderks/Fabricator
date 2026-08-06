@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import re
 import tempfile
+from functools import lru_cache
 from pathlib import Path
 
 from flask import current_app, g, json
@@ -157,6 +158,53 @@ _WINDOWS_ABS_PATH = re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:[\\/][^\s\"'<>|]*")
 
 _ROOT_CONFIG_KEYS = ("SERVERS_ROOT", "JAVA_ROOT", "BACKUPS_DIR")
 
+# A root shorter than this is too generic to look for inside arbitrary text.
+# "/tmp" is the shortest real one we use, so the floor sits just under it.
+_MIN_ROOT_LENGTH = 4
+
+
+def _normalise_root(value) -> str:
+    """Trim a root to a comparable form: no trailing separator."""
+    text = str(value).strip()
+    while len(text) > 1 and text[-1] in "\\/":
+        text = text[:-1]
+    return text
+
+
+def _is_usable_root(root: str) -> bool:
+    """True when a root is specific enough to be matched inside text at all.
+
+    A filesystem root -- "/", "C:\\" -- names no directory of its own and would
+    match inside every absolute path and most URLs, so it is dropped rather than
+    used. The consequence is stated rather than hidden: if the data directory
+    really is "/", paths under it are not scrubbed by this pass. There is no
+    version of substring replacement on "/" that is not worse.
+    """
+    if len(root) < _MIN_ROOT_LENGTH:
+        return False
+    return bool(Path(root).name)
+
+
+@lru_cache(maxsize=64)
+def _root_pattern(root: str) -> "re.Pattern[str]":
+    """Match ``root`` only where a filesystem path could actually begin and end.
+
+    Two boundaries, and both are load-bearing:
+
+    * BEFORE -- not preceded by an alphanumeric. This is what keeps "/data" from
+      matching inside "https://cdn.modrinth.com/data/AANobbMI/...", where it is
+      preceded by the "m" of ".com". On the Docker image the data directory IS
+      "/data", so without this every Modrinth URL a token caller received was
+      corrupted. Same shape of guard as the drive-letter pattern above, for the
+      same reason.
+    * AFTER -- a separator, whitespace, a quote, or end of string. This is what
+      keeps the root "/data" from matching the first five characters of
+      "/database/x.jar", which is a different directory entirely.
+    """
+    return re.compile(
+        r"(?<![A-Za-z0-9])" + re.escape(root) + r"(?=[\\/]|[\s\"'<>|]|$)"
+    )
+
 
 def _known_roots():
     """The panel's own filesystem roots, longest first so nesting resolves."""
@@ -165,18 +213,24 @@ def _known_roots():
     for key in _ROOT_CONFIG_KEYS:
         value = config.get(key)
         if value:
-            roots.add(str(value))
+            roots.add(_normalise_root(value))
     servers_file = config.get("SERVERS_FILE")
     if servers_file:
-        roots.add(str(Path(servers_file).parent))  # data dir (auth.json lives here)
-    roots.add(tempfile.gettempdir())  # loader metadata staging dirs
-    return sorted((root for root in roots if root), key=len, reverse=True)
+        # data dir (auth.json lives here); on the Docker image this is "/data"
+        roots.add(_normalise_root(Path(servers_file).parent))
+    roots.add(_normalise_root(tempfile.gettempdir()))  # loader metadata staging
+    usable = (root for root in roots if root and _is_usable_root(root))
+    return sorted(usable, key=len, reverse=True)
 
 
 def _scrub_text(text: str, roots) -> str:
     for root in roots:
-        if root in text:
-            text = text.replace(root, _PLACEHOLDER)
+        # The usability guard lives HERE, not only in _known_roots, so that a
+        # root too generic to match safely is refused wherever it comes from.
+        if not root or not _is_usable_root(root):
+            continue
+        if root in text:  # cheap pre-check before the anchored match
+            text = _root_pattern(root).sub(_PLACEHOLDER, text)
     return _WINDOWS_ABS_PATH.sub(_PLACEHOLDER, text)
 
 
