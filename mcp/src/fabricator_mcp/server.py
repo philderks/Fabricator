@@ -168,5 +168,12 @@ def build_server(config: PanelConfig, *, client: PanelClient | None = None):
 
 
 def run(config: PanelConfig) -> None:  # pragma: no cover - blocks on stdio
-    """Serve over stdio until the client closes the transport."""
+    """Serve over stdio until the client closes the transport.
+
+    The version probe runs first and can only ever print a line: it never
+    refuses to start, because an old panel still serves most tools correctly.
+    """
+    from fabricator_mcp.version_check import warn_if_panel_is_old
+
+    warn_if_panel_is_old(config)
     build_server(config).run()
