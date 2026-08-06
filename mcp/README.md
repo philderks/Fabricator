@@ -16,6 +16,79 @@ installed, check a mod against Modrinth, remove or update it, restart.
 - The panel, reachable from this machine, with **MCP access enabled** under *Integrations*.
 - An API token. **`read` is the recommended default** — it cannot change anything. Use `manage`
   only when you want the assistant to be able to act.
+- **[`uv`](https://docs.astral.sh/uv/) installed and on your `PATH`.** This is the one hard
+  prerequisite, and it is not bundled with any MCP client. If `uv` is missing, your client will
+  report the Fabricator server as **failing to launch or disconnecting at startup** — it looks
+  like a broken server, not like a panel or token problem, because the process never starts.
+  Installing `uv` fixes it.
+
+## Connecting a client
+
+Put this in your client's MCP server configuration (for Claude Desktop, `claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "fabricator": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/philderks/Fabricator@dev#subdirectory=mcp",
+        "fabricator-mcp"
+      ],
+      "env": {
+        "FABRICATOR_URL": "http://127.0.0.1:5000",
+        "FABRICATOR_TOKEN": "YOUR_TOKEN_HERE"
+      }
+    }
+  }
+}
+```
+
+The panel generates this block for you, with the URL and token filled in, on the **Integrations**
+page.
+
+> The package is installed straight from the repository because it is not published to PyPI yet.
+> When it is, `command` and `args` become `"uvx"` and `["fabricator-mcp"]`, and nothing else
+> changes. Those two values are the entire launch channel; they live here and in
+> `frontend/src/config/mcpClientConfig.js`.
+
+## What the assistant can do
+
+The token's scope decides this, and the **panel** enforces it — not this package.
+
+| Scope | What it reaches |
+|---|---|
+| `read` | List servers and their status · read console output and crash logs · list installed mods and identify them against Modrinth by file hash · CPU and memory use · Java version checks · install progress and failure reasons · search Modrinth and check whether a mod has a build for your Minecraft version and loader |
+| `manage` | Everything above, plus: start / stop / restart a server · install or update one mod by Modrinth project id · delete installed mod jars |
+
+**`read` is the documented default.** It answers every diagnostic question and cannot change
+anything on your server.
+
+Whatever the scope, a large part of the panel is refused to **every** token: the console, file
+reading and writing, server settings, creating or deleting servers, Java installation, the
+updater, backups and snapshot restore, world import, and all player administration including the
+player lists. Those refusals happen in the panel, and this package surfaces them as they are
+rather than hiding the tools.
+
+### Known limitation: mods in subfolders
+
+Only jars sitting **directly** in a server's `mods` folder are listed, and only those can be
+removed. A jar inside a subfolder is invisible to the listing and cannot be deleted with
+`remove_mods` — manage it through the panel UI instead. The tools say so rather than failing
+opaquely.
+
+## Security notes
+
+- **Server logs contain text written by mods and by players.** Anything that can print to the
+  server console — a mod, a player's chat message, a nickname, the MOTD — ends up in what the
+  assistant reads. A `manage` token lets an assistant act on what it reads there. Prefer a `read`
+  token unless you specifically want it to be able to change things.
+- **The token sits in plain text in your MCP client's configuration file.** Treat that file like a
+  password: anyone who can read it can use the token.
+- Tokens do not expire. Revoke any you no longer use, from the Integrations page.
+- Turning MCP access off in the panel makes existing tokens stop working immediately without
+  deleting them.
 
 ## Configuration
 
@@ -27,10 +100,7 @@ Two environment variables, set by your MCP client on the process it spawns:
 | `FABRICATOR_TOKEN` | **yes** | — | The API token from the Integrations page |
 
 The token is **never** read from the command line. `argv` is visible to every process on the
-machine and lands in shell history; a spawned process's environment is neither. The file holding
-your client configuration contains the token in plain text — treat it like a password.
-
-Connect instructions for a specific client ship with the documentation commit.
+machine and lands in shell history; a spawned process's environment is neither.
 
 ## Development
 

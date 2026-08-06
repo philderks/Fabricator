@@ -1470,5 +1470,55 @@ curl -H "Authorization: Bearer fab_xxx_yyy" http://localhost:5000/api/servers
   like a password.
 - Tokens carry no expiry. Revoke any token you no longer use.
 
-> **Connecting a client:** the setup steps for the Fabricator MCP server — how it is installed and
-> launched next to your assistant — are documented separately and are not part of this page yet.
+### Connecting a client
+
+The MCP server that consumes these tokens lives in [`mcp/`](mcp/) in this repository. It runs on
+**your** machine, next to your assistant, and talks to the panel over the API documented above.
+
+It needs [`uv`](https://docs.astral.sh/uv/) on your `PATH` — the one hard prerequisite, and not
+something MCP clients bundle. **If `uv` is missing, your client reports the server as failing to
+launch or disconnecting at startup**, which looks like a broken server rather than a panel or
+token problem, because the process never starts at all.
+
+Put this in your client's MCP configuration (the Integrations page generates it with your URL and
+token filled in):
+
+```json
+{
+  "mcpServers": {
+    "fabricator": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/philderks/Fabricator@dev#subdirectory=mcp",
+        "fabricator-mcp"
+      ],
+      "env": {
+        "FABRICATOR_URL": "http://127.0.0.1:5000",
+        "FABRICATOR_TOKEN": "YOUR_TOKEN_HERE"
+      }
+    }
+  }
+}
+```
+
+The package is installed from the repository because it is not on PyPI yet; when it is, `command`
+and `args` become `"uvx"` and `["fabricator-mcp"]` and nothing else changes.
+
+The token goes in `env`, never in `args` — a command line is readable by every process on the
+machine and is written to shell history.
+
+### What each scope reaches through the MCP server
+
+| Scope | Tools |
+|---|---|
+| `read` | list servers · read logs · list and identify installed mods · CPU/memory · Java version checks · install progress and failure reasons · Modrinth search, project info and compatibility checks |
+| `manage` | all of the above, plus start/stop/restart, install or update a mod by Modrinth id, and delete mod jars |
+
+**`read` is the recommended default**: it answers every diagnostic question and cannot change
+anything. The tool set is deliberately narrower than what a token may reach, and it is not a
+security boundary — the panel is. Tools are never hidden based on scope; a `manage` tool called
+with a `read` token returns the panel's `403` and the client says so.
+
+**Mods in subfolders:** only jars directly in a server's `mods` folder are listed, and only those
+can be removed through the MCP server. A jar in a subfolder must be managed in the panel UI.
