@@ -14,9 +14,9 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from flask import current_app, jsonify, request, session
+from flask import current_app, g, jsonify, request, session
 
-from backend.auth import service
+from backend.auth import buckets, redaction, service
 from backend.auth.routes import auth_bp
 from backend.managed import is_managed
 
@@ -52,6 +52,47 @@ def _unwritable_message(path) -> str:
     )
 
 
+def _bearer_decision(credential: str):
+    """Resolve an MCP bearer-token request against the route permission table.
+
+    Returns ``None`` to ALLOW only when the token is valid AND the route is in
+    scope; otherwise returns a rejection response. This is the EXCLUSIVE
+    resolution: the caller invokes it whenever an ``Authorization: Bearer``
+    header is present, and it never falls back to the session.
+
+    401 = authentication (switch off, invalid/malformed token); 403 =
+    authorization (valid token, but the route is NEVER / unknown / out of the
+    token's scope).
+
+    SECURITY: the switch and token map are read FRESH from auth.json on every
+    call (``service.mcp_state``). Do NOT add a TTL cache, module-level memo, or
+    app.config snapshot here — the off-switch and token revocation must take
+    effect live.
+    """
+    state = service.mcp_state()
+    if not state["enabled"]:
+        return jsonify({"error": "mcp token auth disabled"}), 401
+    match = service.match_token(state["tokens"], credential)
+    if match is None:
+        return jsonify({"error": "invalid token"}), 401
+    token_id, scope = match
+    rule = request.url_rule
+    if rule is None:
+        # 405 / redirect / no matched rule: nothing to bucket -> fail closed.
+        return jsonify({"error": "forbidden for token"}), 403
+    method = "GET" if request.method == "HEAD" else request.method
+    bucket = buckets.BUCKETS.get((method, rule.rule))
+    if bucket is None or bucket == "never":
+        return jsonify({"error": "forbidden for token"}), 403
+    if bucket == "manage" and scope != "manage":
+        return jsonify({"error": "insufficient scope"}), 403
+    service.touch_token_last_used(token_id)  # records AUTHORIZED use, not success
+    # Mark the request for the response filter. This is the ONLY place a request
+    # is declared token-authenticated, so redaction cannot apply to a session.
+    setattr(g, redaction.TOKEN_REQUEST_FLAG, True)
+    return None  # read route (any scope) or manage route with a manage token
+
+
 def _auth_gate():
     """Single default-deny gate for everything under /api/."""
     if request.method == "OPTIONS":
@@ -66,6 +107,16 @@ def _auth_gate():
         if (request.method, request.path) in _SETUP_ENDPOINTS:
             return None
         return jsonify({"error": "setup required"}), 401
+
+    # MCP API token: an Authorization: Bearer header makes this a token request,
+    # resolved here and NEVER falling back to the session. Placed BELOW the
+    # DISABLE_AUTH opt-out (so it never runs on an auth-off / fleet box) and
+    # ABOVE the public allowlist + session check. The scheme is matched
+    # case-insensitively; a present-but-empty Bearer is still a token request
+    # (rejected), so it cannot slip through to the session.
+    scheme, _, credential = request.headers.get("Authorization", "").partition(" ")
+    if scheme.lower() == "bearer":
+        return _bearer_decision(credential.strip())
 
     # Configured: public allowlist, else require a session.
     if (request.method, request.path) in _PUBLIC_ENDPOINTS:
@@ -111,3 +162,6 @@ def init_auth(app) -> None:
 
     app.register_blueprint(auth_bp)
     app.before_request(_auth_gate)
+    # Response half of the token path, registered beside the gate: one filter
+    # that sees every response body a token can ever receive.
+    app.after_request(redaction.redact_token_response)

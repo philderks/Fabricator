@@ -1375,3 +1375,150 @@ commercially. The CLA Assistant bot records your acceptance once per GitHub acco
 
 - GitHub Issues: [Fabricator Issues](https://github.com/philderks/Fabricator/issues)
 - Modrinth API docs: [docs.modrinth.com](https://docs.modrinth.com)
+
+## MCP integration (API tokens)
+
+Fabricator can issue scoped **API tokens** so an MCP client — an AI assistant such as Claude — can
+read your server's state and perform a small set of maintenance actions over the same HTTP API this
+document describes. The typical use is modpack crash diagnosis: read the crash log, list the
+installed mods, check a mod against Modrinth, remove or update it, restart.
+
+The feature is **off by default**. Nothing changes for your panel until you turn it on and mint a
+token.
+
+### Enabling it and minting a token
+
+Open **Integrations** in the panel sidebar.
+
+1. Turn **Enable MCP access** on.
+2. Choose **Create token**, give it a name and a scope (`read` or `manage`).
+3. Copy the token immediately — it is shown **once** and cannot be retrieved afterwards. Only a
+   SHA-256 hash of it is stored.
+
+Revoke a token from the same page; revocation takes effect on the next request.
+
+Tokens look like `fab_<id>_<secret>`. The `<id>` is a non-secret lookup key that appears in the
+token list; the `<secret>` half is what is never shown again.
+
+### Scopes
+
+| Scope | Can do |
+|---|---|
+| `read` | Read-only routes: server list and details, logs, installed mods, metrics, Java status, backups and snapshot listings, the Modrinth catalog. |
+| `manage` | Everything `read` can do, plus start / stop / restart, re-install the configured loader, install or update a mod by Modrinth ID, and remove installed mods. |
+
+Every `/api` route is classified into exactly one of three buckets, and the classification is
+enforced by the panel itself, not by the client: **32 read**, **7 manage**, **58 never**. Routes in
+the `never` bucket are refused for **every** token regardless of scope — the console, all file read
+and write routes, server settings, autostart, server create and delete, Java installation, the
+self-updater, playit, backup restore/download/delete, world import, whole-modpack install (including
+the `.mrpack` upload routes), all player administration (bans, kicks, ops, whitelist), the
+player-data reads (they contain player names, UUIDs and IP addresses), and the token-management
+routes themselves. A token can never mint a token, revoke one, or flip the switch.
+
+Requests are answered with `401` when the credential itself is not accepted (bad, revoked or
+expired token, or the switch is off) and `403` when the token is valid but the route is out of its
+scope or in the `never` bucket. A `403` is a fact about your configuration, not a temporary
+condition — retrying it will not change the answer.
+
+### What a token never receives
+
+Responses on the token path are filtered server-side before they leave the panel:
+
+- **Credential fields are removed** — for example the RCON password stored in a server record.
+- **Host filesystem paths are removed**, including absolute paths embedded in error messages. A path
+  is reported relative to the panel's own directories, so a failure still names the file it failed
+  on without disclosing your machine's layout.
+- `GET /api/java/status` **refuses** a caller-supplied `java_path`, because that value names a
+  binary the panel would execute.
+
+None of this applies to your own logged-in session: the operator sees the panel exactly as before.
+
+### Managing tokens over HTTP
+
+These four routes are **session-only** — they require a logged-in operator and are refused to every
+token:
+
+| Method | Route | Purpose |
+|---|---|---|
+| `GET` | `/api/integrations/mcp` | Switch state and token metadata (never a secret) |
+| `PUT` | `/api/integrations/mcp` | `{"enabled": bool}` — turn MCP access on or off |
+| `POST` | `/api/integrations/mcp/tokens` | `{"name": str, "scope": "read"\|"manage"}` — mint; the response is the only time the token is shown |
+| `DELETE` | `/api/integrations/mcp/tokens/<token_id>` | Revoke |
+
+Using a token is the standard bearer scheme:
+
+```bash
+curl -H "Authorization: Bearer fab_xxx_yyy" http://localhost:5000/api/servers
+```
+
+### Behaviour worth knowing
+
+- **Turning the switch off does not delete your tokens.** They stop being accepted (`401`) and start
+  working again when you turn it back on.
+- **Before the panel has a password** (first-run setup), no token can be minted or used.
+- **Managed installs** hide the Integrations section entirely.
+- Tokens are stored in the same `0600` `auth.json` as your password hash.
+
+### Security notes
+
+- **Server logs contain text written by mods and by players**, and a `manage` token lets an
+  assistant act on what it reads there. Treat a `manage` token as you would giving someone else the
+  panel: prefer a `read` token for pure diagnosis, and hand out `manage` only when you want the
+  assistant to be able to change something.
+- **The token is stored in plain text in your MCP client's configuration file.** Treat that file
+  like a password.
+- Tokens carry no expiry. Revoke any token you no longer use.
+
+### Connecting a client
+
+The MCP server that consumes these tokens lives in [`mcp/`](mcp/) in this repository. It runs on
+**your** machine, next to your assistant, and talks to the panel over the API documented above.
+
+It needs [`uv`](https://docs.astral.sh/uv/) on your `PATH` — the one hard prerequisite, and not
+something MCP clients bundle. **If `uv` is missing, your client reports the server as failing to
+launch or disconnecting at startup**, which looks like a broken server rather than a panel or
+token problem, because the process never starts at all.
+
+Put this in your client's MCP configuration (the Integrations page generates it with your URL and
+token filled in):
+
+```json
+{
+  "mcpServers": {
+    "fabricator": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/philderks/Fabricator@dev#subdirectory=mcp",
+        "fabricator-mcp"
+      ],
+      "env": {
+        "FABRICATOR_URL": "http://127.0.0.1:5000",
+        "FABRICATOR_TOKEN": "YOUR_TOKEN_HERE"
+      }
+    }
+  }
+}
+```
+
+The package is installed from the repository because it is not on PyPI yet; when it is, `command`
+and `args` become `"uvx"` and `["fabricator-mcp"]` and nothing else changes.
+
+The token goes in `env`, never in `args` — a command line is readable by every process on the
+machine and is written to shell history.
+
+### What each scope reaches through the MCP server
+
+| Scope | Tools |
+|---|---|
+| `read` | list servers · read logs · list and identify installed mods · CPU/memory · Java version checks · install progress and failure reasons · Modrinth search, project info and compatibility checks |
+| `manage` | all of the above, plus start/stop/restart, install or update a mod by Modrinth id, and delete mod jars |
+
+**`read` is the recommended default**: it answers every diagnostic question and cannot change
+anything. The tool set is deliberately narrower than what a token may reach, and it is not a
+security boundary — the panel is. Tools are never hidden based on scope; a `manage` tool called
+with a `read` token returns the panel's `403` and the client says so.
+
+**Mods in subfolders:** only jars directly in a server's `mods` folder are listed, and only those
+can be removed through the MCP server. A jar in a subfolder must be managed in the panel UI.

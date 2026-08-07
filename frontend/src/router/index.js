@@ -4,6 +4,7 @@ import LoginPage from '../views/LoginPage.vue'
 import SetupPage from '../views/SetupPage.vue'
 import RootLayout from '../layouts/RootLayout.vue'
 import Servers from '../views/Servers.vue'
+import IntegrationsPage from '../views/IntegrationsPage.vue'
 import ServerLayout from '../layouts/ServerLayout.vue'
 import ServerOverviewPage from '../views/server/ServerOverviewPage.vue'
 import ServerConsolePage from '../views/server/ServerConsolePage.vue'
@@ -22,7 +23,8 @@ const routes = [
     path: '/',
     component: RootLayout,
     children: [
-      { path: '', name: 'Servers', component: Servers }
+      { path: '', name: 'Servers', component: Servers },
+      { path: 'integrations', name: 'Integrations', component: IntegrationsPage }
     ]
   },
   {

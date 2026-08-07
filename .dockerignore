@@ -14,3 +14,4 @@ java
 *.log
 .fabricator
 docs
+mcp

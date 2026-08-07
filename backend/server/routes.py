@@ -11,6 +11,7 @@ from flask import Blueprint, jsonify, request
 
 logger = logging.getLogger(__name__)
 
+from backend.auth.redaction import is_token_request
 from backend.server.manager import ServerManager
 from backend.server.registry import get_server_process_registry
 from backend.server import storage
@@ -1212,6 +1213,16 @@ def get_java_status():
     required_java_param = request.args.get('required_java')
     java_path_param = request.args.get('java_path') or None
 
+    # java_path names a binary this handler then executes (``_probe`` below), so
+    # honouring it for a token caller is arbitrary process execution from a READ
+    # route. Rejected rather than ignored: silently probing a different binary
+    # would answer a question the caller did not ask, and a hard 400 makes an
+    # attempt visible instead of quietly succeeding. Session behaviour unchanged.
+    if java_path_param is not None and is_token_request():
+        return jsonify({
+            'error': 'java_path is not accepted for token-authenticated requests'
+        }), 400
+
     compat = resolve_required_java(mc_version) if mc_version else None
     required_java = None
     if required_java_param:
@@ -1479,10 +1490,28 @@ def get_server_metrics(server_id, server):
     return jsonify(metrics)
 
 
+def _validated_loader(loader):
+    """Return the normalised loader name, or None when it is not a known loader.
+
+    Called BEFORE anything builds a path out of ``loader``: the metadata staging
+    directory is named after this value and created with ``mkdir(parents=True)``,
+    and creating a directory from an unvalidated request path segment is wrong
+    regardless of who asked. Validated against the same LOADER_REGISTRY that
+    ``get_installer_for`` resolves against, so the two can never disagree.
+    """
+    normalised = (loader or '').strip().lower()
+    if normalised not in supported_loaders():
+        return None
+    return normalised
+
+
 @server_bp.route('/loaders/<loader>/versions/game', methods=['GET'])
 def get_loader_game_versions(loader):
     """Return Minecraft versions supported by ``loader``."""
-    installer = _get_installer(loader, _loader_meta_dir(loader.lower()))
+    normalised = _validated_loader(loader)
+    if normalised is None:
+        return jsonify({'error': f'Unknown loader: {loader}'}), 404
+    installer = _get_installer(normalised, _loader_meta_dir(normalised))
     if installer is None:
         return jsonify({'error': f'Unknown loader: {loader}'}), 404
     return jsonify(installer.get_minecraft_versions())
@@ -1495,7 +1524,10 @@ def get_loader_loader_versions(loader):
     Some loaders (e.g. Vanilla) do not have a separate loader version; those
     return an empty list.
     """
-    installer = _get_installer(loader, _loader_meta_dir(loader.lower()))
+    normalised = _validated_loader(loader)
+    if normalised is None:
+        return jsonify({'error': f'Unknown loader: {loader}'}), 404
+    installer = _get_installer(normalised, _loader_meta_dir(normalised))
     if installer is None:
         return jsonify({'error': f'Unknown loader: {loader}'}), 404
     mc_version = request.args.get('mc_version')
