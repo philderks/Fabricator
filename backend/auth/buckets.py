@@ -103,6 +103,12 @@ _NEVER = [
     ("POST", "/api/servers/<server_id>/backup-quick"),
     # modpack install (can plant files including an @args_file)
     ("POST", "/api/modrinth/modpack/<project_id>/install"),
+    # .mrpack upload surface: the caller supplies the archive outright, so the
+    # install is the same file-planting reach with none of the catalog's
+    # vetting. Discard is listed with them to keep the surface whole.
+    ("POST", "/api/modrinth/modpack/upload"),
+    ("POST", "/api/modrinth/modpack/upload/<upload_id>/install"),
+    ("DELETE", "/api/modrinth/modpack/upload/<upload_id>"),
     # players reads: personal data (names, UUIDs, IP addresses, per-player
     # "last seen"). No redaction makes these safe to hand an assistant, and they
     # answer no question the diagnosis use case asks.

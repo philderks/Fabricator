@@ -1408,13 +1408,13 @@ token list; the `<secret>` half is what is never shown again.
 | `manage` | Everything `read` can do, plus start / stop / restart, re-install the configured loader, install or update a mod by Modrinth ID, and remove installed mods. |
 
 Every `/api` route is classified into exactly one of three buckets, and the classification is
-enforced by the panel itself, not by the client: **32 read**, **7 manage**, **55 never**. Routes in
+enforced by the panel itself, not by the client: **32 read**, **7 manage**, **58 never**. Routes in
 the `never` bucket are refused for **every** token regardless of scope — the console, all file read
 and write routes, server settings, autostart, server create and delete, Java installation, the
-self-updater, playit, backup restore/download/delete, world import, whole-modpack install, all
-player administration (bans, kicks, ops, whitelist), the player-data reads (they contain player
-names, UUIDs and IP addresses), and the token-management routes themselves. A token can never mint
-a token, revoke one, or flip the switch.
+self-updater, playit, backup restore/download/delete, world import, whole-modpack install (including
+the `.mrpack` upload routes), all player administration (bans, kicks, ops, whitelist), the
+player-data reads (they contain player names, UUIDs and IP addresses), and the token-management
+routes themselves. A token can never mint a token, revoke one, or flip the switch.
 
 Requests are answered with `401` when the credential itself is not accepted (bad, revoked or
 expired token, or the switch is off) and `403` when the token is valid but the route is out of its
