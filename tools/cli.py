@@ -17,7 +17,7 @@ DATA_DIR = "/var/lib/fabricator"
 CONFIG_DIR = "/etc/fabricator"
 SERVICE_USER = "fabricator"
 API_BASE = "http://localhost:5000"
-GITHUB_API = "https://api.github.com/repos/philderks/Fabricator/releases/latest"
+GITHUB_API = "https://api.github.com/repos/philderks/Fabricator/releases?per_page=100"
 
 
 def _systemctl(action: str) -> int:
@@ -43,9 +43,24 @@ def _get_latest_release_tag() -> str | None:
     try:
         resp = requests.get(GITHUB_API, timeout=15)
         resp.raise_for_status()
-        return resp.json().get("tag_name")
+        releases = resp.json()
+        if not isinstance(releases, list):
+            return None
+        for release in releases:
+            if not isinstance(release, dict):
+                continue
+            tag = release.get("tag_name")
+            if (
+                isinstance(tag, str)
+                and tag.startswith("v")
+                and not tag.startswith("mcp-v")
+                and not release.get("draft", False)
+                and not release.get("prerelease", False)
+            ):
+                return tag
     except Exception:
         return None
+    return None
 
 
 @click.group()
