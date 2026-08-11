@@ -8,6 +8,9 @@ license = "AGPL-3.0-only"
 dependencies = [
     "mcp>=1.28,<2",
     "httpx>=0.28",
+    # pydantic-settings 2.15 warns on FastMCP 1.x's unresolved generic
+    # lifespan annotation during every clean uvx startup.
+    "pydantic-settings>=2.5.2,<2.15",
 ]
 
 [project.scripts]
