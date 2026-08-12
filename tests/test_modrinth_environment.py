@@ -29,16 +29,16 @@ from backend.modrinth.client import ModrinthClient
 
 @pytest.mark.parametrize("value", sorted(env.SERVER_CAPABLE_ENVIRONMENTS))
 def test_server_capable_environments_resolve_to_server(value):
-    side, reason = env.side_from_environment([value])
-    assert side == "server"
-    assert value in reason
+    verdict = env.side_from_environment([value])
+    assert verdict.side == "server"
+    assert value in verdict.reason
 
 
 @pytest.mark.parametrize("value", sorted(env.CLIENT_ONLY_ENVIRONMENTS))
 def test_client_only_environments_resolve_to_client(value):
-    side, reason = env.side_from_environment([value])
-    assert side == "client"
-    assert value in reason
+    verdict = env.side_from_environment([value])
+    assert verdict.side == "client"
+    assert value in verdict.reason
 
 
 def test_sodium_is_client_only():
@@ -71,16 +71,16 @@ def test_environment_outranks_deprecated_fields():
         "client_side": "required",
         "server_side": "unsupported",
     }
-    side, reason = env.side_from_project(project)
-    assert side == "server"
-    assert "environment" in reason
+    verdict = env.side_from_project(project)
+    assert verdict.side == "server"
+    assert "environment" in verdict.reason
 
 
 def test_falls_back_to_server_side_when_environment_absent():
     """Covers a project whose metadata has not been migrated yet."""
-    side, reason = env.side_from_project({"client_side": "required", "server_side": "unsupported"})
-    assert side == "client"
-    assert "server_side" in reason
+    verdict = env.side_from_project({"client_side": "required", "server_side": "unsupported"})
+    assert verdict.side == "client"
+    assert "server_side" in verdict.reason
 
 
 @pytest.mark.parametrize("server_side,expected", [
@@ -348,3 +348,27 @@ def test_sweep_leaves_a_jar_it_cannot_find_on_disk_alone(pack):
 
     assert pack.client._apply_modrinth_side_metadata(pack.install_path, result, {}) == []
     assert result["files_installed"] == ["mods/vanished.jar"]
+
+
+def test_client_required_server_optional_is_not_installed():
+    """Regression: "optional on the server" must not mean "install it".
+
+    Fog is tagged ``client_only_server_optional`` on Modrinth, and its jar
+    references ``net/minecraft/client/KeyMapping``. Treating the tag as
+    server-capable overrode the jar scan's correct client verdict and killed a
+    real NeoForge server with "Attempted to load class ... for invalid dist
+    DEDICATED_SERVER" — the very failure #64 is about. Skipping costs an
+    optional enhancement the user can still add by hand.
+    """
+    assert env.side_from_environment(["client_only_server_optional"])[0] == "client"
+
+
+def test_server_capable_values_all_have_a_real_server_side():
+    """Guards the distinction the Fog regression turned on.
+
+    Everything in the server set must be a mod the server requires or can use
+    on its own. "Optional on the server" is not that, and must never be added
+    back here.
+    """
+    assert "client_only_server_optional" not in env.SERVER_CAPABLE_ENVIRONMENTS
+    assert not (env.SERVER_CAPABLE_ENVIRONMENTS & env.CLIENT_ONLY_ENVIRONMENTS)
