@@ -1139,10 +1139,12 @@ class ModrinthClient:
 
                 if loader_key == "quilt":
                     if "quilt.mod.json" in names:
-                        return self._classify_quilt(zf.read("quilt.mod.json"))
-                    if "fabric.mod.json" in names:
-                        return self._classify_fabric(zf.read("fabric.mod.json"))
-                    return "uncertain", "quilt.mod.json/fabric.mod.json missing"
+                        result = self._classify_quilt(zf.read("quilt.mod.json"))
+                    elif "fabric.mod.json" in names:
+                        result = self._classify_fabric(zf.read("fabric.mod.json"))
+                    else:
+                        result = ("uncertain", "quilt.mod.json/fabric.mod.json missing")
+                    return self._with_class_scan_fallback(zf, result)
 
                 if loader_key == "forge":
                     return self._classify_forge_family(
@@ -1156,8 +1158,10 @@ class ModrinthClient:
 
                 # fabric or unknown -> fabric.mod.json
                 if "fabric.mod.json" in names:
-                    return self._classify_fabric(zf.read("fabric.mod.json"))
-                return "uncertain", "fabric.mod.json missing"
+                    result = self._classify_fabric(zf.read("fabric.mod.json"))
+                else:
+                    result = ("uncertain", "fabric.mod.json missing")
+                return self._with_class_scan_fallback(zf, result)
         except (OSError, zipfile.BadZipFile):
             return "uncertain", "Failed to parse mod metadata"
 
@@ -1182,14 +1186,31 @@ class ModrinthClient:
         else:
             result = ("uncertain", f"{' or '.join(toml_candidates)} missing")
 
-        if result[0] == "uncertain":
-            scan_result = self._scan_class_files_for_client_imports(zf)
-            if scan_result[0] == "uncertain":
-                def _decap(s: str) -> str:
-                    return s[0].lower() + s[1:] if s else s
-                return scan_result[0], f"{result[1]}; {_decap(scan_result[1])}"
-            return scan_result
-        return result
+        return self._with_class_scan_fallback(zf, result)
+
+    def _with_class_scan_fallback(
+        self, zf: zipfile.ZipFile, result: Tuple[str, str],
+    ) -> Tuple[str, str]:
+        """Let the constant-pool scan break a tie the manifest could not.
+
+        Only runs when the manifest reader came back ``uncertain``, so an
+        explicit ``side="SERVER"`` is never second-guessed by a heuristic.
+        When the scan is also inconclusive both reasons are reported, so the
+        user sees why classification failed at each layer.
+
+        Applies to every loader. A Fabric mod that omits ``environment``
+        defaults to ``"*"`` and used to fall straight through to "install it
+        and hope", with no second opinion available.
+        """
+        if result[0] != "uncertain":
+            return result
+
+        scan_result = self._scan_class_files_for_client_imports(zf)
+        if scan_result[0] == "uncertain":
+            def _decap(s: str) -> str:
+                return s[0].lower() + s[1:] if s else s
+            return scan_result[0], f"{result[1]}; {_decap(scan_result[1])}"
+        return scan_result
 
     def _classify_fabric(self, raw: bytes) -> Tuple[str, str]:
         try:

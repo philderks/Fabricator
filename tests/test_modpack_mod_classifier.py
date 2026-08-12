@@ -715,3 +715,34 @@ def test_nested_jar_without_client_refs_stays_uncertain(mod_client, tmp_path):
 
     classification, _ = mod_client._classify_mod_jar_for_server(jar_path, loader="neoforge")
     assert classification == "uncertain"
+
+
+# ---------------------------------------------------------------------------
+# Class scan on the Fabric/Quilt path (2) — a Fabric manifest that omits
+# ``environment`` defaults to "*", which used to fall straight through to
+# "install it and hope" with no second opinion available.
+# ---------------------------------------------------------------------------
+
+def test_fabric_silent_manifest_falls_back_to_class_scan(mod_client, tmp_path):
+    jar = make_mod_jar(
+        tmp_path,
+        {"fabric.mod.json": '{"id": "demo", "version": "1.0"}'},
+        class_files={
+            "com/example/Demo.class": b"\xca\xfe\xba\xbecom/mojang/blaze3d/systems/RenderSystem",
+        },
+    )
+    classification, _ = mod_client._classify_mod_jar_for_server(jar, loader="fabric")
+    assert classification == "client"
+
+
+def test_fabric_explicit_server_environment_skips_class_scan(mod_client, tmp_path):
+    """environment=server short-circuits — a client class ref must not override it."""
+    jar = make_mod_jar(
+        tmp_path,
+        {"fabric.mod.json": '{"id": "demo", "environment": "server"}'},
+        class_files={
+            "com/example/Demo.class": b"\xca\xfe\xba\xbeorg/lwjgl/Version",
+        },
+    )
+    classification, _ = mod_client._classify_mod_jar_for_server(jar, loader="fabric")
+    assert classification == "server"
