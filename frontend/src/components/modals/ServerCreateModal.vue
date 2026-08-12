@@ -24,6 +24,13 @@
       </div>
       <div v-else class="install-progress-spinner" aria-label="Working…"></div>
 
+      <p
+        class="install-progress-hint"
+        v-if="installProgress?.phase === 'installing_modpack' && modpackStageLabel(installProgress)"
+      >
+        {{ modpackStageLabel(installProgress) }}
+      </p>
+
       <p class="install-progress-hint" v-if="installProgress?.phase === 'running_installer'">
         Forge / NeoForge installers download libraries and patch the vanilla server jar.
         This step can take several minutes for modern Minecraft versions.
@@ -580,16 +587,6 @@
     </template>
   </BaseModal>
 
-  <ModSideDecisionModal
-    :show="showUncertainModsModal"
-    :mods="uncertainModsReport"
-    :mc-version="formData.version"
-    :loader="formData.loader"
-    :loading="creating"
-    @confirm="confirmUncertainModsDecision"
-    @cancel="cancelUncertainModsDecision"
-    @close="cancelUncertainModsDecision"
-  />
 
   <JavaInstallModal
     :show="showJavaModal"
@@ -607,12 +604,9 @@ import Panel from '../ui/Panel.vue'
 import AppButton from '../ui/AppButton.vue'
 import FormField from '../ui/FormField.vue'
 import { createServer, installServer, getLoaderGameVersions, getJavaStatus, getServerInstallProgress } from '../../api/servers'
-import ModSideDecisionModal from './ModSideDecisionModal.vue'
 import {
-  installModpack,
   resolveProjectVersion,
   uploadModpackArchive,
-  installUploadedModpack,
   discardModpackUpload
 } from '../../api/modrinth'
 import { useToast } from '../../composables/useToast'
@@ -625,7 +619,6 @@ export default {
   components: {
     BaseModal,
     JavaInstallModal,
-    ModSideDecisionModal,
     Panel,
     AppButton,
     FormField
@@ -658,9 +651,6 @@ export default {
       showJavaModal: false,
       pendingJavaMcVersion: '',
       pendingJavaRetryServerId: null,
-      showUncertainModsModal: false,
-      uncertainModsReport: [],
-      pendingUncertainModsResolver: null,
       uploadedPack: null,
       packUploading: false,
       packUploadPercent: 0,
@@ -1041,56 +1031,30 @@ export default {
       }
     },
 
-    requestUncertainModsDecision(uncertainMods = []) {
-      return new Promise((resolve, reject) => {
-        this.uncertainModsReport = Array.isArray(uncertainMods) ? uncertainMods : []
-        this.showUncertainModsModal = true
-        this.pendingUncertainModsResolver = { resolve, reject }
-      })
-    },
-
-    confirmUncertainModsDecision(overrides) {
-      const resolver = this.pendingUncertainModsResolver
-      this.pendingUncertainModsResolver = null
-      this.showUncertainModsModal = false
-      this.uncertainModsReport = []
-      if (resolver?.resolve) {
-        resolver.resolve(overrides || {})
-      }
-    },
-
-    cancelUncertainModsDecision() {
-      const resolver = this.pendingUncertainModsResolver
-      this.pendingUncertainModsResolver = null
-      this.showUncertainModsModal = false
-      this.uncertainModsReport = []
-      if (resolver?.reject) {
-        resolver.reject(new Error('Modpack installation canceled. Unknown mod sides were not confirmed.'))
-      }
-    },
-
-    async installSelectedModpackOnServer(serverId, modSideOverrides = null) {
+    // The modpack the backend should install once the loader is in. Handing
+    // the intent over with the install request is what makes it survive this
+    // screen being closed or the page refreshed (#63) — previously the browser
+    // had to still be here to fire a second request, and if it wasn't, the
+    // pack was silently dropped.
+    buildModpackIntent() {
+      if (this.formData.setupMode !== 'modpack') return null
       if (this.uploadedPack) {
-        return installUploadedModpack(this.uploadedPack.upload_id, {
-          server_id: serverId,
+        return {
+          source: 'upload',
+          upload_id: this.uploadedPack.upload_id,
           loader: this.formData.loader,
-          clean_install: false,
-          create_backup: false,
-          mod_side_overrides: modSideOverrides,
-          // The mismatch warning is shown on the form, so by the time we get
-          // here the user has already answered it. A 409 at this point would
-          // strand a server that has just been created with no way to reply.
-          force: true
-        })
+          mc_version: this.formData.version,
+        }
       }
-      return installModpack(this.selectedModpack.id, {
-        mc_version: this.formData.version,
-        loader: this.formData.loader,
-        server_id: serverId,
-        clean_install: false,
-        create_backup: false,
-        mod_side_overrides: modSideOverrides
-      })
+      if (this.selectedModpack) {
+        return {
+          source: 'project',
+          project_id: this.selectedModpack.id,
+          loader: this.formData.loader,
+          mc_version: this.formData.version,
+        }
+      }
+      return null
     },
 
     handleClose() {
@@ -1210,10 +1174,31 @@ export default {
         running_installer:      'Running installer (this can take 2–15 minutes)…',
         detecting_artifacts:    'Verifying artefacts…',
         writing_eula:           'Finalising…',
+        installing_modpack:     'Installing modpack…',
         done:                   'Done',
         failed:                 'Failed',
       }
       return labels[phase] || 'Installing…'
+    },
+
+    /** Sub-stage detail while the worker is installing the modpack. */
+    modpackStageLabel(progress) {
+      const labels = {
+        starting:              'Preparing…',
+        resolving:             'Resolving modpack version…',
+        downloading_pack:      'Downloading modpack archive…',
+        checking_availability: 'Checking file availability…',
+        installing_files:      'Downloading mods…',
+        extracting_overrides:  'Extracting override files…',
+        verifying_mod_sides:   'Checking mods for server compatibility…',
+        done:                  'Finishing up…',
+      }
+      const label = labels[progress?.modpack_stage]
+      if (!label) return ''
+      if (progress.modpack_total > 0) {
+        return `${label} (${progress.modpack_current}/${progress.modpack_total})`
+      }
+      return label
     },
 
     /**
@@ -1366,7 +1351,10 @@ export default {
         this.installCreatedServerId = server.id
 
         // POST /install — 202 on async start; 400 (Java guard) throws into catch.
-        const initialProgress = await installServer(server.id)
+        // The modpack rides along so the worker installs it too; from here on
+        // this screen only observes.
+        const modpackIntent = this.buildModpackIntent()
+        const initialProgress = await installServer(server.id, { modpack: modpackIntent })
 
         // Switch modal into install-progress UI and start polling.
         this.installState = 'installing'
@@ -1379,47 +1367,25 @@ export default {
           // already reset by handleInstallClose; backend continues in
           // background. Nothing else to do — finally clears `creating`.
         } else if (finalProgress.phase === 'done') {
-          // Modpack install (if any) runs AFTER loader install succeeds.
+          // The worker installed the modpack too; report what it did rather
+          // than doing it here.
           let modpackInstallError = null
-          if (this.formData.setupMode === 'modpack' && (this.selectedModpack || this.uploadedPack)) {
+          if (modpackIntent) {
             const modpackTitle = this.selectedModpack?.title || this.uploadedPackTitle
-            this.toast.info(`Installing ${modpackTitle}…`, 'Modpack')
-            try {
-              let mpResult = null
-              let overrideMap = null
-              while (true) {
-                try {
-                  mpResult = await this.installSelectedModpackOnServer(server.id, overrideMap)
-                  break
-                } catch (installError) {
-                  const uncertainMods = installError?.data?.uncertain_mod_files
-                  const canContinueWithUncertain = Boolean(installError?.data?.can_continue_with_uncertain)
-                  if (
-                    installError?.status === 409
-                    && canContinueWithUncertain
-                    && Array.isArray(uncertainMods)
-                    && uncertainMods.length
-                  ) {
-                    this.toast.warning('Some mods need a server/client decision before install can continue.', 'Uncertain Mod Side')
-                    overrideMap = await this.requestUncertainModsDecision(uncertainMods)
-                    continue
-                  }
-                  throw installError
-                }
-              }
-              if (mpResult?.uncertain_mod_files?.length) {
+            // The backend consumes a staged upload once it lands, so drop our
+            // handle before resetForm can try to discard it again.
+            this.uploadedPack = null
+            if (finalProgress.modpack_error) {
+              modpackInstallError = finalProgress.modpack_error
+              this.toast.error(modpackInstallError, 'Modpack Failed')
+            } else {
+              this.toast.success(`${modpackTitle} installed successfully!`, 'Modpack Installed')
+              if (finalProgress.modpack_uncertain > 0) {
                 this.toast.info(
-                  `${mpResult.uncertain_mod_files.length} uncertain mods were classified by your selection.`,
-                  'Modpack Choices Applied',
+                  `${finalProgress.modpack_uncertain} mods could not be confirmed as server-safe. Review them on the server's mods page.`,
+                  'Modpack Warnings',
                 )
               }
-              // The backend consumes a staged upload once it lands, so drop
-              // our handle before resetForm can try to discard it again.
-              this.uploadedPack = null
-              this.toast.success(`${modpackTitle} installed successfully!`, 'Modpack Installed')
-            } catch (modpackError) {
-              modpackInstallError = modpackError?.message || 'Modpack installation failed. You can install it manually from the server dashboard.'
-              this.toast.error(modpackInstallError, 'Modpack Failed')
             }
           }
 
@@ -1495,9 +1461,6 @@ export default {
       if (this.imp) {
         this.imp.resetAll()
       }
-      this.showUncertainModsModal = false
-      this.uncertainModsReport = []
-      this.pendingUncertainModsResolver = null
 
       // Releases the staged archive server-side too, so closing the dialog
       // does not leave an upload sitting in the staging folder until it ages

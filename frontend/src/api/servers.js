@@ -204,8 +204,11 @@ export async function getServerMetrics(serverId) {
  * @param {string|number} serverId - Server ID
  * @returns {Promise<Object>} Installation result
  */
-export async function installServer(serverId) {
-  return post(`/api/servers/${serverId}/install`)
+export async function installServer(serverId, { modpack = null } = {}) {
+  // A modpack passed here is installed by the same backend worker that
+  // installs the loader, so closing the screen or refreshing no longer loses
+  // it (#63). Omit it and the install is loader-only, as before.
+  return post(`/api/servers/${serverId}/install`, modpack ? { modpack } : {})
 }
 
 /**
