@@ -166,6 +166,14 @@ def _store_projects(projects: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]
                 "title": project.get("title"),
                 "icon_url": project.get("icon_url"),
                 "slug": project.get("slug"),
+                # Side metadata, carried so the installer can ask Modrinth
+                # what a jar actually is instead of guessing from its bytes
+                # (see modrinth/environment.py). ``environment`` is the
+                # current field; the other two are its deprecated ancestors,
+                # kept as a fallback for projects not migrated yet.
+                "environment": project.get("environment"),
+                "client_side": project.get("client_side"),
+                "server_side": project.get("server_side"),
             }
             _project_cache[pid] = (expires_at, entry)
             stored[pid] = entry

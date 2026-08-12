@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import logging
 import re
 import shutil
 import sys
@@ -21,8 +22,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
+from backend.modrinth import environment as mod_environment
+from backend.modrinth.installed import file_sha1
 from backend.modrinth.ratelimit import RateLimitExceeded, shared_limiter
 from backend.utils.zip import is_within
+
+logger = logging.getLogger(__name__)
 
 
 def _retry_after_seconds(response: Optional[requests.Response]) -> Optional[float]:
@@ -678,6 +683,13 @@ class ModrinthClient:
                 loader=loader,
             )
 
+        # Last word on what belongs on a dedicated server, over both the index
+        # entries and the overrides tree.
+        _report("verifying_mod_sides")
+        self._apply_modrinth_side_metadata(
+            install_path, result, normalized_overrides,
+        )
+
         dependencies = index.get("dependencies") or {}
         return {
             "version": index.get("versionId"),
@@ -1025,6 +1037,88 @@ class ModrinthClient:
                     files_installed.append(scoped_path)
             else:
                 files_installed.append(scoped_path)
+
+    def _apply_modrinth_side_metadata(
+        self,
+        install_path: Path,
+        result: Dict[str, Any],
+        overrides: Dict[str, str],
+    ) -> List[str]:
+        """Re-judge every installed mod jar against Modrinth's own metadata.
+
+        Runs once, after the index files and overrides are on disk, and
+        outranks everything that put them there: index ``env``, jar manifests,
+        and the constant-pool scan are all inference, while Modrinth's
+        ``environment`` field is the author's own statement of where the mod
+        runs (see :mod:`backend.modrinth.environment`). A jar Modrinth calls
+        client-only is removed no matter how it got installed — that is
+        issue #64.
+
+        A user override still wins: someone who explicitly asked for a mod on
+        the server gets it, since only they know what they are building.
+
+        Deciding after download rather than before costs the bandwidth of the
+        client-only jars in a pack, which is a small and bounded fraction of
+        it. In exchange there is one place where this decision is made, for
+        both index entries and overrides, instead of two that can disagree.
+
+        Returns the paths it removed; ``result`` is updated in place.
+        """
+        hashes_by_path: Dict[str, str] = {}
+        for entry_path in result.get("files_installed", []):
+            relative = self._strip_override_prefix(entry_path)
+            lowered = relative.lower()
+            if not (lowered.startswith("mods/") and lowered.endswith(".jar")):
+                continue
+            if self._forced_side(overrides, entry_path, relative) == "server":
+                continue
+            target = (install_path / relative).resolve()
+            if not is_within(install_path, target) or not target.is_file():
+                continue
+            digest = file_sha1(target)
+            if digest:
+                hashes_by_path[entry_path] = digest
+
+        sides = mod_environment.sides_by_path(self, hashes_by_path)
+        if not sides:
+            return []
+
+        removed: List[str] = []
+        for entry_path, (side, reason) in sides.items():
+            # Modrinth vouching for a jar settles an "uncertain" warning the
+            # jar heuristics raised about it — the user has no decision left
+            # to make, so the prompt should not survive.
+            result["uncertain_mod_files"] = [
+                item for item in result.get("uncertain_mod_files", [])
+                if item.get("path") != entry_path
+            ]
+            if side != "client":
+                continue
+
+            relative = self._strip_override_prefix(entry_path)
+            target = (install_path / relative).resolve()
+            if is_within(install_path, target):
+                target.unlink(missing_ok=True)
+            if entry_path in result["files_installed"]:
+                result["files_installed"].remove(entry_path)
+            result["files_skipped"].append(entry_path)
+            removed.append(entry_path)
+            logger.info("modrinth: skipped client-only mod %s (%s)", entry_path, reason)
+
+        return removed
+
+    @staticmethod
+    def _strip_override_prefix(entry_path: str) -> str:
+        """Map a reported install path back to its path inside the server dir."""
+        for prefix in ("server-overrides/", "overrides/"):
+            if entry_path.startswith(prefix):
+                return entry_path[len(prefix):]
+        return entry_path
+
+    @staticmethod
+    def _forced_side(overrides: Dict[str, str], entry_path: str, relative: str) -> str:
+        """Look a user side-override up under either path form."""
+        return overrides.get(entry_path) or overrides.get(relative) or ""
 
     def _collect_unavailable_modpack_entries(
         self,
