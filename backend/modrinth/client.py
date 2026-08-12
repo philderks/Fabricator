@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import re
 import shutil
@@ -92,6 +93,17 @@ class ModrinthClient:
         b"net/minecraft/client/gui/",
         b"net/minecraft/client/renderer/",
     )
+
+    # Where loaders keep nested mod jars. Forge/NeoForge ship Jar-in-Jar under
+    # META-INF/jarjar/, Fabric and Quilt under META-INF/jars/. The outer jar is
+    # often a thin shim — Sodium's NeoForge build carries 72 stub classes and
+    # hides the real mod in a nested jar — so a scan that stops at the surface
+    # is scanning the wrapper, not the mod.
+    NESTED_JAR_PREFIXES = ("META-INF/jarjar/", "META-INF/jars/")
+
+    # One level of nesting is scanned, and no more: nested jars are libraries,
+    # and a deeper walk buys little for a cost that multiplies.
+    MAX_NESTED_JARS_SCANNED = 32
 
     # Modrinth caps a single bulk lookup implicitly (URL length for GET, body
     # size for POST) rather than by a documented count. 200 keeps a
@@ -1226,7 +1238,39 @@ class ModrinthClient:
         a raw bytestring search over the file body is sufficient — no
         class-file parsing required. First hit wins; we stop scanning
         the moment any pattern matches.
+
+        Nested jars (Jar-in-Jar) are scanned too, one level deep — see
+        :attr:`NESTED_JAR_PREFIXES`.
         """
+        hit = self._scan_zip_members_for_client_imports(zf)
+        if hit is not None:
+            return hit
+
+        scanned = 0
+        for name in zf.namelist():
+            if scanned >= self.MAX_NESTED_JARS_SCANNED:
+                break
+            if not name.endswith(".jar"):
+                continue
+            if not any(name.startswith(p) for p in self.NESTED_JAR_PREFIXES):
+                continue
+            scanned += 1
+            try:
+                with zf.open(name) as fh:
+                    with zipfile.ZipFile(io.BytesIO(fh.read())) as nested:
+                        hit = self._scan_zip_members_for_client_imports(nested)
+            except (KeyError, zipfile.BadZipFile, OSError, MemoryError):
+                continue
+            if hit is not None:
+                classification, reason = hit
+                return classification, f"{reason} (in nested jar {name})"
+
+        return "uncertain", "No client-only class references found"
+
+    def _scan_zip_members_for_client_imports(
+        self, zf: zipfile.ZipFile,
+    ) -> Optional[Tuple[str, str]]:
+        """Return a client verdict for the first matching .class, else None."""
         for name in zf.namelist():
             if not name.endswith(".class"):
                 continue
@@ -1242,7 +1286,7 @@ class ModrinthClient:
                         f"Class file references client-only package "
                         f"{pattern.decode('ascii')}",
                     )
-        return "uncertain", "No client-only class references found"
+        return None
 
     def _classify_forge_toml(self, raw: bytes) -> Tuple[str, str]:
         """Read mods.toml / neoforge.mods.toml.
