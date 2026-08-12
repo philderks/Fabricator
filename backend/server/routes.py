@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 from backend.auth.redaction import is_token_request
 from backend.modrinth import pending as pending_modpack
+from backend.modrinth import modmeta  # noqa: F401  (re-exported for tests)
 from backend.modrinth.client import ModrinthClient
 from backend.server.manager import ServerManager
 from backend.server.registry import get_server_process_registry

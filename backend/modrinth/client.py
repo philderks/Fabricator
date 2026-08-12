@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 
 from backend.modrinth import environment as mod_environment
+from backend.modrinth import modmeta
 from backend.modrinth.installed import file_sha1
 from backend.modrinth.ratelimit import RateLimitExceeded, shared_limiter
 from backend.utils.zip import is_within
@@ -687,7 +688,7 @@ class ModrinthClient:
         # entries and the overrides tree.
         _report("verifying_mod_sides")
         self._apply_modrinth_side_metadata(
-            install_path, result, normalized_overrides,
+            install_path, result, normalized_overrides, loader=loader,
         )
 
         dependencies = index.get("dependencies") or {}
@@ -1043,6 +1044,7 @@ class ModrinthClient:
         install_path: Path,
         result: Dict[str, Any],
         overrides: Dict[str, str],
+        loader: Optional[str] = None,
     ) -> List[str]:
         """Re-judge every installed mod jar against Modrinth's own metadata.
 
@@ -1083,8 +1085,7 @@ class ModrinthClient:
         if not sides:
             return []
 
-        removed: List[str] = []
-        for entry_path, (side, reason) in sides.items():
+        for entry_path, verdict in sides.items():
             # Modrinth vouching for a jar settles an "uncertain" warning the
             # jar heuristics raised about it — the user has no decision left
             # to make, so the prompt should not survive.
@@ -1092,9 +1093,30 @@ class ModrinthClient:
                 item for item in result.get("uncertain_mod_files", [])
                 if item.get("path") != entry_path
             ]
-            if side != "client":
-                continue
 
+        # Removing a mod can strand another that requires it, so the graph
+        # decides who actually goes — see modmeta.resolve_removals.
+        identities = {
+            path: modmeta.read_identity(
+                (install_path / self._strip_override_prefix(path)).resolve(), loader
+            )
+            for path in hashes_by_path
+        }
+        hard = {p for p, v in sides.items() if v.side == "client" and not v.is_soft}
+        soft = {p for p, v in sides.items() if v.side == "client" and v.is_soft}
+        to_remove, spared = modmeta.resolve_removals(identities, hard, soft)
+
+        for entry_path in sorted(spared):
+            logger.info(
+                "modrinth: keeping %s despite %s — a mod being installed requires it",
+                entry_path, sides[entry_path].reason,
+            )
+
+        removed: List[str] = []
+        for entry_path in sorted(to_remove):
+            reason = sides[entry_path].reason if entry_path in sides else (
+                "requires a mod that cannot run on a dedicated server"
+            )
             relative = self._strip_override_prefix(entry_path)
             target = (install_path / relative).resolve()
             if is_within(install_path, target):
