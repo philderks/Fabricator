@@ -80,8 +80,14 @@ class ModrinthClient:
     # dedicated server at classloading. Used as a fallback when a Forge mod's
     # mods.toml is silent on side — the common case for ETF, ModernUI,
     # Dynamic FPS, etc.
+    #
+    # ``org/lwjgl/`` is deliberately the whole package, not ``org/lwjgl/glfw/``:
+    # a dedicated server has no LWJGL on its classpath at all, so every
+    # subpackage is equally fatal. The narrower prefix is what let Sodium
+    # through in issue #64 — it references org/lwjgl/Version, org/lwjgl/opengl/*
+    # and org/lwjgl/system/* but never touches GLFW directly.
     CLIENT_ONLY_CLASS_PATTERNS: tuple[bytes, ...] = (
-        b"org/lwjgl/glfw/",
+        b"org/lwjgl/",
         b"com/mojang/blaze3d/",
         b"net/minecraft/client/gui/",
         b"net/minecraft/client/renderer/",

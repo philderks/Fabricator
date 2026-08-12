@@ -441,7 +441,7 @@ version="1.0"
 
 @pytest.mark.parametrize("loader", ["forge", "neoforge"])
 def test_forge_class_pool_lwjgl_hit_classifies_client(mod_client, tmp_path, loader):
-    """A .class referencing org/lwjgl/glfw/* in its constant pool -> client."""
+    """A .class referencing org/lwjgl/* in its constant pool -> client."""
     jar = make_mod_jar(
         tmp_path,
         {"META-INF/mods.toml": EMPTY_FORGE_TOML},
@@ -451,7 +451,26 @@ def test_forge_class_pool_lwjgl_hit_classifies_client(mod_client, tmp_path, load
     )
     classification, reason = mod_client._classify_mod_jar_for_server(jar, loader=loader)
     assert classification == "client"
-    assert "org/lwjgl/glfw/" in reason
+    assert "org/lwjgl/" in reason
+
+
+@pytest.mark.parametrize("loader", ["forge", "neoforge"])
+def test_forge_class_pool_matches_lwjgl_outside_glfw(mod_client, tmp_path, loader):
+    """Issue #64: the pattern must cover all of org/lwjgl/, not just GLFW.
+
+    Sodium never references GLFW directly — it references ``org/lwjgl/Version``,
+    which is precisely the class the reporter's server died on. A dedicated
+    server has no LWJGL at all, so every subpackage is equally fatal.
+    """
+    jar = make_mod_jar(
+        tmp_path,
+        {"META-INF/mods.toml": EMPTY_FORGE_TOML},
+        class_files={
+            "com/example/Demo.class": b"\xca\xfe\xba\xbeorg/lwjgl/Version",
+        },
+    )
+    classification, _ = mod_client._classify_mod_jar_for_server(jar, loader=loader)
+    assert classification == "client"
 
 
 @pytest.mark.parametrize("loader", ["forge", "neoforge"])
