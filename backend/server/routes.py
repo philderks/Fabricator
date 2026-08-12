@@ -12,6 +12,8 @@ from flask import Blueprint, jsonify, request
 logger = logging.getLogger(__name__)
 
 from backend.auth.redaction import is_token_request
+from backend.modrinth import pending as pending_modpack
+from backend.modrinth.client import ModrinthClient
 from backend.server.manager import ServerManager
 from backend.server.registry import get_server_process_registry
 from backend.server import storage
@@ -859,6 +861,52 @@ def delete_server_route(server_id, server):
     return jsonify(response), 200 if removal_error is None else 500
 
 
+def _install_pending_modpack(server_id: str, install_path: Path, intent: dict) -> None:
+    """Install the modpack requested at create time, once the loader is in.
+
+    Runs inside the install worker, so there is no request in flight and
+    nobody to prompt. Never raises: the loader install has already succeeded
+    and the server is usable, so a pack that fails leaves a working server and
+    a recorded error rather than turning the whole create into a failure.
+    """
+    label = pending_modpack.describe(intent)
+
+    def _on_progress(stage='', current=0, total=0, detail=''):
+        install_progress.update(
+            server_id,
+            phase='installing_modpack',
+            modpack_name=label,
+            modpack_stage=stage,
+            modpack_current=current,
+            modpack_total=total,
+            modpack_detail=detail,
+        )
+
+    _on_progress(stage='starting')
+
+    try:
+        result = pending_modpack.install(
+            ModrinthClient(), intent, install_path, _on_progress
+        )
+    except Exception as exc:  # noqa: BLE001 - a bad pack must not fail the server
+        logger.exception('Modpack install failed for server %s', server_id)
+        storage.update_server(server_id, {'pendingModpack': None})
+        install_progress.update(server_id, modpack_error=str(exc))
+        return
+
+    storage.update_server(server_id, {
+        'modpack': pending_modpack.modpack_record(result),
+        'pendingModpack': None,
+    })
+    pending_modpack.cleanup(result)
+    install_progress.update(
+        server_id,
+        modpack_installed=True,
+        modpack_uncertain=len(result.get('uncertain_mod_files') or []),
+        modpack_missing=len(result.get('missing_files') or []),
+    )
+
+
 @server_bp.route('/servers/<server_id>/install', methods=['POST'])
 @require_server
 def install_server(server_id, server):
@@ -887,6 +935,15 @@ def install_server(server_id, server):
         install_path = _registry().resolve_install_path(server)
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
+
+    # A modpack asked for at create time is installed by this same worker,
+    # right after the loader. It used to be a second request the browser fired
+    # once it saw the loader finish, which meant closing the screen or
+    # refreshing lost the pack entirely (#63). Stored on the server record so
+    # it is visible to anyone debugging a half-finished create.
+    modpack_intent = pending_modpack.normalize_intent(
+        (request.get_json(silent=True) or {}).get('modpack')
+    )
 
     installer = _get_installer(loader, install_path)
     if not installer:
@@ -1000,6 +1057,9 @@ def install_server(server_id, server):
     # need the persistent status flip on the server record.
     storage.update_server_status(server_id, 'installing')
 
+    if modpack_intent:
+        storage.update_server(server_id, {'pendingModpack': modpack_intent})
+
     # The worker thread acquires + releases the per-server lock itself
     # because RLock is thread-bound (Python's RLock binds the owning
     # thread on acquire and only that thread can release). The worker
@@ -1030,6 +1090,8 @@ def install_server(server_id, server):
                 if result.launch is not None:
                     updates['launch'] = result.launch.to_dict()
                 storage.update_server(server_id, updates)
+                if modpack_intent:
+                    _install_pending_modpack(server_id, install_path, modpack_intent)
                 # The installer already emitted 'done' before returning;
                 # this update is idempotent and ensures the entry has the
                 # final status flip for the frontend.
