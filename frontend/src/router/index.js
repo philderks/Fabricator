@@ -22,7 +22,15 @@ const routes = [
     path: '/',
     component: RootLayout,
     children: [
-      { path: '', name: 'Servers', component: Servers }
+      { path: '', name: 'Servers', component: Servers },
+      // Same page as ServerGeneralSettings, reachable without a server. The
+      // panel-wide settings (Java, MCP, password, display) do not need one;
+      // the page hides its per-server Auto-start panel when the id is absent.
+      { path: 'settings', name: 'GlobalSettings', component: ServerGeneralSettingsPage },
+      // MCP moved into the Settings page. Keep the old URL alive so bookmarks
+      // (and ?redirect=/integrations coming back through the login guard) land
+      // somewhere real instead of an unmatched blank route.
+      { path: 'integrations', redirect: { name: 'GlobalSettings' } }
     ]
   },
   {

@@ -26,6 +26,12 @@ async function onLock() {
 const serverId = computed(() => route.params.id)
 const hasServerContext = computed(() => Boolean(serverId.value))
 
+const settingsTarget = computed(() =>
+  hasServerContext.value
+    ? { name: 'ServerGeneralSettings', params: { id: serverId.value } }
+    : { name: 'GlobalSettings' }
+)
+
 const ALL_NAV_ITEMS = [
   { name: 'ServerOverview', label: 'Overview', icon: 'overview' },
   { name: 'ServerConsole',  label: 'Console',  icon: 'console'  },
@@ -219,7 +225,10 @@ onUnmounted(() => {
 
 <template>
   <aside class="app-sidebar">
-    <div class="app-sidebar__logo">
+    <!-- The way back to the server list. RootLayout routes (Servers, the
+         server-less Settings) have no topbar and no ServerSwitcher, so without
+         this the only exit from them is the browser's back button. -->
+    <router-link :to="{ name: 'Servers' }" class="app-sidebar__logo">
       <img
         class="app-sidebar__logo-img"
         src="/favicon.svg"
@@ -229,7 +238,7 @@ onUnmounted(() => {
         aria-hidden="true"
       />
       <span class="app-sidebar__brand">Fabricator</span>
-    </div>
+    </router-link>
 
     <ServerSwitcher v-if="hasServerContext" />
     <button
@@ -302,20 +311,20 @@ onUnmounted(() => {
     </nav>
 
     <div class="app-sidebar__bottom">
-      <component
-        :is="hasServerContext ? 'router-link' : 'div'"
-        v-bind="hasServerContext
-          ? { to: { name: 'ServerGeneralSettings', params: { id: serverId } }, activeClass: 'is-active' }
-          : { 'aria-disabled': 'true' }"
+      <!-- Unlike the server nav above, Settings is never ghosted: most of what
+           it holds (Java, MCP, password, display) is panel-wide, so it falls
+           back to the server-less /settings route. -->
+      <router-link
+        :to="settingsTarget"
+        active-class="is-active"
         class="app-sidebar__nav-item"
-        :class="{ 'app-sidebar__nav-item--ghost': !hasServerContext }"
       >
         <svg class="app-sidebar__nav-icon" width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
           <path d="M11.5 8.9L13.4 8.9L13.4 6.2L11.5 6.1L10.7 4.8L11.6 3.1L9.3 1.8L8.2 3.4L6.8 3.4L5.8 1.8L3.4 3.1L4.3 4.8L3.6 6.1L1.7 6.2L1.7 8.9L3.6 8.9L4.3 10.2L3.4 11.9L5.8 13.2L6.8 11.6L8.2 11.6L9.3 13.2L11.6 11.9L10.7 10.2Z"/>
           <circle cx="7.5" cy="7.5" r="2.2"/>
         </svg>
         <span>Settings</span>
-      </component>
+      </router-link>
 
       <button
         v-if="auth.enabled"
@@ -383,6 +392,16 @@ onUnmounted(() => {
   padding: var(--space-4) var(--space-3);
   border-bottom: 1px solid var(--border-color);
   flex-shrink: 0;
+  text-decoration: none;
+}
+
+.app-sidebar__logo:hover .app-sidebar__brand {
+  color: var(--primary);
+}
+
+.app-sidebar__logo:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
 }
 
 .app-sidebar__logo-img {
@@ -395,6 +414,7 @@ onUnmounted(() => {
   font-weight: 600;
   color: var(--text-primary);
   letter-spacing: -0.3px;
+  transition: color 0.15s ease;
 }
 
 /* "No servers yet" chip — replaces ServerSwitcher when no server context */

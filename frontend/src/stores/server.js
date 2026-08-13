@@ -45,6 +45,7 @@ const MODPACK_STAGE_LABELS = {
   checking_availability: 'Checking file availability...',
   installing_files: 'Downloading mods...',
   extracting_overrides: 'Extracting override files...',
+  verifying_mod_sides: 'Checking mods for server compatibility...',
   done: 'Finishing up...'
 }
 

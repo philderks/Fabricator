@@ -1,0 +1,35 @@
+[project]
+name = "fabricator-mcp"
+version = "0.1.0"
+description = "MCP server for the Fabricator Minecraft panel"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "AGPL-3.0-only"
+dependencies = [
+    "mcp>=1.28,<2",
+    "httpx>=0.28",
+    # pydantic-settings 2.15 warns on FastMCP 1.x's unresolved generic
+    # lifespan annotation during every clean uvx startup.
+    "pydantic-settings>=2.5.2,<2.15",
+]
+
+[project.scripts]
+fabricator-mcp = "fabricator_mcp.__main__:main"
+
+[dependency-groups]
+# anyio ships its own pytest plugin and is already in the mcp closure, so async
+# tests need no extra runner dependency.
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fabricator_mcp"]
+
+# Load-bearing for test isolation: this table stops pytest's rootdir search at
+# mcp/, so a run here never reaches the panel's pytest.ini or loads the panel's
+# tests/conftest.py. See README "Isolation from the panel suite".
+[tool.pytest.ini_options]
+testpaths = ["tests"]

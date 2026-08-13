@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
+import logging
 import re
 import shutil
 import sys
@@ -20,8 +22,13 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
+from backend.modrinth import environment as mod_environment
+from backend.modrinth import modmeta
+from backend.modrinth.installed import file_sha1
 from backend.modrinth.ratelimit import RateLimitExceeded, shared_limiter
 from backend.utils.zip import is_within
+
+logger = logging.getLogger(__name__)
 
 
 def _retry_after_seconds(response: Optional[requests.Response]) -> Optional[float]:
@@ -80,12 +87,29 @@ class ModrinthClient:
     # dedicated server at classloading. Used as a fallback when a Forge mod's
     # mods.toml is silent on side — the common case for ETF, ModernUI,
     # Dynamic FPS, etc.
+    #
+    # ``org/lwjgl/`` is deliberately the whole package, not ``org/lwjgl/glfw/``:
+    # a dedicated server has no LWJGL on its classpath at all, so every
+    # subpackage is equally fatal. The narrower prefix is what let Sodium
+    # through in issue #64 — it references org/lwjgl/Version, org/lwjgl/opengl/*
+    # and org/lwjgl/system/* but never touches GLFW directly.
     CLIENT_ONLY_CLASS_PATTERNS: tuple[bytes, ...] = (
-        b"org/lwjgl/glfw/",
+        b"org/lwjgl/",
         b"com/mojang/blaze3d/",
         b"net/minecraft/client/gui/",
         b"net/minecraft/client/renderer/",
     )
+
+    # Where loaders keep nested mod jars. Forge/NeoForge ship Jar-in-Jar under
+    # META-INF/jarjar/, Fabric and Quilt under META-INF/jars/. The outer jar is
+    # often a thin shim — Sodium's NeoForge build carries 72 stub classes and
+    # hides the real mod in a nested jar — so a scan that stops at the surface
+    # is scanning the wrapper, not the mod.
+    NESTED_JAR_PREFIXES = ("META-INF/jarjar/", "META-INF/jars/")
+
+    # One level of nesting is scanned, and no more: nested jars are libraries,
+    # and a deeper walk buys little for a cost that multiplies.
+    MAX_NESTED_JARS_SCANNED = 32
 
     # Modrinth caps a single bulk lookup implicitly (URL length for GET, body
     # size for POST) rather than by a documented count. 200 keeps a
@@ -660,6 +684,13 @@ class ModrinthClient:
                 loader=loader,
             )
 
+        # Last word on what belongs on a dedicated server, over both the index
+        # entries and the overrides tree.
+        _report("verifying_mod_sides")
+        self._apply_modrinth_side_metadata(
+            install_path, result, normalized_overrides, loader=loader,
+        )
+
         dependencies = index.get("dependencies") or {}
         return {
             "version": index.get("versionId"),
@@ -1008,6 +1039,109 @@ class ModrinthClient:
             else:
                 files_installed.append(scoped_path)
 
+    def _apply_modrinth_side_metadata(
+        self,
+        install_path: Path,
+        result: Dict[str, Any],
+        overrides: Dict[str, str],
+        loader: Optional[str] = None,
+    ) -> List[str]:
+        """Re-judge every installed mod jar against Modrinth's own metadata.
+
+        Runs once, after the index files and overrides are on disk, and
+        outranks everything that put them there: index ``env``, jar manifests,
+        and the constant-pool scan are all inference, while Modrinth's
+        ``environment`` field is the author's own statement of where the mod
+        runs (see :mod:`backend.modrinth.environment`). A jar Modrinth calls
+        client-only is removed no matter how it got installed — that is
+        issue #64.
+
+        A user override still wins: someone who explicitly asked for a mod on
+        the server gets it, since only they know what they are building.
+
+        Deciding after download rather than before costs the bandwidth of the
+        client-only jars in a pack, which is a small and bounded fraction of
+        it. In exchange there is one place where this decision is made, for
+        both index entries and overrides, instead of two that can disagree.
+
+        Returns the paths it removed; ``result`` is updated in place.
+        """
+        hashes_by_path: Dict[str, str] = {}
+        for entry_path in result.get("files_installed", []):
+            relative = self._strip_override_prefix(entry_path)
+            lowered = relative.lower()
+            if not (lowered.startswith("mods/") and lowered.endswith(".jar")):
+                continue
+            if self._forced_side(overrides, entry_path, relative) == "server":
+                continue
+            target = (install_path / relative).resolve()
+            if not is_within(install_path, target) or not target.is_file():
+                continue
+            digest = file_sha1(target)
+            if digest:
+                hashes_by_path[entry_path] = digest
+
+        sides = mod_environment.sides_by_path(self, hashes_by_path)
+        if not sides:
+            return []
+
+        for entry_path, verdict in sides.items():
+            # Modrinth vouching for a jar settles an "uncertain" warning the
+            # jar heuristics raised about it — the user has no decision left
+            # to make, so the prompt should not survive.
+            result["uncertain_mod_files"] = [
+                item for item in result.get("uncertain_mod_files", [])
+                if item.get("path") != entry_path
+            ]
+
+        # Removing a mod can strand another that requires it, so the graph
+        # decides who actually goes — see modmeta.resolve_removals.
+        identities = {
+            path: modmeta.read_identity(
+                (install_path / self._strip_override_prefix(path)).resolve(), loader
+            )
+            for path in hashes_by_path
+        }
+        hard = {p for p, v in sides.items() if v.side == "client" and not v.is_soft}
+        soft = {p for p, v in sides.items() if v.side == "client" and v.is_soft}
+        to_remove, spared = modmeta.resolve_removals(identities, hard, soft)
+
+        for entry_path in sorted(spared):
+            logger.info(
+                "modrinth: keeping %s despite %s — a mod being installed requires it",
+                entry_path, sides[entry_path].reason,
+            )
+
+        removed: List[str] = []
+        for entry_path in sorted(to_remove):
+            reason = sides[entry_path].reason if entry_path in sides else (
+                "requires a mod that cannot run on a dedicated server"
+            )
+            relative = self._strip_override_prefix(entry_path)
+            target = (install_path / relative).resolve()
+            if is_within(install_path, target):
+                target.unlink(missing_ok=True)
+            if entry_path in result["files_installed"]:
+                result["files_installed"].remove(entry_path)
+            result["files_skipped"].append(entry_path)
+            removed.append(entry_path)
+            logger.info("modrinth: skipped client-only mod %s (%s)", entry_path, reason)
+
+        return removed
+
+    @staticmethod
+    def _strip_override_prefix(entry_path: str) -> str:
+        """Map a reported install path back to its path inside the server dir."""
+        for prefix in ("server-overrides/", "overrides/"):
+            if entry_path.startswith(prefix):
+                return entry_path[len(prefix):]
+        return entry_path
+
+    @staticmethod
+    def _forced_side(overrides: Dict[str, str], entry_path: str, relative: str) -> str:
+        """Look a user side-override up under either path form."""
+        return overrides.get(entry_path) or overrides.get(relative) or ""
+
     def _collect_unavailable_modpack_entries(
         self,
         entries: List[Dict[str, Any]],
@@ -1121,10 +1255,12 @@ class ModrinthClient:
 
                 if loader_key == "quilt":
                     if "quilt.mod.json" in names:
-                        return self._classify_quilt(zf.read("quilt.mod.json"))
-                    if "fabric.mod.json" in names:
-                        return self._classify_fabric(zf.read("fabric.mod.json"))
-                    return "uncertain", "quilt.mod.json/fabric.mod.json missing"
+                        result = self._classify_quilt(zf.read("quilt.mod.json"))
+                    elif "fabric.mod.json" in names:
+                        result = self._classify_fabric(zf.read("fabric.mod.json"))
+                    else:
+                        result = ("uncertain", "quilt.mod.json/fabric.mod.json missing")
+                    return self._with_class_scan_fallback(zf, result)
 
                 if loader_key == "forge":
                     return self._classify_forge_family(
@@ -1138,8 +1274,10 @@ class ModrinthClient:
 
                 # fabric or unknown -> fabric.mod.json
                 if "fabric.mod.json" in names:
-                    return self._classify_fabric(zf.read("fabric.mod.json"))
-                return "uncertain", "fabric.mod.json missing"
+                    result = self._classify_fabric(zf.read("fabric.mod.json"))
+                else:
+                    result = ("uncertain", "fabric.mod.json missing")
+                return self._with_class_scan_fallback(zf, result)
         except (OSError, zipfile.BadZipFile):
             return "uncertain", "Failed to parse mod metadata"
 
@@ -1164,14 +1302,31 @@ class ModrinthClient:
         else:
             result = ("uncertain", f"{' or '.join(toml_candidates)} missing")
 
-        if result[0] == "uncertain":
-            scan_result = self._scan_class_files_for_client_imports(zf)
-            if scan_result[0] == "uncertain":
-                def _decap(s: str) -> str:
-                    return s[0].lower() + s[1:] if s else s
-                return scan_result[0], f"{result[1]}; {_decap(scan_result[1])}"
-            return scan_result
-        return result
+        return self._with_class_scan_fallback(zf, result)
+
+    def _with_class_scan_fallback(
+        self, zf: zipfile.ZipFile, result: Tuple[str, str],
+    ) -> Tuple[str, str]:
+        """Let the constant-pool scan break a tie the manifest could not.
+
+        Only runs when the manifest reader came back ``uncertain``, so an
+        explicit ``side="SERVER"`` is never second-guessed by a heuristic.
+        When the scan is also inconclusive both reasons are reported, so the
+        user sees why classification failed at each layer.
+
+        Applies to every loader. A Fabric mod that omits ``environment``
+        defaults to ``"*"`` and used to fall straight through to "install it
+        and hope", with no second opinion available.
+        """
+        if result[0] != "uncertain":
+            return result
+
+        scan_result = self._scan_class_files_for_client_imports(zf)
+        if scan_result[0] == "uncertain":
+            def _decap(s: str) -> str:
+                return s[0].lower() + s[1:] if s else s
+            return scan_result[0], f"{result[1]}; {_decap(scan_result[1])}"
+        return scan_result
 
     def _classify_fabric(self, raw: bytes) -> Tuple[str, str]:
         try:
@@ -1220,7 +1375,39 @@ class ModrinthClient:
         a raw bytestring search over the file body is sufficient — no
         class-file parsing required. First hit wins; we stop scanning
         the moment any pattern matches.
+
+        Nested jars (Jar-in-Jar) are scanned too, one level deep — see
+        :attr:`NESTED_JAR_PREFIXES`.
         """
+        hit = self._scan_zip_members_for_client_imports(zf)
+        if hit is not None:
+            return hit
+
+        scanned = 0
+        for name in zf.namelist():
+            if scanned >= self.MAX_NESTED_JARS_SCANNED:
+                break
+            if not name.endswith(".jar"):
+                continue
+            if not any(name.startswith(p) for p in self.NESTED_JAR_PREFIXES):
+                continue
+            scanned += 1
+            try:
+                with zf.open(name) as fh:
+                    with zipfile.ZipFile(io.BytesIO(fh.read())) as nested:
+                        hit = self._scan_zip_members_for_client_imports(nested)
+            except (KeyError, zipfile.BadZipFile, OSError, MemoryError):
+                continue
+            if hit is not None:
+                classification, reason = hit
+                return classification, f"{reason} (in nested jar {name})"
+
+        return "uncertain", "No client-only class references found"
+
+    def _scan_zip_members_for_client_imports(
+        self, zf: zipfile.ZipFile,
+    ) -> Optional[Tuple[str, str]]:
+        """Return a client verdict for the first matching .class, else None."""
         for name in zf.namelist():
             if not name.endswith(".class"):
                 continue
@@ -1236,7 +1423,7 @@ class ModrinthClient:
                         f"Class file references client-only package "
                         f"{pattern.decode('ascii')}",
                     )
-        return "uncertain", "No client-only class references found"
+        return None
 
     def _classify_forge_toml(self, raw: bytes) -> Tuple[str, str]:
         """Read mods.toml / neoforge.mods.toml.

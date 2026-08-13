@@ -14,6 +14,7 @@ from backend.system.routes import system_bp
 from backend.backups.routes import backups_bp
 from backend.server.players.routes import players_bp
 from backend.playit.routes import playit_bp
+from backend.integrations.routes import integrations_bp
 from backend.backups.scheduler import init_scheduler
 
 def get_base_path() -> str:
@@ -56,6 +57,7 @@ def create_app() -> Flask:
     app.register_blueprint(backups_bp)
     app.register_blueprint(players_bp)
     app.register_blueprint(playit_bp)
+    app.register_blueprint(integrations_bp)
 
     # One-time startup cleanup: flip stale 'installing'/'starting' statuses
     # left over from a previous run. Tolerates a missing/malformed index.

@@ -12,11 +12,15 @@ def test_status_enabled_unauthenticated(auth_client):
 
 
 def test_status_enabled_authenticated(authed_client):
+    from backend.core.version import get_app_version
+
     assert authed_client.get("/api/auth/status").get_json() == {
         "enabled": True,
         "authenticated": True,
         "needs_setup": False,
         "managed": False,
+        # Only a caller that has proved itself sees the version.
+        "panel_version": get_app_version(),
     }
 
 
@@ -37,6 +41,27 @@ def test_status_disabled(client):
         "needs_setup": False,
         "managed": False,
     }
+
+
+def test_status_includes_panel_version_for_a_token_caller(auth_client):
+    """The MCP client reads this with a token, so the token path must carry it."""
+    from backend.auth import service
+    from backend.core.version import get_app_version
+
+    service.set_mcp_enabled(True)
+    token = service.create_token("t", "read")["token"]
+
+    body = auth_client.get(
+        "/api/auth/status", headers={"Authorization": f"Bearer {token}"}
+    ).get_json()
+
+    assert body["panel_version"] == get_app_version()
+
+
+def test_status_omits_panel_version_for_an_unauthenticated_caller(auth_client):
+    """The route answers without a credential, so the version is not free to take."""
+    body = auth_client.get("/api/auth/status").get_json()
+    assert "panel_version" not in body
 
 
 def test_status_includes_managed_true(tmp_servers_root, monkeypatch):

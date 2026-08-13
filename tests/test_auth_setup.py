@@ -18,11 +18,14 @@ def test_setup_success_writes_hash_and_logs_in(setup_app, setup_client):
     # needs_setup flipped off in-memory, and we're logged in (no re-login).
     assert setup_app.config["FABRICATOR_NEEDS_SETUP"] is False
     assert setup_client.get("/api/servers").status_code == 200
+    from backend.core.version import get_app_version
+
     assert setup_client.get("/api/auth/status").get_json() == {
         "enabled": True,
         "authenticated": True,
         "needs_setup": False,
         "managed": False,
+        "panel_version": get_app_version(),
     }
 
 

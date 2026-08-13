@@ -166,11 +166,45 @@ def _store_projects(projects: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]
                 "title": project.get("title"),
                 "icon_url": project.get("icon_url"),
                 "slug": project.get("slug"),
+                # Side metadata, carried so the installer can ask Modrinth
+                # what a jar actually is instead of guessing from its bytes
+                # (see modrinth/environment.py). ``environment`` is the
+                # current field; the other two are its deprecated ancestors,
+                # kept as a fallback for projects not migrated yet.
+                "environment": project.get("environment"),
+                "client_side": project.get("client_side"),
+                "server_side": project.get("server_side"),
             }
             _project_cache[pid] = (expires_at, entry)
             stored[pid] = entry
         _trim(_project_cache, _MAX_PROJECTS)
     return stored
+
+
+def resolve_versions(
+    client, hashes: List[str], algorithm: str = "sha1"
+) -> Dict[str, Dict[str, Any]]:
+    """Map file hashes to Modrinth versions, serving what the cache knows.
+
+    Only the hashes no cache entry covers reach the network, and negatives
+    are remembered too, so a folder full of hand-built jars costs one request
+    the first time and none after.
+    """
+    wanted = list(dict.fromkeys(h for h in hashes if h))
+    versions, unknown = _cached_versions(wanted)
+    if unknown:
+        found = client.get_versions_by_hashes(unknown, algorithm=algorithm)
+        versions.update(_store_versions(unknown, found))
+    return versions
+
+
+def resolve_projects(client, project_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+    """Map project ids to cached project metadata, fetching what is missing."""
+    wanted = list(dict.fromkeys(pid for pid in project_ids if pid))
+    projects, unknown = _cached_projects(wanted)
+    if unknown:
+        projects.update(_store_projects(client.get_projects(unknown)))
+    return projects
 
 
 def resolve_jar_files(client, paths: List[Path]) -> Dict[str, Dict[str, Any]]:
@@ -197,15 +231,10 @@ def resolve_jar_files(client, paths: List[Path]) -> Dict[str, Dict[str, Any]]:
     if not by_hash:
         return {}
 
-    versions, unknown_hashes = _cached_versions(list(by_hash))
-    if unknown_hashes:
-        found = client.get_versions_by_hashes(unknown_hashes, algorithm="sha1")
-        versions.update(_store_versions(unknown_hashes, found))
-
-    project_ids = [v["project_id"] for v in versions.values() if v.get("project_id")]
-    projects, unknown_projects = _cached_projects(list(dict.fromkeys(project_ids)))
-    if unknown_projects:
-        projects.update(_store_projects(client.get_projects(unknown_projects)))
+    versions = resolve_versions(client, list(by_hash), algorithm="sha1")
+    projects = resolve_projects(
+        client, [v["project_id"] for v in versions.values() if v.get("project_id")]
+    )
 
     resolved: Dict[str, Dict[str, Any]] = {}
     for digest, filenames in by_hash.items():

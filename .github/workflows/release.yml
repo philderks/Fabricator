@@ -12,6 +12,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    if: ${{ !startsWith(github.event.release.tag_name, 'mcp-v') }}
     outputs:
       is_prerelease: ${{ steps.detect.outputs.is_prerelease }}
     steps:
@@ -26,6 +27,7 @@ jobs:
 
   build-linux:
     runs-on: ubuntu-latest
+    if: ${{ !startsWith(github.event.release.tag_name, 'mcp-v') }}
     needs: check
 
     steps:
@@ -80,6 +82,7 @@ jobs:
 
   build-windows:
     runs-on: windows-latest
+    if: ${{ !startsWith(github.event.release.tag_name, 'mcp-v') }}
     needs: check
 
     steps:
@@ -136,6 +139,7 @@ jobs:
 
   build-docker:
     runs-on: ubuntu-latest
+    if: ${{ !startsWith(github.event.release.tag_name, 'mcp-v') }}
     needs: check
     permissions:
       contents: read

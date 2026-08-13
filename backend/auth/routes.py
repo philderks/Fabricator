@@ -10,6 +10,7 @@ import time
 from flask import Blueprint, current_app, jsonify, request, session
 
 from backend.auth import service
+from backend.auth.redaction import is_token_request
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 
@@ -131,14 +132,24 @@ def status():
     authenticated = (
         enabled and not needs_setup and session.get("authenticated") is True
     )
-    return (
-        jsonify(
-            {
-                "enabled": enabled,
-                "authenticated": authenticated,
-                "needs_setup": needs_setup,
-                "managed": bool(current_app.config.get("FABRICATOR_MANAGED")),
-            }
-        ),
-        200,
-    )
+    payload = {
+        "enabled": enabled,
+        "authenticated": authenticated,
+        "needs_setup": needs_setup,
+        "managed": bool(current_app.config.get("FABRICATOR_MANAGED")),
+    }
+    # The version is a fingerprint, and this route answers without a credential
+    # (it is on the public allowlist, so a login page can render). So it is
+    # added only for a caller that has already proved itself — a session, or an
+    # accepted API token. An MCP client always reads this with a token, so it
+    # loses nothing; an unauthenticated caller gets exactly the payload it got
+    # before this field existed.
+    if authenticated or is_token_request():
+        # Imported here, not at module scope: backend/core/__init__.py imports
+        # the app factory, which imports this package, so a top-level
+        # "from backend.core.version import ..." is a circular import. The
+        # helper is lru_cached, so the call costs nothing after the first.
+        from backend.core.version import get_app_version
+
+        payload["panel_version"] = get_app_version()
+    return jsonify(payload), 200

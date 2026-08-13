@@ -1,8 +1,10 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import Panel from '../../components/ui/Panel.vue'
 import ToggleRow from '../../components/ui/ToggleRow.vue'
 import JavaManagerPanel from '../../components/settings/JavaManagerPanel.vue'
+import McpPanel from '../../components/settings/McpPanel.vue'
 import ChangePasswordPanel from '../../components/settings/ChangePasswordPanel.vue'
 import { useAuthStore } from '../../stores/auth'
 import { useServerStore } from '../../stores/server'
@@ -13,6 +15,14 @@ import { getUpdateStatus } from '../../api/servers'
 const auth = useAuthStore()
 const store = useServerStore()
 const prefs = usePreferencesStore()
+const route = useRoute()
+
+// This page serves two routes: /server/:id/settings and the server-less
+// /settings. Read the param rather than store.currentServerId — the store keeps
+// the last server it saw, and only ServerLayout resyncs it, so on /settings it
+// would still be set. Standalone also has no AppTopbar, hence its own heading
+// and padding (RootLayout leaves both to the page, like Servers.vue).
+const hasServer = computed(() => Boolean(route.params.id))
 
 // Boot auto-start mode — saves instantly via its own endpoint, so it stays
 // editable even while the server is running (unlike server.properties).
@@ -54,8 +64,10 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="general-settings">
-    <Panel v-if="!auth.managed" title="Auto-start">
+  <div class="general-settings" :class="{ 'general-settings--standalone': !hasServer }">
+    <h1 v-if="!hasServer" class="general-settings__heading">Settings</h1>
+
+    <Panel v-if="!auth.managed && hasServer" title="Auto-start">
       <p class="general-settings__autostart-intro">
         What should happen to this server when Fabricator starts up?
       </p>
@@ -98,6 +110,8 @@ onMounted(async () => {
 
     <JavaManagerPanel v-if="!auth.managed" />
 
+    <McpPanel v-if="!auth.managed" />
+
     <ChangePasswordPanel v-if="auth.enabled" />
 
     <Panel title="About">
@@ -121,6 +135,19 @@ onMounted(async () => {
   flex-direction: column;
   gap: var(--space-4);
   max-width: 880px;
+}
+
+/* RootLayout supplies no padding and no topbar, so the server-less route
+   carries both itself (matching Servers.vue's --space-5). */
+.general-settings--standalone {
+  padding: var(--space-5);
+}
+
+.general-settings__heading {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 .general-settings__autostart-intro {
