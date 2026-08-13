@@ -19,6 +19,7 @@ from unittest.mock import patch
 import pytest
 
 from backend.modrinth import pending
+from backend.modrinth.pending import PreparedPack
 from backend.server.installer.base import InstallResult, InstallStatus, LaunchSpec
 
 
@@ -48,6 +49,16 @@ def _wait(server_id: str, timeout: float = 5.0) -> dict:
             return entry
         time.sleep(0.01)
     raise AssertionError(f"timeout: {ip.get(server_id)!r}")
+
+
+def _prepared(tmp_path, loader_version="", **identity):
+    """A PreparedPack pointing at a throwaway file, as prepare() would return."""
+    archive = tmp_path / "pack.mrpack"
+    archive.write_bytes(b"PK\x03\x04")
+    return PreparedPack(
+        archive=archive, loader="fabric", loader_version=loader_version,
+        filename="pack.mrpack", source="project", identity=identity,
+    )
 
 
 OK_RESULT = InstallResult(
@@ -120,20 +131,25 @@ def test_modpack_is_installed_by_the_worker_not_the_browser(client, tmp_servers_
 
     installed = {}
 
-    def fake_install_modpack(**kwargs):
+    def fake_install_archive(archive, path, **kwargs):
+        installed["archive"] = archive
         installed.update(kwargs)
         return {
-            "name": "Cool Pack", "version": "1.0", "mc_version": "1.21.1",
-            "project_id": "PACK123", "version_id": "v1", "loaders": ["fabric"],
             "files_installed": ["mods/a.jar"], "files_skipped": [],
             "uncertain_mod_files": [], "missing_files": [],
         }
 
+    prepared = _prepared(
+        tmp_servers_root, name="Cool Pack", version="1.0",
+        mc_version="1.21.1", project_id="PACK123", version_id="v1",
+        loaders=["fabric"],
+    )
     with patch.dict("os.environ", {"FABRICATOR_SKIP_JAVA_CHECK": "1"}), \
          patch("backend.server.installer.fabric.FabricInstaller.install_with_config",
                return_value=OK_RESULT), \
-         patch("backend.modrinth.client.ModrinthClient.install_modpack",
-               side_effect=fake_install_modpack):
+         patch("backend.modrinth.pending.prepare", return_value=prepared), \
+         patch("backend.modrinth.client.ModrinthClient.install_mrpack_archive",
+               side_effect=fake_install_archive):
         resp = client.post(f"/api/servers/{server_id}/install", json={
             "modpack": {
                 "source": "project", "project_id": "PACK123",
@@ -143,7 +159,7 @@ def test_modpack_is_installed_by_the_worker_not_the_browser(client, tmp_servers_
         assert resp.status_code == 202
         final = _wait(server_id)
 
-    assert installed["project_id"] == "PACK123"
+    assert installed["archive"] == prepared.archive
     assert final["phase"] == "done"
     assert final.get("modpack_installed") is True
     assert "modpack_error" not in final
@@ -166,7 +182,7 @@ def test_install_without_a_modpack_is_untouched(client, tmp_servers_root):
     with patch.dict("os.environ", {"FABRICATOR_SKIP_JAVA_CHECK": "1"}), \
          patch("backend.server.installer.fabric.FabricInstaller.install_with_config",
                return_value=OK_RESULT), \
-         patch("backend.modrinth.client.ModrinthClient.install_modpack") as never:
+         patch("backend.modrinth.pending.prepare") as never:
         resp = client.post(f"/api/servers/{server_id}/install")
         assert resp.status_code == 202
         final = _wait(server_id)
@@ -192,7 +208,9 @@ def test_a_failing_modpack_still_leaves_a_usable_server(client, tmp_servers_root
     with patch.dict("os.environ", {"FABRICATOR_SKIP_JAVA_CHECK": "1"}), \
          patch("backend.server.installer.fabric.FabricInstaller.install_with_config",
                return_value=OK_RESULT), \
-         patch("backend.modrinth.client.ModrinthClient.install_modpack",
+         patch("backend.modrinth.pending.prepare",
+               return_value=_prepared(tmp_servers_root)), \
+         patch("backend.modrinth.client.ModrinthClient.install_mrpack_archive",
                side_effect=RuntimeError("modrinth exploded")):
         resp = client.post(f"/api/servers/{server_id}/install", json={
             "modpack": {"source": "project", "project_id": "PACK123"},
@@ -222,7 +240,9 @@ def test_a_failed_loader_install_does_not_run_the_modpack(client, tmp_servers_ro
     with patch.dict("os.environ", {"FABRICATOR_SKIP_JAVA_CHECK": "1"}), \
          patch("backend.server.installer.fabric.FabricInstaller.install_with_config",
                return_value=failed), \
-         patch("backend.modrinth.client.ModrinthClient.install_modpack") as never:
+         patch("backend.modrinth.client.ModrinthClient.install_mrpack_archive") as never, \
+         patch("backend.modrinth.pending.prepare",
+               return_value=_prepared(tmp_servers_root)):
         resp = client.post(f"/api/servers/{server_id}/install", json={
             "modpack": {"source": "project", "project_id": "PACK123"},
         })
@@ -246,7 +266,9 @@ def test_uncertain_mods_are_recorded_rather_than_prompted(client, tmp_servers_ro
     with patch.dict("os.environ", {"FABRICATOR_SKIP_JAVA_CHECK": "1"}), \
          patch("backend.server.installer.fabric.FabricInstaller.install_with_config",
                return_value=OK_RESULT), \
-         patch("backend.modrinth.client.ModrinthClient.install_modpack",
+         patch("backend.modrinth.pending.prepare",
+               return_value=_prepared(tmp_servers_root, name="Pack")), \
+         patch("backend.modrinth.client.ModrinthClient.install_mrpack_archive",
                return_value={
                    "name": "Pack", "loaders": [], "files_installed": [],
                    "files_skipped": [], "missing_files": [],
@@ -279,3 +301,58 @@ def test_an_expired_upload_is_reported_not_crashed(client, tmp_servers_root):
 
     assert final["phase"] == "done"
     assert "no longer available" in final["modpack_error"]
+
+
+# ---------------------------------------------------------------------------
+# Loader pinning — a pack is assembled against one loader build, and its mods
+# are compiled against that build's internals. "Fresh & Smooth" pins NeoForge
+# 21.1.169; installed on 21.1.248 the identical 26 mods die during startup
+# because Moonlight's mixin finds nothing to attach to, and on 21.1.169 they
+# boot. So the pack's declared build has to reach the installer.
+# ---------------------------------------------------------------------------
+
+class _FakeInstaller:
+    def __init__(self, versions, raises=None):
+        self._versions = versions
+        self._raises = raises
+
+    def get_available_versions(self, mc_version):
+        if self._raises:
+            raise self._raises
+        return self._versions
+
+
+def test_declared_loader_version_is_pinned(tmp_servers_root):
+    from backend.server.routes import _pack_loader_version
+    prepared = _prepared(tmp_servers_root, loader_version="21.1.169")
+    installer = _FakeInstaller([{"version": "21.1.248"}, {"version": "21.1.169"}])
+    assert _pack_loader_version(installer, prepared, "1.21.1") == "21.1.169"
+
+
+def test_a_pack_that_declares_nothing_uses_the_default(tmp_servers_root):
+    from backend.server.routes import _pack_loader_version
+    prepared = _prepared(tmp_servers_root, loader_version="")
+    installer = _FakeInstaller([{"version": "21.1.248"}])
+    assert _pack_loader_version(installer, prepared, "1.21.1") is None
+
+
+def test_an_unavailable_pin_is_ignored_rather_than_obeyed(tmp_servers_root):
+    """Pinning a build that does not exist would fail an install that worked."""
+    from backend.server.routes import _pack_loader_version
+    prepared = _prepared(tmp_servers_root, loader_version="99.9.9")
+    installer = _FakeInstaller([{"version": "21.1.248"}])
+    assert _pack_loader_version(installer, prepared, "1.21.1") is None
+
+
+def test_an_unreadable_version_list_falls_back_to_the_default(tmp_servers_root):
+    from backend.server.routes import _pack_loader_version
+    prepared = _prepared(tmp_servers_root, loader_version="21.1.169")
+    installer = _FakeInstaller([], raises=RuntimeError("maven is down"))
+    assert _pack_loader_version(installer, prepared, "1.21.1") is None
+
+
+def test_plain_string_version_lists_are_accepted(tmp_servers_root):
+    """Loaders differ on whether they list dicts or bare version strings."""
+    from backend.server.routes import _pack_loader_version
+    prepared = _prepared(tmp_servers_root, loader_version="0.16.14")
+    assert _pack_loader_version(_FakeInstaller(["0.16.14"]), prepared, "1.21.1") == "0.16.14"

@@ -25,6 +25,9 @@ half-created server with no way to answer it.
 from __future__ import annotations
 
 import logging
+import shutil
+import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
@@ -94,21 +97,39 @@ def describe(intent: Dict[str, Any]) -> str:
     return intent.get("project_id") or "modpack"
 
 
-def install(
-    client: Any,
-    intent: Dict[str, Any],
-    install_path: Path,
-    progress_callback: Optional[Callable[..., None]] = None,
-) -> Dict[str, Any]:
-    """Install the pack ``intent`` names into ``install_path``.
+@dataclass
+class PreparedPack:
+    """A pack fetched and read, but not yet installed.
 
-    ``clean_install`` is deliberately not honoured here: this runs on a server
-    that was created moments ago, so there is nothing to clean and no backup
-    worth taking. The interactive install route keeps both options for packs
-    going onto a server that already has content.
+    Exists because of ordering: the loader has to go in before the mods, but
+    the loader *version* the pack was built against is only knowable by
+    reading the pack. Preparing first means one download answers both
+    questions, instead of installing a loader and finding out afterwards.
+    """
+
+    archive: Path
+    loader: str = ""
+    loader_version: str = ""
+    filename: str = ""
+    source: str = "project"
+    upload_id: str = ""
+    identity: Dict[str, Any] = field(default_factory=dict)
+    _tmp_dir: Optional[str] = None
+
+    def cleanup(self) -> None:
+        """Drop the temporary download, if this pack came with one."""
+        if self._tmp_dir:
+            shutil.rmtree(self._tmp_dir, ignore_errors=True)
+            self._tmp_dir = None
+
+
+def prepare(client: Any, intent: Dict[str, Any]) -> PreparedPack:
+    """Fetch the pack ``intent`` names and read what it declares.
+
+    The caller owns the result and must call :meth:`PreparedPack.cleanup`.
 
     Raises :class:`PendingModpackError` when the intent can no longer be
-    installed — most often a staged upload that expired or was swept.
+    honoured — most often a staged upload that expired or was swept.
     """
     source = intent.get("source")
 
@@ -120,36 +141,87 @@ def install(
                 "The uploaded modpack is no longer available — upload the "
                 ".mrpack again and install it from the server's dashboard"
             )
-        result = client.install_mrpack_archive(
-            staged.path,
-            install_path,
-            loader=intent.get("loader") or staged.summary.get("loader"),
-            clean_install=False,
-            allow_missing=True,
-            mod_side_overrides=intent.get("mod_side_overrides"),
-            progress_callback=progress_callback,
+        summary = staged.summary or {}
+        return PreparedPack(
+            archive=staged.path,
+            loader=intent.get("loader") or str(summary.get("loader") or ""),
+            loader_version=str(summary.get("loader_version") or ""),
+            filename=staged.filename,
+            source="upload",
+            upload_id=upload_id,
         )
-        result.setdefault("name", staged.filename)
-        result["_source"] = "upload"
-        result["_filename"] = staged.filename
-        result["_upload_id"] = upload_id
-        return result
 
     project_id = intent.get("project_id") or ""
     if not project_id:
         raise PendingModpackError("The stored modpack request names no project")
 
-    result = client.install_modpack(
-        project_id=project_id,
-        install_path=install_path,
-        mc_version=intent.get("mc_version") or None,
-        loader=intent.get("loader") or None,
+    best = client._resolve_modpack_version(
+        project_id, intent.get("mc_version") or None, intent.get("loader") or None
+    )
+    download_url = client.get_primary_file_url(best)
+    if not download_url:
+        raise PendingModpackError("No download URL found for that modpack version")
+
+    tmp_dir = tempfile.mkdtemp(prefix="fabricator-pack-")
+    try:
+        archive = client._download_mrpack(download_url, Path(tmp_dir))
+        summary = mrpack.describe(mrpack.read_index(archive))
+    except Exception:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise
+
+    return PreparedPack(
+        archive=archive,
+        loader=intent.get("loader") or str(summary.get("loader") or ""),
+        loader_version=str(summary.get("loader_version") or ""),
+        filename=str(summary.get("name") or ""),
+        source="project",
+        identity={
+            "version": best.get("version_number"),
+            "name": best.get("name"),
+            "mc_version": (best.get("game_versions") or [None])[0],
+            "loaders": best.get("loaders", []),
+            "project_id": project_id,
+            "version_id": best.get("id"),
+        },
+        _tmp_dir=tmp_dir,
+    )
+
+
+def install_prepared(
+    client: Any,
+    prepared: PreparedPack,
+    intent: Dict[str, Any],
+    install_path: Path,
+    progress_callback: Optional[Callable[..., None]] = None,
+) -> Dict[str, Any]:
+    """Install an already-prepared pack into ``install_path``.
+
+    ``clean_install`` is deliberately not honoured here: this runs on a server
+    that was created moments ago, so there is nothing to clean and no backup
+    worth taking. The interactive install route keeps both options for packs
+    going onto a server that already has content.
+    """
+    result = client.install_mrpack_archive(
+        prepared.archive,
+        install_path,
+        loader=prepared.loader or None,
         clean_install=False,
         allow_missing=True,
         mod_side_overrides=intent.get("mod_side_overrides"),
         progress_callback=progress_callback,
     )
-    result["_source"] = "project"
+
+    # A pack fetched from Modrinth has an upstream identity the index cannot
+    # know; an uploaded one has only its filename.
+    if prepared.identity:
+        result.update({k: v for k, v in prepared.identity.items() if v})
+    else:
+        result.setdefault("name", prepared.filename)
+
+    result["_source"] = prepared.source
+    result["_filename"] = prepared.filename
+    result["_upload_id"] = prepared.upload_id
     return result
 
 
