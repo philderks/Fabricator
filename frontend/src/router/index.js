@@ -4,7 +4,6 @@ import LoginPage from '../views/LoginPage.vue'
 import SetupPage from '../views/SetupPage.vue'
 import RootLayout from '../layouts/RootLayout.vue'
 import Servers from '../views/Servers.vue'
-import IntegrationsPage from '../views/IntegrationsPage.vue'
 import ServerLayout from '../layouts/ServerLayout.vue'
 import ServerOverviewPage from '../views/server/ServerOverviewPage.vue'
 import ServerConsolePage from '../views/server/ServerConsolePage.vue'
@@ -24,7 +23,14 @@ const routes = [
     component: RootLayout,
     children: [
       { path: '', name: 'Servers', component: Servers },
-      { path: 'integrations', name: 'Integrations', component: IntegrationsPage }
+      // Same page as ServerGeneralSettings, reachable without a server. The
+      // panel-wide settings (Java, MCP, password, display) do not need one;
+      // the page hides its per-server Auto-start panel when the id is absent.
+      { path: 'settings', name: 'GlobalSettings', component: ServerGeneralSettingsPage },
+      // MCP moved into the Settings page. Keep the old URL alive so bookmarks
+      // (and ?redirect=/integrations coming back through the login guard) land
+      // somewhere real instead of an unmatched blank route.
+      { path: 'integrations', redirect: { name: 'GlobalSettings' } }
     ]
   },
   {
