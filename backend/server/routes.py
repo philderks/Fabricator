@@ -20,6 +20,7 @@ from backend.server.manager import ServerManager
 from backend.server.registry import get_server_process_registry
 from backend.server import storage
 from backend.server import install_progress
+from backend.server import upgrade as upgrade_service
 from backend.managed import is_managed
 from backend.server.installer import (
     InstallStatus,
@@ -1178,6 +1179,68 @@ def install_server(server_id, server):
     ).start()
 
     # Return current progress (includes the 'starting' entry we just inserted).
+    return jsonify({
+        'active': install_progress.is_active(server_id),
+        **install_progress.get(server_id),
+    }), 202
+
+
+@server_bp.route('/servers/<server_id>/upgrade', methods=['POST'])
+@require_server
+def upgrade_server(server_id, server):
+    """Queue a safe Vanilla/Paper release upgrade.
+
+    The worker makes a mandatory full-server snapshot before stopping the JVM or
+    replacing its jar. It shares the established install-progress protocol so
+    callers can use the existing polling endpoint while the migration runs.
+    """
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({'error': 'Request body must be a JSON object'}), 400
+    target_version = payload.get('version')
+    try:
+        target_version = upgrade_service.validate_upgrade(server, target_version)
+    except upgrade_service.UpgradeError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    if install_progress.is_active(server_id):
+        return jsonify({'error': 'Another operation is in progress for this server'}), 409
+    probe = try_acquire(server_id)
+    if probe is None:
+        return jsonify({'error': 'Another operation is in progress for this server'}), 409
+    probe.release()
+
+    install_progress.update(
+        server_id,
+        phase='starting',
+        server_id=server_id,
+        kind='upgrade',
+        from_version=server.get('version'),
+        to_version=target_version,
+    )
+
+    def _run_upgrade():
+        try:
+            def _on_progress(phase, detail):
+                install_progress.update(server_id, phase=phase, kind='upgrade', **detail)
+
+            result = upgrade_service.upgrade_server(
+                server_id, target_version, progress_callback=_on_progress,
+            )
+            install_progress.update(
+                server_id, phase='done', kind='upgrade', **result,
+            )
+        except Exception as exc:  # surfaced to the polling client
+            logger.exception('Server upgrade failed for %s', server_id)
+            install_progress.update(
+                server_id, phase='failed', kind='upgrade', error=str(exc),
+            )
+
+    threading.Thread(
+        target=_run_upgrade,
+        name=f'server-upgrade-{server_id}',
+        daemon=True,
+    ).start()
     return jsonify({
         'active': install_progress.is_active(server_id),
         **install_progress.get(server_id),

@@ -101,6 +101,9 @@ _NEVER = [
     ("DELETE", "/api/servers/<server_id>/backup-configs/<config_id>"),
     ("POST", "/api/servers/<server_id>/backup-configs/<config_id>/run"),
     ("POST", "/api/servers/<server_id>/backup-quick"),
+    # full-server migration is intentionally UI-only until a dedicated MCP tool
+    # can present its backup and rollback contract.
+    ("POST", "/api/servers/<server_id>/upgrade"),
     # modpack install (can plant files including an @args_file)
     ("POST", "/api/modrinth/modpack/<project_id>/install"),
     # .mrpack upload surface: the caller supplies the archive outright, so the

@@ -6,10 +6,79 @@ import Panel from '../../components/ui/Panel.vue'
 import ToggleRow from '../../components/ui/ToggleRow.vue'
 import { useServerStore } from '../../stores/server'
 import { useAuthStore } from '../../stores/auth'
-import { getInstalledJava, getJavaStatus } from '../../api/servers'
+import { getInstalledJava, getJavaStatus, getLoaderGameVersions, getServerInstallProgress, upgradeServer } from '../../api/servers'
+import { useToast } from '../../composables/useToast'
 
 const store = useServerStore()
 const auth = useAuthStore()
+const toast = useToast()
+
+// First-stage migrations are deliberately limited to jar-only server types.
+// Fabric/Forge/NeoForge need per-mod compatibility resolution before they can
+// be safely offered here.
+const canUpgrade = computed(() => ['vanilla', 'paper'].includes(store.server?.loader))
+const upgradeVersions = ref([])
+const targetUpgradeVersion = ref('')
+const upgradeStarting = ref(false)
+const upgradePhase = ref('')
+
+function isNewerMinecraftRelease(candidate, current) {
+  const parse = (version) => String(version).split('.').map(Number)
+  const [candidateMajor, candidateMinor, candidatePatch = 0] = parse(candidate)
+  const [currentMajor, currentMinor, currentPatch = 0] = parse(current)
+  return candidateMajor === currentMajor && (
+    candidateMinor > currentMinor ||
+    (candidateMinor === currentMinor && candidatePatch > currentPatch)
+  )
+}
+
+async function loadUpgradeVersions() {
+  if (!canUpgrade.value) return
+  try {
+    const versions = await getLoaderGameVersions(store.server.loader)
+    const current = store.server.version
+    upgradeVersions.value = (versions || [])
+      .filter((entry) => entry.stable && isNewerMinecraftRelease(entry.version, current))
+      .map((entry) => entry.version)
+    targetUpgradeVersion.value = upgradeVersions.value[0] || ''
+  } catch {
+    upgradeVersions.value = []
+  }
+}
+
+async function startUpgrade() {
+  const target = targetUpgradeVersion.value
+  if (!target || !store.server?.id) return
+  const confirmed = window.confirm(
+    `Create a full backup and upgrade ${store.server.name} from ${store.server.version} to ${target}? ` +
+    'Downgrades are not supported; restore the new backup if you need to go back.'
+  )
+  if (!confirmed) return
+  upgradeStarting.value = true
+  upgradePhase.value = 'starting'
+  try {
+    await upgradeServer(store.server.id, target)
+    toast.info('Upgrade started. Fabricator is creating a full backup before replacing the server version.')
+    let progress
+    do {
+      progress = await getServerInstallProgress(store.server.id)
+      upgradePhase.value = progress?.phase || 'working'
+      if (progress?.active) await new Promise((resolve) => setTimeout(resolve, 1000))
+    } while (progress?.active)
+
+    if (progress?.phase === 'done') {
+      await store.loadServer({ silent: true })
+      toast.success(`Server upgraded to ${target}. Your pre-upgrade backup is ready to restore if needed.`)
+    } else {
+      toast.error(progress?.error || 'The server upgrade failed. Your pre-upgrade backup is available for restore.')
+    }
+  } catch (error) {
+    toast.error(error?.message || 'Could not start the server upgrade.')
+  } finally {
+    upgradeStarting.value = false
+    upgradePhase.value = ''
+  }
+}
 
 const isDirty = computed(() => store.isDirtySettings)
 
@@ -140,6 +209,7 @@ const javaAutoHint = computed(() =>
 
 onMounted(async () => {
   if (auth.managed) return
+  await loadUpgradeVersions()
   try {
     const payload = await getInstalledJava()
     installedJava.value = Array.isArray(payload?.managed) ? payload.managed : []
@@ -191,6 +261,36 @@ const onReset = () => {
     <div class="settings-page__guard" v-if="!store.canEditSettings">
       Stop the server before editing configuration.
     </div>
+
+    <Panel v-if="canUpgrade && !auth.managed" title="Minecraft version upgrade">
+      <div class="settings-page__mode">
+        <div>
+          <p class="settings-page__mode-label">Upgrade {{ store.server?.version }}</p>
+          <p class="settings-page__mode-description">
+            Fabricator creates a full backup, stops the server, and installs the selected Vanilla or Paper release. Downgrades are blocked.
+          </p>
+          <p v-if="upgradeStarting" class="settings-page__upgrade-progress">Working: {{ upgradePhase.replaceAll('_', ' ') }}</p>
+        </div>
+        <div class="settings-page__upgrade-actions">
+          <select
+            v-model="targetUpgradeVersion"
+            class="settings-page__input"
+            :disabled="upgradeStarting || !upgradeVersions.length"
+            aria-label="Target Minecraft version"
+          >
+            <option v-for="version in upgradeVersions" :key="version" :value="version">{{ version }}</option>
+          </select>
+          <AppButton
+            variant="warning"
+            :loading="upgradeStarting"
+            :disabled="!targetUpgradeVersion"
+            @click="startUpgrade"
+          >
+            Upgrade server
+          </AppButton>
+        </div>
+      </div>
+    </Panel>
 
     <Panel title="Mode">
       <div class="settings-page__mode">
@@ -1214,6 +1314,25 @@ const onReset = () => {
 .settings-page__mode-button--active {
   border-color: var(--primary);
   color: var(--primary);
+}
+
+.settings-page__upgrade-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 210px;
+}
+
+.settings-page__upgrade-progress {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  margin: var(--space-2) 0 0;
+  text-transform: capitalize;
+}
+
+.settings-page__upgrade-actions .settings-page__input {
+  width: auto;
+  min-width: 104px;
 }
 
 .settings-page__grid {
