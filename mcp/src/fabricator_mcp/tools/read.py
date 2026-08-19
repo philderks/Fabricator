@@ -250,15 +250,23 @@ async def check_installed_mod_updates(client: PanelClient, server_id: str) -> di
     server = server if isinstance(server, dict) else {}
     listing = await list_installed_mods(client, server_id, identify=True)
     version, loader = server.get("version"), server.get("loader")
-    results = []
+    results, unidentified, seen = [], [], set()
     for mod in listing.get("mods", [])[:25]:
-        project_id = mod.get("projectId") if isinstance(mod, dict) else None
-        if not project_id or not version:
+        if not isinstance(mod, dict):
+            continue
+        project_id = mod.get("projectId")
+        if not project_id:
+            unidentified.append({"name": mod.get("name")})
+            continue
+        if project_id in seen:
+            continue
+        seen.add(project_id)
+        if not version:
             continue
         compatible = await check_mod_compatibility(client, project_id, version, loader)
         target = compatible.get("versionId")
-        results.append(drop_empty({"name": mod.get("name"), "projectId": project_id, "currentVersionId": mod.get("versionId"), "currentVersionNumber": mod.get("versionNumber"), "targetVersionId": target, "targetVersionNumber": compatible.get("versionNumber"), "updateAvailable": bool(target and target != mod.get("versionId")), "compatible": compatible.get("compatible")}))
-    return {"minecraftVersion": version, "loader": loader, "updates": results, "identified": listing.get("identified", False), "truncated": len(listing.get("mods", [])) > 25}
+        results.append(drop_empty({"projectId": project_id, "currentVersionId": mod.get("versionId"), "currentVersionNumber": mod.get("versionNumber"), "candidateVersionId": target, "candidateVersionNumber": compatible.get("versionNumber"), "state": "no-compatible-version" if not compatible.get("compatible") else ("current-for-target" if target == mod.get("versionId") else "different-compatible-version"), "compatible": compatible.get("compatible")}))
+    return {"minecraftVersion": version, "loader": loader, "mods": results, "unidentified": unidentified, "identified": listing.get("identified", False), "truncated": len(listing.get("mods", [])) > 25}
 
 
 async def get_server_runtime_diagnostics(client: PanelClient, server_id: str) -> dict[str, Any]:
