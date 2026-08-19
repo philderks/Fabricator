@@ -47,7 +47,7 @@ async def test_advertised_tools_are_exactly_the_route_table():
     server = build_server(_CONFIG, client=_client(lambda r: httpx.Response(200, json={})))
     advertised = {tool.name for tool in await server.list_tools()}
     assert advertised == set(TOOL_ROUTES)
-    assert len(advertised) == 19
+    assert len(advertised) == 25
 
 
 async def test_manage_tools_are_advertised_even_though_a_read_token_cannot_use_them():

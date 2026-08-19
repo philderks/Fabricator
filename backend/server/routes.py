@@ -498,6 +498,13 @@ def get_server_details(server_id, server):
     return jsonify(_augment_with_runtime(server))
 
 
+@server_bp.route('/servers/<server_id>/java-status', methods=['GET'])
+@require_server
+def get_server_java_status(server_id, server):
+    """Report the effective runtime and Java compatibility for one server."""
+    return jsonify(_server_java_check_payload(server))
+
+
 @server_bp.route('/servers/<server_id>/logs', methods=['GET'])
 def get_server_logs(server_id):
     # type=int yields None on unparseable input, so fall back explicitly rather

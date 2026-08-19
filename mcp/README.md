@@ -62,7 +62,7 @@ The token's scope decides this, and the **panel** enforces it — not this packa
 
 | Scope | What it reaches |
 |---|---|
-| `read` | List servers and their status · read console output and crash logs · list installed mods and identify them against Modrinth by file hash · CPU and memory use · Java version checks · loader and Minecraft-version discovery · install progress and failure reasons · backup coverage and snapshot metadata · search Modrinth and check whether a mod has a build for your Minecraft version and loader |
+| `read` | List servers and their status · read console output and crash logs · list/identify installed mods and audit their compatible updates · batch-check Modrinth project compatibility · inspect exact Modrinth versions and search modpacks (catalog only) · CPU and memory use · server-specific Java/runtime and install diagnostics · loader and Minecraft-version discovery · backup coverage, schedules, and snapshot metadata · search Modrinth |
 | `manage` | Everything above, plus: start / stop / restart a server · start or retry server installation using its saved configuration · install or update one mod by Modrinth project id · delete installed mod jars |
 
 **`read` is the documented default.** It answers every diagnostic question and cannot change
