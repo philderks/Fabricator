@@ -214,6 +214,75 @@ async def get_install_progress(client: PanelClient, server_id: str) -> dict[str,
     })
 
 
+async def search_modpacks(client: PanelClient, query: str, mc_version: str | None = None, loader: str | None = None, limit: int = DEFAULT_SEARCH_LIMIT) -> dict[str, Any]:
+    """Search the catalog only; installing modpacks remains intentionally unavailable."""
+    if not isinstance(query, str) or not query.strip():
+        raise ValueError("query is required")
+    payload = await client.get("/api/modrinth/modpacks/search", params={"query": query.strip()[:128], "mc_version": mc_version, "loader": loader, "limit": clamp(limit, 1, 50, DEFAULT_SEARCH_LIMIT)})
+    hits = payload.get("hits") if isinstance(payload, dict) else []
+    hits = hits if isinstance(hits, list) else []
+    return {"results": [drop_empty({"projectId": h.get("project_id"), "slug": h.get("slug"), "title": h.get("title"), "description": h.get("description"), "downloads": h.get("downloads")}) for h in hits if isinstance(h, dict)]}
+
+
+async def get_mod_version(client: PanelClient, version_id: str) -> dict[str, Any]:
+    version_id = _require(version_id, "version_id")
+    payload = await client.get(f"/api/modrinth/version/{version_id}")
+    payload = payload if isinstance(payload, dict) else {}
+    return drop_empty({"versionId": payload.get("id"), "projectId": payload.get("project_id"), "versionNumber": payload.get("version_number"), "gameVersions": payload.get("game_versions"), "loaders": payload.get("loaders"), "name": payload.get("name")})
+
+
+async def check_mods_compatibility(client: PanelClient, project_ids: list[str], mc_version: str, loader: str | None = None) -> dict[str, Any]:
+    if not isinstance(project_ids, list) or not project_ids:
+        raise ValueError("project_ids is required")
+    if not isinstance(mc_version, str) or not mc_version.strip():
+        raise ValueError("mc_version is required")
+    results = []
+    for project_id in project_ids[:25]:
+        project_id = _require(project_id, "project_id")
+        result = await check_mod_compatibility(client, project_id, mc_version, loader)
+        results.append({"projectId": project_id, **result})
+    return {"minecraftVersion": mc_version.strip(), "loader": loader, "results": results, "truncated": len(project_ids) > 25}
+
+
+async def check_installed_mod_updates(client: PanelClient, server_id: str) -> dict[str, Any]:
+    server_id = _require(server_id, "server_id")
+    server = await client.get(f"/api/servers/{server_id}")
+    server = server if isinstance(server, dict) else {}
+    listing = await list_installed_mods(client, server_id, identify=True)
+    version, loader = server.get("version"), server.get("loader")
+    results, unidentified, seen = [], [], set()
+    for mod in listing.get("mods", [])[:25]:
+        if not isinstance(mod, dict):
+            continue
+        project_id = mod.get("projectId")
+        if not project_id:
+            unidentified.append({"name": mod.get("name")})
+            continue
+        if project_id in seen:
+            continue
+        seen.add(project_id)
+        if not version:
+            continue
+        compatible = await check_mod_compatibility(client, project_id, version, loader)
+        target = compatible.get("versionId")
+        results.append(drop_empty({"projectId": project_id, "currentVersionId": mod.get("versionId"), "currentVersionNumber": mod.get("versionNumber"), "candidateVersionId": target, "candidateVersionNumber": compatible.get("versionNumber"), "state": "no-compatible-version" if not compatible.get("compatible") else ("current-for-target" if target == mod.get("versionId") else "different-compatible-version"), "compatible": compatible.get("compatible")}))
+    return {"minecraftVersion": version, "loader": loader, "mods": results, "unidentified": unidentified, "identified": listing.get("identified", False), "truncated": len(listing.get("mods", [])) > 25}
+
+
+async def get_server_runtime_diagnostics(client: PanelClient, server_id: str) -> dict[str, Any]:
+    server_id = _require(server_id, "server_id")
+    java, install = await client.get(f"/api/servers/{server_id}/java-status"), await client.get(f"/api/servers/{server_id}/install/progress")
+    java, install = (java if isinstance(java, dict) else {}), (install if isinstance(install, dict) else {})
+    return drop_empty({"requiredMajor": java.get("required_java"), "detectedMajor": java.get("detected_java"), "meetsRequirement": java.get("meets_requirement"), "enforcementSkipped": java.get("java_enforcement_skipped"), "install": drop_empty({"active": install.get("active"), "phase": install.get("phase"), "error": install.get("error"), "updatedAt": install.get("updated_at")})})
+
+
+async def list_backup_configs(client: PanelClient, server_id: str) -> dict[str, Any]:
+    server_id = _require(server_id, "server_id")
+    payload = await client.get(f"/api/servers/{server_id}/backup-configs")
+    configs = payload if isinstance(payload, list) else []
+    return {"configs": [drop_empty({"id": c.get("id"), "name": c.get("name"), "enabled": c.get("enabled"), "schedule": c.get("schedule"), "retention": c.get("retention"), "nextRunTime": c.get("next_run_time")}) for c in configs if isinstance(c, dict)]}
+
+
 #: What the panel reports when it has no release marker to read — a source
 #: checkout has no .fabricator_version, only a built release does.
 _UNKNOWN_VERSION = "unknown"

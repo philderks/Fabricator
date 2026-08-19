@@ -22,6 +22,7 @@ _READ = [
     ("GET", "/api/servers/<server_id>/logs"),
     ("GET", "/api/servers/<server_id>/mods"),
     ("GET", "/api/servers/<server_id>/install/progress"),
+    ("GET", "/api/servers/<server_id>/java-status"),
     ("GET", "/api/servers/<server_id>/metrics"),
     ("GET", "/api/metrics/system"),
     ("GET", "/api/java/status"),

@@ -17,7 +17,7 @@ Bump ``PANEL_TABLE_REVISION`` only after a human has re-audited the difference.
 from __future__ import annotations
 
 #: Date of the last human re-audit of this snapshot.
-PANEL_TABLE_REVISION = "2026-08-06"
+PANEL_TABLE_REVISION = "2026-08-19"
 
 PANEL_READ: frozenset[tuple[str, str]] = frozenset({
     ("GET", "/api/auth/status"),
@@ -48,6 +48,7 @@ PANEL_READ: frozenset[tuple[str, str]] = frozenset({
     ("GET", "/api/servers/<server_id>/backup-configs"),
     ("GET", "/api/servers/<server_id>/backup-summary"),
     ("GET", "/api/servers/<server_id>/install/progress"),
+    ("GET", "/api/servers/<server_id>/java-status"),
     ("GET", "/api/servers/<server_id>/logs"),
     ("GET", "/api/servers/<server_id>/metrics"),
     ("GET", "/api/servers/<server_id>/mods"),

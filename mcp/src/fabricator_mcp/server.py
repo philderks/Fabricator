@@ -134,6 +134,36 @@ def register_read_tools(server, client: PanelClient) -> None:
         server as configured.
         """
         return await read_tools.check_mod_compatibility(client, project_id, mc_version, loader)
+    @server.tool()
+    async def search_modpacks(query: str, mc_version: str | None = None, loader: str | None = None, limit: int = 10) -> dict[str, Any]:
+        """Search Modrinth modpacks. Installing a modpack remains panel-UI only."""
+        return await read_tools.search_modpacks(client, query, mc_version, loader, limit)
+
+    @server.tool()
+    async def get_mod_version(version_id: str) -> dict[str, Any]:
+        """Inspect one exact Modrinth version before choosing an update."""
+        return await read_tools.get_mod_version(client, version_id)
+
+    @server.tool()
+    async def check_installed_mod_updates(server_id: str) -> dict[str, Any]:
+        """Find compatible updates for identified installed mods; reports at most 25."""
+        return await read_tools.check_installed_mod_updates(client, server_id)
+
+    @server.tool()
+    async def check_mods_compatibility(project_ids: list[str], mc_version: str, loader: str | None = None) -> dict[str, Any]:
+        """Batch-check up to 25 Modrinth projects for a target loader and Minecraft version."""
+        return await read_tools.check_mods_compatibility(client, project_ids, mc_version, loader)
+
+    @server.tool()
+    async def get_server_runtime_diagnostics(server_id: str) -> dict[str, Any]:
+        """Show this server's effective Java compatibility and current install progress."""
+        return await read_tools.get_server_runtime_diagnostics(client, server_id)
+
+    @server.tool()
+    async def list_backup_configs(server_id: str) -> dict[str, Any]:
+        """List backup schedules and retention without exposing storage paths or mutation."""
+        return await read_tools.list_backup_configs(client, server_id)
+
 
 
 def register_manage_tools(server, client: PanelClient) -> None:
