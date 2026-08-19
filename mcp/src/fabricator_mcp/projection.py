@@ -65,6 +65,39 @@ def project_server(record: Any) -> dict[str, Any]:
     })
 
 
+def project_snapshot(record: Any) -> dict[str, Any]:
+    """The recovery metadata an assistant can safely reason about.
+
+    Host paths are not useful to a diagnostic conversation and must stay out of
+    its context even though the panel already redacts them for token callers.
+    """
+    if not isinstance(record, dict):
+        return {}
+    return drop_empty({
+        "id": record.get("id"),
+        "type": record.get("type"),
+        "createdAt": record.get("createdAt"),
+        "fileName": record.get("fileName"),
+        "sizeBytes": record.get("sizeBytes"),
+        "status": record.get("status"),
+    })
+
+
+def project_version_metadata(record: Any) -> dict[str, Any]:
+    """Normalise installer-specific version-list records for MCP context."""
+    if isinstance(record, str):
+        return {"version": record}
+    if not isinstance(record, dict):
+        return {}
+    nested = record.get("loader")
+    nested = nested if isinstance(nested, dict) else {}
+    return drop_empty({
+        "version": record.get("version") or nested.get("version"),
+        "stable": record.get("stable") if "stable" in record else nested.get("stable"),
+        "type": record.get("type") or nested.get("type"),
+    })
+
+
 def project_log_lines(payload: Any, limit: int) -> dict[str, Any]:
     """Flatten stdout/stderr into one ordered list, clamped both ways."""
     if not isinstance(payload, dict):

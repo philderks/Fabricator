@@ -62,16 +62,17 @@ The token's scope decides this, and the **panel** enforces it — not this packa
 
 | Scope | What it reaches |
 |---|---|
-| `read` | List servers and their status · read console output and crash logs · list installed mods and identify them against Modrinth by file hash · CPU and memory use · Java version checks · install progress and failure reasons · search Modrinth and check whether a mod has a build for your Minecraft version and loader |
-| `manage` | Everything above, plus: start / stop / restart a server · install or update one mod by Modrinth project id · delete installed mod jars |
+| `read` | List servers and their status · read console output and crash logs · list installed mods and identify them against Modrinth by file hash · CPU and memory use · Java version checks · loader and Minecraft-version discovery · install progress and failure reasons · backup coverage and snapshot metadata · search Modrinth and check whether a mod has a build for your Minecraft version and loader |
+| `manage` | Everything above, plus: start / stop / restart a server · start or retry server installation using its saved configuration · install or update one mod by Modrinth project id · delete installed mod jars |
 
 **`read` is the documented default.** It answers every diagnostic question and cannot change
 anything on your server.
 
 Whatever the scope, a large part of the panel is refused to **every** token: the console, file
 reading and writing, server settings, creating or deleting servers, Java installation, the
-updater, backups and snapshot restore, world import, and all player administration including the
-player lists. Those refusals happen in the panel, and this package surfaces them as they are
+updater, backup creation and snapshot restore, world import, and all player administration
+including the player lists. The read-only backup and snapshot metadata tools do not expose archive
+paths or files. Those refusals happen in the panel, and this package surfaces them as they are
 rather than hiding the tools.
 
 ### Known limitation: mods in subfolders

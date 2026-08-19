@@ -135,6 +135,69 @@ async def test_check_java_without_a_version_sends_no_params():
     assert panel.query() == {}
 
 
+async def test_list_loader_game_versions_uses_the_loader_metadata_route():
+    panel = Panel({"/api/loaders/paper/versions/game": [
+        {"version": "1.21.4", "stable": True, "type": "release", "noise": "drop"},
+    ]})
+    async with client_for(panel) as client:
+        result = await read_tools.list_loader_game_versions(client, "paper")
+    assert panel.calls == [("GET", "/api/loaders/paper/versions/game")]
+    assert result == {"loader": "paper", "minecraftVersions": [
+        {"version": "1.21.4", "stable": True, "type": "release"},
+    ]}
+
+
+async def test_list_loader_versions_sends_an_optional_minecraft_version():
+    panel = Panel({"/api/loaders/paper/versions/loader": [
+        {"loader": {"version": "0.16.0", "stable": True}, "noise": "drop"},
+    ]})
+    async with client_for(panel) as client:
+        result = await read_tools.list_loader_versions(client, "paper", "1.21.4")
+    assert panel.calls == [("GET", "/api/loaders/paper/versions/loader")]
+    assert panel.query() == {"mc_version": "1.21.4"}
+    assert result == {"loader": "paper", "minecraftVersion": "1.21.4", "versions": [
+        {"version": "0.16.0", "stable": True},
+    ]}
+
+
+async def test_get_backup_status_projects_summary_without_its_storage_path():
+    panel = Panel({"/api/servers/s1/backup-summary": {
+        "total_snapshots": 3,
+        "total_size_bytes": 1234,
+        "last_snapshot": {"id": "snap-1", "fileName": "safe.tar", "filePath": "/srv/secrets"},
+        "next_run": {"config_id": "nightly", "config_name": "Nightly", "next_run_time": "2026-08-20T01:00:00Z"},
+        "configs_count": 1,
+        "defaultStoragePath": "/srv/fabricator/backups",
+    }})
+    async with client_for(panel) as client:
+        result = await read_tools.get_backup_status(client, "s1")
+    assert panel.calls == [("GET", "/api/servers/s1/backup-summary")]
+    assert result == {
+        "totalSnapshots": 3,
+        "totalSizeBytes": 1234,
+        "lastSnapshot": {"id": "snap-1", "fileName": "safe.tar"},
+        "nextRun": {"configId": "nightly", "configName": "Nightly", "nextRunTime": "2026-08-20T01:00:00Z"},
+        "configsCount": 1,
+    }
+    assert "srv" not in str(result)
+
+
+async def test_list_snapshots_projects_recovery_metadata_without_file_paths():
+    panel = Panel({"/api/servers/s1/snapshots": [{
+        "id": "snap-1", "type": "backup", "createdAt": "2026-08-19T00:00:00Z",
+        "fileName": "before-upgrade.tar", "filePath": "/srv/fabricator/backups/before-upgrade.tar",
+        "sizeBytes": 1234, "status": "success",
+    }]})
+    async with client_for(panel) as client:
+        result = await read_tools.list_snapshots(client, "s1")
+    assert panel.calls == [("GET", "/api/servers/s1/snapshots")]
+    assert result == {"snapshots": [{
+        "id": "snap-1", "type": "backup", "createdAt": "2026-08-19T00:00:00Z",
+        "fileName": "before-upgrade.tar", "sizeBytes": 1234, "status": "success",
+    }]}
+    assert "srv" not in str(result)
+
+
 async def test_get_install_progress_route_and_error_field():
     panel = Panel({"/api/servers/s1/install/progress": {"active": False, "phase": "failed", "error": "boom"}})
     async with client_for(panel) as client:

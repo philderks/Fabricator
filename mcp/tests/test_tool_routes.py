@@ -72,4 +72,4 @@ def test_the_tool_set_is_narrower_than_the_ceiling():
     """Curation, stated as a fact: tools use a strict subset of the permitted routes."""
     used = {route for routes in TOOL_ROUTES.values() for route in routes}
     assert used < PANEL_TOKEN_REACHABLE
-    assert len(TOOL_ROUTES) == 14
+    assert len(TOOL_ROUTES) == 19
