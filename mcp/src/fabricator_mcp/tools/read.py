@@ -17,11 +17,14 @@ from fabricator_mcp.projection import (
     project_log_lines,
     project_mod_entry,
     project_server,
+    project_snapshot,
+    project_version_metadata,
 )
 
 DEFAULT_LOG_LIMIT = 200
 DEFAULT_SEARCH_LIMIT = 10
 DEFAULT_VERSION_LIMIT = 20
+MAX_METADATA_VERSIONS = 100
 
 #: Said once, on every mods listing, because it is the one thing the listing
 #: cannot show you.
@@ -132,6 +135,69 @@ async def check_java(client: PanelClient, mc_version: str | None = None) -> dict
             entry.get("major") for entry in managed if isinstance(entry, dict)
         ],
     })
+
+
+async def list_loader_game_versions(client: PanelClient, loader: str) -> dict[str, Any]:
+    """List stable Minecraft versions a Fabricator loader can install."""
+    loader = _require(loader, "loader").lower()
+    payload = await client.get(f"/api/loaders/{loader}/versions/game")
+    versions = payload if isinstance(payload, list) else []
+    return {
+        "loader": loader,
+        "minecraftVersions": [
+            projected for version in versions[:MAX_METADATA_VERSIONS]
+            if (projected := project_version_metadata(version))
+        ],
+    }
+
+
+async def list_loader_versions(
+    client: PanelClient, loader: str, mc_version: str | None = None
+) -> dict[str, Any]:
+    """List loader builds, optionally narrowed to one Minecraft version."""
+    loader = _require(loader, "loader").lower()
+    version = mc_version.strip() if isinstance(mc_version, str) and mc_version.strip() else None
+    payload = await client.get(
+        f"/api/loaders/{loader}/versions/loader",
+        params={"mc_version": version},
+    )
+    versions = payload if isinstance(payload, list) else []
+    return drop_empty({
+        "loader": loader,
+        "minecraftVersion": version,
+        "versions": [
+            projected for item in versions[:MAX_METADATA_VERSIONS]
+            if (projected := project_version_metadata(item))
+        ],
+    })
+
+
+async def get_backup_status(client: PanelClient, server_id: str) -> dict[str, Any]:
+    """Show whether this server has usable backups and when one is next scheduled."""
+    server_id = _require(server_id, "server_id")
+    payload = await client.get(f"/api/servers/{server_id}/backup-summary")
+    payload = payload if isinstance(payload, dict) else {}
+    next_run = payload.get("next_run")
+    next_run = next_run if isinstance(next_run, dict) else {}
+    return drop_empty({
+        "totalSnapshots": payload.get("total_snapshots"),
+        "totalSizeBytes": payload.get("total_size_bytes"),
+        "lastSnapshot": project_snapshot(payload.get("last_snapshot")),
+        "nextRun": drop_empty({
+            "configId": next_run.get("config_id"),
+            "configName": next_run.get("config_name"),
+            "nextRunTime": next_run.get("next_run_time"),
+        }),
+        "configsCount": payload.get("configs_count"),
+    })
+
+
+async def list_snapshots(client: PanelClient, server_id: str) -> dict[str, Any]:
+    """List backup snapshots for recovery inspection; restore remains panel-UI only."""
+    server_id = _require(server_id, "server_id")
+    payload = await client.get(f"/api/servers/{server_id}/snapshots")
+    snapshots = payload if isinstance(payload, list) else []
+    return {"snapshots": [project_snapshot(snapshot) for snapshot in snapshots if isinstance(snapshot, dict)]}
 
 
 async def get_install_progress(client: PanelClient, server_id: str) -> dict[str, Any]:

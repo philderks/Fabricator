@@ -78,6 +78,28 @@ def register_read_tools(server, client: PanelClient) -> None:
         return await read_tools.check_java(client, mc_version)
 
     @server.tool()
+    async def list_loader_game_versions(loader: str) -> dict[str, Any]:
+        """List Minecraft versions Fabricator can install for a loader."""
+        return await read_tools.list_loader_game_versions(client, loader)
+
+    @server.tool()
+    async def list_loader_versions(
+        loader: str, mc_version: str | None = None
+    ) -> dict[str, Any]:
+        """List loader builds, optionally for one Minecraft version."""
+        return await read_tools.list_loader_versions(client, loader, mc_version)
+
+    @server.tool()
+    async def get_backup_status(server_id: str) -> dict[str, Any]:
+        """Show backup coverage, latest snapshot, and the next scheduled backup."""
+        return await read_tools.get_backup_status(client, server_id)
+
+    @server.tool()
+    async def list_snapshots(server_id: str) -> dict[str, Any]:
+        """List recovery snapshots. Restoring one remains a deliberate panel-UI action."""
+        return await read_tools.list_snapshots(client, server_id)
+
+    @server.tool()
     async def get_install_progress(server_id: str) -> dict[str, Any]:
         """Show the state of the server's most recent install, including why it failed."""
         return await read_tools.get_install_progress(client, server_id)
@@ -130,6 +152,15 @@ def register_manage_tools(server, client: PanelClient) -> None:
         stop or a restart.
         """
         return await manage_tools.control_server(client, server_id, action)
+
+    @server.tool()
+    async def install_server(server_id: str) -> dict[str, Any]:
+        """Install or retry installation using the server's stored configuration.
+
+        This changes server files and may take several minutes. Poll
+        get_install_progress afterwards; the panel enforces the manage scope.
+        """
+        return await manage_tools.install_server(client, server_id)
 
     @server.tool()
     async def update_or_install_mod(

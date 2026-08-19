@@ -69,6 +69,21 @@ async def test_control_server_response_is_projected():
     assert set(result["server"]) == {"id", "status"}
 
 
+async def test_install_server_starts_the_panel_install_worker_without_a_body():
+    panel = Panel({"active": True, "phase": "starting", "server_id": "s1", "loader": "paper", "mc_version": "1.21.4"})
+    async with client_for(panel) as client:
+        result = await manage_tools.install_server(client, "s1")
+    assert panel.calls == [("POST", "/api/servers/s1/install")]
+    assert panel.body() is None
+    assert result == {
+        "active": True,
+        "phase": "starting",
+        "serverId": "s1",
+        "loader": "paper",
+        "minecraftVersion": "1.21.4",
+    }
+
+
 async def test_update_or_install_mod_sends_the_required_body():
     panel = Panel({"success": True, "message": "Mod installed successfully", "file": "sodium.jar"})
     async with client_for(panel) as client:

@@ -41,6 +41,18 @@ TOOL_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
         ("GET", "/api/java/status"),
         ("GET", "/api/java/installed"),
     ),
+    "list_loader_game_versions": (
+        ("GET", "/api/loaders/<loader>/versions/game"),
+    ),
+    "list_loader_versions": (
+        ("GET", "/api/loaders/<loader>/versions/loader"),
+    ),
+    "get_backup_status": (
+        ("GET", "/api/servers/<server_id>/backup-summary"),
+    ),
+    "list_snapshots": (
+        ("GET", "/api/servers/<server_id>/snapshots"),
+    ),
     "get_install_progress": (
         ("GET", "/api/servers/<server_id>/install/progress"),
     ),
@@ -64,6 +76,9 @@ TOOL_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
         ("POST", "/api/servers/<server_id>/stop"),
         ("POST", "/api/servers/<server_id>/restart"),
     ),
+    "install_server": (
+        ("POST", "/api/servers/<server_id>/install"),
+    ),
     "update_or_install_mod": (
         ("POST", "/api/modrinth/mod/<mod_id>/install"),
     ),
@@ -81,12 +96,17 @@ TOOL_SCOPES: dict[str, str] = {
     "list_installed_mods": READ,
     "check_resource_usage": READ,
     "check_java": READ,
+    "list_loader_game_versions": READ,
+    "list_loader_versions": READ,
+    "get_backup_status": READ,
+    "list_snapshots": READ,
     "get_install_progress": READ,
     "check_panel": READ,
     "search_modrinth": READ,
     "get_mod_info": READ,
     "check_mod_compatibility": READ,
     "control_server": MANAGE,
+    "install_server": MANAGE,
     "update_or_install_mod": MANAGE,
     "remove_mods": MANAGE,
 }

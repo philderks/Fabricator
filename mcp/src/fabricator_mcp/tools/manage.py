@@ -76,6 +76,23 @@ async def control_server(client: PanelClient, server_id: str, action: str) -> di
     })
 
 
+async def install_server(client: PanelClient, server_id: str) -> dict[str, Any]:
+    """Queue installation using the server's already persisted configuration."""
+    server_id = _require_server_id(server_id)
+    # No body: the panel installs the server's stored loader/version/settings.
+    # In particular, this tool must not expose caller-controlled install paths
+    # or modpack archives.
+    payload = await client.post(f"/api/servers/{server_id}/install")
+    payload = payload if isinstance(payload, dict) else {}
+    return drop_empty({
+        "active": payload.get("active"),
+        "phase": payload.get("phase"),
+        "serverId": payload.get("server_id"),
+        "loader": payload.get("loader"),
+        "minecraftVersion": payload.get("mc_version"),
+    })
+
+
 async def update_or_install_mod(
     client: PanelClient,
     server_id: str,
