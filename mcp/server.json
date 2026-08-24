@@ -1,0 +1,36 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.philderks/fabricator-panel-mcp",
+  "description": "Manage and diagnose Minecraft servers through the self-hosted Fabricator panel.",
+  "version": "0.1.0",
+  "repository": {
+    "url": "https://github.com/philderks/Fabricator",
+    "source": "github",
+    "subfolder": "mcp"
+  },
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "fabricator-panel-mcp",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "FABRICATOR_URL",
+          "description": "Base URL of the Fabricator panel",
+          "default": "http://127.0.0.1:5000",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "FABRICATOR_TOKEN",
+          "description": "API token created on the panel's Integrations page",
+          "isRequired": true,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}
