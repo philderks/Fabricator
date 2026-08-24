@@ -17,7 +17,7 @@ def test_missing_token_exits_with_an_actionable_message(env, capsys):
 
     err = capsys.readouterr().err
     assert "FABRICATOR_TOKEN" in err
-    assert "Integrations" in err
+    assert "Settings" in err
 
 
 @pytest.mark.parametrize("value", ["", "   "])

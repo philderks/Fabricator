@@ -1,17 +1,18 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
-import { useAuthStore } from '../stores/auth'
-import { useToast } from '../composables/useToast'
-import { copyToClipboard } from '../utils/clipboard'
-import Panel from '../components/ui/Panel.vue'
-import FormField from '../components/ui/FormField.vue'
-import ToggleRow from '../components/ui/ToggleRow.vue'
-import AppButton from '../components/ui/AppButton.vue'
-import ConfirmModal from '../components/modals/ConfirmModal.vue'
-import { getMcp, setMcpEnabled, createMcpToken, deleteMcpToken } from '../api/mcp'
-import { buildMcpClientConfig } from '../config/mcpClientConfig'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useToast } from '../../composables/useToast'
+import { copyToClipboard } from '../../utils/clipboard'
+import Panel from '../ui/Panel.vue'
+import FormField from '../ui/FormField.vue'
+import ToggleRow from '../ui/ToggleRow.vue'
+import AppButton from '../ui/AppButton.vue'
+import ConfirmModal from '../modals/ConfirmModal.vue'
+import { getMcp, setMcpEnabled, createMcpToken, deleteMcpToken } from '../../api/mcp'
+import { buildMcpClientConfig } from '../../config/mcpClientConfig'
 
-const auth = useAuthStore()
+// Managed mode hides this panel entirely; the parent gates on auth.managed
+// (same as JavaManagerPanel), so nothing here needs to re-check it.
+
 const toast = useToast()
 
 const enabled = ref(false)
@@ -140,39 +141,49 @@ function relativeTime(iso) {
   return rtf.format(Math.round(diffMs / 86400000), 'day')
 }
 
-onMounted(() => {
-  // Managed mode: the whole section is hidden; skip the API call entirely.
-  if (auth.managed) return
-  load()
+onMounted(load)
+
+onBeforeUnmount(() => {
+  if (copyTimer) clearTimeout(copyTimer)
 })
 </script>
 
 <template>
-  <div v-if="!auth.managed" class="mcp-page">
-    <header class="mcp-page__head">
-      <h1 class="mcp-page__title">Model Context Protocol</h1>
-      <p class="mcp-page__intro">
-        Connect an AI assistant to this panel. It can read your server's status,
-        logs and installed mods — and, with a manage token, start and stop the
-        server or change mods.
-      </p>
-    </header>
+  <Panel title="Model Context Protocol">
+    <template #action>
+      <span class="mcp-beta">Beta</span>
+    </template>
 
-    <Panel title="Access">
-      <ToggleRow
-        :model-value="enabled"
-        label="Enable MCP access"
-        :disabled="toggling"
-        @update:model-value="onToggle"
-      />
-      <p v-if="!enabled" class="mcp-note">
-        MCP access is off. Existing tokens stay saved but are rejected until you
-        turn this back on.
-      </p>
-    </Panel>
+    <p class="mcp-intro">
+      Connect an AI assistant to this panel. It can read your server's status,
+      logs and installed mods — and, with a manage token, start and stop the
+      server or change mods.
+    </p>
 
-    <Panel title="Tokens">
-      <form class="mcp-create" @submit.prevent="onCreate">
+    <p class="mcp-beta-note">
+      <strong>Beta.</strong> The machine running your AI client needs
+      <code>uv</code> installed — without it the client reports the server as
+      failing to launch rather than naming the missing prerequisite. How the
+      client is configured may still change between releases.
+    </p>
+
+    <ToggleRow
+      :model-value="enabled"
+      label="Enable MCP access"
+      :disabled="toggling"
+      @update:model-value="onToggle"
+    />
+    <p v-if="!enabled" class="mcp-note">
+      MCP access is off. Existing tokens stay saved but are rejected until you
+      turn this back on.
+    </p>
+
+    <!-- Tokens stay listed while MCP is off so they can still be revoked;
+         only minting new ones is gated on the switch. -->
+    <section v-if="enabled || tokens.length" class="mcp-section">
+      <h4 class="mcp-section__title">Tokens</h4>
+
+      <form v-if="enabled" class="mcp-create" @submit.prevent="onCreate">
         <FormField label="Name" hint="So you can tell your tokens apart later." v-slot="{ id, describedBy }">
           <input
             :id="id"
@@ -208,7 +219,7 @@ onMounted(() => {
       </form>
 
       <div v-if="newToken" class="mcp-secret">
-        <h4 class="mcp-secret__title">Your new token</h4>
+        <h5 class="mcp-secret__title">Your new token</h5>
         <p class="mcp-secret__body">
           Copy it now. It is not stored in readable form and cannot be shown again.
         </p>
@@ -245,9 +256,11 @@ onMounted(() => {
           </tbody>
         </table>
       </div>
-    </Panel>
+    </section>
 
-    <Panel title="Connect a client">
+    <section v-if="enabled" class="mcp-section">
+      <h4 class="mcp-section__title">Connect a client</h4>
+
       <FormField
         label="Panel URL"
         hint="The address your client can reach this panel at. Change it if the client runs on a different machine."
@@ -261,7 +274,7 @@ onMounted(() => {
       <p class="mcp-warn">
         The token is stored in plain text in that file — treat it like a password.
       </p>
-    </Panel>
+    </section>
 
     <ConfirmModal
       :show="Boolean(revokeTarget)"
@@ -274,37 +287,57 @@ onMounted(() => {
       @confirm="confirmRevoke"
       @cancel="cancelRevoke"
     />
-  </div>
+  </Panel>
 </template>
 
 <style scoped>
-.mcp-page {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  max-width: 880px;
-  padding: var(--space-4);
-}
-
-.mcp-page__head {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.mcp-page__title {
-  margin: 0;
-  font-size: var(--text-lg);
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.mcp-page__intro {
-  margin: 0;
+.mcp-intro {
+  margin: 0 0 var(--space-2);
   font-size: var(--text-sm);
   color: var(--text-muted);
   line-height: var(--leading-normal);
   max-width: 60ch;
+}
+
+/* Beta chrome uses --info, deliberately not --warning: the two security
+   warnings further down are the real ones, and sharing a colour with a
+   maturity label would dilute them. */
+.mcp-beta {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px solid color-mix(in oklch, var(--info) 40%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in oklch, var(--info) 14%, transparent);
+  color: var(--info);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.mcp-beta-note {
+  margin: 0 0 var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--info);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: color-mix(in oklch, var(--info) 7%, transparent);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  line-height: var(--leading-normal);
+  max-width: 60ch;
+}
+
+.mcp-beta-note strong {
+  color: var(--info);
+  font-weight: 600;
+}
+
+.mcp-beta-note code {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--bg-primary);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
 }
 
 .mcp-note {
@@ -312,6 +345,24 @@ onMounted(() => {
   font-size: var(--text-sm);
   color: var(--text-muted);
   line-height: var(--leading-normal);
+}
+
+/* Sub-sections inside the single settings panel, separated by a hairline so
+   the panel reads as grouped rather than as one long form. */
+.mcp-section {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-color);
+}
+
+/* Mirrors .panel__title so the sub-headings match the panel chrome. */
+.mcp-section__title {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .mcp-create {

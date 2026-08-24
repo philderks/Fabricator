@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from fabricator_mcp import __version__
 from fabricator_mcp.client import PanelClient
 from fabricator_mcp.config import PanelConfig
 from fabricator_mcp.tools import manage as manage_tools
@@ -161,6 +162,10 @@ def build_server(config: PanelConfig, *, client: PanelClient | None = None):
     from mcp.server.fastmcp import FastMCP
 
     server = FastMCP(SERVER_NAME)
+    # FastMCP 1.x does not expose its low-level server version in the public
+    # constructor. Set it explicitly so initialize reports this package's
+    # version instead of falling back to the MCP SDK version.
+    server._mcp_server.version = __version__
     panel = client if client is not None else PanelClient(config)
     register_read_tools(server, panel)
     register_manage_tools(server, panel)

@@ -7,10 +7,12 @@ for a tool that does not exist.
 from __future__ import annotations
 
 import logging
+import warnings
 
 import httpx
 import pytest
 
+from fabricator_mcp import __version__
 from fabricator_mcp.client import PanelClient
 from fabricator_mcp.config import PanelConfig
 from fabricator_mcp.routes import MANAGE, TOOL_ROUTES, TOOL_SCOPES
@@ -27,6 +29,18 @@ def _client(handler) -> PanelClient:
         return None
 
     return PanelClient(_CONFIG, transport=httpx.MockTransport(handler), sleep=_instant)
+
+
+async def test_server_construction_emits_no_runtime_warnings():
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        build_server(_CONFIG, client=_client(lambda r: httpx.Response(200, json={})))
+
+
+async def test_advertised_server_version_is_the_fabricator_package_version():
+    server = build_server(_CONFIG, client=_client(lambda r: httpx.Response(200, json={})))
+    options = server._mcp_server.create_initialization_options()
+    assert options.server_version == __version__
 
 
 async def test_advertised_tools_are_exactly_the_route_table():

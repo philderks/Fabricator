@@ -51,8 +51,8 @@ DEFAULT_TIMEOUT_SECONDS = 30.0
 
 _AUTH_MESSAGE = (
     "The panel rejected the API token (401). Check FABRICATOR_TOKEN is correct "
-    "and has not been revoked, and that MCP access is still enabled on the "
-    "panel's Integrations page. This is not retried."
+    "and has not been revoked, and that MCP access is still enabled in the "
+    "panel's Settings, under Model Context Protocol. This is not retried."
 )
 
 
@@ -192,8 +192,9 @@ class PanelClient:
                 if "scope" in detail.lower():
                     raise PanelScopeError(
                         "This action needs a token with the 'manage' scope; the "
-                        "token in use is read-only. Mint a manage token on the "
-                        "Integrations page. This is not retried."
+                        "token in use is read-only. Mint a manage token in the "
+                        "panel's Settings, under Model Context Protocol. This "
+                        "is not retried."
                     )
                 raise PanelForbiddenError(
                     "The panel refuses this route for every token "

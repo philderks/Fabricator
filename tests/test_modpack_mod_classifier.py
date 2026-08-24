@@ -441,7 +441,7 @@ version="1.0"
 
 @pytest.mark.parametrize("loader", ["forge", "neoforge"])
 def test_forge_class_pool_lwjgl_hit_classifies_client(mod_client, tmp_path, loader):
-    """A .class referencing org/lwjgl/glfw/* in its constant pool -> client."""
+    """A .class referencing org/lwjgl/* in its constant pool -> client."""
     jar = make_mod_jar(
         tmp_path,
         {"META-INF/mods.toml": EMPTY_FORGE_TOML},
@@ -451,7 +451,26 @@ def test_forge_class_pool_lwjgl_hit_classifies_client(mod_client, tmp_path, load
     )
     classification, reason = mod_client._classify_mod_jar_for_server(jar, loader=loader)
     assert classification == "client"
-    assert "org/lwjgl/glfw/" in reason
+    assert "org/lwjgl/" in reason
+
+
+@pytest.mark.parametrize("loader", ["forge", "neoforge"])
+def test_forge_class_pool_matches_lwjgl_outside_glfw(mod_client, tmp_path, loader):
+    """Issue #64: the pattern must cover all of org/lwjgl/, not just GLFW.
+
+    Sodium never references GLFW directly — it references ``org/lwjgl/Version``,
+    which is precisely the class the reporter's server died on. A dedicated
+    server has no LWJGL at all, so every subpackage is equally fatal.
+    """
+    jar = make_mod_jar(
+        tmp_path,
+        {"META-INF/mods.toml": EMPTY_FORGE_TOML},
+        class_files={
+            "com/example/Demo.class": b"\xca\xfe\xba\xbeorg/lwjgl/Version",
+        },
+    )
+    classification, _ = mod_client._classify_mod_jar_for_server(jar, loader=loader)
+    assert classification == "client"
 
 
 @pytest.mark.parametrize("loader", ["forge", "neoforge"])
@@ -639,3 +658,91 @@ def test_install_e2e_classifier_catches_lwjgl_mod_without_index_environment(mod_
     assert result["files_skipped"] == ["mods/lwjgl-mod.jar"]
     assert result["uncertain_mod_files"] == []
     assert not (install_path / "mods" / "lwjgl-mod.jar").exists()
+
+
+# ---------------------------------------------------------------------------
+# Jar-in-Jar scanning (2) — Forge/NeoForge and Fabric both ship nested mod
+# jars, and the outer jar is frequently a thin shim. Sodium's NeoForge build
+# carries 72 stub classes and hides the mod in META-INF/jarjar/, so a scan
+# that stops at the surface classifies the wrapper, not the mod (#64).
+# ---------------------------------------------------------------------------
+
+def _nested_jar_bytes(inner_name: str, inner_bytes: bytes, outer_meta: Dict[str, str]) -> bytes:
+    """Build a jar whose real payload sits in a nested jar member."""
+    import io
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for arcname, content in outer_meta.items():
+            zf.writestr(arcname, content)
+        zf.writestr(inner_name, inner_bytes)
+    return buf.getvalue()
+
+
+@pytest.mark.parametrize("prefix", ["META-INF/jarjar/", "META-INF/jars/"])
+def test_nested_jar_client_refs_classify_client(mod_client, tmp_path, prefix):
+    """Client-only refs inside a nested jar must classify the outer jar."""
+    import io
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("com/example/Real.class", b"\xca\xfe\xba\xbeorg/lwjgl/opengl/GL11C")
+    inner = buf.getvalue()
+
+    jar_path = tmp_path / "shim.jar"
+    jar_path.write_bytes(_nested_jar_bytes(
+        f"{prefix}real-mod.jar", inner,
+        # Outer jar is a shim: a silent manifest and one clean class.
+        {"META-INF/neoforge.mods.toml": EMPTY_FORGE_TOML},
+    ))
+
+    classification, reason = mod_client._classify_mod_jar_for_server(jar_path, loader="neoforge")
+    assert classification == "client"
+    assert "nested jar" in reason
+
+
+def test_nested_jar_without_client_refs_stays_uncertain(mod_client, tmp_path):
+    """A clean nested jar must not be enough to condemn the outer jar."""
+    import io
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("com/example/Real.class", b"\xca\xfe\xba\xbejava/util/List")
+    inner = buf.getvalue()
+
+    jar_path = tmp_path / "shim.jar"
+    jar_path.write_bytes(_nested_jar_bytes(
+        "META-INF/jarjar/real-mod.jar", inner,
+        {"META-INF/neoforge.mods.toml": EMPTY_FORGE_TOML},
+    ))
+
+    classification, _ = mod_client._classify_mod_jar_for_server(jar_path, loader="neoforge")
+    assert classification == "uncertain"
+
+
+# ---------------------------------------------------------------------------
+# Class scan on the Fabric/Quilt path (2) — a Fabric manifest that omits
+# ``environment`` defaults to "*", which used to fall straight through to
+# "install it and hope" with no second opinion available.
+# ---------------------------------------------------------------------------
+
+def test_fabric_silent_manifest_falls_back_to_class_scan(mod_client, tmp_path):
+    jar = make_mod_jar(
+        tmp_path,
+        {"fabric.mod.json": '{"id": "demo", "version": "1.0"}'},
+        class_files={
+            "com/example/Demo.class": b"\xca\xfe\xba\xbecom/mojang/blaze3d/systems/RenderSystem",
+        },
+    )
+    classification, _ = mod_client._classify_mod_jar_for_server(jar, loader="fabric")
+    assert classification == "client"
+
+
+def test_fabric_explicit_server_environment_skips_class_scan(mod_client, tmp_path):
+    """environment=server short-circuits — a client class ref must not override it."""
+    jar = make_mod_jar(
+        tmp_path,
+        {"fabric.mod.json": '{"id": "demo", "environment": "server"}'},
+        class_files={
+            "com/example/Demo.class": b"\xca\xfe\xba\xbeorg/lwjgl/Version",
+        },
+    )
+    classification, _ = mod_client._classify_mod_jar_for_server(jar, loader="fabric")
+    assert classification == "server"

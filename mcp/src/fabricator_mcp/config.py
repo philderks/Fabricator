@@ -44,9 +44,9 @@ class PanelConfig:
         token = (source.get(TOKEN_ENV) or "").strip()
         if not token:
             raise ConfigError(
-                f"{TOKEN_ENV} is not set. Create an API token on the panel's "
-                f"Integrations page and put it in the \"env\" block of your MCP "
-                f"client configuration."
+                f"{TOKEN_ENV} is not set. Create an API token in the panel's "
+                f"Settings, under Model Context Protocol, and put it in the "
+                f"\"env\" block of your MCP client configuration."
             )
 
         raw_url = (source.get(URL_ENV) or "").strip() or DEFAULT_URL

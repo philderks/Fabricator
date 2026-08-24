@@ -313,9 +313,29 @@ main() {
     trap cleanup EXIT
 
     get_latest_tag() {
-      curl -fsSL "https://api.github.com/repos/${FABRICATOR_REPO}/releases/latest" \
-        | grep -m1 '"tag_name"' \
-        | sed -E 's/.*"tag_name":[[:space:]]*"([^"]+)".*/\1/'
+      curl -fsSL "https://api.github.com/repos/${FABRICATOR_REPO}/releases?per_page=100" \
+        | python3 -c '
+import json
+import sys
+
+releases = json.load(sys.stdin)
+if not isinstance(releases, list):
+    raise ValueError("GitHub releases response was not a list")
+
+for release in releases:
+    if not isinstance(release, dict):
+        continue
+    tag = release.get("tag_name")
+    if (
+        isinstance(tag, str)
+        and tag.startswith("v")
+        and not tag.startswith("mcp-v")
+        and not release.get("draft", False)
+        and not release.get("prerelease", False)
+    ):
+        print(tag)
+        break
+'
     }
 
     APP_SRC_DIR="$TMP_DIR/fabricator"
@@ -346,7 +366,7 @@ main() {
       if [[ "$FABRICATOR_VERSION" == "latest" ]]; then
         TAG="$(get_latest_tag || true)"
         if [[ -z "$TAG" ]]; then
-          error "Could not determine latest release tag. GitHub API may be rate-limited. Re-run with: FABRICATOR_VERSION=vX.Y.Z"
+          error "No Fabricator release was found. Re-run with: FABRICATOR_VERSION=vX.Y.Z"
         fi
         info "Latest release: $TAG"
       elif [[ "$FABRICATOR_VERSION" == "main" ]]; then

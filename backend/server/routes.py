@@ -1,6 +1,7 @@
 """Server management routes and blueprints."""
 from functools import lru_cache
 from pathlib import Path
+from typing import Optional
 import logging
 import os
 import shutil
@@ -12,6 +13,9 @@ from flask import Blueprint, jsonify, request
 logger = logging.getLogger(__name__)
 
 from backend.auth.redaction import is_token_request
+from backend.modrinth import pending as pending_modpack
+from backend.modrinth import modmeta  # noqa: F401  (re-exported for tests)
+from backend.modrinth.client import ModrinthClient
 from backend.server.manager import ServerManager
 from backend.server.registry import get_server_process_registry
 from backend.server import storage
@@ -859,6 +863,91 @@ def delete_server_route(server_id, server):
     return jsonify(response), 200 if removal_error is None else 500
 
 
+def _pack_loader_version(installer, prepared, mc_version: str) -> Optional[str]:
+    """The loader build the pack declares, if this installer can supply it.
+
+    A modpack is assembled against one loader build and its mods are compiled
+    against that build's internals. Installing the newest one instead is how a
+    pack that works everywhere else dies on startup: "Fresh & Smooth" pins
+    NeoForge 21.1.169, and on 21.1.248 Moonlight's mixin finds nothing to
+    attach to and takes the server down before it boots.
+
+    Returns None when the pack says nothing, names a different loader, or
+    names a build this loader cannot offer — pinning a version that does not
+    exist would turn a working install into a failed one, so an unusable pin
+    is ignored rather than obeyed.
+    """
+    declared = str(getattr(prepared, 'loader_version', '') or '').strip()
+    if not declared:
+        return None
+
+    try:
+        available = installer.get_available_versions(mc_version)
+    except Exception:  # noqa: BLE001 - a version list we cannot read is not fatal
+        logger.warning('Could not list loader versions; ignoring the pack pin')
+        return None
+
+    known = {
+        str(v.get('version') if isinstance(v, dict) else v).strip()
+        for v in (available or [])
+    }
+    if declared not in known:
+        logger.warning(
+            'Modpack asks for loader %s but it is not available for %s; '
+            'installing the default instead', declared, mc_version,
+        )
+        return None
+    return declared
+
+
+def _install_pending_modpack(
+    server_id: str, install_path: Path, intent: dict, prepared,
+) -> None:
+    """Install the modpack requested at create time, once the loader is in.
+
+    Runs inside the install worker, so there is no request in flight and
+    nobody to prompt. Never raises: the loader install has already succeeded
+    and the server is usable, so a pack that fails leaves a working server and
+    a recorded error rather than turning the whole create into a failure.
+    """
+    label = pending_modpack.describe(intent)
+
+    def _on_progress(stage='', current=0, total=0, detail=''):
+        install_progress.update(
+            server_id,
+            phase='installing_modpack',
+            modpack_name=label,
+            modpack_stage=stage,
+            modpack_current=current,
+            modpack_total=total,
+            modpack_detail=detail,
+        )
+
+    _on_progress(stage='starting')
+
+    try:
+        result = pending_modpack.install_prepared(
+            ModrinthClient(), prepared, intent, install_path, _on_progress
+        )
+    except Exception as exc:  # noqa: BLE001 - a bad pack must not fail the server
+        logger.exception('Modpack install failed for server %s', server_id)
+        storage.update_server(server_id, {'pendingModpack': None})
+        install_progress.update(server_id, modpack_error=str(exc))
+        return
+
+    storage.update_server(server_id, {
+        'modpack': pending_modpack.modpack_record(result),
+        'pendingModpack': None,
+    })
+    pending_modpack.cleanup(result)
+    install_progress.update(
+        server_id,
+        modpack_installed=True,
+        modpack_uncertain=len(result.get('uncertain_mod_files') or []),
+        modpack_missing=len(result.get('missing_files') or []),
+    )
+
+
 @server_bp.route('/servers/<server_id>/install', methods=['POST'])
 @require_server
 def install_server(server_id, server):
@@ -887,6 +976,15 @@ def install_server(server_id, server):
         install_path = _registry().resolve_install_path(server)
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
+
+    # A modpack asked for at create time is installed by this same worker,
+    # right after the loader. It used to be a second request the browser fired
+    # once it saw the loader finish, which meant closing the screen or
+    # refreshing lost the pack entirely (#63). Stored on the server record so
+    # it is visible to anyone debugging a half-finished create.
+    modpack_intent = pending_modpack.normalize_intent(
+        (request.get_json(silent=True) or {}).get('modpack')
+    )
 
     installer = _get_installer(loader, install_path)
     if not installer:
@@ -1000,6 +1098,9 @@ def install_server(server_id, server):
     # need the persistent status flip on the server record.
     storage.update_server_status(server_id, 'installing')
 
+    if modpack_intent:
+        storage.update_server(server_id, {'pendingModpack': modpack_intent})
+
     # The worker thread acquires + releases the per-server lock itself
     # because RLock is thread-bound (Python's RLock binds the owning
     # thread on acquire and only that thread can release). The worker
@@ -1008,14 +1109,36 @@ def install_server(server_id, server):
     def _run_install():
         worker_lock = get_server_lock(server_id)
         worker_lock.acquire()
+        prepared = None
         try:
             def _on_progress(phase, detail):
                 install_progress.update(server_id, phase=phase, **detail)
+
+            # Fetch the pack before the loader: it declares which loader build
+            # it was assembled against, and installing a different one breaks
+            # mods that were compiled against that build's internals.
+            loader_version = None
+            if modpack_intent:
+                install_progress.update(server_id, phase='resolving_modpack')
+                try:
+                    prepared = pending_modpack.prepare(ModrinthClient(), modpack_intent)
+                    loader_version = _pack_loader_version(
+                        installer, prepared, mc_version
+                    )
+                    if loader_version:
+                        install_progress.update(
+                            server_id, loader_version=loader_version,
+                        )
+                except Exception as exc:  # noqa: BLE001 - fall back to a bare server
+                    logger.exception('Could not prepare modpack for %s', server_id)
+                    install_progress.update(server_id, modpack_error=str(exc))
+                    storage.update_server(server_id, {'pendingModpack': None})
 
             try:
                 result = installer.install_with_config(
                     mc_version=mc_version,
                     server_config=server,
+                    loader_version=loader_version,
                     progress_callback=_on_progress,
                 )
             except Exception as exc:
@@ -1030,6 +1153,10 @@ def install_server(server_id, server):
                 if result.launch is not None:
                     updates['launch'] = result.launch.to_dict()
                 storage.update_server(server_id, updates)
+                if modpack_intent and prepared is not None:
+                    _install_pending_modpack(
+                        server_id, install_path, modpack_intent, prepared,
+                    )
                 # The installer already emitted 'done' before returning;
                 # this update is idempotent and ensures the entry has the
                 # final status flip for the frontend.
@@ -1040,6 +1167,8 @@ def install_server(server_id, server):
                     server_id, phase='failed', error=result.message
                 )
         finally:
+            if prepared is not None:
+                prepared.cleanup()
             worker_lock.release()
 
     threading.Thread(

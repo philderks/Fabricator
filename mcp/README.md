@@ -2,9 +2,11 @@
 
 # fabricator-panel-mcp
 
+> **Beta.** Young, and the way the client is configured may change between releases.
+
 An MCP server for the [Fabricator](https://github.com/philderks/Fabricator) Minecraft panel. It
 runs on **your** machine, next to your MCP client, and talks to your panel over its HTTP API using
-an API token you mint in the panel's **Integrations** page.
+an API token you mint in the panel's **Settings**, under *Model Context Protocol*.
 
 It is built for one job: working out why a modpack server is crashing. Read the log, see what is
 installed, check a mod against Modrinth, remove or update it, restart.
@@ -15,7 +17,8 @@ installed, check a mod against Modrinth, remove or update it, restart.
 
 ## Connect your MCP client
 
-Paste this into your MCP client configuration. Create the token under **Integrations** in Fabricator.
+Paste this into your MCP client configuration. Create the token in Fabricator's **Settings** →
+*Model Context Protocol*.
 
 ```json
 {
@@ -34,7 +37,8 @@ Paste this into your MCP client configuration. Create the token under **Integrat
 
 ## Requirements
 
-- The panel, reachable from this machine, with **MCP access enabled** under *Integrations*.
+- The panel, reachable from this machine, with **MCP access enabled** in *Settings* → *Model
+  Context Protocol*.
 - An API token. **`read` is the recommended default** — it cannot change anything. Use `manage`
   only when you want the assistant to be able to act.
 - **[`uv`](https://docs.astral.sh/uv/) installed and on your `PATH`.** This is the one hard
@@ -42,6 +46,7 @@ Paste this into your MCP client configuration. Create the token under **Integrat
   report the Fabricator server as **failing to launch or disconnecting at startup** — it looks
   like a broken server, not like a panel or token problem, because the process never starts.
   Installing `uv` fixes it.
+
 
 ## What the assistant can do
 
@@ -76,7 +81,7 @@ opaquely.
   token unless you specifically want it to be able to change things.
 - **The token sits in plain text in your MCP client's configuration file.** Treat that file like a
   password: anyone who can read it can use the token.
-- Tokens do not expire. Revoke any you no longer use, from the Integrations page.
+- Tokens do not expire. Revoke any you no longer use, from the same Settings panel.
 - Turning MCP access off in the panel makes existing tokens stop working immediately without
   deleting them.
 
@@ -87,7 +92,7 @@ Two environment variables, set by your MCP client on the process it spawns:
 | Variable | Required | Default | Meaning |
 |---|---|---|---|
 | `FABRICATOR_URL` | no | `http://127.0.0.1:5000` | Base URL of the panel |
-| `FABRICATOR_TOKEN` | **yes** | — | The API token from the Integrations page |
+| `FABRICATOR_TOKEN` | **yes** | — | The API token from the panel's Settings |
 
 The token is **never** read from the command line. `argv` is visible to every process on the
 machine and lands in shell history; a spawned process's environment is neither.

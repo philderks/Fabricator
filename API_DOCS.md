@@ -1378,6 +1378,9 @@ commercially. The CLA Assistant bot records your acceptance once per GitHub acco
 
 ## MCP integration (API tokens)
 
+> **Beta.** This feature is young and its client-side setup may change between releases. The
+> machine running your AI client needs [`uv`](https://docs.astral.sh/uv/) installed.
+
 Fabricator can issue scoped **API tokens** so an MCP client — an AI assistant such as Claude — can
 read your server's state and perform a small set of maintenance actions over the same HTTP API this
 document describes. The typical use is modpack crash diagnosis: read the crash log, list the
@@ -1388,14 +1391,14 @@ token.
 
 ### Enabling it and minting a token
 
-Open **Integrations** in the panel sidebar.
+Open **Settings** in the panel sidebar and find the **Model Context Protocol** panel.
 
 1. Turn **Enable MCP access** on.
 2. Choose **Create token**, give it a name and a scope (`read` or `manage`).
 3. Copy the token immediately — it is shown **once** and cannot be retrieved afterwards. Only a
    SHA-256 hash of it is stored.
 
-Revoke a token from the same page; revocation takes effect on the next request.
+Revoke a token from the same panel; revocation takes effect on the next request.
 
 Tokens look like `fab_<id>_<secret>`. The `<id>` is a non-secret lookup key that appears in the
 token list; the `<secret>` half is what is never shown again.
@@ -1457,7 +1460,7 @@ curl -H "Authorization: Bearer fab_xxx_yyy" http://localhost:5000/api/servers
 - **Turning the switch off does not delete your tokens.** They stop being accepted (`401`) and start
   working again when you turn it back on.
 - **Before the panel has a password** (first-run setup), no token can be minted or used.
-- **Managed installs** hide the Integrations section entirely.
+- **Managed installs** hide the Model Context Protocol panel entirely.
 - Tokens are stored in the same `0600` `auth.json` as your password hash.
 
 ### Security notes
@@ -1480,7 +1483,7 @@ something MCP clients bundle. **If `uv` is missing, your client reports the serv
 launch or disconnecting at startup**, which looks like a broken server rather than a panel or
 token problem, because the process never starts at all.
 
-Put this in your client's MCP configuration (the Integrations page generates it with your URL and
+Put this in your client's MCP configuration (the Settings panel generates it with your URL and
 token filled in):
 
 ```json

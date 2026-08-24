@@ -85,7 +85,7 @@ async def test_401_from_the_switch_being_off_says_so_too():
     # One code, two causes: the message must name both rather than guess.
     message = str(exc.value)
     assert "FABRICATOR_TOKEN" in message
-    assert "Integrations" in message
+    assert "Settings" in message
     assert recorder.calls == 1
 
 
