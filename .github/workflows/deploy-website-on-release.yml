@@ -11,7 +11,9 @@ jobs:
   trigger-cloudflare-pages-deploy:
     name: Trigger Cloudflare Pages deploy hook
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    # A skipped MCP-tagged Build & Release run is still a completed workflow.
+    # Guard its upstream tag independently so it cannot redeploy the panel site.
+    if: ${{ (github.event.workflow_run.conclusion == 'success' && !startsWith(github.event.workflow_run.head_branch, 'mcp-v')) || github.event_name == 'workflow_dispatch' }}
     steps:
       - name: Validate deploy hook secret is configured
         env:

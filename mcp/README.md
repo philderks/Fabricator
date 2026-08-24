@@ -1,4 +1,6 @@
-# fabricator-mcp
+<!-- mcp-name: io.github.philderks/fabricator-panel-mcp -->
+
+# fabricator-panel-mcp
 
 An MCP server for the [Fabricator](https://github.com/philderks/Fabricator) Minecraft panel. It
 runs on **your** machine, next to your MCP client, and talks to your panel over its HTTP API using
@@ -11,6 +13,25 @@ installed, check a mod against Modrinth, remove or update it, restart.
 > panel, against the token, on the server side. The tool set here is a curation layer: it is
 > narrower than what the token can reach, and it stays honest about the difference.
 
+## Connect your MCP client
+
+Paste this into your MCP client configuration. Create the token under **Integrations** in Fabricator.
+
+```json
+{
+  "mcpServers": {
+    "fabricator": {
+      "command": "uvx",
+      "args": ["fabricator-panel-mcp"],
+      "env": {
+        "FABRICATOR_URL": "http://YOUR-PANEL:5000",
+        "FABRICATOR_TOKEN": "YOUR_API_TOKEN"
+      }
+    }
+  }
+}
+```
+
 ## Requirements
 
 - The panel, reachable from this machine, with **MCP access enabled** under *Integrations*.
@@ -21,37 +42,6 @@ installed, check a mod against Modrinth, remove or update it, restart.
   report the Fabricator server as **failing to launch or disconnecting at startup** — it looks
   like a broken server, not like a panel or token problem, because the process never starts.
   Installing `uv` fixes it.
-
-## Connecting a client
-
-Put this in your client's MCP server configuration (for Claude Desktop, `claude_desktop_config.json`):
-
-```json
-{
-  "mcpServers": {
-    "fabricator": {
-      "command": "uvx",
-      "args": [
-        "--from",
-        "git+https://github.com/philderks/Fabricator@dev#subdirectory=mcp",
-        "fabricator-mcp"
-      ],
-      "env": {
-        "FABRICATOR_URL": "http://127.0.0.1:5000",
-        "FABRICATOR_TOKEN": "YOUR_TOKEN_HERE"
-      }
-    }
-  }
-}
-```
-
-The panel generates this block for you, with the URL and token filled in, on the **Integrations**
-page.
-
-> The package is installed straight from the repository because it is not published to PyPI yet.
-> When it is, `command` and `args` become `"uvx"` and `["fabricator-mcp"]`, and nothing else
-> changes. Those two values are the entire launch channel; they live here and in
-> `frontend/src/config/mcpClientConfig.js`.
 
 ## What the assistant can do
 
@@ -147,7 +137,7 @@ Four independent mechanisms keep this suite and the panel's from touching each o
    pytest's upward search here, so a run in `mcp/` never loads the panel's `conftest.py`; the
    panel's `pytest.ini` sets `testpaths = tests` and `norecursedirs = mcp` so a run at the repo
    root never descends into this directory.
-4. **Separate CI job** — path-scoped to `mcp/**`, with its own working directory.
+4. **Separate test workflow** — `.github/workflows/mcp-tests.yml` runs the locked and unlocked jobs from `mcp/`.
 
 **Do not add a `[tool.uv.workspace]` to the repository root.** A workspace would merge the two
 lockfiles and environments and destroy the island.
