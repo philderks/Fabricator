@@ -11,7 +11,7 @@
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Docker-lightgrey?style=flat-square)](https://github.com/philderks/Fabricator)
 [![Docker](https://img.shields.io/badge/ghcr.io-philderks%2Ffabricator-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/philderks/Fabricator/pkgs/container/fabricator)
 
-[Website](https://fabricator.site/) | [Documentation](https://docs.fabricator.site/)
+[Website](https://fabricator.site/) | [Documentation](https://docs.fabricator.site/) | [MCP server for AI clients](mcp/README.md)
 
 </div>
 

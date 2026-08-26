@@ -1,33 +1,23 @@
-name: MCP package
+name: Publish MCP server
 
-# Path-scoped so panel-only changes do not run it — with one deliberate
-# exception: backend/auth/buckets.py. That file IS the thing the drift test
-# watches, so a change to the panel's permission table has to trigger this
-# workflow or the check would only ever run when we happen to touch mcp/.
 on:
-  push:
-    paths:
-      - 'mcp/**'
-      - 'backend/auth/buckets.py'
-      - '.github/workflows/mcp.yml'
-  pull_request:
-    paths:
-      - 'mcp/**'
-      - 'backend/auth/buckets.py'
-      - '.github/workflows/mcp.yml'
+  release:
+    types: [published]
+  workflow_dispatch:
 
 jobs:
-  # The gate. Runs the exact closure recorded in uv.lock, so a green tick here
-  # means "this commit works with the dependencies we committed".
-  locked:
-    name: locked closure (gate)
+  test:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.event.release.tag_name, 'mcp-v')
+    name: locked closure (release gate)
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: mcp
     env:
-      # Turns "panel source missing" from a skip into a failure, so the drift
-      # check can never quietly stop running here.
+      # The panel permission table is a release contract, not an optional
+      # source-tree lookup. Fail rather than silently skipping its drift test.
       FABRICATOR_MCP_REQUIRE_PANEL: '1'
     steps:
       - uses: actions/checkout@v4
@@ -35,40 +25,47 @@ jobs:
         with:
           enable-cache: true
       - name: Install the locked closure
-        run: uv sync --frozen     # fails if uv.lock has drifted from pyproject.toml
-      - name: Run the suite
+        run: uv sync --frozen
+      - name: Run tests
         run: uv run pytest -q
 
-  # A warning, not a gate. Users do not install our lockfile: `uvx fabricator-mcp`
-  # resolves the published dependency ranges fresh every time, so the closure a
-  # user gets is the one this job tests, not the one above. Without it the first
-  # report of an SDK regression would come from a user. It is allowed to fail:
-  # a broken upstream release must be visible without blocking a release that is
-  # otherwise fine.
-  unlocked:
-    name: unlocked closure (warning only)
+  publish:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.event.release.tag_name, 'mcp-v')
+    needs: test
     runs-on: ubuntu-latest
-    continue-on-error: true
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
     defaults:
       run:
         working-directory: mcp
-    env:
-      FABRICATOR_MCP_REQUIRE_PANEL: '1'
     steps:
       - uses: actions/checkout@v4
+
       - uses: astral-sh/setup-uv@v5
+
+      - name: Build
+        run: uv build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          enable-cache: true
-      - name: Re-resolve the published dependency ranges
-        run: uv lock --upgrade    # discarded with the runner; never committed from CI
-      - name: Install what that resolved
-        run: uv sync
-      - name: Report what a user would actually get
+          packages-dir: mcp/dist
+
+      - name: Install mcp-publisher
         run: |
-          uv run python - <<'PY'
-          from importlib.metadata import version
-          for dist in ("mcp", "httpx", "pydantic", "anyio"):
-              print(f"{dist}=={version(dist)}")
-          PY
-      - name: Run the suite against it
-        run: uv run pytest -q
+          curl -sL https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz \
+            | tar xz mcp-publisher
+
+      - name: Publish to MCP Registry
+        run: |
+          ./mcp-publisher login github-oidc
+          for i in 1 2 3 4 5; do
+            ./mcp-publisher publish && exit 0
+            echo "Registry publish failed (attempt $i), retrying in 20s"
+            sleep 20
+          done
+          exit 1

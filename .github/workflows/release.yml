@@ -11,8 +11,10 @@ permissions:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    # MCP packages share this repository but must never produce panel release
+    # assets, move the GHCR :latest tag, or trigger the panel release chain.
     if: ${{ !startsWith(github.event.release.tag_name, 'mcp-v') }}
+    runs-on: ubuntu-latest
     outputs:
       is_prerelease: ${{ steps.detect.outputs.is_prerelease }}
     steps:

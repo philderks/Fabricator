@@ -1,10 +1,14 @@
 [project]
-name = "fabricator-mcp"
-version = "0.3.0"
+name = "fabricator-panel-mcp"
+version = "0.1.0"
 description = "MCP server for the Fabricator Minecraft panel"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 license = "AGPL-3.0-only"
+authors = [
+    { name = "Philipp Noél Derks" },
+    { name = "Linus Sommermeyer" },
+]
 dependencies = [
     "mcp>=1.28,<2",
     "httpx>=0.28",
@@ -13,8 +17,12 @@ dependencies = [
     "pydantic-settings>=2.5.2,<2.15",
 ]
 
+[project.urls]
+Homepage = "https://fabricator.site/"
+Repository = "https://github.com/philderks/Fabricator"
+
 [project.scripts]
-fabricator-mcp = "fabricator_mcp.__main__:main"
+fabricator-panel-mcp = "fabricator_mcp.__main__:main"
 
 [dependency-groups]
 # anyio ships its own pytest plugin and is already in the mcp closure, so async
