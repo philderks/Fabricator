@@ -222,6 +222,17 @@ export async function getServerInstallProgress(serverId) {
 }
 
 /**
+ * Create a mandatory snapshot and upgrade a Vanilla or Paper server release.
+ * The returned job uses the normal install-progress endpoint for polling.
+ * @param {string|number} serverId
+ * @param {string} version Target Minecraft release, newer than the current one
+ * @returns {Promise<Object>} Upgrade job state
+ */
+export async function upgradeServer(serverId, version) {
+  return post(`/api/servers/${encodeURIComponent(serverId)}/upgrade`, { version })
+}
+
+/**
  * Get Minecraft versions supported by a loader.
  * @param {string} loader - Loader name (e.g. 'fabric', 'vanilla')
  * @returns {Promise<Array<{version: string, stable: boolean, type?: string}>>}
