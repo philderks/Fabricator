@@ -825,7 +825,12 @@ export default {
     },
     'formData.loader'(newLoader, oldLoader) {
       if (newLoader === oldLoader) return
-      this.formData.version = ''
+      // Deliberately NOT clearing formData.version here. Picking the version
+      // first and the loader second is a normal order, and wiping the choice
+      // made loadGameVersions treat it as "nothing picked" and drop the newest
+      // stable release on top of it. That reload already replaces the version
+      // when the incoming loader has no build for it, so leaving it alone keeps
+      // a still-valid choice and fixes an unsupported one.
       // Loaders without a modpack story (Vanilla + plugin servers) — flip back
       // to custom and drop any cached modpack selection so a stale modpack
       // URL/object doesn't ride along into the create POST and trip a 409.
@@ -1068,9 +1073,10 @@ export default {
       this.versionsLoading = true
       try {
         // With the "None" default nothing is picked yet, so list plain game
-        // versions rather than some loader's subset. Picking a loader resets
-        // the version and refetches, so this list is only ever a starting point.
+        // versions rather than some loader's subset. Picking a loader refetches
+        // against that loader, so this list is only ever a starting point.
         const loader = this.formData.loader || 'vanilla'
+        const previousVersion = this.formData.version
         const versions = await getLoaderGameVersions(loader)
         this.gameVersions = Array.isArray(versions) ? versions : []
         const stableVersions = this.gameVersions.filter(v => v.stable)
@@ -1078,6 +1084,17 @@ export default {
         const versionExists = this.filteredGameVersions.some(v => v.version === this.formData.version)
         if ((!this.formData.version || !versionExists) && preferred) {
           this.formData.version = preferred.version
+          // Only when a real choice had to be dropped: the version genuinely
+          // isn't offered for this loader. Silently swapping it is how the
+          // reset bug went unnoticed. Skipped while a pack is pending, since
+          // applyPendingPackVersion below has the final say on the version and
+          // reports its own mismatch.
+          if (previousVersion && previousVersion !== preferred.version && !this.pendingPackVersion) {
+            this.toast.info(
+              `${this.loaderLabelFor(loader)} has no build for Minecraft ${previousVersion} — switched to ${preferred.version}.`,
+              'Version Changed',
+            )
+          }
         }
         // An uploaded pack's own Minecraft version outranks the newest-stable
         // default: switching the loader to match a pack reloads this list, and
