@@ -8,7 +8,16 @@ import { version as appVersion } from '../../../package.json'
 import { getUpdateStatus, triggerUpdate } from '../../api/servers'
 import { useToast } from '../../composables/useToast'
 import { useServerStore } from '../../stores/server'
+import { useSidebarCollapsed } from '../../composables/useSidebarCollapsed'
 import { loaderContentKind, contentLabel } from '../../utils/loaderKind'
+
+const { collapsed, toggle: toggleCollapsed } = useSidebarCollapsed()
+
+// Collapsed, labels are visually hidden but stay in the DOM for screen readers,
+// so `title` is only a mouse affordance. Native tooltips rather than styled
+// ones on purpose: __nav scrolls, and `overflow-y: auto` computes overflow-x to
+// `auto` too, so a tooltip drawn outside the rail would be clipped there.
+const railTitle = (label) => (collapsed.value ? label : null)
 
 const route = useRoute()
 const toast = useToast()
@@ -224,11 +233,38 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <aside class="app-sidebar">
+  <aside class="app-sidebar" :class="{ 'is-collapsed': collapsed }">
+    <!-- Sits on the seam it controls, at header-row height: where the eye lands
+         first, and directly on the boundary that moves. Straddling the border
+         instead of sitting inside the rail is what keeps it in one place across
+         both states — it shifts horizontally with the edge and nothing else,
+         and it leaves the narrow rail's header free for the logo. -->
+    <button
+      type="button"
+      class="app-sidebar__collapse-btn"
+      :aria-label="collapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+      :aria-expanded="!collapsed"
+      :title="collapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+      @click="toggleCollapsed"
+    >
+      <svg
+        class="app-sidebar__collapse-icon"
+        width="12" height="12" viewBox="0 0 12 12"
+        fill="none" stroke="currentColor" stroke-width="1.6"
+        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+      >
+        <path d="M7.5 2.5l-4 3.5 4 3.5"/>
+      </svg>
+    </button>
+
     <!-- The way back to the server list. RootLayout routes (Servers, the
          server-less Settings) have no topbar and no ServerSwitcher, so without
          this the only exit from them is the browser's back button. -->
-    <router-link :to="{ name: 'Servers' }" class="app-sidebar__logo">
+    <router-link
+      :to="{ name: 'Servers' }"
+      class="app-sidebar__logo"
+      :title="railTitle('Fabricator — all servers')"
+    >
       <img
         class="app-sidebar__logo-img"
         src="/favicon.svg"
@@ -237,7 +273,7 @@ onUnmounted(() => {
         height="24"
         aria-hidden="true"
       />
-      <span class="app-sidebar__brand">Fabricator</span>
+      <span class="app-sidebar__brand app-sidebar__label">Fabricator</span>
     </router-link>
 
     <ServerSwitcher v-if="hasServerContext" />
@@ -245,12 +281,13 @@ onUnmounted(() => {
       v-else-if="!auth.managed"
       type="button"
       class="app-sidebar__no-server-chip"
+      :title="railTitle('No servers yet — create one')"
       @click="showCreateModal = true"
     >
       <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
         <path d="M5.5 1v9M1 5.5h9"/>
       </svg>
-      <span>No servers yet</span>
+      <span class="app-sidebar__label">No servers yet</span>
     </button>
 
     <nav class="app-sidebar__nav" aria-label="Server navigation">
@@ -263,6 +300,7 @@ onUnmounted(() => {
           : { 'aria-disabled': 'true' }"
         class="app-sidebar__nav-item"
         :class="{ 'app-sidebar__nav-item--ghost': !hasServerContext }"
+        :title="railTitle(item.label)"
       >
         <svg class="app-sidebar__nav-icon" width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
           <template v-if="item.icon === 'overview'">
@@ -306,7 +344,7 @@ onUnmounted(() => {
             <circle cx="5" cy="11" r="1.6"/>
           </template>
         </svg>
-        <span>{{ item.label }}</span>
+        <span class="app-sidebar__label">{{ item.label }}</span>
       </component>
     </nav>
 
@@ -318,25 +356,27 @@ onUnmounted(() => {
         :to="settingsTarget"
         active-class="is-active"
         class="app-sidebar__nav-item"
+        :title="railTitle('Settings')"
       >
         <svg class="app-sidebar__nav-icon" width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
           <path d="M11.5 8.9L13.4 8.9L13.4 6.2L11.5 6.1L10.7 4.8L11.6 3.1L9.3 1.8L8.2 3.4L6.8 3.4L5.8 1.8L3.4 3.1L4.3 4.8L3.6 6.1L1.7 6.2L1.7 8.9L3.6 8.9L4.3 10.2L3.4 11.9L5.8 13.2L6.8 11.6L8.2 11.6L9.3 13.2L11.6 11.9L10.7 10.2Z"/>
           <circle cx="7.5" cy="7.5" r="2.2"/>
         </svg>
-        <span>Settings</span>
+        <span class="app-sidebar__label">Settings</span>
       </router-link>
 
       <button
         v-if="auth.enabled"
         type="button"
         class="app-sidebar__nav-item app-sidebar__account-btn"
+        :title="railTitle('Lock')"
         @click="onLock"
       >
         <svg class="app-sidebar__nav-icon" width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
           <rect x="3.5" y="6.8" width="8" height="6" rx="1"/>
           <path d="M5.3 6.8V4.8a2.2 2.2 0 014.4 0v2"/>
         </svg>
-        <span>Lock</span>
+        <span class="app-sidebar__label">Lock</span>
       </button>
 
       <component
@@ -346,6 +386,7 @@ onUnmounted(() => {
         class="app-sidebar__update-pill"
         :class="{ 'is-clickable': updateAvailable }"
         :disabled="updateAvailable && updateTriggering ? true : undefined"
+        :title="railTitle(`${updateLabel} · ${updateVersionLabel}`)"
         @click="updateAvailable ? runUpdate() : undefined"
       >
         <span
@@ -353,8 +394,8 @@ onUnmounted(() => {
           :class="updateAvailable ? 'is-available' : 'is-idle'"
           aria-hidden="true"
         ></span>
-        <span class="app-sidebar__update-text">{{ updateLabel }}</span>
-        <span class="app-sidebar__update-ver">{{ updateVersionLabel }}</span>
+        <span class="app-sidebar__update-text app-sidebar__label">{{ updateLabel }}</span>
+        <span class="app-sidebar__update-ver app-sidebar__label">{{ updateVersionLabel }}</span>
       </component>
     </div>
 
@@ -381,7 +422,91 @@ onUnmounted(() => {
   border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  /* Anchor for the collapse handle. Overflow is deliberately visible so that
+     handle can straddle the right border; scrolling moved to __nav, which is
+     the only part that can outgrow the viewport anyway — a bonus being that
+     the logo row and bottom group now stay put instead of scrolling away. */
+  position: relative;
+  overflow: visible;
+  /* The token itself changes on collapse, so both track it. */
+  transition: width 0.18s ease, min-width 0.18s ease;
+}
+
+.app-sidebar__collapse-btn {
+  position: absolute;
+  /* Centred on the header row, and on the border itself. */
+  top: calc((var(--app-chrome-header-height) - 24px) / 2);
+  right: -12px;
+  z-index: 30;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 50%;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.app-sidebar__collapse-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.app-sidebar__collapse-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.app-sidebar__collapse-icon {
+  transition: transform 0.18s ease;
+}
+
+.app-sidebar.is-collapsed .app-sidebar__collapse-icon {
+  transform: rotate(180deg);
+}
+
+/* ---------- Collapsed (icon-only rail) ---------- */
+
+/* Labels are hidden from sight but kept for assistive tech, so every nav item
+   still has an accessible name in the rail — `display: none` would strip it and
+   leave a row of unnamed icons. */
+.app-sidebar.is-collapsed .app-sidebar__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+.app-sidebar.is-collapsed .app-sidebar__logo,
+.app-sidebar.is-collapsed .app-sidebar__nav-item,
+.app-sidebar.is-collapsed .app-sidebar__no-server-chip,
+.app-sidebar.is-collapsed .app-sidebar__update-pill {
+  justify-content: center;
+  gap: 0;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+/* Keeps the hit target square rather than letting it collapse onto the icon. */
+.app-sidebar.is-collapsed .app-sidebar__update-pill {
+  padding-top: 9px;
+  padding-bottom: 9px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-sidebar,
+  .app-sidebar__collapse-icon {
+    transition: none;
+  }
 }
 
 .app-sidebar__logo {
@@ -447,6 +572,10 @@ onUnmounted(() => {
   gap: 2px;
   padding: var(--space-2);
   flex: 1;
+  /* min-height is what lets a flex child actually shrink below its content and
+     scroll, rather than pushing the bottom group off-screen. */
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .app-sidebar__nav-item {
