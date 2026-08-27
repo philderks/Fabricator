@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import AppButton from '../../components/ui/AppButton.vue'
 import { useServerStore } from '../../stores/server'
 
@@ -73,15 +73,30 @@ const parseLine = (entry, defaultLevel = 'INFO') => {
   return { tsMs, time, level, message }
 }
 
-// Tag each line with a stream-scoped id so :key stays stable across filter
-// toggles — index keys made Vue recycle DOM nodes carrying the previous
-// line's level class, flashing the wrong color on filter swap.
-const allLines = computed(() => {
-  const stdout = (store.logs.stdout || []).map((entry, i) => ({ id: `stdout:${i}`, stream: 'stdout', ...parseLine(entry) }))
-  const stderr = (store.logs.stderr || []).map((entry, i) => {
-    const parsed = parseLine(entry, 'ERROR')
-    return { id: `stderr:${i}`, stream: 'stderr', ...parsed }
+// Tag each line with an id so :key stays stable across filter toggles — index
+// keys made Vue recycle DOM nodes carrying the previous line's level class,
+// flashing the wrong color on filter swap.
+//
+// The id is derived from the line's *content*, not its position. loadLogs()
+// returns a trailing window of the log, so once a server passes the limit every
+// index shifts on each poll: with index keys Vue patched the shifted text into
+// the existing nodes and never inserted anything, which meant a genuinely new
+// line was indistinguishable from an old one — and so could not animate in.
+// The `#n` suffix disambiguates lines that repeat verbatim within one poll.
+const withIds = (entries, stream, defaultLevel) => {
+  const seen = new Map()
+  return entries.map((entry) => {
+    const line = parseLine(entry, defaultLevel)
+    const base = `${stream}|${line.tsMs}|${line.message}`
+    const n = (seen.get(base) ?? 0) + 1
+    seen.set(base, n)
+    return { id: `${base}#${n}`, stream, ...line }
   })
+}
+
+const allLines = computed(() => {
+  const stdout = withIds(store.logs.stdout || [], 'stdout', 'INFO')
+  const stderr = withIds(store.logs.stderr || [], 'stderr', 'ERROR')
   // Interleave the two streams by capture timestamp so a crash's stderr shows
   // next to the stdout that produced it, instead of all stderr dumped after all
   // stdout. Only sort when EVERY line carries a parseable ts — a numeric key
@@ -96,11 +111,112 @@ const allLines = computed(() => {
   return merged
 })
 
+// --- Smooth reveal -----------------------------------------------------------
+// Logs are polled on an interval, so without this a poll drops its whole batch
+// of new lines into the terminal in a single frame — the console jumps in steps
+// rather than streaming. We withhold newly-arrived lines and release them over a
+// short window so output reads as continuous.
+
+const REVEAL_BUDGET_MS = 900 // however big the backlog, it is fully out by then
+const MIN_LINE_GAP_MS = 45   // ...but a couple of lines still land one at a time
+
+// Someone who has asked the OS for less motion wants the text, not the effect.
+const prefersReducedMotion = typeof window !== 'undefined'
+  && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+
+// Counted from the END of allLines, so the count stays valid even when the log
+// window slides and every absolute index shifts underneath us.
+const hiddenCount = ref(0)
+
+let rafId = 0
+let lastFrame = 0
+let deadline = 0
+let carry = 0 // fractional lines owed from the previous frame
+
+const stopDrip = () => {
+  if (rafId) cancelAnimationFrame(rafId)
+  rafId = 0
+  carry = 0
+}
+
+const step = (now) => {
+  // Clamp dt: a backgrounded tab stops firing frames, and without this the
+  // catch-up frame on return would release the entire backlog at once.
+  const dt = Math.min(now - lastFrame, 120)
+  lastFrame = now
+  const hidden = hiddenCount.value
+  if (hidden <= 0) return stopDrip()
+  // Pace against the time LEFT, not the budget as a whole. Dividing the
+  // remaining lines by a fixed budget makes the rate fall as the backlog
+  // drains, so the tail crawls and a large batch overruns the budget several
+  // times over; against the remaining time the rate self-corrects and the
+  // backlog lands on the deadline. The floor keeps a two-line trickle from
+  // collapsing into a single pop.
+  const timeLeft = Math.max(deadline - now, 16)
+  carry += Math.max(1 / MIN_LINE_GAP_MS, hidden / timeLeft) * dt
+  const release = Math.floor(carry)
+  if (release > 0) {
+    carry -= release
+    hiddenCount.value = Math.max(0, hidden - release)
+  }
+  rafId = requestAnimationFrame(step)
+}
+
+const startDrip = () => {
+  // A poll landing mid-drip refreshes the deadline, so its lines get the full
+  // window too rather than being rushed out on the tail of the previous batch.
+  deadline = performance.now() + REVEAL_BUDGET_MS
+  if (rafId) return
+  lastFrame = performance.now()
+  carry = 1 // let the first new line through immediately; stagger the rest
+  rafId = requestAnimationFrame(step)
+}
+
+// Identity of the last line we have already accounted for. Compared by content
+// because ids carry a per-poll duplicate counter that can shift as the window
+// slides.
+const tailKey = (l) => `${l.stream}|${l.tsMs}|${l.message}`
+let prevTailKey = null
+
+watch(allLines, (lines) => {
+  const nextTailKey = lines.length ? tailKey(lines[lines.length - 1]) : null
+  const previous = prevTailKey
+  prevTailKey = nextTailKey
+
+  if (!lines.length) { hiddenCount.value = 0; stopDrip(); return }
+  if (nextTailKey === previous) return // poll returned nothing new
+
+  // First fill, or a wholesale replacement (server switch, manual refresh after
+  // a clear): this is backfill, not live output. Dripping a thousand retained
+  // lines would read as the page hanging, so show them at once.
+  if (previous === null || prefersReducedMotion) { hiddenCount.value = 0; return }
+
+  // Scan back for the previous tail; everything after it arrived since. Going
+  // from the end also survives the window sliding, which moves the anchor's
+  // index but not its position relative to the end.
+  let anchor = -1
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (tailKey(lines[i]) === previous) { anchor = i; break }
+  }
+  // Anchor fell off the front of the window (or the log was replaced): there is
+  // no meaningful "new" set to stagger, so reveal everything.
+  if (anchor === -1) { hiddenCount.value = 0; return }
+
+  // Both counts are tail-relative, so a poll landing mid-drip composes cleanly.
+  hiddenCount.value += lines.length - 1 - anchor
+  startDrip()
+}, { immediate: true })
+
+onUnmounted(stopDrip)
+
 const filteredLines = computed(() => {
-  if (activeFilter.value === 'ALL') return allLines.value
+  const lines = allLines.value
+  const hidden = Math.min(Math.max(hiddenCount.value, 0), lines.length)
+  const released = hidden ? lines.slice(0, lines.length - hidden) : lines
+  if (activeFilter.value === 'ALL') return released
   // Drop the restart divider under a level filter: it defaults to INFO, so it
   // would otherwise show up as the lone "entry" in an empty INFO view.
-  return allLines.value.filter((l) => !l.boundary && l.level === activeFilter.value)
+  return released.filter((l) => !l.boundary && l.level === activeFilter.value)
 })
 
 watch(filteredLines, async () => {
@@ -335,6 +451,27 @@ const onHistoryNext = () => {
   gap: var(--space-2);
   align-items: baseline;
   padding: 1px 0;
+}
+
+/* Runs once per node, on insert. Content-derived :keys mean Vue patches lines
+   that were already on screen and only *inserts* genuinely new ones, so a poll
+   animates its new arrivals and leaves the rest alone. transform is used rather
+   than margin/height so an entering line never reflows the ones above it. */
+@keyframes console-line-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.console-page__line,
+.console-page__boundary {
+  animation: console-line-in 170ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .console-page__line,
+  .console-page__boundary {
+    animation: none;
+  }
 }
 
 .console-page__line-time {
