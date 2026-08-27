@@ -219,15 +219,41 @@ const filteredLines = computed(() => {
   return released.filter((l) => !l.boundary && l.level === activeFilter.value)
 })
 
+const scrollToBottom = () => {
+  const el = terminalRef.value
+  if (el) el.scrollTop = el.scrollHeight
+}
+
 watch(filteredLines, async () => {
   if (!autoScroll.value) return
   await nextTick()
-  const el = terminalRef.value
-  if (el) el.scrollTop = el.scrollHeight
+  scrollToBottom()
 }, { flush: 'post' })
 
+// Scrolling up to read something hands control away from auto-scroll; scrolling
+// back to the bottom hands it back. Both fall out of one measurement, with no
+// flag needed to tell a user scroll from the watcher's own: the programmatic
+// scroll always lands at the bottom, so it re-affirms auto-scroll instead of
+// cancelling it. Measuring in the handler (rather than trusting the event's
+// arrival order) means a stale event still reads the current position.
+const PIN_THRESHOLD_PX = 32 // ~two lines of slack, so "close enough" counts as pinned
+
+const onTerminalScroll = () => {
+  const el = terminalRef.value
+  if (!el) return
+  autoScroll.value = el.scrollHeight - el.scrollTop - el.clientHeight <= PIN_THRESHOLD_PX
+}
+
 const setFilter = (level) => { activeFilter.value = level }
-const toggleAutoScroll = () => { autoScroll.value = !autoScroll.value }
+
+const toggleAutoScroll = async () => {
+  autoScroll.value = !autoScroll.value
+  if (!autoScroll.value) return
+  // Catch up now. Waiting for the next line to arrive would leave the button
+  // reading "on" while the view sits where it was.
+  await nextTick()
+  scrollToBottom()
+}
 
 const onSubmit = (event) => {
   event.preventDefault()
@@ -276,7 +302,7 @@ const onHistoryNext = () => {
           class="console-page__icon-btn"
           :class="{ 'is-active': autoScroll }"
           :aria-pressed="autoScroll"
-          :title="autoScroll ? 'Auto-scroll on' : 'Auto-scroll off'"
+          :title="autoScroll ? 'Auto-scroll on' : 'Auto-scroll off — click, or scroll to the bottom, to resume'"
           @click="toggleAutoScroll"
         >
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
@@ -289,7 +315,7 @@ const onHistoryNext = () => {
       </div>
     </div>
 
-    <div ref="terminalRef" class="console-page__terminal">
+    <div ref="terminalRef" class="console-page__terminal" @scroll.passive="onTerminalScroll">
       <div v-if="!filteredLines.length" class="console-page__empty">
         <template v-if="store.logsLoading">Loading logs…</template>
         <template v-else-if="activeFilter === 'ALL'">No logs yet.</template>
