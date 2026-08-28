@@ -1418,4 +1418,23 @@ const onReset = () => {
   line-height: var(--leading-normal);
 }
 
+/* The footer needs no `left` override: --sidebar-width resolves to 0 below the
+   breakpoint (global.css), so it already spans the full width once the sidebar
+   becomes a drawer. Only the field grids and the footer's own padding change. */
+@media (max-width: 768px) {
+  .settings-page__grid,
+  .settings-page__grid--three {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-page__footer {
+    padding: var(--space-3);
+  }
+
+  /* Stretch the save/reset pair across the bar — at this width there is no
+     reason to leave them huddled in a corner, and they become easy targets. */
+  .settings-page__footer-inner > * {
+    flex: 1;
+  }
+}
 </style>

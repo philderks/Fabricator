@@ -580,4 +580,30 @@ const onHistoryNext = () => {
   color: var(--text-disabled);
   cursor: not-allowed;
 }
+/* Mobile: five level filters plus the two actions overflow a phone row. The
+   filter group scrolls sideways rather than wrapping, which keeps it reading as
+   one segmented control. */
+@media (max-width: 768px) {
+  .console-page__bar {
+    gap: var(--space-2);
+  }
+
+  .console-page__filters {
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .console-page__filters::-webkit-scrollbar {
+    display: none;
+  }
+
+  .console-page__filter {
+    flex-shrink: 0;
+  }
+
+  .console-page__bar-actions {
+    flex-shrink: 0;
+  }
+}
 </style>

@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useServerStore } from '../../stores/server'
 import { useAuthStore } from '../../stores/auth'
 import { useSidebarCollapsed } from '../../composables/useSidebarCollapsed'
+import { useMobileNav } from '../../composables/useMobileNav'
 import { getEffectiveStatus as statusOf } from '../../utils/getEffectiveStatus'
 
 const route = useRoute()
@@ -52,11 +53,18 @@ const metaText = (s) => {
 }
 
 const { collapsed } = useSidebarCollapsed()
+const { isMobile, close: closeDrawer } = useMobileNav()
 
-// Collapsed, the trigger keeps only the status dot, so a title carries the name
+// The rail treatment is desktop-only, matching AppSidebar's own `isRail`: on
+// mobile this sits inside a full-width drawer, where stripping the switcher
+// down to a bare status dot would leave the drawer with no indication of which
+// server you are looking at.
+const isRail = computed(() => collapsed.value && !isMobile.value)
+
+// Railed, the trigger keeps only the status dot, so a title carries the name
 // and meta the row would otherwise show.
 const triggerTitle = computed(() =>
-  collapsed.value ? `${currentServer.value.name} — ${metaText(currentServer.value)}` : null
+  isRail.value ? `${currentServer.value.name} — ${metaText(currentServer.value)}` : null
 )
 
 const toggle = () => {
@@ -79,6 +87,10 @@ const switchTo = (id) => {
 
 const goToAddServer = () => {
   close()
+  // Unlike switchTo, this opens a modal instead of navigating, so the mobile
+  // drawer won't be dismissed by AppSidebar's route watcher — and the drawer
+  // sits above the modal layer. Dismiss it here.
+  closeDrawer()
   // Modal is mounted at App.vue and provided as `showCreateModal`, so this
   // works from any layout (no need to route to "/" first).
   showCreateModal.value = true
@@ -101,7 +113,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="server-switcher" :class="{ 'is-collapsed': collapsed }">
+  <div class="server-switcher" :class="{ 'is-collapsed': isRail }">
     <button
       type="button"
       class="server-switcher__trigger"

@@ -620,4 +620,26 @@ onUnmounted(() => {
 .stat-playit__copy--confirmed {
   color: var(--success);
 }
+/* Mobile: the four/five stat cards and the two content columns are the only
+   things on this page that assume width. Two stat columns rather than one —
+   the cards are a short label over a short value, so a single column wastes
+   most of the row and pushes everything below the fold. */
+@media (max-width: 900px) {
+  .overview-page__row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .overview-page__stats,
+  .overview-page__stats--five {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 420px) {
+  .overview-page__qa-grid {
+    grid-template-columns: 1fr;
+  }
+}
 </style>

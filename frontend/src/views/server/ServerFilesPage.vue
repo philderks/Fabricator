@@ -732,4 +732,42 @@ const onCopyPath = async () => {
   font-size: var(--text-xs);
   color: var(--danger);
 }
+/* Mobile: the toolbar is Up / breadcrumbs / search / Refresh — four things
+   that need more than a phone's width. Breadcrumbs get their own scrolling row
+   (a deep path is long by nature and must stay legible), and the search grows
+   into the row it shares with the two buttons. */
+@media (max-width: 768px) {
+  .files-page__toolbar {
+    flex-wrap: wrap;
+    row-gap: var(--space-2);
+  }
+
+  .files-page__crumbs {
+    order: -1;
+    flex: 1 0 100%;
+    overflow-x: auto;
+    /* Overrides the desktop clip: scrolling to the current folder beats
+       truncating the path to its first segment. */
+    white-space: nowrap;
+  }
+
+  .files-page__search {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .files-page__search-input {
+    width: 100%;
+    min-width: 0;
+  }
+
+  /* Size and Modified are reference detail, not what you navigate by; the name
+     column is what has to stay readable. Both are recoverable by rotating. */
+  .files-page__th-size,
+  .files-page__td-size,
+  .files-page__th-modified,
+  .files-page__td-modified {
+    display: none;
+  }
+}
 </style>

@@ -274,10 +274,11 @@ onUnmounted(() => {
 <style scoped>
 .server-layout {
   display: flex;
-  min-height: 100vh;
+  min-height: 100dvh;
   /* Fixed viewport height so nested flex (console terminal) can shrink and scroll
-     instead of growing the document when log content is tall. */
-  height: 100vh;
+     instead of growing the document when log content is tall. dvh rather than vh
+     so mobile browser chrome doesn't push the console's command row off-screen. */
+  height: 100dvh;
   background: var(--bg-primary);
   color: var(--text-primary);
 }
@@ -296,9 +297,12 @@ onUnmounted(() => {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  padding: var(--space-5);
+  /* Tokenised so global.css can tighten every page's gutter on mobile at once. */
+  padding: var(--app-content-padding);
   overflow-x: hidden;
   overflow-y: auto;
+  /* Momentum scrolling under the fixed chrome on iOS. */
+  -webkit-overflow-scrolling: touch;
 }
 
 .server-layout__loading {

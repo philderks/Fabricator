@@ -9,15 +9,32 @@ import { getUpdateStatus, triggerUpdate } from '../../api/servers'
 import { useToast } from '../../composables/useToast'
 import { useServerStore } from '../../stores/server'
 import { useSidebarCollapsed } from '../../composables/useSidebarCollapsed'
+import { useMobileNav } from '../../composables/useMobileNav'
 import { loaderContentKind, contentLabel } from '../../utils/loaderKind'
 
 const { collapsed, toggle: toggleCollapsed } = useSidebarCollapsed()
+const { isMobile, drawerOpen, close: closeDrawer } = useMobileNav()
+
+// The rail and the drawer are mutually exclusive presentations of the same
+// sidebar: on mobile the whole thing is off-canvas at full width, so a collapse
+// preference set on desktop must not shrink it to an icon strip there. The CSS
+// side of this pairing lives in global.css (--sidebar-width goes to 0 on
+// mobile) and in the media block below.
+const isRail = computed(() => collapsed.value && !isMobile.value)
 
 // Collapsed, labels are visually hidden but stay in the DOM for screen readers,
 // so `title` is only a mouse affordance. Native tooltips rather than styled
 // ones on purpose: __nav scrolls, and `overflow-y: auto` computes overflow-x to
 // `auto` too, so a tooltip drawn outside the rail would be clipped there.
-const railTitle = (label) => (collapsed.value ? label : null)
+// Mouse-only by nature, so the drawer never gets them.
+const railTitle = (label) => (isRail.value ? label : null)
+
+// One button, two jobs: it collapses the rail on desktop and dismisses the
+// drawer on mobile, where "narrower" isn't a state the sidebar has.
+const onCollapseClick = () => {
+  if (isMobile.value) closeDrawer()
+  else toggleCollapsed()
+}
 
 const route = useRoute()
 const toast = useToast()
@@ -34,6 +51,18 @@ async function onLock() {
 
 const serverId = computed(() => route.params.id)
 const hasServerContext = computed(() => Boolean(serverId.value))
+
+// Every nav item in here is a link, so a tap that navigates has done what the
+// drawer was opened for. Watching the resolved path (not route.name) also
+// covers switching servers, which keeps the name and changes only the param.
+watch(() => route.fullPath, () => closeDrawer())
+
+// Opening a modal from the drawer is the one action that doesn't navigate, so
+// it has to dismiss the drawer itself — the drawer sits above the modal layer.
+const openCreateModal = () => {
+  closeDrawer()
+  showCreateModal.value = true
+}
 
 const settingsTarget = computed(() =>
   hasServerContext.value
@@ -233,7 +262,21 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <aside class="app-sidebar" :class="{ 'is-collapsed': collapsed }">
+  <!-- Drawer scrim. Rendered on mobile only, and always — not v-if'd on
+       drawerOpen — so it can fade rather than pop in. -->
+  <div
+    v-if="isMobile"
+    class="app-sidebar__scrim"
+    :class="{ 'is-visible': drawerOpen }"
+    aria-hidden="true"
+    @click="closeDrawer"
+  ></div>
+
+  <aside
+    id="app-sidebar"
+    class="app-sidebar"
+    :class="{ 'is-collapsed': isRail, 'is-drawer-open': drawerOpen }"
+  >
     <!-- Sits on the seam it controls, at header-row height: where the eye lands
          first, and directly on the boundary that moves. Straddling the border
          instead of sitting inside the rail is what keeps it in one place across
@@ -242,10 +285,10 @@ onUnmounted(() => {
     <button
       type="button"
       class="app-sidebar__collapse-btn"
-      :aria-label="collapsed ? 'Expand sidebar' : 'Collapse sidebar'"
-      :aria-expanded="!collapsed"
-      :title="collapsed ? 'Expand sidebar' : 'Collapse sidebar'"
-      @click="toggleCollapsed"
+      :aria-label="isMobile ? 'Close navigation menu' : (collapsed ? 'Expand sidebar' : 'Collapse sidebar')"
+      :aria-expanded="isMobile ? drawerOpen : !collapsed"
+      :title="isMobile ? 'Close menu' : (collapsed ? 'Expand sidebar' : 'Collapse sidebar')"
+      @click="onCollapseClick"
     >
       <svg
         class="app-sidebar__collapse-icon"
@@ -282,7 +325,7 @@ onUnmounted(() => {
       type="button"
       class="app-sidebar__no-server-chip"
       :title="railTitle('No servers yet — create one')"
-      @click="showCreateModal = true"
+      @click="openCreateModal"
     >
       <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
         <path d="M5.5 1v9M1 5.5h9"/>
@@ -502,8 +545,77 @@ onUnmounted(() => {
   padding-bottom: 9px;
 }
 
+/* ---------- Mobile (off-canvas drawer) ----------
+ *
+ * See global.css for the token half of this: --sidebar-width drops to 0 below
+ * the same 768px threshold, so the sidebar's slot in the layout closes up and
+ * the drawer floats over the content instead of displacing it.
+ *
+ * z-index sits above the modal layer (1000) on purpose — the drawer is the
+ * frontmost surface while it's open, and the two actions in it that would open
+ * a modal (create server, run update) dismiss it first or live inside it.
+ */
+@media (max-width: 768px) {
+  .app-sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 1100;
+    width: var(--sidebar-width-drawer);
+    min-width: var(--sidebar-width-drawer);
+    max-width: 85vw;
+    box-shadow: var(--shadow-lg);
+    transform: translateX(-100%);
+    /* Pulled out of the tab order while closed — an off-screen sidebar that
+       still takes focus is the classic drawer accessibility bug. Delayed on the
+       way out so it doesn't vanish mid-slide. */
+    visibility: hidden;
+    transition: transform 0.22s ease, visibility 0s linear 0.22s;
+  }
+
+  .app-sidebar.is-drawer-open {
+    transform: translateX(0);
+    visibility: visible;
+    transition: transform 0.22s ease, visibility 0s;
+  }
+
+  /* Roomier rows for thumbs; the desktop 7px is a pointer-sized target. */
+  .app-sidebar__nav-item {
+    padding: 11px var(--space-3);
+  }
+
+  .app-sidebar__collapse-btn {
+    /* Inside the drawer rather than straddling its edge: the edge is over the
+       scrim here, where a 24px circle is easy to miss and easy to mistake for
+       part of the page behind it. */
+    top: calc((var(--app-chrome-header-height) - 28px) / 2);
+    right: var(--space-2);
+    width: 28px;
+    height: 28px;
+  }
+}
+
+.app-sidebar__scrim {
+  position: fixed;
+  inset: 0;
+  /* One below the drawer, above everything else. */
+  z-index: 1099;
+  background: rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s ease;
+}
+
+.app-sidebar__scrim.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .app-sidebar,
+  .app-sidebar.is-drawer-open,
+  .app-sidebar__scrim,
   .app-sidebar__collapse-icon {
     transition: none;
   }

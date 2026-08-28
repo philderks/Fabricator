@@ -29,6 +29,16 @@ const isPlugin = computed(() => isPluginLoader(store.server?.loader))
 const noun = computed(() => contentLabel(store.server?.loader, true))
 const nounSingular = computed(() => contentLabel(store.server?.loader, false))
 const nounLower = computed(() => noun.value.toLowerCase())
+
+// The bar is permanent now, so its label has to carry the idle state too —
+// previously "select all" only existed as a footer that appeared when nothing
+// was selected, and the bar only when something was.
+const selectAllLabel = computed(() => {
+  if (store.allFilteredSelected) return 'Deselect all'
+  if (store.selectedCount > 0) return `${store.selectedCount} selected`
+  const count = store.filteredMods.length
+  return `Select all ${count} ${count === 1 ? nounSingular.value.toLowerCase() : nounLower.value}`
+})
 </script>
 
 <template>
@@ -76,8 +86,14 @@ const nounLower = computed(() => noun.value.toLowerCase())
     </Panel>
 
     <Panel :title="`Installed ${noun}`" :padded="false">
-      <!-- Bulk action toolbar (only visible when at least one mod is selected) -->
-      <div v-if="store.selectedCount > 0" class="mods-page__bulk-bar">
+      <!-- Selection toolbar. Present whenever there is a list to act on, so the
+           checkbox is somewhere predictable instead of appearing only once a
+           selection exists; it picks up the accent treatment when one does. -->
+      <div
+        v-if="!store.modsLoading && store.filteredMods.length > 0"
+        class="mods-page__bulk-bar"
+        :class="{ 'is-active': store.selectedCount > 0 }"
+      >
         <label class="mods-page__select-all">
           <input
             type="checkbox"
@@ -86,9 +102,9 @@ const nounLower = computed(() => noun.value.toLowerCase())
             :indeterminate.prop="store.selectedCount > 0 && !store.allFilteredSelected"
             @change="store.toggleSelectAllMods"
           />
-          <span>{{ store.allFilteredSelected ? 'Deselect all' : `${store.selectedCount} selected` }}</span>
+          <span>{{ selectAllLabel }}</span>
         </label>
-        <div class="mods-page__bulk-actions">
+        <div v-if="store.selectedCount > 0" class="mods-page__bulk-actions">
           <button
             type="button"
             class="mods-page__bulk-clear"
@@ -165,15 +181,6 @@ const nounLower = computed(() => noun.value.toLowerCase())
         </SearchResultCard>
       </div>
 
-      <!-- Select-all footer (when no items selected, and list is non-empty) -->
-      <div
-        v-if="!store.modsLoading && store.filteredMods.length > 1 && store.selectedCount === 0"
-        class="mods-page__select-all-footer"
-      >
-        <button type="button" class="mods-page__select-all-btn" @click="store.toggleSelectAllMods">
-          Select all {{ store.filteredMods.length }} {{ nounLower }}
-        </button>
-      </div>
     </Panel>
   </div>
 </template>
@@ -238,14 +245,23 @@ const nounLower = computed(() => noun.value.toLowerCase())
 }
 
 /* ── Bulk action toolbar ───────────────────────────────── */
+/* Idle it is just the list's header rule; the accent is what marks an active
+   selection, so it can't be baked in now that the bar is always on screen. */
 .mods-page__bulk-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: var(--space-2) var(--space-4);
-  background: color-mix(in srgb, var(--primary) 8%, var(--bg-secondary));
-  border-bottom: 1px solid color-mix(in srgb, var(--primary) 20%, var(--border-color));
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
   gap: var(--space-3);
+  min-height: 44px;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.mods-page__bulk-bar.is-active {
+  background: color-mix(in srgb, var(--primary) 8%, var(--bg-secondary));
+  border-bottom-color: color-mix(in srgb, var(--primary) 20%, var(--border-color));
 }
 
 .mods-page__select-all {
@@ -378,24 +394,29 @@ const nounLower = computed(() => noun.value.toLowerCase())
 }
 
 /* ── Select-all footer ─────────────────────────────────── */
-.mods-page__select-all-footer {
-  padding: var(--space-2) var(--space-4);
-  border-top: 1px solid var(--border-color);
-  text-align: center;
-}
+/* Mobile: search and the two browse buttons want ~440px between them; below
+   that the search takes its own row and the buttons split the next one. */
+@media (max-width: 768px) {
+  .mods-page__header {
+    flex-wrap: wrap;
+  }
 
-.mods-page__select-all-btn {
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
-  font-family: inherit;
-  font-size: var(--text-xs);
-  cursor: pointer;
-  padding: 2px 4px;
-  transition: color 0.15s ease;
-}
+  .mods-page__search {
+    flex: 1 0 100%;
+    height: 36px;
+  }
 
-.mods-page__select-all-btn:hover {
-  color: var(--primary);
+  .mods-page__actions {
+    flex: 1;
+  }
+
+  .mods-page__actions > * {
+    flex: 1;
+  }
+
+  .mods-page__bulk-bar {
+    flex-wrap: wrap;
+    row-gap: var(--space-2);
+  }
 }
 </style>

@@ -673,4 +673,42 @@ function onToggleEnforce(value) {
   font-size: var(--text-xs);
 }
 .reason-input:focus { outline: none; border-color: var(--danger); }
+/* Mobile: the toolbar already wraps, so the work here is letting the search
+   and add-player inputs use the width the wrap gives them instead of holding
+   their desktop max-widths, and halving the stat grid. */
+@media (max-width: 768px) {
+  .players-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .players-search,
+  .player-add__input {
+    flex: 1;
+    min-width: 0;
+    max-width: none;
+  }
+
+  .player-add {
+    width: 100%;
+  }
+
+  /* The row is name + roles + actions; below this width they stack rather than
+     squeeze the name to a few characters. */
+  .player-row {
+    flex-wrap: wrap;
+    row-gap: var(--space-2);
+  }
+
+  .player-row__main {
+    flex-basis: 100%;
+  }
+
+  .player-row__spacer {
+    display: none;
+  }
+
+  .reason-input {
+    width: 100%;
+  }
+}
 </style>

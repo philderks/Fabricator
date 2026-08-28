@@ -140,7 +140,7 @@ onMounted(async () => {
 /* RootLayout supplies no padding and no topbar, so the server-less route
    carries both itself (matching Servers.vue's --space-5). */
 .general-settings--standalone {
-  padding: var(--space-5);
+  padding: var(--app-content-padding);
 }
 
 .general-settings__heading {
