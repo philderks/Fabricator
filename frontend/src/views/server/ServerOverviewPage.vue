@@ -159,6 +159,32 @@ onUnmounted(() => {
       </div>
     </section>
 
+    <!-- Forge/NeoForge run a subprocess installer that can take minutes, during
+         which every panel below has nothing real to say. Lead with the install
+         rather than leaving a page of zeroes and "no logs yet". -->
+    <Panel v-if="store.serverInstalling" title="Installing server">
+      <div class="overview-page__install">
+        <div class="overview-page__install-head">
+          <span class="overview-page__install-label">{{ store.installDisplay.label }}</span>
+          <span v-if="store.installDisplay.determinate" class="overview-page__install-pct">
+            {{ store.installDisplay.percent }}%
+          </span>
+        </div>
+        <div class="overview-page__bar">
+          <div
+            class="overview-page__bar-fill"
+            :class="{ 'is-indeterminate': !store.installDisplay.determinate }"
+            :style="store.installDisplay.determinate
+              ? { width: `${store.installDisplay.percent}%` }
+              : null"
+          ></div>
+        </div>
+        <p class="overview-page__install-note">
+          {{ store.installDisplay.detail || 'This can take a few minutes. You can leave this page — the install keeps running.' }}
+        </p>
+      </div>
+    </Panel>
+
     <Panel v-if="store.activeModpack" title="Active modpack">
       <div class="overview-page__modpack">
         <span class="overview-page__modpack-name">{{ store.activeModpack.name || store.activeModpack.projectId }}</span>
@@ -197,7 +223,10 @@ onUnmounted(() => {
             </a>
           </template>
           <div class="overview-page__logs">
-            <div v-if="!recentLogLines.length" class="overview-page__empty">No logs yet.</div>
+            <div v-if="!recentLogLines.length" class="overview-page__empty">
+              <template v-if="store.serverInstalling">Installing — the server has not started yet.</template>
+              <template v-else>No logs yet.</template>
+            </div>
             <div v-else v-for="(line, i) in recentLogLines" :key="i" class="overview-page__log-line">
               {{ line }}
             </div>
@@ -213,7 +242,11 @@ onUnmounted(() => {
               <svg class="icon-arrow-right" width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 6H7.5M7.5 3.25l3.25 2.75L7.5 8.75" /></svg>
             </a>
           </template>
-          <div v-if="!modPreview.length" class="overview-page__empty">No {{ contentNounLower }} installed.</div>
+          <div v-if="!modPreview.length" class="overview-page__empty">
+            <template v-if="store.backgroundModpackInstalling">{{ store.backgroundModpackLabel }}</template>
+            <template v-else-if="store.serverInstalling">Waiting for the install to finish.</template>
+            <template v-else>No {{ contentNounLower }} installed.</template>
+          </div>
           <ul v-else class="overview-page__mods">
             <li v-for="mod in modPreview" :key="mod.path" class="overview-page__mod">
               <div class="overview-page__mod-main">
@@ -375,6 +408,55 @@ onUnmounted(() => {
 .overview-page__bar-fill--cpu {
   background: var(--accent, var(--primary));
   opacity: 0.75;
+}
+
+/* Phases that report no byte count — notably running_installer, the long one
+   on Forge/NeoForge. Motion says "still working" where a 0% bar would not. */
+.overview-page__bar-fill.is-indeterminate {
+  width: 30%;
+  animation: overview-install-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes overview-install-slide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+.overview-page__install {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.overview-page__install-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.overview-page__install-label {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.overview-page__install-pct {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.overview-page__install-note {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: var(--leading-normal);
+  overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overview-page__bar-fill.is-indeterminate {
+    animation: none;
+  }
 }
 
 .overview-page__panel-link {

@@ -33,9 +33,10 @@ const nounLower = computed(() => noun.value.toLowerCase())
 // The bar is permanent now, so its label has to carry the idle state too —
 // previously "select all" only existed as a footer that appeared when nothing
 // was selected, and the bar only when something was.
-// Early stages (resolving the pack, fetching the archive) report no file count,
-// so the bar runs indeterminate until the per-file download begins.
-const hasInstallTotal = computed(() => (store.backgroundModpack?.total || 0) > 0)
+// Early stages (resolving the pack, fetching the archive) and the whole loader
+// half report no file count, so the bar runs indeterminate until the per-file
+// download begins.
+const hasInstallTotal = computed(() => store.backgroundModpack?.determinate === true)
 
 const selectAllLabel = computed(() => {
   if (store.allFilteredSelected) return 'Deselect all'

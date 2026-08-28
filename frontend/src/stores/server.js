@@ -260,50 +260,80 @@ export const useServerStore = defineStore('server', () => {
     return stagePercent(p)
   })
 
-  // A create-time install runs as one worker: it resolves the pack, installs
-  // the loader, then installs the pack. Only the last step reports the pack's
-  // own stage/counts (under modpack_*-prefixed keys, since the entry is shared
-  // with the loader's phases), so this flattens whichever step is current into
-  // one shape the UI can render without knowing any of that.
-  const backgroundModpack = computed(() => {
+  // One flattened view of whatever the install worker is doing, whether that is
+  // the loader's half of the job or a pack's. A create-time install runs as a
+  // single worker — resolve the pack, install the loader, install the pack —
+  // and only the last step reports the pack's own stage/counts (under
+  // modpack_*-prefixed keys, since the entry is shared with the loader's
+  // phases), so this hides that split from every surface that renders it.
+  const installActivity = computed(() => {
     const p = serverInstallProgress.value
     if (!p?.active) return null
 
-    // Gate on the server record, not the phase. The pack's own phases bookend
-    // the loader's, so keying off them alone would pull the banner for the
-    // whole middle stretch and put it back afterwards. pendingModpack is
-    // written before the worker starts and cleared once the pack lands, so it
-    // covers the install end to end; the phase check is the fallback for the
-    // window before the record has loaded.
-    const isModpackPhase = p.phase === 'installing_modpack'
-    if (!server.value?.pendingModpack && !isModpackPhase && p.phase !== 'resolving_modpack') {
-      return null
-    }
-
-    if (isModpackPhase) {
+    if (p.phase === 'installing_modpack') {
       const inner = {
         stage: p.modpack_stage || '',
         current: p.modpack_current || 0,
         total: p.modpack_total || 0
       }
       return {
+        kind: 'modpack',
         name: p.modpack_name || '',
         label: stageLabel(inner),
         percent: stagePercent(inner),
-        total: inner.total,
+        determinate: inner.total > 0,
         detail: p.modpack_detail || ''
       }
     }
 
-    // Still the loader's half of the job. Naming the actual phase beats leaving
-    // a stale "Downloading mods" up while the server jar is what's downloading.
+    // Loader phases. Only the two download phases actually emit bytes, and the
+    // progress entry merges keys rather than replacing them — so bytes_done
+    // lingers at 100% into later phases. Trusting it there would park a full
+    // bar over running_installer, which for Forge/NeoForge is the long part.
+    const hasBytes = p.phase === 'downloading_installer' || p.phase === 'downloading_server_jar'
+    const done = Number(p.bytes_done) || 0
+    const total = hasBytes ? (Number(p.bytes_total) || 0) : 0
     return {
+      kind: 'loader',
       name: p.modpack_name || '',
-      label: INSTALL_PHASE_LABELS[p.phase] || 'Preparing install...',
-      percent: 0,
-      total: 0,
+      label: INSTALL_PHASE_LABELS[p.phase] || 'Installing server…',
+      percent: total > 0 ? Math.round((done / total) * 100) : 0,
+      determinate: total > 0,
       detail: ''
     }
+  })
+
+  // Falls back to the persisted status so the install is still announced when
+  // no progress entry exists: the worker's progress lives in memory on the
+  // backend, so a restart mid-install wipes it while the record stays
+  // 'installing'. An unlabelled "installing" beats a page of zeroes.
+  const serverInstalling = computed(() =>
+    installActivity.value !== null || pickEffectiveStatus(server.value) === 'installing'
+  )
+
+  // Always renderable while serverInstalling is true, including the
+  // restart-wiped-the-progress case above, where all we know is that it runs.
+  const installDisplay = computed(() => installActivity.value || {
+    kind: 'loader',
+    name: '',
+    label: 'Installing server…',
+    percent: 0,
+    determinate: false,
+    detail: ''
+  })
+
+  // The Mods tab's narrower view: only surface an install there when a pack is
+  // actually part of it. Gated on the server record rather than the phase —
+  // the pack's phases bookend the loader's, so keying off them alone would pull
+  // the panel for the whole middle stretch and put it back afterwards.
+  // pendingModpack is written before the worker starts and cleared once the
+  // pack lands, so it covers the install end to end; the phase check is the
+  // fallback for the window before the record has loaded.
+  const backgroundModpack = computed(() => {
+    const activity = installActivity.value
+    if (!activity) return null
+    if (!server.value?.pendingModpack && activity.kind !== 'modpack') return null
+    return activity
   })
 
   const backgroundModpackInstalling = computed(() => backgroundModpack.value !== null)
@@ -1332,6 +1362,9 @@ export const useServerStore = defineStore('server', () => {
     // Getters
     modpackProgressLabel,
     modpackProgressPercent,
+    installActivity,
+    installDisplay,
+    serverInstalling,
     backgroundModpackInstalling,
     backgroundModpackLabel,
     backgroundModpackPercent,
