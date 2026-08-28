@@ -22,6 +22,7 @@ const auth = useAuthStore()
 let logsIntervalId = null
 let serverStatusIntervalId = null
 let modpackProgressIntervalId = null
+let installProgressIntervalId = null
 
 /** Routes that show live-ish console output; keep logs polling like the console page. */
 function shouldPollLogs(routeName) {
@@ -66,6 +67,37 @@ function stopModpackProgressPolling() {
   store.clearModpackProgress()
 }
 
+// A pack picked in the create modal is installed by the same worker as the
+// loader, so it can still be downloading mods when the user first opens the
+// server — started by nothing this tab did, and invisible without this. The
+// poll stops itself the moment the worker goes idle, so the cost is one
+// request per server visit unless something is actually running.
+function startInstallProgressPolling() {
+  if (installProgressIntervalId) return
+  installProgressIntervalId = setInterval(async () => {
+    const stillRunning = await store.fetchServerInstallProgress()
+    if (!stillRunning) {
+      stopInstallProgressPolling()
+      // The mods that were downloading are on disk now; without this the list
+      // stays as it looked before the install and the progress bar just
+      // disappears, which reads as the pack having done nothing.
+      await store.loadMods()
+    }
+  }, 1500)
+}
+
+function stopInstallProgressPolling() {
+  if (installProgressIntervalId) {
+    clearInterval(installProgressIntervalId)
+    installProgressIntervalId = null
+  }
+}
+
+// Probe once on arrival; only commit to polling if something is in flight.
+async function checkInstallProgress() {
+  if (await store.fetchServerInstallProgress()) startInstallProgressPolling()
+}
+
 // ---------- Route-to-store synchronization ----------
 // The store deliberately does NOT call useRoute() (setup-store route context
 // is fragile under HMR). The layout owns this sync. Both watchers use
@@ -103,6 +135,7 @@ watch(() => store.currentServerId, async (newId, oldId) => {
   // server's. The store.modpackInstalling watcher restarts it for the
   // new server if needed.
   stopModpackProgressPolling()
+  stopInstallProgressPolling()
   store.resetState()
   await store.refreshAll()
   if (shouldPollLogs(route.name)) {
@@ -110,6 +143,7 @@ watch(() => store.currentServerId, async (newId, oldId) => {
     startLogPolling()
   }
   startServerStatusPolling()
+  checkInstallProgress()
 }, { immediate: true })
 
 // Drive modpack-progress polling from the store's installing flag.
@@ -118,12 +152,19 @@ watch(() => store.modpackInstalling, (installing) => {
   else stopModpackProgressPolling()
 })
 
+// An install kicked off from this tab pushes a pack through the same worker,
+// so pick the progress up there too rather than only on arrival.
+watch(() => store.actionState.install, (installing) => {
+  if (installing) startInstallProgressPolling()
+})
+
 // ---------- Lifecycle ----------
 
 onUnmounted(() => {
   stopLogPolling()
   stopServerStatusPolling()
   stopModpackProgressPolling()
+  stopInstallProgressPolling()
 })
 </script>
 

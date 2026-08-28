@@ -49,6 +49,21 @@ const MODPACK_STAGE_LABELS = {
   done: 'Finishing up...'
 }
 
+// Loader-install phases, from backend/server/install_progress.py. The pack's
+// own stages are MODPACK_STAGE_LABELS above; these cover the stretch between
+// resolving a pack and installing it, which is still part of the same job.
+const INSTALL_PHASE_LABELS = {
+  starting: 'Starting install...',
+  resolving_modpack: 'Resolving modpack...',
+  resolving_versions: 'Resolving versions...',
+  downloading_installer: 'Downloading installer...',
+  downloading_server_jar: 'Downloading server files...',
+  verifying: 'Verifying download...',
+  running_installer: 'Running installer...',
+  detecting_artifacts: 'Finishing server files...',
+  writing_eula: 'Finishing server files...'
+}
+
 const TEXT_FILE_EXTENSIONS = new Set([
   'txt', 'json', 'properties', 'yml', 'yaml', 'toml', 'cfg', 'conf', 'log', 'md'
 ])
@@ -114,6 +129,13 @@ export const useServerStore = defineStore('server', () => {
   const showDeleteServerModal = ref(false)
   const deletingServer = ref(false)
   const modpackProgress = ref(null)
+  // Progress for a pack the *install worker* is applying, as opposed to
+  // modpackProgress above which only covers an install this tab started from
+  // the Mods browser. A pack chosen in the create modal is installed by the
+  // same worker that installs the loader, so by the time the user reaches the
+  // server its mods are still downloading with nothing in this tab aware of it.
+  // Sourced from GET /servers/<id>/install/progress.
+  const serverInstallProgress = ref(null)
   const showModpackInstallConfirmModal = ref(false)
   const pendingModpackInstall = ref(null)
   const modpackCreateBackup = ref(true)
@@ -210,21 +232,83 @@ export const useServerStore = defineStore('server', () => {
   }
 
   // ---------- Computeds (getters) ----------
-  const modpackProgressLabel = computed(() => {
-    const p = modpackProgress.value
-    if (!p?.active) return ''
+
+  // Both progress sources describe the same install with the same stage
+  // vocabulary, so the phrasing lives here once rather than per surface.
+  function stageLabel(p) {
     const stage = MODPACK_STAGE_LABELS[p.stage] || p.stage || 'Working...'
     if (p.stage === 'installing_files' && p.total > 0) {
       return `${stage} (${p.current}/${p.total})`
     }
     return stage
+  }
+
+  function stagePercent(p) {
+    if (!p.total) return 0
+    return Math.round((p.current / p.total) * 100)
+  }
+
+  const modpackProgressLabel = computed(() => {
+    const p = modpackProgress.value
+    if (!p?.active) return ''
+    return stageLabel(p)
   })
 
   const modpackProgressPercent = computed(() => {
     const p = modpackProgress.value
-    if (!p?.active || !p.total) return 0
-    return Math.round((p.current / p.total) * 100)
+    if (!p?.active) return 0
+    return stagePercent(p)
   })
+
+  // A create-time install runs as one worker: it resolves the pack, installs
+  // the loader, then installs the pack. Only the last step reports the pack's
+  // own stage/counts (under modpack_*-prefixed keys, since the entry is shared
+  // with the loader's phases), so this flattens whichever step is current into
+  // one shape the UI can render without knowing any of that.
+  const backgroundModpack = computed(() => {
+    const p = serverInstallProgress.value
+    if (!p?.active) return null
+
+    // Gate on the server record, not the phase. The pack's own phases bookend
+    // the loader's, so keying off them alone would pull the banner for the
+    // whole middle stretch and put it back afterwards. pendingModpack is
+    // written before the worker starts and cleared once the pack lands, so it
+    // covers the install end to end; the phase check is the fallback for the
+    // window before the record has loaded.
+    const isModpackPhase = p.phase === 'installing_modpack'
+    if (!server.value?.pendingModpack && !isModpackPhase && p.phase !== 'resolving_modpack') {
+      return null
+    }
+
+    if (isModpackPhase) {
+      const inner = {
+        stage: p.modpack_stage || '',
+        current: p.modpack_current || 0,
+        total: p.modpack_total || 0
+      }
+      return {
+        name: p.modpack_name || '',
+        label: stageLabel(inner),
+        percent: stagePercent(inner),
+        total: inner.total,
+        detail: p.modpack_detail || ''
+      }
+    }
+
+    // Still the loader's half of the job. Naming the actual phase beats leaving
+    // a stale "Downloading mods" up while the server jar is what's downloading.
+    return {
+      name: p.modpack_name || '',
+      label: INSTALL_PHASE_LABELS[p.phase] || 'Preparing install...',
+      percent: 0,
+      total: 0,
+      detail: ''
+    }
+  })
+
+  const backgroundModpackInstalling = computed(() => backgroundModpack.value !== null)
+  const backgroundModpackLabel = computed(() => backgroundModpack.value?.label || '')
+  const backgroundModpackPercent = computed(() => backgroundModpack.value?.percent || 0)
 
   const serverStatus = computed(() => {
     const loaderName = server.value?.loader
@@ -730,6 +814,23 @@ export const useServerStore = defineStore('server', () => {
     modpackProgress.value = null
   }
 
+  // Returns true while the worker is still going, so the caller's poll knows
+  // whether to schedule another tick.
+  async function fetchServerInstallProgress() {
+    if (!currentServerId.value) return false
+    try {
+      const progress = await getServerInstallProgress(currentServerId.value)
+      serverInstallProgress.value = progress?.active ? progress : null
+    } catch {
+      // polling failure is non-critical — silently swallow
+    }
+    return serverInstallProgress.value !== null
+  }
+
+  function clearServerInstallProgress() {
+    serverInstallProgress.value = null
+  }
+
   async function runModpackInstall(modpackData) {
     if (!modpackData) return
     const isRetry = Boolean(modpackData.allowMissing || modpackData.modSideOverrides)
@@ -1154,6 +1255,7 @@ export const useServerStore = defineStore('server', () => {
     installLoading.value = false
     modpackInstalling.value = false
     modpackProgress.value = null
+    serverInstallProgress.value = null
     showModpackInstallConfirmModal.value = false
     showMissingModsConfirmModal.value = false
     pendingModpackInstall.value = null
@@ -1217,6 +1319,7 @@ export const useServerStore = defineStore('server', () => {
     showDeleteServerModal,
     deletingServer,
     modpackProgress,
+    serverInstallProgress,
     showModpackInstallConfirmModal,
     pendingModpackInstall,
     modpackCreateBackup,
@@ -1229,6 +1332,10 @@ export const useServerStore = defineStore('server', () => {
     // Getters
     modpackProgressLabel,
     modpackProgressPercent,
+    backgroundModpackInstalling,
+    backgroundModpackLabel,
+    backgroundModpackPercent,
+    backgroundModpack,
     serverStatus,
     canEditSettings,
     ramMetrics,
@@ -1284,6 +1391,8 @@ export const useServerStore = defineStore('server', () => {
     cancelModpackInstallConfirmation,
     fetchModpackProgress,
     clearModpackProgress,
+    fetchServerInstallProgress,
+    clearServerInstallProgress,
     runModpackInstall,
     confirmModpackInstall,
     cancelMissingModsConfirmation,

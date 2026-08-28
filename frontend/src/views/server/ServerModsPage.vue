@@ -33,6 +33,10 @@ const nounLower = computed(() => noun.value.toLowerCase())
 // The bar is permanent now, so its label has to carry the idle state too —
 // previously "select all" only existed as a footer that appeared when nothing
 // was selected, and the bar only when something was.
+// Early stages (resolving the pack, fetching the archive) report no file count,
+// so the bar runs indeterminate until the per-file download begins.
+const hasInstallTotal = computed(() => (store.backgroundModpack?.total || 0) > 0)
+
 const selectAllLabel = computed(() => {
   if (store.allFilteredSelected) return 'Deselect all'
   if (store.selectedCount > 0) return `${store.selectedCount} selected`
@@ -62,6 +66,32 @@ const selectAllLabel = computed(() => {
         </AppButton>
       </div>
     </div>
+
+    <!-- A pack installed from the create modal keeps downloading after the
+         modal is gone, so this is the only place that install is visible. -->
+    <Panel v-if="store.backgroundModpackInstalling" :title="`Installing ${nounLower}`">
+      <div class="mods-page__install">
+        <div class="mods-page__install-head">
+          <span class="mods-page__install-label">{{ store.backgroundModpackLabel }}</span>
+          <span v-if="hasInstallTotal" class="mods-page__install-pct">
+            {{ store.backgroundModpackPercent }}%
+          </span>
+        </div>
+        <div class="mods-page__install-track">
+          <div
+            class="mods-page__install-fill"
+            :class="{ 'is-indeterminate': !hasInstallTotal }"
+            :style="hasInstallTotal ? { width: `${store.backgroundModpackPercent}%` } : null"
+          ></div>
+        </div>
+        <p v-if="store.backgroundModpack?.name" class="mods-page__install-detail">
+          {{ store.backgroundModpack.name }}
+        </p>
+        <p v-if="store.backgroundModpack?.detail" class="mods-page__install-detail">
+          {{ store.backgroundModpack.detail }}
+        </p>
+      </div>
+    </Panel>
 
     <Panel v-if="store.activeModpack" title="Active modpack">
       <div class="mods-page__modpack">
@@ -218,6 +248,68 @@ const selectAllLabel = computed(() => {
 .mods-page__actions {
   display: flex;
   gap: var(--space-2);
+}
+
+.mods-page__install {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.mods-page__install-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.mods-page__install-label {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.mods-page__install-pct {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.mods-page__install-track {
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-tertiary);
+  overflow: hidden;
+}
+
+.mods-page__install-fill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--primary);
+  transition: width 0.3s ease;
+}
+
+/* No file count yet, so show motion rather than a bar stuck at zero. */
+.mods-page__install-fill.is-indeterminate {
+  width: 35%;
+  animation: mods-install-slide 1.1s ease-in-out infinite;
+}
+
+@keyframes mods-install-slide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(340%); }
+}
+
+.mods-page__install-detail {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: var(--leading-normal);
+  overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mods-page__install-fill.is-indeterminate {
+    animation: none;
+  }
 }
 
 .mods-page__modpack {
