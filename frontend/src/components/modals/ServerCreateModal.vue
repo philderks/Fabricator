@@ -1514,6 +1514,19 @@ export default {
   gap: var(--space-5);
 }
 
+/* Panel lays its body out as a plain block, and global.css zeroes every
+   margin — so stacked fields inside one panel had NO space between them at
+   all: the previous field's input sat flush against the next field's label,
+   and a field's hint ran straight into the heading under it. Matching the
+   grid's own 20px column gap gives the same rhythm down as across.
+   Scoped here rather than in Panel: other views place their own spacing
+   inside panel bodies, and a global gap would double it. */
+.settings-form :deep(.panel__body) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
 .version-label-row {
   display: flex;
   align-items: center;
@@ -1547,6 +1560,9 @@ export default {
 /* Mode toggle (Custom Server / Import Modpack) */
 .mode-toggle {
   display: inline-flex;
+  /* Shrink-to-fit: as a flex item in the panel body it would otherwise stretch
+     to the full width and stop reading as a pair of pills. */
+  align-self: flex-start;
   align-items: center;
   padding: 3px;
   border-radius: var(--radius-pill);
@@ -1610,8 +1626,13 @@ export default {
   accent-color: var(--primary);
 }
 
+/* Top-aligned, not bottom. The `&nbsp;` label in the action column reserves the
+   label row so the button's top lines up with the input's; bottom-aligning
+   instead measured the whole column, so on the Link row — whose field carries a
+   hint underneath — the button was pushed a hint's height below the input it
+   belongs to, while the hintless Search row looked fine. */
 .modpack-input-row {
-  align-items: end;
+  align-items: start;
 }
 
 .modpack-grow {
@@ -1863,16 +1884,22 @@ export default {
 
 /* Scope-migrated from global.css in Phase 7 Task 7
    (sole remaining caller after FormField migration). */
+/* These hand-rolled equivalents of FormField sit directly beside real ones —
+   "Minecraft Version" shares a row with "Mod Loader" — so their type has to be
+   the same or the row looks subtly broken. The raw rem values had drifted off
+   the scale: labels were 14px against FormField's 13px, and hints 13px against
+   its 11px, which made the same kind of text two different sizes in one form. */
 .form-group {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 
 .form-group label {
-  font-size: 0.875rem;
+  font-size: var(--text-sm);
   font-weight: 500;
   color: var(--text-primary);
+  line-height: var(--leading-tight);
 }
 
 .form-group input,
@@ -1881,20 +1908,21 @@ export default {
 }
 
 .form-hint {
-  font-size: 0.8125rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
+  line-height: var(--leading-normal);
 }
 
 .form-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 1.25rem;
+  gap: var(--space-5);
 }
 
 .form-checkboxes {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 1rem;
+  gap: var(--space-4);
 }
 
 .checkbox-label {

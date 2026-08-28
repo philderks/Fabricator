@@ -1216,6 +1216,20 @@ const onReset = () => {
   color: var(--primary);
 }
 
+/* Panel renders its body as a plain block and global.css zeroes every margin,
+   so stacked blocks inside one panel had nothing between them. It only looked
+   broken in places because two rules below were patching it by hand — a
+   margin-bottom on notices, a margin-top on toggle groups — which covered the
+   adjacencies those happened to sit in and missed the rest. In Java Runtime
+   that left the runtime/path grid flush against the JVM Arguments label
+   whenever no warning was showing. One gap here replaces both patches and
+   spaces every panel on the page the same way. */
+.settings-page :deep(.panel__body) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
 .settings-page__grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1309,11 +1323,11 @@ const onReset = () => {
   white-space: nowrap;
 }
 
+/* Spacing above comes from the panel body's gap now, not a margin here. */
 .settings-page__toggles {
   display: flex;
   flex-direction: column;
   gap: 0;
-  margin-top: var(--space-3);
 }
 
 .settings-page__toggle {
@@ -1355,7 +1369,6 @@ const onReset = () => {
   border-radius: var(--radius-sm);
   font-size: var(--text-sm);
   line-height: var(--leading-normal);
-  margin-bottom: var(--space-3);
 }
 
 .settings-page__notice strong {

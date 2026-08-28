@@ -535,7 +535,9 @@ onUnmounted(() => {
 }
 
 .app-sidebar__brand {
-  font-size: var(--text-sm);
+  /* Wordmark, not a nav label — it carries the header row next to a 24px mark,
+     so it sits a step above the --text-sm used for the items below it. */
+  font-size: var(--text-md);
   font-weight: 600;
   color: var(--text-primary);
   letter-spacing: -0.3px;
