@@ -37,9 +37,11 @@ export const SETTINGS_SECTIONS = [
   {
     key: 'security',
     label: 'Security',
-    description: 'Change the password used to unlock Fabricator.',
-    // Only meaningful when there is a password to change.
-    requiresAuth: true
+    description: 'The password used to unlock Fabricator, and whether one is required.',
+    // Deliberately NOT gated on auth being enabled: this section is the only
+    // way back once the password is turned off, so hiding it in that state
+    // would make disabling a one-way door.
+    hiddenWhenManaged: true
   }
 ]
 

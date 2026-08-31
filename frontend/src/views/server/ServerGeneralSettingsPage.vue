@@ -6,6 +6,7 @@ import ToggleRow from '../../components/ui/ToggleRow.vue'
 import JavaManagerPanel from '../../components/settings/JavaManagerPanel.vue'
 import McpPanel from '../../components/settings/McpPanel.vue'
 import ChangePasswordPanel from '../../components/settings/ChangePasswordPanel.vue'
+import PasswordTogglePanel from '../../components/settings/PasswordTogglePanel.vue'
 import { useAuthStore } from '../../stores/auth'
 import { useServerStore } from '../../stores/server'
 import { usePreferencesStore } from '../../stores/preferences'
@@ -186,7 +187,11 @@ onMounted(async () => {
 
     <McpPanel v-if="activeSection === 'mcp'" />
 
-    <ChangePasswordPanel v-if="activeSection === 'security'" />
+    <!-- Nothing to change when there is no password; the toggle panel below
+         covers that state and is how one gets set again. -->
+    <ChangePasswordPanel v-if="activeSection === 'security' && auth.enabled" />
+
+    <PasswordTogglePanel v-if="activeSection === 'security'" />
   </div>
 </template>
 

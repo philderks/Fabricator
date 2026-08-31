@@ -134,7 +134,15 @@ def init_auth(app) -> None:
     value). ``FABRICATOR_NEEDS_SETUP`` is seeded here but is runtime-mutable —
     the setup handler flips it to False once a password is set.
     """
-    disabled = service.auth_disabled()
+    # Two independent opt-outs. The env var is the declarative one; the file
+    # flag is the operator turning the password off from Settings. The file
+    # flag is ignored when the hash comes from the env var, because there the
+    # credential is declarative and the UI cannot override it (the same reason
+    # change-password refuses in that mode).
+    file_opt_out = (
+        service.password_disabled_in_file() and not service.password_is_env_managed()
+    )
+    disabled = service.auth_disabled() or file_opt_out
 
     app.config.update(
         SESSION_COOKIE_HTTPONLY=True,

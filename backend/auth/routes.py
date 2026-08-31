@@ -118,6 +118,97 @@ def change_password():
     return jsonify({"changed": True}), 200
 
 
+@auth_bp.route("/disable", methods=["POST"])
+def disable_password():
+    """Turn the operator password off (requires the CURRENT password).
+
+    Protected by the gate, and re-verifies the password on top of that: this
+    drops the only credential on the install, so a hijacked session must not be
+    enough on its own. Refuses (409) when the hash is declared via the env var,
+    where the file flag would have no effect. Flips the live config so the gate
+    opens immediately, without waiting for a restart. SENSITIVE: never log the
+    password.
+    """
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON body required"}), 400
+    current = data.get("current")
+    if not isinstance(current, str) or not current:
+        return jsonify({"error": "current password is required"}), 400
+    if service.password_is_env_managed():
+        return (
+            jsonify(
+                {
+                    "error": "password is set via FABRICATOR_AUTH_PASSWORD_HASH; "
+                    "remove it there"
+                }
+            ),
+            409,
+        )
+    # Already off: the gate lets everyone through in that state, so there is no
+    # password left to verify and nothing to do.
+    if not current_app.config.get("FABRICATOR_AUTH_ENABLED"):
+        return jsonify({"disabled": True}), 200
+    if not service.verify_password(current):
+        time.sleep(LOGIN_FAILURE_DELAY_SECONDS)
+        return jsonify({"error": "current password is incorrect"}), 401
+
+    service.disable_password()
+    current_app.config["FABRICATOR_AUTH_ENABLED"] = False
+    # Without this the next start would see no credential and demand setup.
+    current_app.config["FABRICATOR_NEEDS_SETUP"] = False
+    session.clear()
+    return jsonify({"disabled": True}), 200
+
+
+@auth_bp.route("/enable", methods=["POST"])
+def enable_password():
+    """Turn the password back on by setting a new one.
+
+    The way back from ``/disable``. Reachable without a session by nature —
+    while auth is off the gate admits everything — which is not a new exposure:
+    an install with no password is open to whoever can reach it either way.
+    Refuses when the env opt-out is set, since the file flag cannot override it
+    and the change would silently not survive a restart.
+    """
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON body required"}), 400
+    new = data.get("new")
+    if not isinstance(new, str) or len(new) < MIN_PASSWORD_LENGTH:
+        return (
+            jsonify(
+                {"error": f"password must be at least {MIN_PASSWORD_LENGTH} characters"}
+            ),
+            400,
+        )
+    if service.password_is_env_managed():
+        return (
+            jsonify(
+                {
+                    "error": "password is set via FABRICATOR_AUTH_PASSWORD_HASH; "
+                    "change it there"
+                }
+            ),
+            409,
+        )
+    if service.auth_disabled():
+        return (
+            jsonify(
+                {"error": "auth is turned off via FABRICATOR_DISABLE_AUTH; unset it first"}
+            ),
+            409,
+        )
+    if current_app.config.get("FABRICATOR_AUTH_ENABLED"):
+        return jsonify({"error": "password is already enabled"}), 409
+
+    service.set_password(new)  # also clears the opt-out flag
+    current_app.config["FABRICATOR_AUTH_ENABLED"] = True
+    current_app.config["FABRICATOR_NEEDS_SETUP"] = False
+    _login_session()
+    return jsonify({"enabled": True}), 200
+
+
 @auth_bp.route("/logout", methods=["POST"])
 def logout():
     # Reaching here means the gate already let us through (logout is protected).

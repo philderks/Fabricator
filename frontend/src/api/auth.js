@@ -27,6 +27,24 @@ export function postSetup(password) {
   })
 }
 
+export function postDisablePassword(current) {
+  // skipAuthRedirect: a wrong-password 401 belongs in the panel, not the
+  // global session-expiry redirect.
+  return apiRequest('/api/auth/disable', {
+    method: 'POST',
+    body: JSON.stringify({ current }),
+    skipAuthRedirect: true
+  })
+}
+
+export function postEnablePassword(next) {
+  return apiRequest('/api/auth/enable', {
+    method: 'POST',
+    body: JSON.stringify({ new: next }),
+    skipAuthRedirect: true
+  })
+}
+
 export function postChangePassword(current, next) {
   // skipAuthRedirect: a wrong-current 401 is shown in the modal, it must NOT
   // trigger the global session-expiry redirect (that would log the user out).
