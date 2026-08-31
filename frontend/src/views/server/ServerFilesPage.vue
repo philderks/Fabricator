@@ -3,6 +3,7 @@ import { computed, defineAsyncComponent, nextTick, onUnmounted, ref, watch } fro
 import { onBeforeRouteLeave } from 'vue-router'
 import AppButton from '../../components/ui/AppButton.vue'
 import Panel from '../../components/ui/Panel.vue'
+import FileTree from '../../components/files/FileTree.vue'
 import ConfirmModal from '../../components/modals/ConfirmModal.vue'
 import { formatFileSize } from '../../utils/format'
 import { copyToClipboard } from '../../utils/clipboard'
@@ -218,6 +219,15 @@ const onCrumbClick = (crumb) => {
 const onRefresh = () => store.openFileBrowser(store.fileBrowser.currentPath)
 const canGoUp = computed(() => Boolean(store.fileBrowser.currentPath))
 
+// Opening a file switches the page into a two-pane workspace: folders move to a
+// tree on the left, the editor takes the rest. Closing the file returns to the
+// full-width browser.
+const isEditing = computed(() => Boolean(store.fileEditor.path) || store.fileEditor.loading)
+
+// The tree emits raw entries, same as the table rows, so both funnel through
+// the one path that checks for unsaved changes first.
+const onTreeSelect = (entry) => onFileClick(entry)
+
 const copyState = ref('idle')
 const onCopyPath = async () => {
   const path = store.fileBrowser.absolutePath
@@ -229,7 +239,10 @@ const onCopyPath = async () => {
 </script>
 
 <template>
-  <div class="files-page">
+  <div class="files-page" :class="{ 'is-editing': isEditing }">
+    <!-- Browser chrome. Hidden while editing: the breadcrumb and Up button
+         steer the flat listing, which the tree replaces. -->
+    <template v-if="!isEditing">
     <div v-if="store.fileBrowser.absolutePath" class="files-page__location">
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
         <path d="M2 3.5A1.5 1.5 0 013.5 2h2.5l1.5 2H11a1.5 1.5 0 011.5 1.5v6A1.5 1.5 0 0111 13H3.5A1.5 1.5 0 012 11.5v-8z" />
@@ -388,12 +401,18 @@ const onCopyPath = async () => {
         </tbody>
       </table>
     </Panel>
+    </template>
 
-    <Panel
-      v-if="store.fileEditor.path || store.fileEditor.loading"
-      ref="editorRef"
-      :title="(store.fileEditor.path || 'Loading…') + (store.hasFileChanges ? ' •' : '')"
-    >
+    <div v-else class="files-page__workspace">
+      <aside class="files-page__tree-pane">
+        <FileTree :active-path="store.fileEditor.path || ''" @select="onTreeSelect" />
+      </aside>
+
+      <Panel
+        ref="editorRef"
+        class="files-page__editor-pane"
+        :title="(store.fileEditor.path || 'Loading…') + (store.hasFileChanges ? ' •' : '')"
+      >
       <template #action>
         <div class="files-page__editor-actions">
           <AppButton
@@ -412,19 +431,20 @@ const onCopyPath = async () => {
         </div>
       </template>
 
-      <div v-if="store.fileEditor.loading" class="files-page__state">Loading file…</div>
-      <div v-else>
-        <CodeEditor
-          ref="codeEditorRef"
-          v-model="store.fileEditor.content"
-          :path="store.fileEditor.path"
-          :disabled="store.fileEditor.saving"
-          @save="onSave"
-          @validity="onValidity"
-        />
-        <p v-if="store.fileEditor.error" class="files-page__editor-error">{{ store.fileEditor.error }}</p>
-      </div>
-    </Panel>
+        <div v-if="store.fileEditor.loading" class="files-page__state">Loading file…</div>
+        <div v-else class="files-page__editor-body">
+          <CodeEditor
+            ref="codeEditorRef"
+            v-model="store.fileEditor.content"
+            :path="store.fileEditor.path"
+            :disabled="store.fileEditor.saving"
+            @save="onSave"
+            @validity="onValidity"
+          />
+          <p v-if="store.fileEditor.error" class="files-page__editor-error">{{ store.fileEditor.error }}</p>
+        </div>
+      </Panel>
+    </div>
 
     <ConfirmModal
       :show="showDiscardConfirm"
@@ -457,6 +477,85 @@ const onCopyPath = async () => {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+}
+
+/* ---------- Editing: tree + editor, filling the viewport ---------- */
+
+/* Only while editing. The browser view keeps its natural height so a short
+   folder listing doesn't stretch to fill the page. */
+.files-page.is-editing {
+  flex: 1;
+  min-height: 0;
+}
+
+.files-page__workspace {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  /* Fixed rail, editor takes the rest. minmax(0,1fr) rather than 1fr so a long
+     unbroken line in the file can't blow the column out past the viewport. */
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.files-page__tree-pane {
+  min-height: 0;
+  min-width: 0;
+}
+
+.files-page__editor-pane {
+  min-height: 0;
+  min-width: 0;
+}
+
+/* Panel is a flex column; its body has to be allowed to shrink before the
+   editor inside it can size to the leftover space rather than overflowing. */
+.files-page__editor-pane :deep(.panel__body) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.files-page__editor-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* Flex the whole way down rather than percentage heights: a percentage needs a
+   definite parent height, which a flex item only sometimes has. */
+.files-page__editor-body :deep(.code-editor) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.files-page__editor-body :deep(.cm-editor) {
+  flex: 1;
+  min-height: 0;
+}
+
+/* CodeMirror's own theme caps the scroller at 60vh and floors it at 320px,
+   which is right for the stacked layout but fights a pane that should fill
+   whatever height it is given. The extra class raises specificity above the
+   generated theme rule. */
+.files-page__editor-body :deep(.cm-editor .cm-scroller) {
+  min-height: 0;
+  max-height: none;
+}
+
+/* Too narrow for two panes side by side (matches the 768px breakpoint the rest
+   of the chrome uses): stack them, and cap the tree so the editor still gets
+   most of the screen. */
+@media (max-width: 768px) {
+  .files-page__workspace {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 12rem) minmax(0, 1fr);
+  }
 }
 
 .files-page__toolbar {
