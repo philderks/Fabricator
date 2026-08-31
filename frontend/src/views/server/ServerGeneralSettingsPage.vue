@@ -11,6 +11,7 @@ import { useServerStore } from '../../stores/server'
 import { usePreferencesStore } from '../../stores/preferences'
 import { version as appVersion } from '../../../package.json'
 import { getUpdateStatus } from '../../api/servers'
+import { availableSettingsSections, settingsSectionLabel } from '../../utils/settingsSections'
 
 const auth = useAuthStore()
 const store = useServerStore()
@@ -23,6 +24,33 @@ const route = useRoute()
 // would still be set. Standalone also has no AppTopbar, hence its own heading
 // and padding (RootLayout leaves both to the page, like Servers.vue).
 const hasServer = computed(() => Boolean(route.params.id))
+
+// Everything except About lives behind its own sub-page, so the index is a
+// short menu rather than one long scroll of unrelated panels.
+const sections = computed(() => availableSettingsSections({
+  hasServer: hasServer.value,
+  managed: auth.managed,
+  authEnabled: auth.enabled
+}))
+
+// Only honour a section that exists in this context: a hand-typed or stale URL
+// (say /settings/java under managed mode) falls back to the index rather than
+// rendering a blank page.
+const activeSection = computed(() => {
+  const key = route.params.section
+  return sections.value.some((s) => s.key === key) ? key : null
+})
+
+const sectionTo = (key) => (hasServer.value
+  ? { name: 'ServerGeneralSettings', params: { id: route.params.id, section: key } }
+  : { name: 'GlobalSettings', params: { section: key } })
+
+// Back to the index. Passing an empty section is what clears the optional param.
+const indexTo = computed(() => (hasServer.value
+  ? { name: 'ServerGeneralSettings', params: { id: route.params.id, section: '' } }
+  : { name: 'GlobalSettings', params: { section: '' } }))
+
+const activeSectionLabel = computed(() => settingsSectionLabel(activeSection.value))
 
 // Boot auto-start mode — saves instantly via its own endpoint, so it stays
 // editable even while the server is running (unlike server.properties).
@@ -65,9 +93,55 @@ onMounted(async () => {
 
 <template>
   <div class="general-settings" :class="{ 'general-settings--standalone': !hasServer }">
-    <h1 v-if="!hasServer" class="general-settings__heading">Settings</h1>
+    <!-- The server route gets its breadcrumb from AppTopbar; RootLayout has no
+         topbar, so the server-less route carries its own. -->
+    <nav v-if="!hasServer" class="general-settings__heading" aria-label="Breadcrumb">
+      <template v-if="activeSection">
+        <router-link :to="indexTo" class="general-settings__crumb-link">Settings</router-link>
+        <span class="general-settings__crumb-sep" aria-hidden="true">/</span>
+        <!-- The h1 tracks the deepest crumb, so the page keeps a real heading
+             rather than trading it for breadcrumb markup. -->
+        <h1 class="general-settings__title" aria-current="page">{{ activeSectionLabel }}</h1>
+      </template>
+      <h1 v-else class="general-settings__title">Settings</h1>
+    </nav>
 
-    <Panel v-if="!auth.managed && hasServer" title="Auto-start">
+    <!-- Index: the sub-pages, then About inline. -->
+    <template v-if="!activeSection">
+      <Panel :padded="false">
+        <nav class="general-settings__menu" aria-label="Settings sections">
+          <router-link
+            v-for="section in sections"
+            :key="section.key"
+            :to="sectionTo(section.key)"
+            class="general-settings__menu-item"
+          >
+            <span class="general-settings__menu-text">
+              <span class="general-settings__menu-label">{{ section.label }}</span>
+              <span class="general-settings__menu-desc">{{ section.description }}</span>
+            </span>
+            <svg class="general-settings__menu-chevron" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M5.5 3l4 4-4 4" />
+            </svg>
+          </router-link>
+        </nav>
+      </Panel>
+
+      <Panel title="About">
+        <dl class="general-settings__about">
+          <div class="general-settings__about-row">
+            <dt>Version</dt>
+            <dd>{{ displayVersion }}</dd>
+          </div>
+          <div class="general-settings__about-row">
+            <dt>Application</dt>
+            <dd>Fabricator</dd>
+          </div>
+        </dl>
+      </Panel>
+    </template>
+
+    <Panel v-if="activeSection === 'autostart'" title="Auto-start">
       <p class="general-settings__autostart-intro">
         What should happen to this server when Fabricator starts up?
       </p>
@@ -93,7 +167,7 @@ onMounted(async () => {
       </div>
     </Panel>
 
-    <Panel title="Display">
+    <Panel v-if="activeSection === 'display'" title="Display">
       <ToggleRow
         :model-value="prefs.memoryUnit === 'MB'"
         label="Show RAM in MB on the Overview"
@@ -108,24 +182,11 @@ onMounted(async () => {
       />
     </Panel>
 
-    <JavaManagerPanel v-if="!auth.managed" />
+    <JavaManagerPanel v-if="activeSection === 'java'" />
 
-    <McpPanel v-if="!auth.managed" />
+    <McpPanel v-if="activeSection === 'mcp'" />
 
-    <ChangePasswordPanel v-if="auth.enabled" />
-
-    <Panel title="About">
-      <dl class="general-settings__about">
-        <div class="general-settings__about-row">
-          <dt>Version</dt>
-          <dd>{{ displayVersion }}</dd>
-        </div>
-        <div class="general-settings__about-row">
-          <dt>Application</dt>
-          <dd>Fabricator</dd>
-        </div>
-      </dl>
-    </Panel>
+    <ChangePasswordPanel v-if="activeSection === 'security'" />
   </div>
 </template>
 
@@ -144,10 +205,104 @@ onMounted(async () => {
 }
 
 .general-settings__heading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   margin: 0;
   font-size: var(--text-lg);
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.general-settings__title {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+  color: inherit;
+}
+
+.general-settings__crumb-link {
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.general-settings__crumb-link:hover {
+  color: var(--primary);
+}
+
+.general-settings__crumb-sep {
+  color: var(--text-disabled);
+  font-weight: 400;
+}
+
+/* ---------- Index menu ---------- */
+
+.general-settings__menu {
+  display: flex;
+  flex-direction: column;
+}
+
+.general-settings__menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px solid var(--border-color);
+  transition: background 0.15s ease;
+}
+
+/* The panel already draws the closing edge. */
+.general-settings__menu-item:last-child {
+  border-bottom: none;
+}
+
+.general-settings__menu-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.general-settings__menu-item:hover .general-settings__menu-chevron {
+  color: var(--primary);
+  transform: translateX(2px);
+}
+
+.general-settings__menu-item:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+.general-settings__menu-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.general-settings__menu-label {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.general-settings__menu-desc {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: var(--leading-normal);
+}
+
+.general-settings__menu-chevron {
+  flex-shrink: 0;
+  color: var(--text-disabled);
+  transition: color 0.15s ease, transform 0.15s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .general-settings__menu-chevron {
+    transition: none;
+  }
 }
 
 .general-settings__autostart-intro {

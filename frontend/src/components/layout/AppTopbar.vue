@@ -5,6 +5,7 @@ import StatusPill from '../ui/StatusPill.vue'
 import AppButton from '../ui/AppButton.vue'
 import MobileMenuButton from './MobileMenuButton.vue'
 import { contentLabel } from '../../utils/loaderKind'
+import { settingsSectionLabel } from '../../utils/settingsSections'
 
 const props = defineProps({
   serverStatus: {
@@ -53,6 +54,19 @@ const pageTitle = computed(() => {
   return ROUTE_TITLE[route.name] || ''
 })
 
+// Settings is the one page with a level below it, so the title becomes a
+// breadcrumb there — the way back to the index without using browser Back.
+// null everywhere else, and on the index itself, where the title says it all.
+const settingsCrumb = computed(() => {
+  if (route.name !== 'ServerGeneralSettings') return null
+  const label = settingsSectionLabel(route.params.section)
+  if (!label) return null
+  return {
+    label,
+    parent: { name: 'ServerGeneralSettings', params: { id: route.params.id, section: '' } }
+  }
+})
+
 // StatusPill.vue owns the allowlist via its prop validator and falls back
 // to STATUS_META.unknown for unknown values — gating it here would just
 // duplicate that logic (F6/CC5).
@@ -78,7 +92,12 @@ const isPending = computed(() => props.serverStatus.status === 'pending')
   <header class="app-topbar">
     <div class="app-topbar__lead">
       <MobileMenuButton />
-      <div class="app-topbar__title">{{ pageTitle }}</div>
+      <nav v-if="settingsCrumb" class="app-topbar__title" aria-label="Breadcrumb">
+        <router-link :to="settingsCrumb.parent" class="app-topbar__crumb-link">{{ pageTitle }}</router-link>
+        <span class="app-topbar__crumb-sep" aria-hidden="true">/</span>
+        <span aria-current="page">{{ settingsCrumb.label }}</span>
+      </nav>
+      <div v-else class="app-topbar__title">{{ pageTitle }}</div>
     </div>
     <div class="app-topbar__right">
       <StatusPill :status="pillStatus" :label="statusLabel" :sub="pillSub" />
@@ -144,6 +163,30 @@ const isPending = computed(() => props.serverStatus.status === 'pending')
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* As a breadcrumb the title holds several elements, so it becomes a flex row.
+   The plain-title case above keeps its ellipsis behaviour untouched. */
+nav.app-topbar__title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.app-topbar__crumb-link {
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.app-topbar__crumb-link:hover {
+  color: var(--primary);
+}
+
+.app-topbar__crumb-sep {
+  color: var(--text-disabled);
+  font-weight: 400;
 }
 
 .app-topbar__right,
