@@ -1151,10 +1151,14 @@ const onReset = () => {
 
 <style scoped>
 .settings-page {
+  /* One definition for the reading column, so the fixed action bar below can
+     line its buttons up with it instead of drifting off on a wide display.
+     Inherited rather than laid out, so `position: fixed` doesn't break it. */
+  --settings-column: 880px;
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  max-width: 880px;
+  max-width: var(--settings-column);
   padding-bottom: 80px;
 }
 
@@ -1395,14 +1399,21 @@ const onReset = () => {
   background: var(--bg-primary);
   border-top: 1px solid var(--border-color);
   box-shadow: var(--shadow-up);
-  padding: var(--space-4) var(--space-5);
+  /* Same gutter the routed content uses, so the inner column below starts on
+     exactly the same line as the panels above it — including on mobile, where
+     that token tightens. */
+  padding: var(--space-4) var(--app-content-padding);
   z-index: 10;
 }
 
+/* The bar stays full-bleed — it is what separates the actions from the page —
+   but its buttons are capped to the content column, so Save lands just under
+   the last panel rather than at the far edge of an ultrawide screen. */
 .settings-page__footer-inner {
   display: flex;
   justify-content: flex-end;
   gap: var(--space-3);
+  max-width: var(--settings-column);
 }
 
 .settings-page__danger {
