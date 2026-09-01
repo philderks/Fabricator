@@ -53,6 +53,11 @@ const indexTo = computed(() => (hasServer.value
 
 const activeSectionLabel = computed(() => settingsSectionLabel(activeSection.value))
 
+const DOCS_URL = 'https://docs.fabricator.site'
+// The tracker itself, not a prefilled new issue: it lands on existing reports
+// first, so a duplicate can be found before it is filed.
+const ISSUES_URL = 'https://github.com/philderks/Fabricator/issues'
+
 // Boot auto-start mode — saves instantly via its own endpoint, so it stays
 // editable even while the server is running (unlike server.properties).
 const autoStartOptions = [
@@ -126,6 +131,43 @@ onMounted(async () => {
             </svg>
           </router-link>
         </nav>
+      </Panel>
+
+      <Panel title="Help" :padded="false">
+        <div class="general-settings__menu">
+          <a
+            class="general-settings__menu-item"
+            :href="DOCS_URL"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <span class="general-settings__menu-text">
+              <span class="general-settings__menu-label">Documentation</span>
+              <span class="general-settings__menu-desc">Guides and reference at docs.fabricator.site.</span>
+            </span>
+            <svg class="general-settings__menu-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4.5 1.5H10.5V7.5" />
+              <path d="M10.5 1.5L5 7" />
+              <path d="M9 8v2.5H1.5V3H4" />
+            </svg>
+          </a>
+          <a
+            class="general-settings__menu-item"
+            :href="ISSUES_URL"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <span class="general-settings__menu-text">
+              <span class="general-settings__menu-label">Report a bug or request a feature</span>
+              <span class="general-settings__menu-desc">Opens the issue tracker on GitHub.</span>
+            </span>
+            <svg class="general-settings__menu-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4.5 1.5H10.5V7.5" />
+              <path d="M10.5 1.5L5 7" />
+              <path d="M9 8v2.5H1.5V3H4" />
+            </svg>
+          </a>
+        </div>
       </Panel>
 
       <Panel title="About">
