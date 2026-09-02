@@ -240,9 +240,12 @@ const onCopyPath = async () => {
 
 <template>
   <div class="files-page" :class="{ 'is-editing': isEditing }">
+    <!-- A real element rather than a bare <template> so the two views are
+         symmetric and each can carry its own entrance animation. It repeats the
+         parent's column layout, which the wrapper would otherwise swallow. -->
     <!-- Browser chrome. Hidden while editing: the breadcrumb and Up button
          steer the flat listing, which the tree replaces. -->
-    <template v-if="!isEditing">
+    <div v-if="!isEditing" class="files-page__browser">
     <div v-if="store.fileBrowser.absolutePath" class="files-page__location">
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
         <path d="M2 3.5A1.5 1.5 0 013.5 2h2.5l1.5 2H11a1.5 1.5 0 011.5 1.5v6A1.5 1.5 0 0111 13H3.5A1.5 1.5 0 012 11.5v-8z" />
@@ -401,7 +404,7 @@ const onCopyPath = async () => {
         </tbody>
       </table>
     </Panel>
-    </template>
+    </div>
 
     <div v-else class="files-page__workspace">
       <aside class="files-page__tree-pane">
@@ -486,6 +489,36 @@ const onCopyPath = async () => {
 .files-page.is-editing {
   flex: 1;
   min-height: 0;
+}
+
+/* Carries the column layout the parent applies to its own children, so wrapping
+   the browser in an element did not change how its chrome and panels stack. */
+.files-page__browser {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+/* Opening or closing a file is the biggest layout change in the app and it is
+   always something the user just did, so it gets an entrance rather than a
+   hard cut. Enter only: with both views in flow, animating the outgoing one
+   would leave the two stacked for the duration. */
+.files-page__browser,
+.files-page__workspace {
+  animation: files-view-in 180ms ease-out both;
+}
+
+@keyframes files-view-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .files-page__browser,
+  .files-page__workspace {
+    animation: none;
+  }
 }
 
 .files-page__workspace {

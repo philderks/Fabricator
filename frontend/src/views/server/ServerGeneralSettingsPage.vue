@@ -112,6 +112,10 @@ onMounted(async () => {
       <h1 v-else class="general-settings__title">Settings</h1>
     </nav>
 
+    <!-- Keyed on the section so navigating swaps the element rather than
+         patching it in place, which is what lets the entrance below replay.
+         The breadcrumb above stays put — it is the fixed part of the frame. -->
+    <div class="general-settings__view" :key="activeSection || 'index'">
     <!-- Index: the sub-pages, then About inline. -->
     <template v-if="!activeSection">
       <Panel :padded="false">
@@ -234,6 +238,7 @@ onMounted(async () => {
     <ChangePasswordPanel v-if="activeSection === 'security' && auth.enabled" />
 
     <PasswordTogglePanel v-if="activeSection === 'security'" />
+    </div>
   </div>
 </template>
 
@@ -259,6 +264,28 @@ onMounted(async () => {
   font-size: var(--text-lg);
   font-weight: 600;
   color: var(--text-primary);
+}
+
+/* Holds the panel stack so the wrapper doesn't swallow the parent's column
+   gap, and gives the index <-> sub-page swap an entrance. User-initiated and
+   always a full content change, which is exactly when motion helps. */
+.general-settings__view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+  animation: settings-view-in 180ms ease-out both;
+}
+
+@keyframes settings-view-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .general-settings__view {
+    animation: none;
+  }
 }
 
 .general-settings__title {
