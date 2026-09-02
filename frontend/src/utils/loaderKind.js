@@ -42,6 +42,20 @@ export function loaderModrinthFacets(loader) {
  * @param {string} loader
  * @returns {'plugin'|'mod'|'none'}
  */
+/**
+ * True when a Modrinth category name is a loader rather than a content tag.
+ *
+ * Modrinth tags loader compatibility as ordinary categories, mixed in with
+ * things like 'adventure' or 'optimization', so a project's `categories` array
+ * has to be filtered before it can be read as "which loaders does this run on".
+ * @param {string} category
+ * @returns {boolean}
+ */
+export function isLoaderCategory(category) {
+  const key = String(category || '').trim().toLowerCase()
+  return MOD_LOADERS.has(key) || PLUGIN_LOADERS.has(key)
+}
+
 export function loaderContentKind(loader) {
   const key = String(loader || '').trim().toLowerCase()
   if (PLUGIN_LOADERS.has(key)) return 'plugin'
