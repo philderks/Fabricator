@@ -1,6 +1,5 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
 import StatCard from '../../components/ui/StatCard.vue'
 import Panel from '../../components/ui/Panel.vue'
 import { installedModDisplayName, installedModInitial } from '../../utils/installedModDisplay'
@@ -11,7 +10,6 @@ import { usePreferencesStore } from '../../stores/preferences'
 import { copyToClipboard } from '../../utils/clipboard'
 import { contentLabel } from '../../utils/loaderKind'
 
-const route = useRoute()
 const store = useServerStore()
 const playit = usePlayitStore()
 const prefs = usePreferencesStore()
@@ -20,13 +18,6 @@ const auth = useAuthStore()
 // "Mods" vs "Plugins" for the installed-content panel, per loader.
 const contentNoun = computed(() => contentLabel(store.server?.loader, true))
 const contentNounLower = computed(() => contentNoun.value.toLowerCase())
-
-/** Matches sidebar Backups nav — always derive :id from the URL to avoid store/route drift. */
-const backupsRouteLocation = computed(() => {
-  const raw = route.params.id
-  const id = typeof raw === 'string' ? raw : raw?.[0]
-  return id ? { name: 'ServerBackups', params: { id } } : null
-})
 
 const RECENT_LOG_PREVIEW_LINES = 16
 
@@ -77,28 +68,59 @@ const recentLogLines = computed(() => {
 })
 const modPreview = computed(() => store.installedMods.slice(0, 4))
 
-// ─── playit.gg — Public-IP stat card (per-server, derived from the store) ────
-// The full tunnel UI lives in the per-server playit.gg tab; here we only show
-// an at-a-glance address card for THIS server's matched tunnel.
+// ─── playit.gg — public address for THIS server's matched tunnel ────────────
+// The full tunnel UI lives in the per-server playit.gg tab; here it is one row
+// of the Connection panel, beside the local address.
 
 const playitTunnel = computed(() => playit.tunnelForPort(store.server?.port))
 const playitLive = computed(() =>
   Boolean(playitTunnel.value?.address && !playitTunnel.value?.disabled_reason)
 )
 
-const copied = ref(false)
+// TPS is the number that says whether the server is keeping up — CPU% does not.
+// null whenever the runtime isn't reporting it (stopped, or not yet sampled).
+const tpsDisplay = computed(() => {
+  const tps = store.serverStatus.tps
+  return typeof tps === 'number' ? tps.toFixed(1) : '—'
+})
+
+// Minecraft counts 20 ticks a second, so anything at or near 20 is healthy and
+// a sustained drop is lag players can feel.
+const tpsAccent = computed(() => {
+  const tps = store.serverStatus.tps
+  if (typeof tps !== 'number') return 'default'
+  if (tps >= 19) return 'success'
+  if (tps >= 15) return 'warning'
+  return 'danger'
+})
+
+// The LAN/local address: whatever host this page was opened on, plus the
+// server's port. A guess, but the right one nearly always — Fabricator and the
+// server it manages are the same machine — and it beats the page never
+// answering "what do I connect to?" at all. The playit row below is the
+// authoritative public address when a tunnel is up.
+const localAddress = computed(() => {
+  const port = store.server?.port
+  if (!port) return ''
+  const host = typeof window !== 'undefined' ? window.location.hostname : ''
+  if (!host) return ''
+  return `${host}:${port}`
+})
+
+// Which row last showed "Copied" — one flag per row rather than a shared
+// boolean, so copying the public address doesn't flash a tick on the local one.
+const copiedKey = ref('')
 let _copyTimeout = null
 let _unsubscribePlayit = null
 
-async function copyAddress() {
-  const addr = playitTunnel.value?.address
-  if (!addr) return
-  const ok = await copyToClipboard(addr)
+async function copyValue(key, value) {
+  if (!value) return
+  const ok = await copyToClipboard(value)
   if (!ok) return
-  copied.value = true
+  copiedKey.value = key
   if (_copyTimeout) clearTimeout(_copyTimeout)
   _copyTimeout = setTimeout(() => {
-    copied.value = false
+    copiedKey.value = ''
     _copyTimeout = null
   }, 2000)
 }
@@ -119,45 +141,38 @@ onUnmounted(() => {
 
 <template>
   <div class="overview-page">
-    <section class="overview-page__stats" :class="{ 'overview-page__stats--five': playitLive }">
+    <section class="overview-page__stats">
       <StatCard label="Players" :value="store.serverStatus.players.online" :unit="store.serverStatus.players.max ? `/${store.serverStatus.players.max}` : ''" />
       <StatCard label="Uptime" :value="store.serverStatus.uptime" />
-      <StatCard label="Version" :value="store.serverStatus.version" />
+      <StatCard label="TPS" :value="tpsDisplay" :accent="tpsAccent" />
       <StatCard label="Mods" :value="store.installedMods.length" :accent="store.installedMods.length > 0 ? 'primary' : 'default'" />
-
-      <!-- Public IP card — only rendered when THIS server's tunnel is live -->
-      <div v-if="playitLive" class="stat-playit">
-        <div class="stat-playit__label">
-          <!-- Globe icon -->
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="12" cy="12" r="10"/>
-            <line x1="2" y1="12" x2="22" y2="12"/>
-            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
-          </svg>
-          Public IP
-        </div>
-        <div class="stat-playit__value">
-          <span class="stat-playit__addr" :title="playitTunnel.address">{{ playitTunnel.address }}</span>
-          <button
-            class="stat-playit__copy"
-            :class="{ 'stat-playit__copy--confirmed': copied }"
-            type="button"
-            :aria-label="copied ? 'Copied!' : 'Copy address'"
-            @click="copyAddress"
-          >
-            <!-- Clipboard icon — shown by default -->
-            <svg v-if="!copied" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <rect x="9" y="2" width="6" height="4" rx="1"/>
-              <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
-            </svg>
-            <!-- Check icon — shown for 2 s after copy -->
-            <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <polyline points="20 6 9 17 4 12"/>
-            </svg>
-          </button>
-        </div>
-      </div>
     </section>
+
+    <!-- Forge/NeoForge run a subprocess installer that can take minutes, during
+         which every panel below has nothing real to say. Lead with the install
+         rather than leaving a page of zeroes and "no logs yet". -->
+    <Panel v-if="store.serverInstalling" title="Installing server">
+      <div class="overview-page__install">
+        <div class="overview-page__install-head">
+          <span class="overview-page__install-label">{{ store.installDisplay.label }}</span>
+          <span v-if="store.installDisplay.determinate" class="overview-page__install-pct">
+            {{ store.installDisplay.percent }}%
+          </span>
+        </div>
+        <div class="overview-page__bar">
+          <div
+            class="overview-page__bar-fill"
+            :class="{ 'is-indeterminate': !store.installDisplay.determinate }"
+            :style="store.installDisplay.determinate
+              ? { width: `${store.installDisplay.percent}%` }
+              : null"
+          ></div>
+        </div>
+        <p class="overview-page__install-note">
+          {{ store.installDisplay.detail || 'This can take a few minutes. You can leave this page — the install keeps running.' }}
+        </p>
+      </div>
+    </Panel>
 
     <Panel v-if="store.activeModpack" title="Active modpack">
       <div class="overview-page__modpack">
@@ -197,7 +212,10 @@ onUnmounted(() => {
             </a>
           </template>
           <div class="overview-page__logs">
-            <div v-if="!recentLogLines.length" class="overview-page__empty">No logs yet.</div>
+            <div v-if="!recentLogLines.length" class="overview-page__empty">
+              <template v-if="store.serverInstalling">Installing — the server has not started yet.</template>
+              <template v-else>No logs yet.</template>
+            </div>
             <div v-else v-for="(line, i) in recentLogLines" :key="i" class="overview-page__log-line">
               {{ line }}
             </div>
@@ -213,7 +231,11 @@ onUnmounted(() => {
               <svg class="icon-arrow-right" width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 6H7.5M7.5 3.25l3.25 2.75L7.5 8.75" /></svg>
             </a>
           </template>
-          <div v-if="!modPreview.length" class="overview-page__empty">No {{ contentNounLower }} installed.</div>
+          <div v-if="!modPreview.length" class="overview-page__empty">
+            <template v-if="store.backgroundModpackInstalling">{{ store.backgroundModpackLabel }}</template>
+            <template v-else-if="store.serverInstalling">Waiting for the install to finish.</template>
+            <template v-else>No {{ contentNounLower }} installed.</template>
+          </div>
           <ul v-else class="overview-page__mods">
             <li v-for="mod in modPreview" :key="mod.path" class="overview-page__mod">
               <div class="overview-page__mod-main">
@@ -233,38 +255,56 @@ onUnmounted(() => {
           </ul>
         </Panel>
 
-        <Panel title="Quick actions">
-          <div class="overview-page__qa-grid">
-            <router-link
-              v-if="!auth.managed && backupsRouteLocation"
-              class="overview-page__qa"
-              :to="backupsRouteLocation"
-            >
-              <span class="overview-page__qa-title">Backups</span>
-              <span class="overview-page__qa-sub">Manage snapshots</span>
-            </router-link>
-            <button
-              v-else-if="!auth.managed"
-              type="button"
-              class="overview-page__qa"
-              disabled
-            >
-              <span class="overview-page__qa-title">Backups</span>
-              <span class="overview-page__qa-sub">Manage snapshots</span>
-            </button>
-            <button type="button" class="overview-page__qa" @click="store.goToConsole">
-              <span class="overview-page__qa-title">Console</span>
-              <span class="overview-page__qa-sub">View logs</span>
-            </button>
-            <button type="button" class="overview-page__qa" @click="store.goToSettings">
-              <span class="overview-page__qa-title">Properties</span>
-              <span class="overview-page__qa-sub">server.properties</span>
-            </button>
-            <button type="button" class="overview-page__qa" @click="store.goToSettings">
-              <span class="overview-page__qa-title">World</span>
-              <span class="overview-page__qa-sub">Manage in settings</span>
-            </button>
-          </div>
+        <!-- Replaces the old Quick actions grid, whose four tiles all led to
+             pages already one click away in the sidebar (two of them to the
+             same page). The address is the thing this page could not answer. -->
+        <Panel title="Connection">
+          <dl class="overview-page__conn">
+            <div v-if="localAddress" class="overview-page__conn-row">
+              <dt class="overview-page__conn-label">{{ playitLive ? 'Local' : 'Address' }}</dt>
+              <dd class="overview-page__conn-value">
+                <code>{{ localAddress }}</code>
+                <button
+                  type="button"
+                  class="overview-page__conn-copy"
+                  :class="{ 'is-confirmed': copiedKey === 'local' }"
+                  :aria-label="copiedKey === 'local' ? 'Copied' : 'Copy address'"
+                  @click="copyValue('local', localAddress)"
+                >{{ copiedKey === 'local' ? 'Copied' : 'Copy' }}</button>
+              </dd>
+            </div>
+
+            <div v-if="playitLive" class="overview-page__conn-row">
+              <dt class="overview-page__conn-label">Public</dt>
+              <dd class="overview-page__conn-value">
+                <code :title="playitTunnel.address">{{ playitTunnel.address }}</code>
+                <button
+                  type="button"
+                  class="overview-page__conn-copy"
+                  :class="{ 'is-confirmed': copiedKey === 'public' }"
+                  :aria-label="copiedKey === 'public' ? 'Copied' : 'Copy public address'"
+                  @click="copyValue('public', playitTunnel.address)"
+                >{{ copiedKey === 'public' ? 'Copied' : 'Copy' }}</button>
+              </dd>
+            </div>
+
+            <div class="overview-page__conn-row">
+              <dt class="overview-page__conn-label">Port</dt>
+              <dd class="overview-page__conn-value">
+                <code>{{ store.server?.port ?? '—' }}</code>
+              </dd>
+            </div>
+          </dl>
+
+          <p class="overview-page__conn-note">
+            <template v-if="playitLive">
+              Local works on your own network; public works from anywhere.
+            </template>
+            <template v-else>
+              Reachable on your network. For access from outside it, set up a
+              tunnel on the playit.gg tab or forward the port on your router.
+            </template>
+          </p>
         </Panel>
       </div>
     </section>
@@ -283,14 +323,13 @@ onUnmounted(() => {
 
 .overview-page__stats {
   display: grid;
+  /* Fixed four: Players, Uptime, TPS, Mods — the values that change. Version
+     is carried by the topbar status pill and the server switcher, and the
+     public-address card that used to extend this row now lives in the
+     Connection panel, so there is no variable count left to accommodate. */
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-3);
   min-width: 0;
-}
-
-/* Expands to 5 equal columns when the Public IP card is present */
-.overview-page__stats--five {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .overview-page__modpack {
@@ -375,6 +414,55 @@ onUnmounted(() => {
 .overview-page__bar-fill--cpu {
   background: var(--accent, var(--primary));
   opacity: 0.75;
+}
+
+/* Phases that report no byte count — notably running_installer, the long one
+   on Forge/NeoForge. Motion says "still working" where a 0% bar would not. */
+.overview-page__bar-fill.is-indeterminate {
+  width: 30%;
+  animation: overview-install-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes overview-install-slide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+.overview-page__install {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.overview-page__install-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.overview-page__install-label {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.overview-page__install-pct {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.overview-page__install-note {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: var(--leading-normal);
+  overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overview-page__bar-fill.is-indeterminate {
+    animation: none;
+  }
 }
 
 .overview-page__panel-link {
@@ -491,51 +579,81 @@ onUnmounted(() => {
   margin-left: var(--space-3);
 }
 
-.overview-page__qa-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+.overview-page__conn {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
   gap: var(--space-2);
 }
 
-.overview-page__qa {
+.overview-page__conn-row {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: var(--space-2) var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.overview-page__conn-label {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
+}
+
+.overview-page__conn-value {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.overview-page__conn-value code {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  /* An address is one token: clip it rather than let it wrap or widen the
+     column, and the title attribute carries the full value. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview-page__conn-copy {
+  flex-shrink: 0;
+  padding: 2px 8px;
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  color: inherit;
+  color: var(--text-muted);
   font-family: inherit;
-  text-align: left;
-  text-decoration: none;
+  font-size: var(--text-xs);
   cursor: pointer;
-  transition: border-color 0.15s ease;
+  transition: border-color 0.15s ease, color 0.15s ease;
 }
 
-.overview-page__qa:hover:not(:disabled) {
-  border-color: var(--text-disabled);
+.overview-page__conn-copy:hover {
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
-.overview-page__qa:focus-visible {
+.overview-page__conn-copy:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
 }
 
-.overview-page__qa:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+.overview-page__conn-copy.is-confirmed {
+  border-color: var(--success);
+  color: var(--success);
 }
 
-.overview-page__qa-title {
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-  font-weight: 500;
-}
-
-.overview-page__qa-sub {
+.overview-page__conn-note {
+  margin: var(--space-3) 0 0;
   font-size: var(--text-xs);
   color: var(--text-disabled);
+  line-height: var(--leading-normal);
 }
 
 .icon-arrow-right {
@@ -544,80 +662,20 @@ onUnmounted(() => {
   vertical-align: middle;
 }
 
-/* ─── Public IP (playit) stat card ─────────────────────────────────────── */
-/* Matches StatCard's visual design token-for-token; built inline because
-   StatCard has no slot for icons or interactive controls. */
-
-.stat-playit {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  padding: var(--space-3) var(--space-4);
-  min-width: 0;
+/* Mobile: the four/five stat cards and the two content columns are the only
+   things on this page that assume width. Two stat columns rather than one —
+   the cards are a short label over a short value, so a single column wastes
+   most of the row and pushes everything below the fold. */
+@media (max-width: 900px) {
+  .overview-page__row {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
-.stat-playit__label {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--text-disabled);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  margin-bottom: var(--space-2);
+@media (max-width: 768px) {
+  .overview-page__stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
-.stat-playit__value {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  min-width: 0;
-}
-
-.stat-playit__addr {
-  /* Smaller than StatCard's 22px value — the address is long text, not a number */
-  font-size: var(--text-sm);
-  font-weight: 600;
-  font-family: var(--font-mono);
-  color: var(--text-primary);
-  letter-spacing: -0.2px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  flex: 1;
-  min-width: 0;
-}
-
-.stat-playit__copy {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
-}
-
-.stat-playit__copy:hover {
-  color: var(--text-secondary);
-  background: var(--bg-tertiary);
-  border-color: var(--border-color);
-}
-
-.stat-playit__copy:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 2px;
-}
-
-/* Confirmed state: briefly tint the check green */
-.stat-playit__copy--confirmed {
-  color: var(--success);
-}
 </style>

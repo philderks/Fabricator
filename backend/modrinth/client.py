@@ -210,6 +210,11 @@ class ModrinthClient:
 
         ``project_type`` is the Modrinth ``project_type`` facet value
         (e.g. ``"mod"``, ``"modpack"``).
+
+        Deliberately NOT filtered by ``server_side``. That field is deprecated
+        and, as ``backend.modrinth.environment`` documents, chronically
+        mislabelled by authors — faceting on it drops packs that run on a
+        dedicated server fine simply because nobody set the tag.
         """
         facets: List[List[str]] = [[f"project_type:{project_type}"]]
         if mc_version:

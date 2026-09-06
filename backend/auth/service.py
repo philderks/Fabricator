@@ -35,6 +35,13 @@ _COOKIE_SECURE_ENV = "FABRICATOR_SESSION_COOKIE_SECURE"
 
 _AUTH_FILE_NAME = "auth.json"
 
+# Set in auth.json when the operator turns the password off from the UI. This
+# has to be recorded explicitly rather than inferred from a missing
+# password_hash: "no credential" already means "first boot, run setup", so
+# deleting the hash alone would put the app into setup mode on the next start
+# and demand a new password instead of staying open.
+_AUTH_DISABLED_KEY = "auth_disabled"
+
 # Guards the read-modify-write of auth.json. Reentrant so the one-time
 # ``complete_setup`` can call ``set_password`` without self-deadlock. The app is
 # a single (threaded) process, so a process-local lock is sufficient.
@@ -190,17 +197,43 @@ def verify_password(password: str) -> bool:
         return False
 
 
+def password_disabled_in_file() -> bool:
+    """True when the operator turned the password off from the UI.
+
+    Distinct from ``auth_disabled()``, which reads the env opt-out. Fail-safe
+    like everything else here: an absent or unreadable file means NOT disabled.
+    """
+    return bool(_read_auth_file().get(_AUTH_DISABLED_KEY))
+
+
+def disable_password() -> None:
+    """Drop the stored credential and record the operator's opt-out.
+
+    The hash is removed as well as flagged: leaving a stale credential behind
+    would silently come back into force if the flag were ever cleared.
+    SENSITIVE: never log the removed hash.
+    """
+    with _lock:
+        data = _read_auth_file()
+        data.pop("password_hash", None)
+        data[_AUTH_DISABLED_KEY] = True
+        _write_auth_file(data)
+
+
 def set_password(password: str) -> None:
     """Persist a new password hash to ``auth.json``, preserving ``secret_key``.
 
     Read-modify-write under the lock so the persisted SECRET_KEY is never
     clobbered (otherwise sessions would be invalidated on the next restart).
+    Also clears the opt-out flag: a stored credential and "password disabled"
+    are mutually exclusive, so setting one is what turns auth back on.
     SENSITIVE: never log the password or hash.
     """
     new_hash = hash_password(password)
     with _lock:
         data = _read_auth_file()
         data["password_hash"] = new_hash
+        data.pop(_AUTH_DISABLED_KEY, None)
         _write_auth_file(data)
 
 

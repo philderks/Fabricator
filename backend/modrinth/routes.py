@@ -1,5 +1,6 @@
 """Modrinth API routes."""
 import threading
+import time
 import uuid
 import zipfile
 from datetime import datetime, timezone
@@ -25,6 +26,50 @@ modrinth_client = ModrinthClient()
 def _registry():
     """Lazy accessor for the process registry."""
     return get_server_process_registry()
+
+
+# --------------------------------------------------------------------------- #
+# Popular-modpacks cache
+# --------------------------------------------------------------------------- #
+#
+# Only the empty-query listing is cached — see search_modpacks. Bounded by the
+# handful of (version, loader, limit, offset, index) combinations the UI can
+# produce, so it cannot grow without limit; entries are still evicted oldest
+# first as a belt-and-braces guard against an unexpected caller.
+
+_POPULAR_CACHE_TTL_S = 15 * 60
+_POPULAR_CACHE_MAX = 64
+_popular_cache_lock = threading.Lock()
+_popular_cache: dict[tuple, tuple[float, dict]] = {}
+
+
+def _popular_cache_get(key: tuple):
+    """Return the cached payload for ``key``, or None when absent/expired."""
+    with _popular_cache_lock:
+        entry = _popular_cache.get(key)
+        if not entry:
+            return None
+        stored_at, payload = entry
+        if time.monotonic() - stored_at > _POPULAR_CACHE_TTL_S:
+            _popular_cache.pop(key, None)
+            return None
+        return payload
+
+
+def _popular_cache_put(key: tuple, payload: dict) -> None:
+    """Store ``payload`` under ``key``, evicting the oldest entry at the cap."""
+    with _popular_cache_lock:
+        if len(_popular_cache) >= _POPULAR_CACHE_MAX and key not in _popular_cache:
+            oldest = min(_popular_cache, key=lambda k: _popular_cache[k][0])
+            _popular_cache.pop(oldest, None)
+        _popular_cache[key] = (time.monotonic(), payload)
+
+
+def reset_popular_cache_for_tests() -> None:
+    """Drop every cached listing (test isolation)."""
+    with _popular_cache_lock:
+        _popular_cache.clear()
+
 
 _install_progress_lock = threading.Lock()
 _install_progress: dict[str, dict] = {}
@@ -297,6 +342,19 @@ def search_modpacks():
         offset = 0
     index = request.args.get('index', 'downloads')
 
+    # An empty query is the "popular packs" listing the UI opens with, so it
+    # arrives on every modal open rather than only when someone searches. It is
+    # also the most cacheable request there is: the same handful of parameter
+    # combinations, answering with a top-downloads ranking that moves over days,
+    # not seconds. Typed queries are left uncached — they are user-paced and far
+    # more varied, so a cache would mostly just hold garbage.
+    cache_key = None
+    if not query.strip():
+        cache_key = (mc_version or '', loader or '', limit, offset, index)
+        cached = _popular_cache_get(cache_key)
+        if cached is not None:
+            return jsonify(cached)
+
     try:
         result = modrinth_client.search(
             project_type='modpack',
@@ -305,8 +363,10 @@ def search_modpacks():
             loader=loader,
             limit=limit,
             offset=offset,
-            index=index
+            index=index,
         )
+        if cache_key is not None:
+            _popular_cache_put(cache_key, result)
         return jsonify(result)
     except ModrinthApiError as exc:
         return _modrinth_error_response(exc)

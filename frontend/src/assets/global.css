@@ -104,8 +104,51 @@ body {
 
   /* Layout */
   --sidebar-width: 216px;
+  /* Icon-only rail: one nav icon plus even padding either side. */
+  --sidebar-width-collapsed: 60px;
+  /* Off-canvas drawer width on mobile. Wider than the desktop rail: it is the
+     only chrome on screen while open, and the rows are touch targets. */
+  --sidebar-width-drawer: 264px;
   /* Top bar and sidebar logo row share one height so the chrome lines up */
   --app-chrome-header-height: 57px;
+  /* Padding around routed page content. A token rather than a literal so the
+     mobile block below can tighten it in one place for every page. */
+  --app-content-padding: var(--space-5);
+}
+
+/* Collapsing the sidebar redefines the width token itself, so anything already
+   measuring against it — notably ServerSettingsPage's fixed footer, which sits
+   at `left: var(--sidebar-width)` — tracks the rail without extra wiring.
+   Toggled on <html> by useSidebarCollapsed. */
+:root.is-sidebar-collapsed {
+  --sidebar-width: var(--sidebar-width-collapsed);
+}
+
+/* ---------- Mobile ----------
+ *
+ * Paired with MOBILE_QUERY in composables/useMobileNav.js — keep the two 768px
+ * thresholds in step. Below it the sidebar is taken out of the flow and drawn
+ * as an overlay drawer, so --sidebar-width (the gutter the sidebar occupies)
+ * goes to zero and the drawer sizes itself from --sidebar-width-drawer. Every
+ * consumer measuring against the token gets the right answer for free — most
+ * visibly ServerSettingsPage's fixed footer, which sits at
+ * `left: var(--sidebar-width)` and so spans the full width here.
+ *
+ * The collapsed override is repeated because a rail collapsed on desktop must
+ * not carry that 60px into the mobile layout; both states resolve to 0.
+ */
+@media (max-width: 768px) {
+  :root,
+  :root.is-sidebar-collapsed {
+    --sidebar-width: 0px;
+    --app-content-padding: var(--space-3);
+  }
+}
+
+/* Set by useMobileNav while the drawer is open. */
+:root.is-mobile-drawer-open,
+:root.is-mobile-drawer-open body {
+  overflow: hidden;
 }
 
 /* Input Fields */

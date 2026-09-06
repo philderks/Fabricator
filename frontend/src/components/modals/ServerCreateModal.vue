@@ -53,6 +53,235 @@
     </div>
 
     <form v-else @submit.prevent="handleCreate" class="settings-form">
+      <!-- First question, not a later one. A modpack targets a specific
+           Minecraft version and loader, so when one is being imported it is the
+           pack that decides those — picking them first and discovering the pack
+           wanted something else is the wrong way round. -->
+      <div class="mode-toggle" role="tablist" aria-label="Server setup mode">
+        <button
+          type="button"
+          role="tab"
+          class="mode-toggle-btn"
+          :class="{ active: formData.setupMode === 'custom' }"
+          :aria-selected="formData.setupMode === 'custom'"
+          @click="formData.setupMode = 'custom'"
+        >
+          Custom Server
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="mode-toggle-btn"
+          :class="{ active: formData.setupMode === 'modpack' }"
+          :aria-selected="formData.setupMode === 'modpack'"
+          @click="formData.setupMode = 'modpack'"
+        >
+          Import Modpack
+        </button>
+      </div>
+
+      <!-- Above Basic Settings on purpose: the pack decides the Minecraft
+           version and loader shown there, so it has to be chosen first. -->
+      <Panel v-if="showModpackPanel" title="Modpack Setup">
+
+        <p class="form-hint">
+          Choose a Modrinth pack by link, by search, or by uploading a .mrpack
+          file you exported yourself. The Minecraft version and loader in Basic
+          Settings are filled in from the pack.
+        </p>
+
+        <div class="modpack-panel">
+          <div class="form-group">
+            <label>Import Method</label>
+            <div class="inline-choice">
+              <label class="choice-pill">
+                <input type="radio" v-model="formData.modpackImportMethod" value="link">
+                <span>Link</span>
+              </label>
+              <label class="choice-pill">
+                <input type="radio" v-model="formData.modpackImportMethod" value="search">
+                <span>Search</span>
+              </label>
+              <label class="choice-pill">
+                <input type="radio" v-model="formData.modpackImportMethod" value="file">
+                <span>Upload .mrpack</span>
+              </label>
+            </div>
+          </div>
+
+          <div v-if="formData.modpackImportMethod === 'link'" class="form-row modpack-input-row">
+            <div class="form-group modpack-grow">
+              <FormField label="Modpack URL or Slug" hint="Supports Modrinth links, slugs, or project IDs.">
+                <template #default="{ id, describedBy }">
+                  <input
+                    :id="id"
+                    v-model="modpackLinkInput"
+                    type="text"
+                    placeholder="https://modrinth.com/modpack/your-pack"
+                    :aria-describedby="describedBy"
+                    @keydown.enter.prevent="!modpackLookupLoading && modpackLinkInput.trim() && resolveModpackByLink()"
+                  >
+                </template>
+              </FormField>
+            </div>
+            <div class="form-group modpack-action">
+              <label>&nbsp;</label>
+              <AppButton
+                variant="ghost"
+                size="md"
+                :disabled="modpackLookupLoading || !modpackLinkInput.trim()"
+                :loading="modpackLookupLoading"
+                @click="resolveModpackByLink"
+              >
+                {{ modpackLookupLoading ? 'Resolving' : 'Resolve' }}
+              </AppButton>
+            </div>
+          </div>
+
+          <div v-else-if="formData.modpackImportMethod === 'search'" class="modpack-search-branch">
+            <div class="form-row modpack-input-row">
+              <div class="form-group modpack-grow">
+                <FormField label="Search Modpacks">
+                  <template #default="{ id, describedBy }">
+                    <input
+                      :id="id"
+                      v-model="modpackSearchQuery"
+                      type="text"
+                      placeholder="All of Fabric, Better Minecraft, ..."
+                      :aria-describedby="describedBy"
+                      @keydown.enter.prevent="!modpackSearchLoading && modpackSearchQuery.trim() && searchForModpacks()"
+                    >
+                  </template>
+                </FormField>
+              </div>
+              <div class="form-group modpack-action">
+                <label>&nbsp;</label>
+                <AppButton
+                  variant="ghost"
+                  size="md"
+                  :disabled="modpackSearchLoading || !modpackSearchQuery.trim()"
+                  :loading="modpackSearchLoading"
+                  @click="searchForModpacks"
+                >
+                  {{ modpackSearchLoading ? 'Searching' : 'Search' }}
+                </AppButton>
+              </div>
+            </div>
+
+            <!-- Heading and list grouped so the panel's 16px gap separates this
+                 block from its neighbours, while the label stays tight to the
+                 list it names. -->
+            <div v-if="modpackSearchResults.length && !selectedModpack" class="modpack-results-block">
+              <p
+                v-if="modpackShowingPopular && !modpackSearchLoading"
+                class="modpack-results-heading"
+              >
+                Popular on Modrinth — or search above
+              </p>
+
+              <div class="modpack-results">
+                <button
+                  v-for="pack in modpackSearchResults"
+                  :key="pack.project_id"
+                  type="button"
+                  class="modpack-result"
+                  :class="{ selected: selectedModpack && selectedModpack.id === pack.project_id }"
+                  @click="selectModpackFromSearch(pack)"
+                >
+                  <div class="modpack-result-header">
+                    <img
+                      v-if="pack.icon_url"
+                      :src="pack.icon_url"
+                      :alt="pack.title"
+                      class="modpack-icon"
+                    >
+                    <div>
+                      <strong>{{ pack.title }}</strong>
+                      <p>{{ pack.description || 'No description provided.' }}</p>
+                    </div>
+                  </div>
+                  <span class="modpack-meta">{{ formatNumber(pack.downloads || 0) }} downloads</span>
+                </button>
+              </div>
+            </div>
+
+            <p v-if="modpackSearchDone && !modpackSearchLoading && !modpackSearchResults.length" class="form-hint">
+              <template v-if="modpackShowingPopular">Could not load modpacks right now. Try searching by name.</template>
+              <template v-else>No matching modpacks found for this search.</template>
+            </p>
+          </div>
+
+          <!-- Upload a .mrpack exported from the Modrinth app (#53). The pack
+               declares its own Minecraft version and loader, so selecting one
+               fills those fields in — editable afterwards, with a warning if
+               they end up disagreeing with the pack. -->
+          <div v-else class="mrpack-upload">
+            <FormField
+              label="Modpack File"
+              hint="A .mrpack exported by the Modrinth app. Mods are fetched from Modrinth; config and other extras come from the pack's overrides."
+            >
+              <template #default="{ id, describedBy }">
+                <input
+                  :id="id"
+                  ref="mrpackInput"
+                  type="file"
+                  accept=".mrpack,application/zip"
+                  :disabled="packUploading"
+                  :aria-describedby="describedBy"
+                  @change="handlePackFileChange"
+                >
+              </template>
+            </FormField>
+
+            <div v-if="packUploading" class="mrpack-progress">
+              <div class="mrpack-progress-track">
+                <div
+                  class="mrpack-progress-fill"
+                  :class="{ indeterminate: packUploadPercent < 0 }"
+                  :style="packUploadPercent >= 0 ? { width: `${packUploadPercent}%` } : null"
+                ></div>
+              </div>
+              <span>{{ packUploadPercent >= 0 ? `Uploading ${packUploadPercent}%` : 'Uploading…' }}</span>
+            </div>
+
+            <p v-if="packUploadError" class="modpack-error">{{ packUploadError }}</p>
+          </div>
+
+          <p v-if="modpackError" class="modpack-error">{{ modpackError }}</p>
+
+          <div v-if="selectedModpack" class="modpack-selected">
+            <img
+              v-if="selectedModpack.iconUrl"
+              :src="selectedModpack.iconUrl"
+              alt=""
+              class="modpack-icon"
+            >
+            <div class="modpack-selected__text">
+              <p class="selected-label">Selected Modpack</p>
+              <strong>{{ selectedModpack.title }}</strong>
+              <p>{{ selectedModpack.description || 'No description provided.' }}</p>
+            </div>
+            <AppButton variant="ghost" size="sm" @click="clearSelectedModpack">
+              Clear
+            </AppButton>
+          </div>
+
+          <div v-if="uploadedPack" class="modpack-selected">
+            <div>
+              <p class="selected-label">Uploaded Modpack</p>
+              <strong>{{ uploadedPackTitle }}</strong>
+              <p>{{ uploadedPackDetail }}</p>
+            </div>
+            <AppButton variant="ghost" size="sm" :disabled="creating" @click="clearUploadedPack">
+              Clear
+            </AppButton>
+          </div>
+
+          <p v-if="packMismatchWarning" class="modpack-warning">{{ packMismatchWarning }}</p>
+
+        </div>
+      </Panel>
+
       <!-- Basic Settings -->
       <Panel title="Basic Settings">
         <FormField label="Server Name">
@@ -112,7 +341,7 @@
                      deliberate. Disabled so it can't be picked back. -->
                 <option value="" disabled>None</option>
                 <option
-                  v-for="loaderOption in loaderOptions"
+                  v-for="loaderOption in availableLoaderOptions"
                   :key="loaderOption.value"
                   :value="loaderOption.value"
                 >
@@ -152,205 +381,7 @@
         </div>
       </Panel>
 
-      <!-- Modpack Setup — only mod loaders use Modrinth modpacks (.mrpack).
-           Vanilla has no loader, and plugin servers (Paper/Purpur/Folia/Pufferfish)
-           use plugins, not modpacks. -->
-      <Panel v-if="showModpackPanel" title="Modpack Setup">
 
-        <div class="mode-toggle" role="tablist" aria-label="Server setup mode">
-          <button
-            type="button"
-            class="mode-toggle-btn"
-            :class="{ active: formData.setupMode === 'custom' }"
-            @click="formData.setupMode = 'custom'"
-          >
-            Custom Server
-          </button>
-          <button
-            type="button"
-            class="mode-toggle-btn"
-            :class="{ active: formData.setupMode === 'modpack' }"
-            @click="formData.setupMode = 'modpack'"
-          >
-            Import Modpack
-          </button>
-        </div>
-
-        <p class="form-hint">
-          Use custom mode for manual setup, or choose a Modrinth modpack by link, by search,
-          or by uploading a .mrpack file you exported yourself.
-        </p>
-
-        <div v-if="formData.setupMode === 'modpack'" class="modpack-panel">
-          <div class="form-group">
-            <label>Import Method</label>
-            <div class="inline-choice">
-              <label class="choice-pill">
-                <input type="radio" v-model="formData.modpackImportMethod" value="link">
-                <span>Link</span>
-              </label>
-              <label class="choice-pill">
-                <input type="radio" v-model="formData.modpackImportMethod" value="search">
-                <span>Search</span>
-              </label>
-              <label class="choice-pill">
-                <input type="radio" v-model="formData.modpackImportMethod" value="file">
-                <span>Upload .mrpack</span>
-              </label>
-            </div>
-          </div>
-
-          <div v-if="formData.modpackImportMethod === 'link'" class="form-row modpack-input-row">
-            <div class="form-group modpack-grow">
-              <FormField label="Modpack URL or Slug" hint="Supports Modrinth links, slugs, or project IDs.">
-                <template #default="{ id, describedBy }">
-                  <input
-                    :id="id"
-                    v-model="modpackLinkInput"
-                    type="text"
-                    placeholder="https://modrinth.com/modpack/your-pack"
-                    :aria-describedby="describedBy"
-                  >
-                </template>
-              </FormField>
-            </div>
-            <div class="form-group modpack-action">
-              <label>&nbsp;</label>
-              <AppButton
-                variant="ghost"
-                size="md"
-                :disabled="modpackLookupLoading || !modpackLinkInput.trim()"
-                :loading="modpackLookupLoading"
-                @click="resolveModpackByLink"
-              >
-                {{ modpackLookupLoading ? 'Resolving' : 'Resolve' }}
-              </AppButton>
-            </div>
-          </div>
-
-          <div v-else-if="formData.modpackImportMethod === 'search'">
-            <div class="form-row modpack-input-row">
-              <div class="form-group modpack-grow">
-                <FormField label="Search Modpacks">
-                  <template #default="{ id, describedBy }">
-                    <input
-                      :id="id"
-                      v-model="modpackSearchQuery"
-                      type="text"
-                      placeholder="All of Fabric, Better Minecraft, ..."
-                      :aria-describedby="describedBy"
-                    >
-                  </template>
-                </FormField>
-              </div>
-              <div class="form-group modpack-action">
-                <label>&nbsp;</label>
-                <AppButton
-                  variant="ghost"
-                  size="md"
-                  :disabled="modpackSearchLoading || !modpackSearchQuery.trim()"
-                  :loading="modpackSearchLoading"
-                  @click="searchForModpacks"
-                >
-                  {{ modpackSearchLoading ? 'Searching' : 'Search' }}
-                </AppButton>
-              </div>
-            </div>
-
-            <div v-if="modpackSearchResults.length" class="modpack-results">
-              <button
-                v-for="pack in modpackSearchResults"
-                :key="pack.project_id"
-                type="button"
-                class="modpack-result"
-                :class="{ selected: selectedModpack && selectedModpack.id === pack.project_id }"
-                @click="selectModpackFromSearch(pack)"
-              >
-                <div class="modpack-result-header">
-                  <img
-                    v-if="pack.icon_url"
-                    :src="pack.icon_url"
-                    :alt="pack.title"
-                    class="modpack-icon"
-                  >
-                  <div>
-                    <strong>{{ pack.title }}</strong>
-                    <p>{{ pack.description || 'No description provided.' }}</p>
-                  </div>
-                </div>
-                <span class="modpack-meta">{{ formatNumber(pack.downloads || 0) }} downloads</span>
-              </button>
-            </div>
-
-            <p v-if="modpackSearchDone && !modpackSearchLoading && !modpackSearchResults.length" class="form-hint">
-              No matching modpacks found for this search.
-            </p>
-          </div>
-
-          <!-- Upload a .mrpack exported from the Modrinth app (#53). The pack
-               declares its own Minecraft version and loader, so selecting one
-               fills those fields in — editable afterwards, with a warning if
-               they end up disagreeing with the pack. -->
-          <div v-else class="mrpack-upload">
-            <FormField
-              label="Modpack File"
-              hint="A .mrpack exported by the Modrinth app. Mods are fetched from Modrinth; config and other extras come from the pack's overrides."
-            >
-              <template #default="{ id, describedBy }">
-                <input
-                  :id="id"
-                  ref="mrpackInput"
-                  type="file"
-                  accept=".mrpack,application/zip"
-                  :disabled="packUploading"
-                  :aria-describedby="describedBy"
-                  @change="handlePackFileChange"
-                >
-              </template>
-            </FormField>
-
-            <div v-if="packUploading" class="mrpack-progress">
-              <div class="mrpack-progress-track">
-                <div
-                  class="mrpack-progress-fill"
-                  :class="{ indeterminate: packUploadPercent < 0 }"
-                  :style="packUploadPercent >= 0 ? { width: `${packUploadPercent}%` } : null"
-                ></div>
-              </div>
-              <span>{{ packUploadPercent >= 0 ? `Uploading ${packUploadPercent}%` : 'Uploading…' }}</span>
-            </div>
-
-            <p v-if="packUploadError" class="modpack-error">{{ packUploadError }}</p>
-          </div>
-
-          <p v-if="modpackError" class="modpack-error">{{ modpackError }}</p>
-
-          <div v-if="selectedModpack" class="modpack-selected">
-            <div>
-              <p class="selected-label">Selected Modpack</p>
-              <strong>{{ selectedModpack.title }}</strong>
-              <p>{{ selectedModpack.description || 'No description provided.' }}</p>
-            </div>
-            <AppButton variant="ghost" size="sm" @click="clearSelectedModpack">
-              Clear
-            </AppButton>
-          </div>
-
-          <div v-if="uploadedPack" class="modpack-selected">
-            <div>
-              <p class="selected-label">Uploaded Modpack</p>
-              <strong>{{ uploadedPackTitle }}</strong>
-              <p>{{ uploadedPackDetail }}</p>
-            </div>
-            <AppButton variant="ghost" size="sm" :disabled="creating" @click="clearUploadedPack">
-              Clear
-            </AppButton>
-          </div>
-
-          <p v-if="packMismatchWarning" class="modpack-warning">{{ packMismatchWarning }}</p>
-
-        </div>
-      </Panel>
 
       <!-- Gameplay Settings -->
       <Panel title="Gameplay">
@@ -659,6 +690,15 @@ export default {
       // A pack's Minecraft version, held until the version list that has to
       // contain it finishes loading. See applyPendingPackVersion.
       pendingPackVersion: '',
+      // Same idea, but for a search/link-resolved pack: it declares a whole
+      // list of supported versions rather than one exact build, so the newest
+      // one the target loader actually has is picked once that list loads.
+      pendingPackVersions: [],
+      // Version + loader as they stood before a pack overwrote them, so
+      // clearing the pack puts the form back rather than leaving the pack's
+      // choices behind as if the user had made them. Null when no pack has
+      // applied its defaults.
+      prePackSelection: null,
       gameVersions: [],
       showSnapshots: false,
       javaStatus: null,
@@ -676,7 +716,9 @@ export default {
       ],
       formData: {
         setupMode: 'custom',
-        modpackImportMethod: 'link',
+        // Search first: browsing by name is how most people arrive at a
+        // pack. A link or slug assumes you already have one in hand.
+        modpackImportMethod: 'search',
         name: '',
         version: '',
         loader: '',
@@ -706,24 +748,56 @@ export default {
     };
   },
   created() {
-    this.imp = useModpackImport({
-      mcVersion: () => this.formData.version,
-      loader: () => this.formData.loader
-    })
+    // No mcVersion/loader getters: unlike ModpackBrowserModal (installing onto
+    // a real server that's already pinned to a version and loader), nothing is
+    // chosen yet at creation time — search must return every pack regardless
+    // of formData.version's default, or packs get silently filtered out
+    // before the user has picked one. The pack itself decides the loader and
+    // version once chosen — see applySearchPackDefaults.
+    this.imp = useModpackImport()
     this.loadGameVersions()
   },
   computed: {
     showModpackPanel() {
-      // Only true mod loaders (Fabric/Quilt/Forge/NeoForge) support .mrpack.
-      // The empty "None" default is excluded explicitly: loaderContentKind
-      // fails open to 'mod' for anything it doesn't recognise, which is right
-      // for a real server whose loader tab must not vanish, but wrong here —
-      // no loader picked yet means no modpack story to offer.
-      return Boolean(this.formData.loader) && loaderContentKind(this.formData.loader) === 'mod'
+      // Driven by the mode tab, not by the loader. Gating this on the loader
+      // was the inversion: the panel is where the loader gets decided (a pack
+      // declares the version and loader build it was assembled against), so
+      // requiring a loader first made it unreachable until after the choice it
+      // was supposed to be making. Picking a non-mod loader by hand still
+      // returns to Custom — see the formData.loader watcher.
+      return this.formData.setupMode === 'modpack'
     },
     filteredGameVersions() {
-      if (this.showSnapshots) return this.gameVersions
-      return this.gameVersions.filter(v => v.stable)
+      const pool = this.compatibleGameVersions || this.gameVersions
+      if (this.showSnapshots) return pool
+      return pool.filter(v => v.stable)
+    },
+    // Once a search/link-resolved pack is chosen, narrow the version select to
+    // builds the pack actually declares support for — but only if that leaves
+    // something to pick. An empty intersection means Modrinth's list and this
+    // loader's list didn't overlap at all, which packMismatchWarning already
+    // surfaces; falling back to the full list there keeps the field usable
+    // instead of showing an empty, disabled select.
+    compatibleGameVersions() {
+      if (this.formData.setupMode !== 'modpack' || !this.selectedModpack?.gameVersions?.length) {
+        return null
+      }
+      const allowed = this.selectedModpack.gameVersions
+      const matches = this.gameVersions.filter(v => allowed.includes(v.version))
+      return matches.length ? matches : null
+    },
+    // Same narrowing for the loader select, with the same empty-intersection
+    // fallback (also covered by the "Unsupported Loader" toast elsewhere).
+    compatibleLoaderOptions() {
+      if (this.formData.setupMode !== 'modpack' || !this.selectedModpack?.loaders?.length) {
+        return null
+      }
+      const allowed = this.selectedModpack.loaders
+      const matches = this.loaderOptions.filter(option => allowed.includes(option.value))
+      return matches.length ? matches : null
+    },
+    availableLoaderOptions() {
+      return this.compatibleLoaderOptions || this.loaderOptions
     },
     selectedModpack() {
       return this.imp?.selectedModpack ?? null
@@ -742,6 +816,9 @@ export default {
     modpackSearchDone() {
       return this.imp?.searchDone ?? false
     },
+    modpackShowingPopular() {
+      return this.imp?.showingPopular ?? false
+    },
     modpackLookupLoading() {
       return this.imp?.resolving ?? false
     },
@@ -749,8 +826,11 @@ export default {
       return this.imp?.loading ?? false
     },
     modpackError: {
-      get() { return this.imp?.errorMessage?.value ?? '' },
-      set(v) { if (this.imp?.errorMessage) this.imp.errorMessage.value = v }
+      // These two read and write the unwrapped ref, like every other accessor
+      // here. Reaching through `.value` returned undefined off a plain string,
+      // so modpack errors were resolving to '' and never rendering.
+      get() { return this.imp?.errorMessage ?? '' },
+      set(v) { if (this.imp) this.imp.errorMessage = v }
     },
     uploadedPackTitle() {
       return this.uploadedPack?.name || this.uploadedPack?.filename || 'Uploaded modpack'
@@ -768,21 +848,39 @@ export default {
       return parts.join(' · ')
     },
     packMismatchWarning() {
-      // The fields stay editable after a pack fills them in, so say plainly
-      // when they have drifted from what the pack was built against. Creating
-      // anyway is allowed — only the user knows if the pack is portable.
-      if (!this.uploadedPack) {
-        return ''
-      }
+      // The version and loader stay editable after a pack is chosen, so say
+      // plainly when they have drifted from what the pack supports. Creating
+      // anyway is allowed — only the user knows whether a pack is portable.
+      //
+      // Both sources are covered. An uploaded .mrpack declares exactly one
+      // version and loader. A pack chosen from search carries the lists
+      // Modrinth publishes, so "supported" there means "in the list" rather
+      // than "equal to". Without this, a search pack's only feedback was the
+      // create request failing, after the whole form had been filled in.
       const differences = []
-      const packMc = this.uploadedPack.minecraft_version || ''
-      const packLoader = (this.uploadedPack.loader || '').toLowerCase()
-      if (packMc && this.formData.version && packMc !== this.formData.version) {
-        differences.push(`Minecraft ${packMc}`)
+
+      if (this.uploadedPack) {
+        const packMc = this.uploadedPack.minecraft_version || ''
+        const packLoader = (this.uploadedPack.loader || '').toLowerCase()
+        if (packMc && this.formData.version && packMc !== this.formData.version) {
+          differences.push(`Minecraft ${packMc}`)
+        }
+        if (packLoader && this.formData.loader && packLoader !== this.formData.loader) {
+          differences.push(this.loaderLabelFor(packLoader))
+        }
+      } else if (this.selectedModpack) {
+        const versions = this.selectedModpack.gameVersions || []
+        const loaders = this.selectedModpack.loaders || []
+        // An empty list means Modrinth told us nothing, which is not the same
+        // as "incompatible" — stay quiet rather than warn on missing data.
+        if (versions.length && this.formData.version && !versions.includes(this.formData.version)) {
+          differences.push(`Minecraft ${this.packSupportSummary(versions)}`)
+        }
+        if (loaders.length && this.formData.loader && !loaders.includes(this.formData.loader)) {
+          differences.push(loaders.map((value) => this.loaderLabelFor(value)).join(' or '))
+        }
       }
-      if (packLoader && this.formData.loader && packLoader !== this.formData.loader) {
-        differences.push(this.loaderLabelFor(packLoader))
-      }
+
       if (!differences.length) {
         return ''
       }
@@ -822,18 +920,62 @@ export default {
       } else {
         this.clearUploadedPack()
       }
+      if (method === 'search') this.loadPopularModpacks()
+    },
+    // Deleting the text back to empty by hand has no button to press
+    // afterward — Search disables itself with nothing typed, and pressing
+    // Enter on an empty box is a no-op too — so the previous query's results
+    // would otherwise just sit there with no way back. Falls back to the same
+    // popular list shown before anything was ever typed. Guarded to the
+    // modpack/search view so resetForm()'s resetAll() (which also clears this
+    // to '') doesn't fire an unwanted fetch while the modal is closing.
+    modpackSearchQuery(newQuery) {
+      if (
+        !newQuery.trim() &&
+        this.formData.setupMode === 'modpack' &&
+        this.formData.modpackImportMethod === 'search'
+      ) {
+        this.imp.loadPopular()
+      }
+    },
+    'formData.setupMode'(mode) {
+      if (mode === 'modpack') {
+        // Entering the modpack flow with Search selected (the default) should
+        // land on a list, not an empty box.
+        if (this.formData.modpackImportMethod === 'search') this.loadPopularModpacks()
+        return
+      }
+      // Leaving it: drop the pack rather than keeping it staged out of sight.
+      // buildModpackIntent() returns null outside modpack mode, so a pack left
+      // selected here was silently not installed — the user picked one, saw it
+      // still listed on the tab they came from, and got a bare server. An
+      // uploaded archive also has to be discarded, not just forgotten, and
+      // clearing restores the version and loader the pack overwrote.
+      this.clearSelectedModpack()
+      this.clearUploadedPack()
     },
     'formData.loader'(newLoader, oldLoader) {
       if (newLoader === oldLoader) return
-      this.formData.version = ''
+      // Deliberately NOT clearing formData.version here. Picking the version
+      // first and the loader second is a normal order, and wiping the choice
+      // made loadGameVersions treat it as "nothing picked" and drop the newest
+      // stable release on top of it. That reload already replaces the version
+      // when the incoming loader has no build for it, so leaving it alone keeps
+      // a still-valid choice and fixes an unsupported one.
       // Loaders without a modpack story (Vanilla + plugin servers) — flip back
       // to custom and drop any cached modpack selection so a stale modpack
       // URL/object doesn't ride along into the create POST and trip a 409.
       if (loaderContentKind(newLoader) !== 'mod') {
         this.formData.setupMode = 'custom'
-        if (this.imp?.selectedModpack) {
-          this.imp.selectedModpack.value = null
-        }
+        // The stash is dropped, not restored: the user just chose this loader
+        // by hand, and that outranks both the pack's defaults and whatever
+        // preceded them. Cleared first so the restore inside
+        // clearSelectedModpack is a no-op and cannot undo that choice.
+        this.prePackSelection = null
+        // Via the composable rather than assigning through `.value`: the ref is
+        // unwrapped in data(), so the old form set a `value` key on the pack
+        // object and left the selection in place.
+        this.clearSelectedModpack()
         this.pendingPackVersion = ''
         this.clearUploadedPack()
       }
@@ -871,20 +1013,112 @@ export default {
       }
     },
 
-    resolveModpackByLink() {
-      return this.imp.resolveByLink()
+    async resolveModpackByLink() {
+      await this.imp.resolveByLink()
+      // A 404'd link falls back to search results instead of a selection —
+      // nothing to apply defaults from in that case.
+      if (this.selectedModpack) {
+        await this.applySearchPackDefaults(this.selectedModpack)
+      }
     },
 
     searchForModpacks() {
+      // Releases the lock: with a pack selected the results list is hidden, so
+      // a search that left the selection in place would look like it did
+      // nothing. Clear is the other way back.
+      this.clearSelectedModpack()
       return this.imp.performSearch()
     },
 
-    selectModpackFromSearch(pack) {
+    /** Fill the search view with top-downloaded packs so it never opens blank.
+     *
+     * Unfiltered on purpose: this is the pack-first flow, so no Minecraft
+     * version or loader has been chosen yet — the pack is what decides them.
+     * Skipped when results are already on screen so switching import method
+     * back and forth does not re-request the same list.
+     */
+    loadPopularModpacks() {
+      // No `.value`: `imp` is stored in data(), so reactive() has already
+      // unwrapped its refs — same convention as the computeds above.
+      if (!this.imp || this.imp.loading || this.modpackSearchResults.length) return
+      return this.imp.loadPopular()
+    },
+
+    async selectModpackFromSearch(pack) {
       this.imp.selectPack(pack)
+      await this.applySearchPackDefaults(this.selectedModpack)
     },
 
     clearSelectedModpack() {
       this.imp.clearSelection()
+      this.pendingPackVersions = []
+      this.restorePrePackSelection()
+    },
+
+    /** Fill the loader and Minecraft version in from a search/link-resolved
+     * pack: unlike an uploaded .mrpack (one declared build), Modrinth gives a
+     * whole list of supported versions and loaders, so the newest version the
+     * chosen loader actually has is picked. Both stay editable afterward. */
+    async applySearchPackDefaults(pack) {
+      if (!pack) return
+
+      // Recorded once per run, same as the upload path: swapping one pack for
+      // another must still restore what the user had before any pack was
+      // involved.
+      if (!this.prePackSelection) {
+        this.prePackSelection = {
+          version: this.formData.version,
+          loader: this.formData.loader,
+        }
+      }
+
+      const supportedLoaders = (pack.loaders || []).filter(
+        (value) => this.loaderOptions.some((option) => option.value === value)
+      )
+      this.pendingPackVersions = pack.gameVersions || []
+
+      if (!supportedLoaders.length) {
+        this.toast.warning(
+          `This pack's loader isn't one Fabricator can install. Pick a loader yourself.`,
+          'Unsupported Loader',
+        )
+        // Still worth trying a compatible version against whatever loader is
+        // already set, rather than leaving the version untouched too.
+        await this.applyPendingPackVersion()
+        await this.refreshJavaRequirement()
+        return
+      }
+
+      // Keep the current loader if the pack already supports it — otherwise
+      // take the first one Modrinth lists, which is normally the pack's
+      // primary loader.
+      const targetLoader = supportedLoaders.includes(this.formData.loader)
+        ? this.formData.loader
+        : supportedLoaders[0]
+
+      if (targetLoader !== this.formData.loader) {
+        // The loader watcher calls loadGameVersions(), which resolves the
+        // pending version list once that loader's builds are in — mirrors
+        // applyPackDefaults below for uploaded packs.
+        this.formData.loader = targetLoader
+        return
+      }
+
+      // Loader already matches, so the watcher above won't fire — resolve now.
+      await this.applyPendingPackVersion()
+      await this.refreshJavaRequirement()
+    },
+
+    /** A readable "1.21.1, 1.20.1 or 3 others" for a pack's version list.
+     *
+     * Popular packs support a dozen versions; naming them all would bury the
+     * point of the warning, which is that the chosen one is not among them.
+     */
+    packSupportSummary(versions) {
+      const named = versions.slice(0, 3).join(', ')
+      const rest = versions.length - 3
+      if (rest <= 0) return named
+      return `${named} or ${rest} other${rest === 1 ? '' : 's'}`
     },
 
     loaderLabelFor(loader) {
@@ -933,6 +1167,15 @@ export default {
       const packLoader = String(pack?.loader || '').toLowerCase()
       const packVersion = pack?.minecraft_version || ''
 
+      // Recorded once per run: swapping one pack for another must still
+      // restore what the user had before any pack was involved.
+      if (!this.prePackSelection) {
+        this.prePackSelection = {
+          version: this.formData.version,
+          loader: this.formData.loader,
+        }
+      }
+
       if (packVersion) {
         this.pendingPackVersion = packVersion
       }
@@ -958,6 +1201,30 @@ export default {
 
     /** Apply a pack's Minecraft version against the loaded version list. */
     async applyPendingPackVersion() {
+      // Search/link pack: a whole list of supported versions rather than one
+      // exact build. gameVersions is already newest-first (loadGameVersions
+      // picks its [0] as "preferred"), so the first entry present in both is
+      // the newest one this loader actually has.
+      if (this.pendingPackVersions.length) {
+        const wanted = this.pendingPackVersions
+        this.pendingPackVersions = []
+
+        const candidates = this.gameVersions.filter(v => wanted.includes(v.version))
+        const match = candidates.find(v => v.stable) || candidates[0]
+        if (!match) {
+          this.toast.warning(
+            `This pack has no build for the Minecraft versions this loader supports. Pick a version yourself.`,
+            'Version Unavailable',
+          )
+          return
+        }
+        if (!match.stable) {
+          this.showSnapshots = true
+        }
+        this.formData.version = match.version
+        return
+      }
+
       const wanted = this.pendingPackVersion
       if (!wanted) {
         return
@@ -980,6 +1247,22 @@ export default {
       this.formData.version = wanted
     },
 
+    /** Put version + loader back to their pre-pack values, if a pack set them. */
+    restorePrePackSelection() {
+      const previous = this.prePackSelection
+      this.prePackSelection = null
+      if (!previous) return
+      // Drop a pack version that never got applied, so a pending one cannot
+      // land on top of the restore once the version list reloads.
+      this.pendingPackVersion = ''
+      this.pendingPackVersions = []
+      // Version first: changing the loader triggers loadGameVersions, which
+      // keeps the current version when the incoming loader offers it. Setting
+      // it afterwards would race that reload instead.
+      this.formData.version = previous.version
+      this.formData.loader = previous.loader
+    },
+
     resetPackFileInput() {
       const input = this.$refs.mrpackInput
       if (input) {
@@ -1000,6 +1283,10 @@ export default {
       this.packUploadPercent = 0
       if (!keepInput) {
         this.resetPackFileInput()
+        // keepInput means one upload is replacing another, and the incoming
+        // pack is about to set these again — restoring in between would just
+        // flicker the version select.
+        this.restorePrePackSelection()
       }
       if (pack?.upload_id) {
         // Best effort: a staged pack the backend still holds expires on its
@@ -1068,9 +1355,10 @@ export default {
       this.versionsLoading = true
       try {
         // With the "None" default nothing is picked yet, so list plain game
-        // versions rather than some loader's subset. Picking a loader resets
-        // the version and refetches, so this list is only ever a starting point.
+        // versions rather than some loader's subset. Picking a loader refetches
+        // against that loader, so this list is only ever a starting point.
         const loader = this.formData.loader || 'vanilla'
+        const previousVersion = this.formData.version
         const versions = await getLoaderGameVersions(loader)
         this.gameVersions = Array.isArray(versions) ? versions : []
         const stableVersions = this.gameVersions.filter(v => v.stable)
@@ -1078,6 +1366,17 @@ export default {
         const versionExists = this.filteredGameVersions.some(v => v.version === this.formData.version)
         if ((!this.formData.version || !versionExists) && preferred) {
           this.formData.version = preferred.version
+          // Only when a real choice had to be dropped: the version genuinely
+          // isn't offered for this loader. Silently swapping it is how the
+          // reset bug went unnoticed. Skipped while a pack is pending, since
+          // applyPendingPackVersion below has the final say on the version and
+          // reports its own mismatch.
+          if (previousVersion && previousVersion !== preferred.version && !this.pendingPackVersion && !this.pendingPackVersions.length) {
+            this.toast.info(
+              `${this.loaderLabelFor(loader)} has no build for Minecraft ${previousVersion} — switched to ${preferred.version}.`,
+              'Version Changed',
+            )
+          }
         }
         // An uploaded pack's own Minecraft version outranks the newest-stable
         // default: switching the loader to match a pack reloads this list, and
@@ -1421,9 +1720,11 @@ export default {
     
     resetForm({ keepJavaModal = false } = {}) {
       const preservedVersion = this.formData.version
+      // Nothing to restore into a form that is being rebuilt from scratch.
+      this.prePackSelection = null
       this.formData = {
         setupMode: 'custom',
-        modpackImportMethod: 'link',
+        modpackImportMethod: 'search',
         name: '',
         version: preservedVersion || (this.gameVersions[0]?.version || ''),
         loader: '',
@@ -1497,6 +1798,19 @@ export default {
   gap: var(--space-5);
 }
 
+/* Panel lays its body out as a plain block, and global.css zeroes every
+   margin — so stacked fields inside one panel had NO space between them at
+   all: the previous field's input sat flush against the next field's label,
+   and a field's hint ran straight into the heading under it. Matching the
+   grid's own 20px column gap gives the same rhythm down as across.
+   Scoped here rather than in Panel: other views place their own spacing
+   inside panel bodies, and a global gap would double it. */
+.settings-form :deep(.panel__body) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
 .version-label-row {
   display: flex;
   align-items: center;
@@ -1530,6 +1844,9 @@ export default {
 /* Mode toggle (Custom Server / Import Modpack) */
 .mode-toggle {
   display: inline-flex;
+  /* Shrink-to-fit: as a flex item of the form column it would otherwise stretch
+     to the full width and stop reading as a pair of pills. */
+  align-self: flex-start;
   align-items: center;
   padding: 3px;
   border-radius: var(--radius-pill);
@@ -1593,8 +1910,41 @@ export default {
   accent-color: var(--primary);
 }
 
-.modpack-input-row {
-  align-items: end;
+/* Top-aligned, not bottom. The `&nbsp;` label in the action column reserves the
+   label row so the button's top lines up with the input's; bottom-aligning
+   instead measured the whole column, so on the Link row — whose field carries a
+   hint underneath — the button was pushed a hint's height below the input it
+   belongs to, while the hintless Search row looked fine. */
+/* The rows inside this branch are siblings in a plain block, so without this
+   the results heading sat flush against the search field. */
+.modpack-search-branch {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* Ghost buttons default to --bg-tertiary, which is exactly the panel's own
+   background — inside here they were an invisible rectangle with a border one
+   shade off the surface, and half that at disabled opacity. Drop them onto the
+   darker base the inputs use so they read as controls. */
+.modpack-panel :deep(.app-btn--ghost) {
+  background: var(--bg-primary);
+  border-color: #2a2a2a;
+  color: var(--text-secondary);
+}
+
+.modpack-panel :deep(.app-btn--ghost:hover:not(:disabled)) {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+/* Compound with .form-row: a bare `.modpack-input-row` selector has the same
+   specificity as `.form-row` below, so — since `.form-row` is declared later
+   in this file — its `1fr 1fr` was winning the cascade and silently undoing
+   this override, which is what actually gave a single button half the width. */
+.form-row.modpack-input-row {
+  align-items: start;
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .modpack-grow {
@@ -1602,7 +1952,37 @@ export default {
 }
 
 .modpack-action {
-  min-width: 140px;
+  min-width: 110px;
+}
+
+/* Takes the free space so Clear stays hard right, and lets a long title
+   ellipsise rather than push the button off the card. */
+.modpack-selected__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.modpack-selected__text strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modpack-results-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* Labels the top-downloads list so it is not read as matches to a query. */
+.modpack-results-heading {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .modpack-results {
@@ -1643,9 +2023,22 @@ export default {
   min-width: 0;
 }
 
+/* The text column is a flex item, so it needs min-width: 0 of its own — the
+   default `auto` refuses to shrink below its content, which let a long pack
+   title push the download count off the row instead of ellipsising. */
+.modpack-result-header > div {
+  min-width: 0;
+}
+
 .modpack-result-header strong {
+  display: block;
   color: var(--text-primary);
   font-size: var(--text-sm);
+  /* Block, so the truncation below applies: <strong> is inline by default and
+     overflow has no effect on it. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .modpack-result-header p {
@@ -1745,11 +2138,13 @@ export default {
   100% { transform: translateX(250%); }
 }
 
+/* Three across now: icon, text, Clear. align-items:center so the icon and the
+   button sit level with the text block rather than pinned to its first line. */
 .modpack-selected {
   display: flex;
   justify-content: space-between;
-  gap: var(--space-4);
-  align-items: start;
+  gap: var(--space-3);
+  align-items: center;
   padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-md);
   background: color-mix(in oklch, var(--success) 12%, transparent);
@@ -1846,16 +2241,22 @@ export default {
 
 /* Scope-migrated from global.css in Phase 7 Task 7
    (sole remaining caller after FormField migration). */
+/* These hand-rolled equivalents of FormField sit directly beside real ones —
+   "Minecraft Version" shares a row with "Mod Loader" — so their type has to be
+   the same or the row looks subtly broken. The raw rem values had drifted off
+   the scale: labels were 14px against FormField's 13px, and hints 13px against
+   its 11px, which made the same kind of text two different sizes in one form. */
 .form-group {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 
 .form-group label {
-  font-size: 0.875rem;
+  font-size: var(--text-sm);
   font-weight: 500;
   color: var(--text-primary);
+  line-height: var(--leading-tight);
 }
 
 .form-group input,
@@ -1864,20 +2265,21 @@ export default {
 }
 
 .form-hint {
-  font-size: 0.8125rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
+  line-height: var(--leading-normal);
 }
 
 .form-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 1.25rem;
+  gap: var(--space-5);
 }
 
 .form-checkboxes {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 1rem;
+  gap: var(--space-4);
 }
 
 .checkbox-label {
