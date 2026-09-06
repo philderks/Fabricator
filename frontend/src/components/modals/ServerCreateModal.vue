@@ -119,6 +119,7 @@
                     type="text"
                     placeholder="https://modrinth.com/modpack/your-pack"
                     :aria-describedby="describedBy"
+                    @keydown.enter.prevent="!modpackLookupLoading && modpackLinkInput.trim() && resolveModpackByLink()"
                   >
                 </template>
               </FormField>
@@ -148,6 +149,7 @@
                       type="text"
                       placeholder="All of Fabric, Better Minecraft, ..."
                       :aria-describedby="describedBy"
+                      @keydown.enter.prevent="!modpackSearchLoading && modpackSearchQuery.trim() && searchForModpacks()"
                     >
                   </template>
                 </FormField>
@@ -339,7 +341,7 @@
                      deliberate. Disabled so it can't be picked back. -->
                 <option value="" disabled>None</option>
                 <option
-                  v-for="loaderOption in loaderOptions"
+                  v-for="loaderOption in availableLoaderOptions"
                   :key="loaderOption.value"
                   :value="loaderOption.value"
                 >
@@ -688,6 +690,10 @@ export default {
       // A pack's Minecraft version, held until the version list that has to
       // contain it finishes loading. See applyPendingPackVersion.
       pendingPackVersion: '',
+      // Same idea, but for a search/link-resolved pack: it declares a whole
+      // list of supported versions rather than one exact build, so the newest
+      // one the target loader actually has is picked once that list loads.
+      pendingPackVersions: [],
       // Version + loader as they stood before a pack overwrote them, so
       // clearing the pack puts the form back rather than leaving the pack's
       // choices behind as if the user had made them. Null when no pack has
@@ -742,10 +748,13 @@ export default {
     };
   },
   created() {
-    this.imp = useModpackImport({
-      mcVersion: () => this.formData.version,
-      loader: () => this.formData.loader
-    })
+    // No mcVersion/loader getters: unlike ModpackBrowserModal (installing onto
+    // a real server that's already pinned to a version and loader), nothing is
+    // chosen yet at creation time — search must return every pack regardless
+    // of formData.version's default, or packs get silently filtered out
+    // before the user has picked one. The pack itself decides the loader and
+    // version once chosen — see applySearchPackDefaults.
+    this.imp = useModpackImport()
     this.loadGameVersions()
   },
   computed: {
@@ -759,8 +768,36 @@ export default {
       return this.formData.setupMode === 'modpack'
     },
     filteredGameVersions() {
-      if (this.showSnapshots) return this.gameVersions
-      return this.gameVersions.filter(v => v.stable)
+      const pool = this.compatibleGameVersions || this.gameVersions
+      if (this.showSnapshots) return pool
+      return pool.filter(v => v.stable)
+    },
+    // Once a search/link-resolved pack is chosen, narrow the version select to
+    // builds the pack actually declares support for — but only if that leaves
+    // something to pick. An empty intersection means Modrinth's list and this
+    // loader's list didn't overlap at all, which packMismatchWarning already
+    // surfaces; falling back to the full list there keeps the field usable
+    // instead of showing an empty, disabled select.
+    compatibleGameVersions() {
+      if (this.formData.setupMode !== 'modpack' || !this.selectedModpack?.gameVersions?.length) {
+        return null
+      }
+      const allowed = this.selectedModpack.gameVersions
+      const matches = this.gameVersions.filter(v => allowed.includes(v.version))
+      return matches.length ? matches : null
+    },
+    // Same narrowing for the loader select, with the same empty-intersection
+    // fallback (also covered by the "Unsupported Loader" toast elsewhere).
+    compatibleLoaderOptions() {
+      if (this.formData.setupMode !== 'modpack' || !this.selectedModpack?.loaders?.length) {
+        return null
+      }
+      const allowed = this.selectedModpack.loaders
+      const matches = this.loaderOptions.filter(option => allowed.includes(option.value))
+      return matches.length ? matches : null
+    },
+    availableLoaderOptions() {
+      return this.compatibleLoaderOptions || this.loaderOptions
     },
     selectedModpack() {
       return this.imp?.selectedModpack ?? null
@@ -885,6 +922,22 @@ export default {
       }
       if (method === 'search') this.loadPopularModpacks()
     },
+    // Deleting the text back to empty by hand has no button to press
+    // afterward — Search disables itself with nothing typed, and pressing
+    // Enter on an empty box is a no-op too — so the previous query's results
+    // would otherwise just sit there with no way back. Falls back to the same
+    // popular list shown before anything was ever typed. Guarded to the
+    // modpack/search view so resetForm()'s resetAll() (which also clears this
+    // to '') doesn't fire an unwanted fetch while the modal is closing.
+    modpackSearchQuery(newQuery) {
+      if (
+        !newQuery.trim() &&
+        this.formData.setupMode === 'modpack' &&
+        this.formData.modpackImportMethod === 'search'
+      ) {
+        this.imp.loadPopular()
+      }
+    },
     'formData.setupMode'(mode) {
       if (mode === 'modpack') {
         // Entering the modpack flow with Search selected (the default) should
@@ -960,8 +1013,13 @@ export default {
       }
     },
 
-    resolveModpackByLink() {
-      return this.imp.resolveByLink()
+    async resolveModpackByLink() {
+      await this.imp.resolveByLink()
+      // A 404'd link falls back to search results instead of a selection —
+      // nothing to apply defaults from in that case.
+      if (this.selectedModpack) {
+        await this.applySearchPackDefaults(this.selectedModpack)
+      }
     },
 
     searchForModpacks() {
@@ -986,13 +1044,69 @@ export default {
       return this.imp.loadPopular()
     },
 
-    selectModpackFromSearch(pack) {
+    async selectModpackFromSearch(pack) {
       this.imp.selectPack(pack)
+      await this.applySearchPackDefaults(this.selectedModpack)
     },
 
     clearSelectedModpack() {
       this.imp.clearSelection()
+      this.pendingPackVersions = []
       this.restorePrePackSelection()
+    },
+
+    /** Fill the loader and Minecraft version in from a search/link-resolved
+     * pack: unlike an uploaded .mrpack (one declared build), Modrinth gives a
+     * whole list of supported versions and loaders, so the newest version the
+     * chosen loader actually has is picked. Both stay editable afterward. */
+    async applySearchPackDefaults(pack) {
+      if (!pack) return
+
+      // Recorded once per run, same as the upload path: swapping one pack for
+      // another must still restore what the user had before any pack was
+      // involved.
+      if (!this.prePackSelection) {
+        this.prePackSelection = {
+          version: this.formData.version,
+          loader: this.formData.loader,
+        }
+      }
+
+      const supportedLoaders = (pack.loaders || []).filter(
+        (value) => this.loaderOptions.some((option) => option.value === value)
+      )
+      this.pendingPackVersions = pack.gameVersions || []
+
+      if (!supportedLoaders.length) {
+        this.toast.warning(
+          `This pack's loader isn't one Fabricator can install. Pick a loader yourself.`,
+          'Unsupported Loader',
+        )
+        // Still worth trying a compatible version against whatever loader is
+        // already set, rather than leaving the version untouched too.
+        await this.applyPendingPackVersion()
+        await this.refreshJavaRequirement()
+        return
+      }
+
+      // Keep the current loader if the pack already supports it — otherwise
+      // take the first one Modrinth lists, which is normally the pack's
+      // primary loader.
+      const targetLoader = supportedLoaders.includes(this.formData.loader)
+        ? this.formData.loader
+        : supportedLoaders[0]
+
+      if (targetLoader !== this.formData.loader) {
+        // The loader watcher calls loadGameVersions(), which resolves the
+        // pending version list once that loader's builds are in — mirrors
+        // applyPackDefaults below for uploaded packs.
+        this.formData.loader = targetLoader
+        return
+      }
+
+      // Loader already matches, so the watcher above won't fire — resolve now.
+      await this.applyPendingPackVersion()
+      await this.refreshJavaRequirement()
     },
 
     /** A readable "1.21.1, 1.20.1 or 3 others" for a pack's version list.
@@ -1087,6 +1201,30 @@ export default {
 
     /** Apply a pack's Minecraft version against the loaded version list. */
     async applyPendingPackVersion() {
+      // Search/link pack: a whole list of supported versions rather than one
+      // exact build. gameVersions is already newest-first (loadGameVersions
+      // picks its [0] as "preferred"), so the first entry present in both is
+      // the newest one this loader actually has.
+      if (this.pendingPackVersions.length) {
+        const wanted = this.pendingPackVersions
+        this.pendingPackVersions = []
+
+        const candidates = this.gameVersions.filter(v => wanted.includes(v.version))
+        const match = candidates.find(v => v.stable) || candidates[0]
+        if (!match) {
+          this.toast.warning(
+            `This pack has no build for the Minecraft versions this loader supports. Pick a version yourself.`,
+            'Version Unavailable',
+          )
+          return
+        }
+        if (!match.stable) {
+          this.showSnapshots = true
+        }
+        this.formData.version = match.version
+        return
+      }
+
       const wanted = this.pendingPackVersion
       if (!wanted) {
         return
@@ -1117,6 +1255,7 @@ export default {
       // Drop a pack version that never got applied, so a pending one cannot
       // land on top of the restore once the version list reloads.
       this.pendingPackVersion = ''
+      this.pendingPackVersions = []
       // Version first: changing the loader triggers loadGameVersions, which
       // keeps the current version when the incoming loader offers it. Setting
       // it afterwards would race that reload instead.
@@ -1232,7 +1371,7 @@ export default {
           // reset bug went unnoticed. Skipped while a pack is pending, since
           // applyPendingPackVersion below has the final say on the version and
           // reports its own mismatch.
-          if (previousVersion && previousVersion !== preferred.version && !this.pendingPackVersion) {
+          if (previousVersion && previousVersion !== preferred.version && !this.pendingPackVersion && !this.pendingPackVersions.length) {
             this.toast.info(
               `${this.loaderLabelFor(loader)} has no build for Minecraft ${previousVersion} — switched to ${preferred.version}.`,
               'Version Changed',
@@ -1799,10 +1938,12 @@ export default {
   color: var(--primary);
 }
 
-.modpack-input-row {
+/* Compound with .form-row: a bare `.modpack-input-row` selector has the same
+   specificity as `.form-row` below, so — since `.form-row` is declared later
+   in this file — its `1fr 1fr` was winning the cascade and silently undoing
+   this override, which is what actually gave a single button half the width. */
+.form-row.modpack-input-row {
   align-items: start;
-  /* Was the inherited 1fr 1fr, which gave a single button half the width and
-     left the search field cramped beside a mostly empty column. */
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
