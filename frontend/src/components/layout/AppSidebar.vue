@@ -358,8 +358,8 @@ onUnmounted(() => {
             <path d="M8 9.5h3"/>
           </template>
           <template v-else-if="item.icon === 'players'">
-            <circle cx="7.5" cy="5" r="2.5" />
-            <path d="M3 13c0-2.5 2-4.5 4.5-4.5S12 10.5 12 13" />
+            <circle cx="7.5" cy="4.5" r="3" />
+            <path d="M2 13.5c0-3 2.46-5.5 5.5-5.5s5.5 2.5 5.5 5.5" />
           </template>
           <template v-else-if="item.icon === 'mods'">
             <path d="M7.5 1L13 4.5v6L7.5 14 2 10.5v-6L7.5 1z"/>
@@ -379,12 +379,12 @@ onUnmounted(() => {
             <path d="M7.5 1.5c1.85 1.7 2.85 3.85 2.85 6s-1 4.3-2.85 6c-1.85-1.7-2.85-3.85-2.85-6s1-4.3 2.85-6z"/>
           </template>
           <template v-else-if="item.icon === 'properties'">
-            <path d="M2 4h7"/>
-            <path d="M13 4h-2"/>
-            <circle cx="10" cy="4" r="1.6"/>
-            <path d="M2 11h2"/>
-            <path d="M13 11H6"/>
-            <circle cx="5" cy="11" r="1.6"/>
+            <path d="M2 2.5h7"/>
+            <path d="M13 2.5h-2"/>
+            <circle cx="10" cy="2.5" r="1.8"/>
+            <path d="M2 12.5h2"/>
+            <path d="M13 12.5H6"/>
+            <circle cx="5" cy="12.5" r="1.8"/>
           </template>
         </svg>
         <span class="app-sidebar__label">{{ item.label }}</span>
