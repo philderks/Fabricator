@@ -50,10 +50,10 @@ def test_manage_bucket_is_exactly_the_expected_set():
 
 def test_read_and_manage_counts():
     counts = Counter(BUCKETS.values())
-    assert counts["read"] == 32
+    assert counts["read"] == 33
     assert counts["manage"] == 7
-    assert counts["never"] == 60
-    assert sum(counts.values()) == 99
+    assert counts["never"] == 61
+    assert sum(counts.values()) == 101
 
 
 def test_the_console_and_settings_routes_are_never():
