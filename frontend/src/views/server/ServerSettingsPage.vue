@@ -1158,7 +1158,12 @@ const onReset = () => {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+  width: 100%;
   max-width: var(--settings-column);
+  /* Centers the column instead of leaving it flush against the sidebar with a
+     growing dead zone on wide/ultrawide monitors. The fixed footer below
+     mirrors this with the same margin so its buttons stay under the column. */
+  margin: 0 auto;
   padding-bottom: 80px;
 }
 
@@ -1414,6 +1419,7 @@ const onReset = () => {
   justify-content: flex-end;
   gap: var(--space-3);
   max-width: var(--settings-column);
+  margin: 0 auto;
 }
 
 .settings-page__danger {

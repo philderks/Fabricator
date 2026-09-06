@@ -153,6 +153,10 @@ async function onEnable() {
 
 .pw-toggle__input {
   width: 100%;
+  /* Matches ChangePasswordPanel's field width — otherwise this input alone
+     stretches to the full reading column while its sibling section's fields
+     stay narrow, which reads as broken on wide panels. */
+  max-width: 360px;
 }
 
 .pw-toggle__error {

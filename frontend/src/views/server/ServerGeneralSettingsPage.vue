@@ -247,7 +247,12 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+  width: 100%;
   max-width: 880px;
+  /* A flex item's auto margins absorb the leftover cross-axis space, so this
+     centers the reading column instead of it hugging the sidebar edge with a
+     growing dead zone on wide/ultrawide monitors. */
+  margin: 0 auto;
 }
 
 /* RootLayout supplies no padding and no topbar, so the server-less route
