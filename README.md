@@ -30,7 +30,9 @@
 |---|---|---|
 | 🧩 | **Loaders**: Fabric, Quilt, NeoForge, Forge, Paper, Purpur, Folia, Pufferfish, Vanilla | ✅ Available |
 | 📦 | **Mod & plugin management**: install, remove, and browse Modrinth mods and plugins | ✅ Available |
+| 🧰 | **Modpack import**: find popular Modrinth packs, search by name or link, or upload an exported `.mrpack` | ✅ Available |
 | 📋 | **Logs & monitoring**: live log stream, TPS and RAM graphs | ✅ Available |
+| 📁 | **File explorer & editor**: browse the server tree, search files, and edit configuration files in the panel | ✅ Available |
 | 👥 | **Player management**: online players, player heads, custom actions | ✅ Available |
 | 💾 | **Backups & restore**: manual snapshots, restore from any backup | ✅ Available |
 | 🌍 | **World import**: upload a world archive and swap it in | ✅ Available |
@@ -46,7 +48,7 @@
 | 🔄 | **One-click Minecraft / Fabric server upgrades** | 📋 Planned |
 | 📊 | **Metrics tab**: CPU, RAM, and usage over time | 📋 Planned |
 | 🔐 | **User roles and permissions** | 📋 Planned |
-| ✏️ | **Editor & files**: better text editor, view archived logs | 📋 Planned |
+| ✏️ | **Advanced editor & archived logs** | 📋 Planned |
 | 📥 | **More install targets**: Proxmox VE, CasaOS, Umbrel, Unraid, Coolify/Dokploy | 📋 Planned |
 
 ---
@@ -225,8 +227,12 @@ To run **without** the built-in login (only if you front Fabricator with your
 own reverse-proxy authentication), set `FABRICATOR_DISABLE_AUTH=1`. This is the
 only supported way to disable it.
 
-**Change or reset the password.** Once logged in, change it from the panel header
-(**Change password**). Forgot it / locked out? Delete `auth.json` from the data
+**Change, turn off, or reset the password.** Once logged in, open
+**Settings → Security** to change the password. From the same screen you can turn
+password protection off (after confirming the current password) or turn it back on
+with a new password. Only turn it off on a trusted network: anyone who can reach
+Fabricator will then be able to manage your servers. Forgot it / locked out? Delete
+`auth.json` from the data
 directory and restart — the app drops back into setup mode so you can set a new
 one. The file lives next to `servers.json`: `/var/lib/fabricator/auth.json` under
 systemd, `/data/auth.json` in Docker. (Deleting it only resets the password/key;
