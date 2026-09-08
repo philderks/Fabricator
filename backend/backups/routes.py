@@ -28,7 +28,6 @@ import logging
 import shutil
 import tarfile
 import tempfile
-import uuid
 import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -342,10 +341,12 @@ def import_world(server_id, server):
             {"error": f"Upload exceeds the {max_bytes}-byte limit"}
         ), 413
 
-    registry = get_server_process_registry()
-    install_path = registry.resolve_install_path(server)
-    upload_dir = install_path.parent / ".uploads"
-    temp_path = upload_dir / f"world-{server_id}-{uuid.uuid4().hex}.upload"
+    # Abandoned uploads (a panel killed mid-import) are swept here rather than on
+    # a timer, matching the .mrpack staging sweep: an upload is a moment this
+    # feature is guaranteed to be running, and it is about to need the space.
+    world_import.sweep_stale_uploads()
+
+    temp_path = world_import.new_upload_path(server_id)
 
     try:
         written = world_import.stream_upload_to_temp(
@@ -516,6 +517,7 @@ def _convert_to_zip(tar_path: Path) -> Tuple[Path, str]:
     DEFLATE-compressed by Minecraft; everything else uses ZIP_DEFLATED.
     """
     tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+    tmp_path = Path(tmp.name)
     try:
         with (
             zipfile.ZipFile(tmp, "w", allowZip64=True) as zf,
@@ -533,9 +535,21 @@ def _convert_to_zip(tar_path: Path) -> Tuple[Path, str]:
                     info.compress_type = zipfile.ZIP_DEFLATED
                     with outer.extractfile(m) as src, zf.open(info, "w") as dst:
                         shutil.copyfileobj(src, dst)
+    except BaseException:
+        # The caller only registers the after-request cleanup once this returns,
+        # so a partial zip from a failed conversion (corrupt archive, disk full)
+        # would otherwise sit in the system temp dir forever. Close first: on
+        # Windows an open handle blocks the unlink. close() is idempotent, so
+        # the finally below is still safe.
+        tmp.close()
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:  # pragma: no cover - nothing more we can do
+            logger.warning("Could not remove partial zip %s", tmp_path)
+        raise
     finally:
         tmp.close()
-    return Path(tmp.name), tar_path.stem + ".zip"
+    return tmp_path, tar_path.stem + ".zip"
 
 
 def _zip_from_inner(
