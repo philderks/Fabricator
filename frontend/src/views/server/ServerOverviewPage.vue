@@ -81,7 +81,11 @@ const playitLive = computed(() =>
 // null whenever the runtime isn't reporting it (stopped, or not yet sampled).
 const tpsDisplay = computed(() => {
   const tps = store.serverStatus.tps
-  return typeof tps === 'number' ? tps.toFixed(1) : '—'
+  if (typeof tps === 'number') return tps.toFixed(1)
+  // Old vanilla/Fabric/Quilt have no tick-rate command at all, so no amount of
+  // waiting will fill this in — say so instead of showing a dash that reads as
+  // "still loading".
+  return store.serverStatus.tpsSupported ? '—' : 'n/a'
 })
 
 // Minecraft counts 20 ticks a second, so anything at or near 20 is healthy and

@@ -1832,6 +1832,9 @@ def get_server_metrics(server_id, server):
     metrics = {
         'status': runtime.get('status', 'stopped'),
         'ram': runtime.get('ram'),
+        'cpu': runtime.get('cpu'),
+        'tps': runtime.get('tps'),
+        'tpsSupported': runtime.get('tpsSupported'),
         'pid': runtime.get('pid'),
     }
 

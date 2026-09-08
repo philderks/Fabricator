@@ -225,7 +225,12 @@ class ServerProcessRegistry:
 
             install_path = self.resolve_install_path(server)
             command = self._build_command(server)
-            manager = ServerManager(command=command, cwd=str(install_path))
+            manager = ServerManager(
+                command=command,
+                cwd=str(install_path),
+                loader=server.get('loader'),
+                version=server.get('version'),
+            )
             self._instances[server_id] = manager
             return manager
 
@@ -259,6 +264,11 @@ class ServerProcessRegistry:
             # without requiring an explicit invalidate() between attempts.
             if not manager.is_running:
                 manager.command = self._build_command(server)
+                # Same refresh for the TPS probe's inputs: a cached manager
+                # whose server has since been upgraded (loader or MC version)
+                # would otherwise keep sampling with the old loader's command.
+                manager.loader = str(server.get('loader') or '') or None
+                manager.version = str(server.get('version') or '') or None
         except ManagedConfigError as exc:
             # Fail-closed: map the launch-builder refusal to the clean stopped
             # shape (no 500). Boot autostart logs this via _start_one and moves on.

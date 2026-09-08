@@ -365,7 +365,11 @@ export const useServerStore = defineStore('server', () => {
         online: server.value?.runtime?.players?.online ?? 0,
         max: server.value?.maxPlayers ?? server.value?.runtime?.players?.max ?? 0
       },
-      tps: server.value?.runtime?.tps ?? null
+      tps: server.value?.runtime?.tps ?? null,
+      // Absent (stopped, or a backend that predates TPS sampling) reads as
+      // supported, so the card falls back to the plain "no reading yet" dash
+      // rather than claiming the server can't report one.
+      tpsSupported: server.value?.runtime?.tpsSupported !== false
     }
   })
 
