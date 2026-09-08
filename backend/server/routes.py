@@ -373,6 +373,64 @@ def _java_compat_payload(mc_version: str) -> dict:
     return compat.to_dict()
 
 
+# --------------------------------------------------------------------------- #
+# Settings write surface
+# --------------------------------------------------------------------------- #
+#
+# PUT /servers/<id>/settings used to merge whatever JSON it was handed into the
+# stored record, stripping only 'id' and 'createdAt'. That let a caller
+# overwrite bookkeeping the panel maintains for itself — the installed-content
+# manifest, the modpack record, the persisted status, the installer-derived
+# launch spec — none of which is a "setting" and none of which any legitimate
+# client sends. A client bug that POSTed a whole server object back (a common
+# read-modify-write pattern) would silently corrupt the manifest.
+#
+# The allowlist below is the write surface. It is derived from the two places
+# that define what a setting actually is, and the pin test
+# tests/test_settings_allowlist.py fails RED if either drifts away from it:
+#
+#   * every field _build_server_properties reads off the record, and
+#   * the record-level tuning the settings form owns (name / memory / launch).
+
+_SETTINGS_RECORD_FIELDS = frozenset({
+    'name', 'memory', 'memoryUnit', 'javaPath', 'jvmArgs',
+})
+
+_SETTINGS_PROPERTY_FIELDS = frozenset({
+    'acceptsTransfers', 'allowFlight', 'broadcastConsoleToOps',
+    'broadcastRconToOps', 'bugReportLink', 'commandBlocks', 'difficulty',
+    'enableCodeOfConduct', 'enableJmxMonitoring', 'enableQuery',
+    'enableRcon', 'enableStatus', 'enforceSecureProfile',
+    'enforceWhitelist', 'entityBroadcastRangePercentage', 'forceGamemode',
+    'functionPermissionLevel', 'gamemode', 'generateStructures',
+    'generatorSettings', 'hardcore', 'hideOnlinePlayers',
+    'initialDisabledPacks', 'initialEnabledPacks', 'levelName', 'levelType',
+    'logIps', 'maxChainedNeighborUpdates', 'maxPlayers', 'maxTickTime',
+    'maxWorldSize', 'motd', 'networkCompressionThreshold', 'onlineMode',
+    'opPermissionLevel', 'pauseWhenEmptySeconds', 'playerIdleTimeout',
+    'port', 'preventProxyConnections', 'pvp', 'queryPort', 'rateLimit',
+    'rconPassword', 'rconPort', 'regionFileCompression',
+    'requireResourcePack', 'resourcePack', 'resourcePackId',
+    'resourcePackPrompt', 'resourcePackSha1', 'seed', 'serverIp',
+    'simulationDistance', 'spawnAnimals', 'spawnMonsters', 'spawnNpcs',
+    'spawnProtection', 'statusHeartbeatInterval', 'syncChunkWrites',
+    'textFilteringConfig', 'textFilteringVersion', 'useNativeTransport',
+    'viewDistance', 'whitelist',
+})
+
+SETTABLE_SETTINGS_FIELDS = _SETTINGS_RECORD_FIELDS | _SETTINGS_PROPERTY_FIELDS
+
+# Server-generated fields that GET returns and that mean nothing on write.
+# Dropped silently rather than rejected so a read-modify-write client (GET the
+# server, change one field, PUT it back) still works — echoing back a value the
+# server itself produced is not an attempt to change anything. Everything NOT
+# here and NOT settable is rejected loudly, because silently ignoring it would
+# leave the caller believing a write landed when it did not.
+_SETTINGS_IGNORED_ECHO_FIELDS = frozenset({
+    'id', 'createdAt', 'updatedAt', 'runtime',
+    'javaCompatibility', 'javaRequirement',
+})
+
 _MIN_PORT = 1
 _MAX_PORT = 65535
 
@@ -850,9 +908,18 @@ def update_server_settings(server_id, server):
             'error': f"Port {data['port']} is already in use by another server"
         }), 400
 
-    protected_fields = ['id', 'createdAt']
-    for field in protected_fields:
+    # Drop the server-generated echo fields, then refuse anything left that is
+    # not a setting. Rejecting rather than stripping keeps a caller from
+    # believing it changed 'status' or 'modContent' when it did not.
+    for field in _SETTINGS_IGNORED_ECHO_FIELDS:
         data.pop(field, None)
+
+    unsettable = sorted(key for key in data if key not in SETTABLE_SETTINGS_FIELDS)
+    if unsettable:
+        return jsonify({
+            'error': f"Not a server setting: {', '.join(unsettable)}",
+            'unsettable_fields': unsettable,
+        }), 400
 
     runtime_status = _registry().get_status(server_id)
     if runtime_status.get('status') == 'running':
