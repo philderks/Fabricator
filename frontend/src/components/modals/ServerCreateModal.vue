@@ -52,6 +52,17 @@
       </div>
     </div>
 
+    <!-- Contact lost while watching the install. The server record exists and
+         the backend worker is most likely still installing into it, so this
+         deliberately does NOT offer Retry: that creates a second server. -->
+    <div v-else-if="installState === 'unknown'" class="install-failed-pane">
+      <h3>Lost contact with the panel</h3>
+      <p class="install-failed-error">{{ installProgress?.error || lostContactMessage }}</p>
+      <div class="install-failed-actions">
+        <AppButton variant="primary" size="md" @click="handleInstallClose">Close</AppButton>
+      </div>
+    </div>
+
     <form v-else @submit.prevent="handleCreate" class="settings-form">
       <!-- First question, not a later one. A modpack targets a specific
            Minecraft version and loader, so when one is being imported it is the
@@ -636,6 +647,11 @@ import AppButton from '../ui/AppButton.vue'
 import FormField from '../ui/FormField.vue'
 import { createServer, installServer, getLoaderGameVersions, getJavaStatus, getServerInstallProgress } from '../../api/servers'
 import {
+  createProgressPoller,
+  LOST_CONTACT_MESSAGE,
+  POLL_INTERVAL_MS
+} from '../../utils/pollProgress'
+import {
   resolveProjectVersion,
   uploadModpackArchive,
   discardModpackUpload
@@ -672,7 +688,7 @@ export default {
       // 'failed' once the user submits and the backend returns 202; the
       // existing 'creating' flag stays true during this phase to keep the
       // submit button disabled if the modal is somehow re-rendered.
-      installState: null,           // null | 'installing' | 'failed'
+      installState: null,           // null | 'installing' | 'failed' | 'unknown'
       installProgress: null,         // last-seen progress payload from GET /install/progress
       installPollHandle: null,       // setInterval handle; clear on terminal/unmount
       installPollResolver: null,     // Promise resolve fn so handleInstallClose can release a mid-install await
@@ -758,6 +774,12 @@ export default {
     this.loadGameVersions()
   },
   computed: {
+    // Module-scope imports are not visible to an Options API template, so the
+    // shared copy is surfaced here rather than duplicated as a literal.
+    lostContactMessage() {
+      return LOST_CONTACT_MESSAGE
+    },
+
     showModpackPanel() {
       // Driven by the mode tab, not by the loader. Gating this on the loader
       // was the inversion: the panel is where the loader gets decided (a pack
@@ -1444,6 +1466,10 @@ export default {
             this.toast.success('Server installed successfully.', 'Server Installation')
             this.installState = null
             this.installProgress = null
+          } else if (finalProgress.phase === 'unknown') {
+            this.installState = 'unknown'
+            this.installProgress = finalProgress
+            this.toast.warning(finalProgress.error, 'Server Installation')
           } else {
             this.installState = 'failed'
             this.installProgress = finalProgress
@@ -1505,6 +1531,13 @@ export default {
      * Resolves with the final progress payload ({phase, error?, ...}).
      * Updates this.installProgress on every poll so the template stays live.
      * Cleans up its own interval handle.
+     *
+     * A failed poll is retried rather than treated as a failed install — the
+     * install runs in a backend worker and keeps going whether or not we can
+     * see it (see utils/pollProgress). Once the retries are exhausted this
+     * resolves with phase 'unknown', NOT 'failed': we genuinely do not know the
+     * outcome, and the 'failed' pane both asserts otherwise and offers a Retry
+     * that would create a second server record for a still-running install.
      */
     async pollInstallProgress(serverId) {
       return new Promise((resolve) => {
@@ -1513,33 +1546,41 @@ export default {
         // clearInterval stops further ticks but leaves the awaiting handleCreate
         // hung — its finally never runs, this.creating stays true forever.
         this.installPollResolver = resolve
+        const poll = createProgressPoller(() => getServerInstallProgress(serverId))
+
+        const finish = (value) => {
+          if (this.installPollHandle) {
+            clearInterval(this.installPollHandle)
+            this.installPollHandle = null
+          }
+          this.installPollResolver = null
+          resolve(value)
+        }
+
         const tick = async () => {
-          try {
-            const progress = await getServerInstallProgress(serverId)
-            this.installProgress = progress
-            if (!progress.active || progress.phase === 'done' || progress.phase === 'failed') {
-              if (this.installPollHandle) {
-                clearInterval(this.installPollHandle)
-                this.installPollHandle = null
-              }
-              this.installPollResolver = null
-              resolve(progress)
-            }
-          } catch (err) {
-            // If the GET itself fails (rare — server unreachable), surface as failed.
-            console.error('Install-progress poll failed:', err)
-            if (this.installPollHandle) {
-              clearInterval(this.installPollHandle)
-              this.installPollHandle = null
-            }
-            this.installPollResolver = null
-            resolve({ phase: 'failed', error: err.message || 'Lost contact with backend during install.' })
+          const result = await poll()
+          if (result.status === 'retry') {
+            console.warn(
+              `Install-progress poll failed (attempt ${result.failures}); retrying`,
+              result.error,
+            )
+            return
+          }
+          if (result.status === 'giveup') {
+            console.error('Install-progress poll gave up:', result.error)
+            finish({ phase: 'unknown', error: LOST_CONTACT_MESSAGE })
+            return
+          }
+          const progress = result.progress
+          this.installProgress = progress
+          if (!progress.active || progress.phase === 'done' || progress.phase === 'failed') {
+            finish(progress)
           }
         }
         // Tick once immediately so a fast install (e.g. Vanilla cached) resolves
         // without a 750ms wait, then on the interval.
         tick()
-        this.installPollHandle = setInterval(tick, 750)
+        this.installPollHandle = setInterval(tick, POLL_INTERVAL_MS)
       })
     },
 
@@ -1691,6 +1732,11 @@ export default {
           this.$emit('create', { id: server.id, name: this.formData.name, modpackInstallError })
           this.$emit('close')
           this.resetForm()
+        } else if (finalProgress.phase === 'unknown') {
+          // Polling gave up; the install is probably still going. No Retry here
+          // — it would create a second server for the one still installing.
+          this.installState = 'unknown'
+          this.installProgress = finalProgress
         } else {
           // phase === 'failed' — show inline error UI, do NOT auto-close.
           this.installState = 'failed'

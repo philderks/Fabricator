@@ -36,6 +36,11 @@ import {
 // Status-display logic consolidated in utils/getEffectiveStatus (F6/CC5);
 // keep alias for the existing call sites in this file.
 import { getEffectiveStatus as pickEffectiveStatus } from '../utils/getEffectiveStatus'
+import {
+  createProgressPoller,
+  LOST_CONTACT_MESSAGE,
+  POLL_INTERVAL_MS
+} from '../utils/pollProgress'
 
 const MODPACK_STAGE_LABELS = {
   starting: 'Starting install...',
@@ -1138,13 +1143,35 @@ export const useServerStore = defineStore('server', () => {
       // create modal's exact contract (750ms cadence, terminal on !active
       // or done/failed; 'aborted' terminates via active:false).
       await installServer(installServerId)
+      // A failed poll observes nothing about the install, which keeps running
+      // in a backend worker regardless, so transient failures are ridden out
+      // rather than reported as a failed install (see utils/pollProgress).
+      const poll = createProgressPoller(() => getServerInstallProgress(installServerId))
       let progress = null
+      let lostContact = false
       for (;;) {
-        await new Promise(resolve => setTimeout(resolve, 750))
-        progress = await getServerInstallProgress(installServerId)
+        await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS))
+        const result = await poll()
+        if (result.status === 'retry') {
+          console.warn(
+            `Install-progress poll failed (attempt ${result.failures}); retrying`,
+            result.error,
+          )
+          continue
+        }
+        if (result.status === 'giveup') {
+          console.error('Install-progress poll gave up:', result.error)
+          lostContact = true
+          break
+        }
+        progress = result.progress
         if (!progress.active || progress.phase === 'done' || progress.phase === 'failed') break
       }
-      if (progress.phase === 'done') {
+      if (lostContact) {
+        // Deliberately a warning, not an error: we do not know that the install
+        // failed, and it most likely did not.
+        toast.warning(LOST_CONTACT_MESSAGE, 'Server Installation')
+      } else if (progress.phase === 'done') {
         toast.success('Server installed successfully.', 'Server Installation')
       } else {
         toast.error(progress.error || 'Installation failed', 'Server Installation')
