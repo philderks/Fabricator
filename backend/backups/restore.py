@@ -7,6 +7,9 @@
 2. **Mandatory safety snapshot.** Fast uncompressed ``.tar`` of the live
    server dir into the *owning config's* ``storagePath`` named
    ``safety-<configSlug>-<ts>.tar``. Recorded with ``type="safety"``.
+   Snapshots without an owning config (``configId: null`` — quick backups,
+   pre-upgrade snapshots, world-import safety tars) place it in the default
+   ``<install>/backups`` instead.
    If this step raises ANY exception the entire restore aborts, the
    live dir is NEVER touched, and the server is restarted if it was
    running. Non-negotiable per the brief and pinned by a dedicated test.
@@ -137,17 +140,15 @@ def run_restore(
             f"Archive {archive_path} no longer exists on disk"
         )
 
+    # The safety snapshot lands in the owning config's storage dir when the
+    # snapshot has one. Snapshots recorded with ``configId: null`` — quick
+    # backups, pre-upgrade snapshots, world-import safety tars — have no
+    # config, so they fall back to the default ``<install>/backups`` location
+    # (the same place the world importer writes its own safety tar). A missing
+    # config must NOT abort the restore: it used to, which made every ad-hoc
+    # snapshot unrestorable, including the pre-upgrade snapshot that
+    # ``server/upgrade.py`` documents as the upgrade recovery path.
     cfg = storage.get_config_record(server_id, snapshot.get("configId") or "")
-    if not cfg:
-        progress.update(
-            job_id,
-            phase="failed",
-            error="Owning backup config not found (cannot place safety snapshot)",
-        )
-        raise ValueError(
-            "Owning backup config not found — restore aborted because the "
-            "mandatory safety snapshot has no storage path"
-        )
 
     server = server_storage.get_server(server_id)
     if not server:
@@ -156,7 +157,10 @@ def run_restore(
 
     registry = get_server_process_registry()
     install_path = registry.resolve_install_path(server)
-    safety_storage = storage.resolve_config_storage_path(cfg)
+    if cfg:
+        safety_storage = storage.resolve_config_storage_path(cfg)
+    else:
+        safety_storage = install_path / "backups"
     safety_storage.mkdir(parents=True, exist_ok=True)
 
     server_lock = get_server_lock(server_id)
@@ -295,13 +299,18 @@ def run_restore(
 def _write_safety_snapshot(
     *,
     install_path: Path,
-    cfg: Dict[str, Any],
+    cfg: Optional[Dict[str, Any]],
     storage_path: Path,
     server_id: str,
 ) -> Dict[str, Any]:
-    """Build the mandatory safety tar and return its snapshot record."""
+    """Build the mandatory safety tar and return its snapshot record.
+
+    ``cfg`` is ``None`` when the restored snapshot has no owning config (an
+    ad-hoc/quick backup); the safety record is then itself ad-hoc
+    (``configId: null``) and named with the generic slug.
+    """
     timestamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
-    config_slug = slugify(cfg.get("name") or "backup") or "backup"
+    config_slug = slugify((cfg or {}).get("name") or "backup") or "backup"
     safety_name = f"safety-{config_slug}-{timestamp}.tar"
     final_path = storage_path / safety_name
     # If a previous safety with the same name exists (very unlikely —
@@ -349,7 +358,7 @@ def _write_safety_snapshot(
     return storage.record_snapshot(
         server_id,
         {
-            "configId": cfg.get("id"),
+            "configId": cfg.get("id") if cfg else None,
             "type": "safety",
             "filePath": str(final_path),
             "fileName": final_path.name,

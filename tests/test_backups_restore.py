@@ -312,6 +312,61 @@ def test_reset_restore_swaps_in_staged_tree(
     assert not (install / "ops.json").exists()
 
 
+def test_restore_of_adhoc_snapshot_without_config_succeeds(
+    restore_env, monkeypatch, tmp_path
+):
+    """A snapshot with ``configId: null`` (quick backup, pre-upgrade snapshot,
+    world-import safety tar) must be restorable. The mandatory safety snapshot
+    then falls back to the default ``<install>/backups`` location and is
+    recorded ad-hoc (``configId: null``) itself. Regression: a missing owning
+    config used to abort the restore outright."""
+    storage = restore_env["storage"]
+    restore = restore_env["restore"]
+    tmp = restore_env["tmp"]
+
+    install = _seed_server(tmp, "srv_adhoc")
+    storage_dir = tmp_path / "store-adhoc"
+    storage_dir.mkdir()
+
+    archive = storage_dir / "manual-snap.tar"
+    _write_plain_tar(archive, {
+        "server.properties": "RESTORED-CONFIG\n",
+        "world/level.dat": "RESTORED-WORLD",
+    })
+    snap = storage.record_snapshot(
+        "srv_adhoc",
+        {
+            "configId": None,
+            "type": "backup",
+            "filePath": str(archive),
+            "fileName": archive.name,
+            "sizeBytes": archive.stat().st_size,
+            "status": "success",
+        },
+    )
+
+    registry = _fake_registry(install)
+    monkeypatch.setattr(
+        restore, "get_server_process_registry", lambda: registry
+    )
+
+    record = restore.run_restore(snap["id"], mode="in_place")
+
+    assert (install / "server.properties").read_text() == "RESTORED-CONFIG\n"
+    assert (install / "world" / "level.dat").read_text() == "RESTORED-WORLD"
+
+    # The mandatory safety snapshot landed in the default location and is
+    # itself an ad-hoc record.
+    safety_id = record["safetySnapshotId"]
+    safety = storage.get_snapshot("srv_adhoc", safety_id)
+    assert safety is not None
+    assert safety["type"] == "safety"
+    assert safety["configId"] is None
+    safety_path = Path(safety["filePath"])
+    assert safety_path.exists()
+    assert safety_path.parent == install / "backups"
+
+
 def test_safe_extract_tar_rejects_traversal(tmp_path):
     """Path-traversal attempts via tar members must be rejected."""
     from backend.utils.zip import safe_extract_tar
