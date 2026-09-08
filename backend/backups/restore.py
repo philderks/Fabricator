@@ -41,7 +41,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from backend.backups import progress, storage
+from backend.backups import archive, progress, storage
 from backend.server import storage as server_storage
 from backend.server.locks import get_server_lock
 from backend.server.registry import get_server_process_registry
@@ -325,9 +325,9 @@ def _write_safety_snapshot(
     # Exclude the storage dir wherever it sits inside the install tree — it may
     # be NESTED (e.g. <install>/data/backups), not just a direct child — so we
     # never recursively pack prior backups into the safety tar (which would grow
-    # it with every restore). A tarfile filter on the arcname drops only the
-    # storage subtree while keeping unrelated siblings under the same
-    # intermediate dir (e.g. <install>/data/other).
+    # it with every restore). Skipping by arcname drops only the storage subtree
+    # while keeping unrelated siblings under the same intermediate dir
+    # (e.g. <install>/data/other).
     try:
         storage_rel = (
             storage_path.resolve().relative_to(install_path.resolve()).as_posix()
@@ -335,18 +335,10 @@ def _write_safety_snapshot(
     except (ValueError, OSError):
         storage_rel = None  # storage lives outside the install tree — nothing to skip
 
-    def _drop_storage(tarinfo):
-        if storage_rel and (
-            tarinfo.name == storage_rel
-            or tarinfo.name.startswith(storage_rel + "/")
-        ):
-            return None
-        return tarinfo
-
     try:
-        with tarfile.open(tmp_path, "w") as tf:
-            for entry in sorted(install_path.iterdir()):
-                tf.add(entry, arcname=entry.name, filter=_drop_storage)
+        warnings = archive.write_tree_tar(
+            install_path, tmp_path, skip=archive.subtree_skipper(storage_rel),
+        )
         os.replace(tmp_path, final_path)
     except Exception:
         try:
@@ -354,6 +346,15 @@ def _write_safety_snapshot(
         except OSError:
             pass
         raise
+
+    message = "Pre-restore safety snapshot"
+    if warnings:
+        logger.warning(
+            "Safety snapshot for %s skipped %d unreadable entr%s: %s",
+            server_id, len(warnings),
+            "y" if len(warnings) == 1 else "ies", "; ".join(warnings[:5]),
+        )
+        message += f" ({len(warnings)} unreadable entries skipped)"
 
     return storage.record_snapshot(
         server_id,
@@ -364,14 +365,21 @@ def _write_safety_snapshot(
             "fileName": final_path.name,
             "sizeBytes": final_path.stat().st_size,
             "durationSeconds": None,
-            "status": "success",
-            "message": "Pre-restore safety snapshot",
+            "status": "warning" if warnings else "success",
+            "message": message,
         },
     )
 
 
 def _extract_archive(archive_path: Path, destination: Path) -> None:
-    """Extract a backup archive (plain tar, tar.gz, or hybrid outer tar)."""
+    """Extract a backup archive (plain tar, tar.gz, or hybrid outer tar).
+
+    ``allow_internal_links=True`` throughout: archives written from here on
+    contain no link members at all (see :mod:`backend.backups.archive`), but
+    safety snapshots taken by older builds stored symlinks verbatim, and the
+    strict default made every one of them unrestorable. Links resolving OUTSIDE
+    the destination are still refused, which is the property that matters.
+    """
     with tarfile.open(archive_path, "r:*") as outer:
         names = set(outer.getnames())
         if {"data.tar.gz", "worlds.tar"}.issubset(names):
@@ -380,9 +388,9 @@ def _extract_archive(archive_path: Path, destination: Path) -> None:
             data_inner = destination / "data.tar.gz"
             worlds_inner = destination / "worlds.tar"
             with tarfile.open(data_inner, "r:gz") as tf:
-                safe_extract_tar(tf, destination)
+                safe_extract_tar(tf, destination, allow_internal_links=True)
             with tarfile.open(worlds_inner, "r") as tf:
-                safe_extract_tar(tf, destination)
+                safe_extract_tar(tf, destination, allow_internal_links=True)
             try:
                 data_inner.unlink()
             except OSError:
@@ -397,7 +405,7 @@ def _extract_archive(archive_path: Path, destination: Path) -> None:
         # Reopen because extractall consumes the iterator state in some
         # Python versions when we already inspected getnames().
     with tarfile.open(archive_path, "r:*") as tf:
-        safe_extract_tar(tf, destination)
+        safe_extract_tar(tf, destination, allow_internal_links=True)
 
 
 def _filtered_outer_members(tf: tarfile.TarFile) -> List[tarfile.TarInfo]:

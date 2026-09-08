@@ -373,6 +373,68 @@ def _java_compat_payload(mc_version: str) -> dict:
     return compat.to_dict()
 
 
+_MIN_PORT = 1
+_MAX_PORT = 65535
+
+
+def _coerce_port(value) -> int:
+    """Return ``value`` as an in-range TCP port int, or raise ``ValueError``.
+
+    Bools are rejected explicitly: ``int(True)`` is 1, so a JSON ``true`` would
+    otherwise sail through as a valid port. Numeric strings ARE accepted and
+    converted, which is what keeps the stored record's type stable — see
+    :func:`_normalize_port` for why that matters.
+    """
+    if isinstance(value, bool):
+        raise ValueError('port must be a number')
+    try:
+        port = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError('port must be a number') from exc
+    if not _MIN_PORT <= port <= _MAX_PORT:
+        raise ValueError(f'port must be between {_MIN_PORT} and {_MAX_PORT}')
+    return port
+
+
+def _normalize_port(data: dict) -> str | None:
+    """Coerce ``data['port']`` to an int in place; return an error message or None.
+
+    Persisting the coerced value is what makes the duplicate-port check
+    trustworthy. The check compares the requested port against every stored
+    record, and ``"25565" == 25565`` is False in Python — so a record that ever
+    held a string port would silently accept a second server on the same port.
+    Normalizing on every write (create AND settings) means the stored type can
+    only ever be int.
+    """
+    if 'port' not in data:
+        return None
+    try:
+        data['port'] = _coerce_port(data['port'])
+    except ValueError as exc:
+        return str(exc)
+    return None
+
+
+def _port_taken_by_other(port: int, servers: list, exclude_id=None) -> bool:
+    """True when another server already holds ``port``.
+
+    Both sides are coerced before comparing so a legacy record that stored its
+    port as a string still collides correctly. A record whose port is
+    unparseable is treated as not-a-conflict — it cannot bind anything anyway,
+    and refusing a create because of an unrelated corrupt record would be worse.
+    """
+    for server in servers:
+        if exclude_id is not None and server.get('id') == exclude_id:
+            continue
+        try:
+            existing = _coerce_port(server.get('port', 25565))
+        except ValueError:
+            continue
+        if existing == port:
+            return True
+    return False
+
+
 def _normalize_launch_overrides(data: dict) -> str | None:
     """Validate and normalize ``javaPath`` / ``jvmArgs`` in-place.
 
@@ -459,9 +521,17 @@ def create_server():
             'error': f'Missing required fields: {", ".join(missing_fields)}'
         }), 400
 
-    requested_port = int(data.get('port', 25565))
+    # Coerce before the duplicate check so the comparison is int-vs-int, and
+    # before the record is written so the stored type is always int. An
+    # unparseable port is the caller's mistake — a 400, not an unhandled 500.
+    data.setdefault('port', 25565)
+    error = _normalize_port(data)
+    if error:
+        return jsonify({'error': error}), 400
+    requested_port = data['port']
+
     existing_servers = storage.get_all_servers()
-    if any((server.get('port') or 25565) == requested_port for server in existing_servers):
+    if _port_taken_by_other(requested_port, existing_servers):
         return jsonify({'error': f'Port {requested_port} is already in use by another server'}), 400
 
     # Same validation as the settings route — the create modal offers javaPath
@@ -767,6 +837,18 @@ def update_server_settings(server_id, server):
     error = _normalize_launch_overrides(data)
     if error:
         return jsonify({'error': error}), 400
+
+    # Same coercion the create route applies, for the same reason: the stored
+    # port type must stay int or the duplicate check silently stops working.
+    error = _normalize_port(data)
+    if error:
+        return jsonify({'error': error}), 400
+    if 'port' in data and _port_taken_by_other(
+        data['port'], storage.get_all_servers(), exclude_id=server_id
+    ):
+        return jsonify({
+            'error': f"Port {data['port']} is already in use by another server"
+        }), 400
 
     protected_fields = ['id', 'createdAt']
     for field in protected_fields:

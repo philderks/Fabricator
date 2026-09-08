@@ -46,7 +46,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from backend.backups import progress, storage
+from backend.backups import archive, progress, storage
 from backend.server import storage as server_storage
 from backend.server.locks import get_server_lock
 from backend.server.registry import get_server_process_registry
@@ -561,8 +561,8 @@ def _write_safety_snapshot(
 
     # Exclude the storage dir wherever it sits inside the install tree (mirror of
     # restore._write_safety_snapshot). Here storage_path is <install>/backups (a
-    # direct child), but a tarfile arcname filter keeps the two copies identical
-    # and correct even if that ever nests — no recursive self-inclusion.
+    # direct child), but skipping by arcname keeps the two copies identical and
+    # correct even if that ever nests — no recursive self-inclusion.
     try:
         storage_rel = (
             storage_path.resolve().relative_to(install_path.resolve()).as_posix()
@@ -570,22 +570,23 @@ def _write_safety_snapshot(
     except (ValueError, OSError):
         storage_rel = None
 
-    def _drop_storage(tarinfo):
-        if storage_rel and (
-            tarinfo.name == storage_rel
-            or tarinfo.name.startswith(storage_rel + "/")
-        ):
-            return None
-        return tarinfo
-
     try:
-        with tarfile.open(tmp_path, "w") as tf:
-            for entry in sorted(install_path.iterdir()):
-                tf.add(entry, arcname=entry.name, filter=_drop_storage)
+        warnings = archive.write_tree_tar(
+            install_path, tmp_path, skip=archive.subtree_skipper(storage_rel),
+        )
         os.replace(tmp_path, final_path)
     except Exception:
         tmp_path.unlink(missing_ok=True)
         raise
+
+    message = "Pre-import safety snapshot"
+    if warnings:
+        logger.warning(
+            "Safety snapshot for %s skipped %d unreadable entr%s: %s",
+            server_id, len(warnings),
+            "y" if len(warnings) == 1 else "ies", "; ".join(warnings[:5]),
+        )
+        message += f" ({len(warnings)} unreadable entries skipped)"
 
     return storage.record_snapshot(
         server_id,
@@ -596,8 +597,8 @@ def _write_safety_snapshot(
             "fileName": final_path.name,
             "sizeBytes": final_path.stat().st_size,
             "durationSeconds": None,
-            "status": "success",
-            "message": "Pre-import safety snapshot",
+            "status": "warning" if warnings else "success",
+            "message": message,
         },
     )
 
