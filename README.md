@@ -18,7 +18,7 @@
 ---
 
 <div align="center">
-  <img width="2560" height="1313" alt="Overview" src="https://github.com/user-attachments/assets/7ed784e6-eb1d-4305-bc98-3800a785fbc1" />
+  <img src="assets/screenshots/overview.png" alt="Fabricator dashboard — server overview" width="1280" />
 </div>
 
 
@@ -50,6 +50,33 @@
 | 🔐 | **User roles and permissions** | 📋 Planned |
 | ✏️ | **Advanced editor & archived logs** | 📋 Planned |
 | 📥 | **More install targets**: Proxmox VE, CasaOS, Umbrel, Unraid, Coolify/Dokploy | 📋 Planned |
+
+---
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%">
+      <img src="assets/screenshots/console.png" alt="Live console with log level filters and a command input" />
+      <sub><b>Console</b> — live log stream, level filters, and a command input</sub>
+    </td>
+    <td width="50%">
+      <img src="assets/screenshots/mods.png" alt="Browsing Modrinth mods from the panel" />
+      <sub><b>Mods</b> — search Modrinth and install mods or plugins in one click</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="assets/screenshots/files.png" alt="File explorer with server.properties open in the editor" />
+      <sub><b>Files</b> — browse the server tree and edit configs in the panel</sub>
+    </td>
+    <td width="50%">
+      <img src="assets/screenshots/createserver.png" alt="Create New Server dialog with the mod loader dropdown open" />
+      <sub><b>New server</b> — pick a version and loader, or import a modpack</sub>
+    </td>
+  </tr>
+</table>
 
 ---
 
