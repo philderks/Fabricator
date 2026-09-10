@@ -373,6 +373,126 @@ def _java_compat_payload(mc_version: str) -> dict:
     return compat.to_dict()
 
 
+# --------------------------------------------------------------------------- #
+# Settings write surface
+# --------------------------------------------------------------------------- #
+#
+# PUT /servers/<id>/settings used to merge whatever JSON it was handed into the
+# stored record, stripping only 'id' and 'createdAt'. That let a caller
+# overwrite bookkeeping the panel maintains for itself — the installed-content
+# manifest, the modpack record, the persisted status, the installer-derived
+# launch spec — none of which is a "setting" and none of which any legitimate
+# client sends. A client bug that POSTed a whole server object back (a common
+# read-modify-write pattern) would silently corrupt the manifest.
+#
+# The allowlist below is the write surface. It is derived from the two places
+# that define what a setting actually is, and the pin test
+# tests/test_settings_allowlist.py fails RED if either drifts away from it:
+#
+#   * every field _build_server_properties reads off the record, and
+#   * the record-level tuning the settings form owns (name / memory / launch).
+
+_SETTINGS_RECORD_FIELDS = frozenset({
+    'name', 'memory', 'memoryUnit', 'javaPath', 'jvmArgs',
+})
+
+_SETTINGS_PROPERTY_FIELDS = frozenset({
+    'acceptsTransfers', 'allowFlight', 'broadcastConsoleToOps',
+    'broadcastRconToOps', 'bugReportLink', 'commandBlocks', 'difficulty',
+    'enableCodeOfConduct', 'enableJmxMonitoring', 'enableQuery',
+    'enableRcon', 'enableStatus', 'enforceSecureProfile',
+    'enforceWhitelist', 'entityBroadcastRangePercentage', 'forceGamemode',
+    'functionPermissionLevel', 'gamemode', 'generateStructures',
+    'generatorSettings', 'hardcore', 'hideOnlinePlayers',
+    'initialDisabledPacks', 'initialEnabledPacks', 'levelName', 'levelType',
+    'logIps', 'maxChainedNeighborUpdates', 'maxPlayers', 'maxTickTime',
+    'maxWorldSize', 'motd', 'networkCompressionThreshold', 'onlineMode',
+    'opPermissionLevel', 'pauseWhenEmptySeconds', 'playerIdleTimeout',
+    'port', 'preventProxyConnections', 'pvp', 'queryPort', 'rateLimit',
+    'rconPassword', 'rconPort', 'regionFileCompression',
+    'requireResourcePack', 'resourcePack', 'resourcePackId',
+    'resourcePackPrompt', 'resourcePackSha1', 'seed', 'serverIp',
+    'simulationDistance', 'spawnAnimals', 'spawnMonsters', 'spawnNpcs',
+    'spawnProtection', 'statusHeartbeatInterval', 'syncChunkWrites',
+    'textFilteringConfig', 'textFilteringVersion', 'useNativeTransport',
+    'viewDistance', 'whitelist',
+})
+
+SETTABLE_SETTINGS_FIELDS = _SETTINGS_RECORD_FIELDS | _SETTINGS_PROPERTY_FIELDS
+
+# Server-generated fields that GET returns and that mean nothing on write.
+# Dropped silently rather than rejected so a read-modify-write client (GET the
+# server, change one field, PUT it back) still works — echoing back a value the
+# server itself produced is not an attempt to change anything. Everything NOT
+# here and NOT settable is rejected loudly, because silently ignoring it would
+# leave the caller believing a write landed when it did not.
+_SETTINGS_IGNORED_ECHO_FIELDS = frozenset({
+    'id', 'createdAt', 'updatedAt', 'runtime',
+    'javaCompatibility', 'javaRequirement',
+})
+
+_MIN_PORT = 1
+_MAX_PORT = 65535
+
+
+def _coerce_port(value) -> int:
+    """Return ``value`` as an in-range TCP port int, or raise ``ValueError``.
+
+    Bools are rejected explicitly: ``int(True)`` is 1, so a JSON ``true`` would
+    otherwise sail through as a valid port. Numeric strings ARE accepted and
+    converted, which is what keeps the stored record's type stable — see
+    :func:`_normalize_port` for why that matters.
+    """
+    if isinstance(value, bool):
+        raise ValueError('port must be a number')
+    try:
+        port = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError('port must be a number') from exc
+    if not _MIN_PORT <= port <= _MAX_PORT:
+        raise ValueError(f'port must be between {_MIN_PORT} and {_MAX_PORT}')
+    return port
+
+
+def _normalize_port(data: dict) -> str | None:
+    """Coerce ``data['port']`` to an int in place; return an error message or None.
+
+    Persisting the coerced value is what makes the duplicate-port check
+    trustworthy. The check compares the requested port against every stored
+    record, and ``"25565" == 25565`` is False in Python — so a record that ever
+    held a string port would silently accept a second server on the same port.
+    Normalizing on every write (create AND settings) means the stored type can
+    only ever be int.
+    """
+    if 'port' not in data:
+        return None
+    try:
+        data['port'] = _coerce_port(data['port'])
+    except ValueError as exc:
+        return str(exc)
+    return None
+
+
+def _port_taken_by_other(port: int, servers: list, exclude_id=None) -> bool:
+    """True when another server already holds ``port``.
+
+    Both sides are coerced before comparing so a legacy record that stored its
+    port as a string still collides correctly. A record whose port is
+    unparseable is treated as not-a-conflict — it cannot bind anything anyway,
+    and refusing a create because of an unrelated corrupt record would be worse.
+    """
+    for server in servers:
+        if exclude_id is not None and server.get('id') == exclude_id:
+            continue
+        try:
+            existing = _coerce_port(server.get('port', 25565))
+        except ValueError:
+            continue
+        if existing == port:
+            return True
+    return False
+
+
 def _normalize_launch_overrides(data: dict) -> str | None:
     """Validate and normalize ``javaPath`` / ``jvmArgs`` in-place.
 
@@ -459,9 +579,17 @@ def create_server():
             'error': f'Missing required fields: {", ".join(missing_fields)}'
         }), 400
 
-    requested_port = int(data.get('port', 25565))
+    # Coerce before the duplicate check so the comparison is int-vs-int, and
+    # before the record is written so the stored type is always int. An
+    # unparseable port is the caller's mistake — a 400, not an unhandled 500.
+    data.setdefault('port', 25565)
+    error = _normalize_port(data)
+    if error:
+        return jsonify({'error': error}), 400
+    requested_port = data['port']
+
     existing_servers = storage.get_all_servers()
-    if any((server.get('port') or 25565) == requested_port for server in existing_servers):
+    if _port_taken_by_other(requested_port, existing_servers):
         return jsonify({'error': f'Port {requested_port} is already in use by another server'}), 400
 
     # Same validation as the settings route — the create modal offers javaPath
@@ -768,9 +896,30 @@ def update_server_settings(server_id, server):
     if error:
         return jsonify({'error': error}), 400
 
-    protected_fields = ['id', 'createdAt']
-    for field in protected_fields:
+    # Same coercion the create route applies, for the same reason: the stored
+    # port type must stay int or the duplicate check silently stops working.
+    error = _normalize_port(data)
+    if error:
+        return jsonify({'error': error}), 400
+    if 'port' in data and _port_taken_by_other(
+        data['port'], storage.get_all_servers(), exclude_id=server_id
+    ):
+        return jsonify({
+            'error': f"Port {data['port']} is already in use by another server"
+        }), 400
+
+    # Drop the server-generated echo fields, then refuse anything left that is
+    # not a setting. Rejecting rather than stripping keeps a caller from
+    # believing it changed 'status' or 'modContent' when it did not.
+    for field in _SETTINGS_IGNORED_ECHO_FIELDS:
         data.pop(field, None)
+
+    unsettable = sorted(key for key in data if key not in SETTABLE_SETTINGS_FIELDS)
+    if unsettable:
+        return jsonify({
+            'error': f"Not a server setting: {', '.join(unsettable)}",
+            'unsettable_fields': unsettable,
+        }), 400
 
     runtime_status = _registry().get_status(server_id)
     if runtime_status.get('status') == 'running':
@@ -1683,6 +1832,9 @@ def get_server_metrics(server_id, server):
     metrics = {
         'status': runtime.get('status', 'stopped'),
         'ram': runtime.get('ram'),
+        'cpu': runtime.get('cpu'),
+        'tps': runtime.get('tps'),
+        'tpsSupported': runtime.get('tpsSupported'),
         'pid': runtime.get('pid'),
     }
 

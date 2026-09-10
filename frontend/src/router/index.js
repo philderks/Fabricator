@@ -26,7 +26,8 @@ const routes = [
       // Same page as ServerGeneralSettings, reachable without a server. The
       // panel-wide settings (Java, MCP, password, display) do not need one;
       // the page hides its per-server Auto-start panel when the id is absent.
-      { path: 'settings', name: 'GlobalSettings', component: ServerGeneralSettingsPage },
+      // :section? drives the settings sub-pages; bare /settings is the index.
+      { path: 'settings/:section?', name: 'GlobalSettings', component: ServerGeneralSettingsPage },
       // MCP moved into the Settings page. Keep the old URL alive so bookmarks
       // (and ?redirect=/integrations coming back through the login guard) land
       // somewhere real instead of an unmatched blank route.
@@ -46,7 +47,7 @@ const routes = [
       { path: 'backups',  name: 'ServerBackups',  component: ServerBackupsPage },
       { path: 'playit',   name: 'ServerPlayit',   component: ServerPlayitPage },
       { path: 'properties', name: 'ServerSettings', component: ServerSettingsPage },
-      { path: 'settings', name: 'ServerGeneralSettings', component: ServerGeneralSettingsPage }
+      { path: 'settings/:section?', name: 'ServerGeneralSettings', component: ServerGeneralSettingsPage }
     ]
   }
 ]

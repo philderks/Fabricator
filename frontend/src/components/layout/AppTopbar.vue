@@ -3,7 +3,9 @@ import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import StatusPill from '../ui/StatusPill.vue'
 import AppButton from '../ui/AppButton.vue'
+import MobileMenuButton from './MobileMenuButton.vue'
 import { contentLabel } from '../../utils/loaderKind'
+import { settingsSectionLabel } from '../../utils/settingsSections'
 
 const props = defineProps({
   serverStatus: {
@@ -52,6 +54,19 @@ const pageTitle = computed(() => {
   return ROUTE_TITLE[route.name] || ''
 })
 
+// Settings is the one page with a level below it, so the title becomes a
+// breadcrumb there — the way back to the index without using browser Back.
+// null everywhere else, and on the index itself, where the title says it all.
+const settingsCrumb = computed(() => {
+  if (route.name !== 'ServerGeneralSettings') return null
+  const label = settingsSectionLabel(route.params.section)
+  if (!label) return null
+  return {
+    label,
+    parent: { name: 'ServerGeneralSettings', params: { id: route.params.id, section: '' } }
+  }
+})
+
 // StatusPill.vue owns the allowlist via its prop validator and falls back
 // to STATUS_META.unknown for unknown values — gating it here would just
 // duplicate that logic (F6/CC5).
@@ -75,40 +90,50 @@ const isPending = computed(() => props.serverStatus.status === 'pending')
 
 <template>
   <header class="app-topbar">
-    <div class="app-topbar__title">{{ pageTitle }}</div>
+    <div class="app-topbar__lead">
+      <MobileMenuButton />
+      <nav v-if="settingsCrumb" class="app-topbar__title" aria-label="Breadcrumb">
+        <router-link :to="settingsCrumb.parent" class="app-topbar__crumb-link">{{ pageTitle }}</router-link>
+        <span class="app-topbar__crumb-sep" aria-hidden="true">/</span>
+        <span aria-current="page">{{ settingsCrumb.label }}</span>
+      </nav>
+      <div v-else class="app-topbar__title">{{ pageTitle }}</div>
+    </div>
     <div class="app-topbar__right">
       <StatusPill :status="pillStatus" :label="statusLabel" :sub="pillSub" />
 
-      <AppButton
-        variant="ghost"
-        size="md"
-        :disabled="actionState.restart || !isRunning"
-        :loading="actionState.restart"
-        @click="$emit('restart')"
-      >
-        {{ actionState.restart ? 'Restarting' : 'Restart' }}
-      </AppButton>
+      <div class="app-topbar__actions">
+        <AppButton
+          variant="ghost"
+          size="md"
+          :disabled="actionState.restart || !isRunning"
+          :loading="actionState.restart"
+          @click="$emit('restart')"
+        >
+          {{ actionState.restart ? 'Restarting' : 'Restart' }}
+        </AppButton>
 
-      <AppButton
-        v-if="isRunning"
-        variant="danger"
-        size="md"
-        :disabled="actionState.stop"
-        :loading="actionState.stop"
-        @click="$emit('stop')"
-      >
-        {{ actionState.stop ? 'Stopping' : 'Stop' }}
-      </AppButton>
-      <AppButton
-        v-else
-        variant="primary"
-        size="md"
-        :disabled="isPending ? actionState.install : (actionState.start || startLocked)"
-        :loading="isPending ? actionState.install : actionState.start"
-        @click="$emit(isPending ? 'install' : 'start')"
-      >
-        {{ startButtonLabel }}
-      </AppButton>
+        <AppButton
+          v-if="isRunning"
+          variant="danger"
+          size="md"
+          :disabled="actionState.stop"
+          :loading="actionState.stop"
+          @click="$emit('stop')"
+        >
+          {{ actionState.stop ? 'Stopping' : 'Stop' }}
+        </AppButton>
+        <AppButton
+          v-else
+          variant="primary"
+          size="md"
+          :disabled="isPending ? actionState.install : (actionState.start || startLocked)"
+          :loading="isPending ? actionState.install : actionState.start"
+          @click="$emit(isPending ? 'install' : 'start')"
+        >
+          {{ startButtonLabel }}
+        </AppButton>
+      </div>
     </div>
   </header>
 </template>
@@ -124,15 +149,80 @@ const isPending = computed(() => props.serverStatus.status === 'pending')
   flex-shrink: 0;
 }
 
+.app-topbar__lead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
 .app-topbar__title {
   font-size: var(--text-lg);
   font-weight: 600;
   color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.app-topbar__right {
+/* As a breadcrumb the title holds several elements, so it becomes a flex row.
+   The plain-title case above keeps its ellipsis behaviour untouched. */
+nav.app-topbar__title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.app-topbar__crumb-link {
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.app-topbar__crumb-link:hover {
+  color: var(--primary);
+}
+
+.app-topbar__crumb-sep {
+  color: var(--text-disabled);
+  font-weight: 400;
+}
+
+.app-topbar__right,
+.app-topbar__actions {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+}
+
+/* Mobile: the status pill plus two buttons can't share a row with the title at
+   phone widths, so the bar becomes two rows — title (with the menu button) on
+   top, controls below. Height goes auto to let the second row exist; the header
+   token stays as the floor so a bar with no controls still lines up. */
+@media (max-width: 768px) {
+  .app-topbar {
+    height: auto;
+    min-height: var(--app-chrome-header-height);
+    flex-wrap: wrap;
+    row-gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .app-topbar__lead {
+    flex: 1 1 auto;
+  }
+
+  .app-topbar__title {
+    font-size: var(--text-md);
+  }
+
+  /* Full-width basis forces the wrap onto row two regardless of how wide the
+     pill's loader/version text happens to render. */
+  .app-topbar__right {
+    flex: 1 0 100%;
+    justify-content: space-between;
+    min-width: 0;
+  }
 }
 </style>

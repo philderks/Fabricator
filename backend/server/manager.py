@@ -7,6 +7,7 @@ import threading
 import time
 from typing import Iterable, List, Optional
 
+from backend.server import tps as tps_probe
 from backend.utils import platform as platform_utils
 from backend.utils.java import parse_java_major
 from backend.utils.time import iso_z_now
@@ -65,8 +66,45 @@ class ServerManager:
     _PLAYER_LEAVE_RE = re.compile(_LOG_PREFIX + r'([^<>\[\]]+) left the game')
     # SGR colour escapes some setups emit around the message on the pipe.
     _ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
+    # "Done (12.345s)! For help, type "help"" — the world is loaded and the
+    # console accepts commands. Same prefix anchoring as the player patterns so
+    # chat cannot fake it.
+    _SERVER_READY_RE = re.compile(_LOG_PREFIX + r'Done \(')
+    # The prefix on its own, used to split a line into prefix + message body
+    # before reading it as a TPS reply.
+    _LOG_LINE_RE = re.compile(_LOG_PREFIX)
 
-    def __init__(self, cwd: str, command: Optional[Iterable[str]] = None):
+    # TPS sampling. There is no push channel for tick rate, so a background
+    # thread types the loader's TPS command into the console on this interval
+    # and the stdout reader picks the answer back out. 30s is deliberately
+    # unhurried: Paper's figure is itself a 1-minute rolling average, so polling
+    # faster would only add lines to the server's own latest.log (which we
+    # cannot suppress — only Fabricator's console view is filtered) without
+    # making the number any fresher.
+    TPS_SAMPLE_INTERVAL_SEC = 30.0
+    # How long a sample waits for its answer before being counted a miss.
+    TPS_RESPONSE_TIMEOUT_SEC = 5.0
+    # Consecutive misses before the sampler gives up for the rest of the run.
+    # Guards against a loader that turns out not to know the command we picked:
+    # better one dead stat card than an error line every interval forever.
+    TPS_MAX_MISSES = 3
+    # Longest wait for the "Done (" line before giving up on sampling. Generous
+    # because a large modpack can genuinely take this long to load.
+    TPS_READY_TIMEOUT_SEC = 900.0
+    # A reading older than this is dropped rather than shown: a frozen number
+    # reads as "fine" when in fact the server stopped answering. Sized to outlast
+    # the sampler's full give-up sequence (TPS_MAX_MISSES rounds of interval +
+    # response timeout), so a brief unresponsive patch does not blank the card
+    # before the sampler itself has concluded anything.
+    TPS_STALE_AFTER_SEC = 150.0
+
+    def __init__(
+        self,
+        cwd: str,
+        command: Optional[Iterable[str]] = None,
+        loader: Optional[str] = None,
+        version: Optional[str] = None,
+    ):
         env_command = os.environ.get("SERVER_COMMAND")
         parsed_env_command: Optional[List[str]] = None
         if env_command:
@@ -109,6 +147,28 @@ class ServerManager:
         # immediate-exit diagnostic tail.
         self._buffer_lock = threading.Lock()
         self._players: Dict[str, OnlinePlayer] = {}
+        # Which TPS command this server understands is decided from these two.
+        # Public and re-assignable: the registry refreshes them before a start
+        # exactly as it does self.command, so an upgraded server is sampled
+        # with the right command without recreating the manager.
+        self.loader = str(loader) if loader else None
+        self.version = str(version) if version else None
+        self._tps_probe: Optional[tps_probe.TpsProbe] = None
+        self._tps: Optional[float] = None
+        self._tps_at = 0.0  # monotonic; 0.0 = never sampled this run
+        # Vanilla reports a target rate and a per-tick cost on separate lines;
+        # the target from the first is what caps the rate derived from the second.
+        self._tps_target_rate = tps_probe.DEFAULT_TICK_RATE
+        # While monotonic() is under this deadline we are waiting on our OWN
+        # probe, and the reply is suppressed from the console buffer. Outside
+        # that window an identical reply is the user's own command, and stays.
+        self._tps_pending_until = 0.0
+        self._tps_response = threading.Event()
+        self._tps_thread: Optional[threading.Thread] = None
+        self._tps_stop = threading.Event()
+        # Set when the current run logs "Done (" — the sampler holds off until
+        # then, since a command sent mid-load only produces an error line.
+        self._ready_event = threading.Event()
         self._lock = threading.Lock()
         # True only while stop() is draining a still-alive process. stop()
         # releases the lock during the drain (so stream threads can log shutdown
@@ -268,21 +328,29 @@ class ServerManager:
 
         def _stream(pipe, buffer: List[tuple[str, str]], is_stdout: bool):
             for line in iter(pipe.readline, ""):
-                # Append + truncate + counter bump together under _buffer_lock
-                # (NOT self._lock) so wait_for_log sees a consistent
-                # (buffer, _stdout_total) snapshot, while start()'s self._lock
-                # hold across the 0.5s spawn probe can't block this append (which
-                # would empty the immediate-exit diagnostic tail).
-                with self._buffer_lock:
-                    buffer.append((iso_z_now(), line))
-                    if len(buffer) > self.MAX_LOG_LINES:
-                        del buffer[: len(buffer) - self.MAX_LOG_LINES]
-                    if is_stdout:
-                        self._stdout_total += 1
-                # Player detection runs on the ANSI-stripped, prefix-anchored
-                # line (the raw line stays in the buffer for the colour console
-                # viewer).
+                # Detection runs on the ANSI-stripped, prefix-anchored line (the
+                # raw line stays in the buffer for the colour console viewer).
                 clean = self._ANSI_RE.sub("", line)
+                # Read before buffering: the reply to our own TPS probe is
+                # consumed here and kept out of the console the user reads, so
+                # a periodic poll does not scroll their log away. Runs outside
+                # _buffer_lock — it may take self._lock to store the reading,
+                # and that is the forbidden nesting order.
+                suppress = is_stdout and self._consume_tps_line(clean)
+                if not suppress:
+                    # Append + truncate + counter bump together under
+                    # _buffer_lock (NOT self._lock) so wait_for_log sees a
+                    # consistent (buffer, _stdout_total) snapshot, while start()'s
+                    # self._lock hold across the 0.5s spawn probe can't block this
+                    # append (which would empty the immediate-exit diagnostic tail).
+                    with self._buffer_lock:
+                        buffer.append((iso_z_now(), line))
+                        if len(buffer) > self.MAX_LOG_LINES:
+                            del buffer[: len(buffer) - self.MAX_LOG_LINES]
+                        if is_stdout:
+                            self._stdout_total += 1
+                if is_stdout and not self._ready_event.is_set() and self._SERVER_READY_RE.search(clean):
+                    self._ready_event.set()
                 join_match = self._PLAYER_JOIN_RE.search(clean)
                 if join_match:
                     name = join_match.group(1)
@@ -296,7 +364,8 @@ class ServerManager:
                     if leave_match:
                         with self._lock:
                             self._players.pop(leave_match.group(1), None)
-                print(line, end="")
+                if not suppress:
+                    print(line, end="")
             pipe.close()
 
         with self._buffer_lock:
@@ -307,6 +376,9 @@ class ServerManager:
             self._stdout_buffer = []
             self._stderr_buffer = []
             self._stdout_total = 0
+        # Belongs to the run, like the buffers: cleared before the stream threads
+        # that set it are started.
+        self._ready_event.clear()
         self._stdout_thread = threading.Thread(
             target=_stream, args=(self._process.stdout, self._stdout_buffer, True), daemon=True
         )
@@ -315,6 +387,130 @@ class ServerManager:
         )
         self._stdout_thread.start()
         self._stderr_thread.start()
+
+    def _consume_tps_line(self, clean: str) -> bool:
+        """Read a stdout line as a possible TPS reply. True means "don't log it".
+
+        Suppression is deliberately narrow: only a reply arriving inside the
+        window of a probe *we* sent is hidden. The same output produced by a
+        user typing the command themselves stays in their console — and is still
+        harvested as a free sample.
+        """
+        if self._tps_probe is None:
+            return False
+
+        prefix = self._LOG_LINE_RE.match(clean)
+        if prefix:
+            body = clean[prefix.end():]
+            if body[:1] in ("<", "["):
+                # Chat, including the 1.19+ "[Not Secure]" marker. Same reasoning
+                # as the player patterns: a player typing "TPS from last 1m..."
+                # must not be able to write a fake tick rate onto the dashboard.
+                return False
+        else:
+            # A line with no log prefix at all. Vanilla's /tick query reply is a
+            # single multi-line chat component, so log4j stamps only its first
+            # line and the rest — including "Average time per tick", the one line
+            # carrying the number — arrives bare. Accepting these is what makes
+            # vanilla/Fabric/Quilt work at all, and it does not reopen the
+            # spoofing hole above: chat is always logged WITH a prefix, and
+            # Minecraft does not let a player put a newline in a message, so a
+            # bare line cannot be player-authored.
+            body = clean
+        reading = tps_probe.classify(body)
+        if reading is None:
+            return False
+
+        kind, value = reading
+        # The window expires on its own rather than being cleared by the first
+        # matching line: vanilla answers over three lines, and the trailing
+        # percentile line would otherwise escape into the console.
+        pending = time.monotonic() < self._tps_pending_until
+
+        if kind == tps_probe.TARGET_RATE:
+            self._tps_target_rate = value
+            return pending
+        if kind == tps_probe.NOISE:
+            return pending
+        if kind == tps_probe.MSPT:
+            value = tps_probe.rate_from_mspt(value, self._tps_target_rate)
+
+        with self._lock:
+            self._tps = value
+            self._tps_at = time.monotonic()
+        self._tps_response.set()
+        return pending
+
+    def _wait_until_ready(self) -> bool:
+        """Block until the run logs "Done (", or the run/patience ends."""
+        deadline = time.monotonic() + self.TPS_READY_TIMEOUT_SEC
+        while not self._ready_event.is_set():
+            if self._tps_stop.wait(0.5):
+                return False
+            if time.monotonic() > deadline:
+                return False
+        return True
+
+    def _tps_sampler(self, probe: "tps_probe.TpsProbe") -> None:
+        """Type the loader's TPS command into the console on a fixed interval.
+
+        Held back until the world has loaded, because a command sent mid-load
+        only produces an error line, and abandoned after TPS_MAX_MISSES silent
+        rounds so a wrong guess about the loader costs one blank stat card
+        rather than an error every interval for the life of the server.
+        """
+        if not self._wait_until_ready():
+            return
+
+        misses = 0
+        while not self._tps_stop.wait(self.TPS_SAMPLE_INTERVAL_SEC):
+            if not self.is_running:
+                return
+
+            self._tps_response.clear()
+            self._tps_pending_until = time.monotonic() + self.TPS_RESPONSE_TIMEOUT_SEC
+            result = self.send_command(probe.command)
+            if not result.get("success"):
+                # Process gone or stdin closed; there is nothing left to ask.
+                return
+
+            answered = self._tps_response.wait(self.TPS_RESPONSE_TIMEOUT_SEC)
+            if self._tps_stop.is_set():
+                # stop() sets the response event too, so the shutdown path never
+                # waits out the full response timeout for this thread to notice.
+                return
+            if answered:
+                misses = 0
+                continue
+
+            misses += 1
+            if misses >= self.TPS_MAX_MISSES:
+                logger.info(
+                    "Server in %s did not answer %r; TPS sampling off for this run",
+                    self.cwd,
+                    probe.command,
+                )
+                return
+
+    def _start_tps_sampler(self) -> None:
+        """Begin sampling, if this loader/version can answer at all."""
+        self._tps = None
+        self._tps_at = 0.0
+        self._tps_target_rate = tps_probe.DEFAULT_TICK_RATE
+        self._tps_pending_until = 0.0
+        self._tps_stop.clear()
+        self._tps_response.clear()
+
+        probe = tps_probe.probe_for(self.loader, self.version)
+        self._tps_probe = probe
+        if probe is None:
+            return
+
+        thread = threading.Thread(
+            target=self._tps_sampler, args=(probe,), daemon=True
+        )
+        self._tps_thread = thread
+        thread.start()
 
     def _spawn_process(self, command_to_run: List[str]) -> tuple[bool, str]:
         try:
@@ -343,6 +539,7 @@ class ServerManager:
                     error_message += f" stderr: {stderr_tail.strip()}"
                 return False, error_message
 
+            self._start_tps_sampler()
             return True, "Server started"
         except Exception as exc:
             logger.exception("Failed to start server process")
@@ -424,11 +621,21 @@ class ServerManager:
             proc = self._process
             stdout_thread = self._stdout_thread
             stderr_thread = self._stderr_thread
+            tps_thread = self._tps_thread
             self._process = None
             self._ps_process = None
             self._players.clear()
             self._stdout_thread = None
             self._stderr_thread = None
+            self._tps_thread = None
+            self._tps_probe = None
+            self._tps = None
+            self._tps_at = 0.0
+            # Both events: _tps_stop is the actual signal, _tps_response only
+            # wakes the sampler out of its response wait so the join below is
+            # immediate rather than up to TPS_RESPONSE_TIMEOUT_SEC.
+            self._tps_stop.set()
+            self._tps_response.set()
             # Set atomically with clearing self._process so start() (which needs
             # the same lock) sees a consistent state: either the process is still
             # present (is_running True) or _stopping is True — never a window
@@ -464,6 +671,8 @@ class ServerManager:
                 stdout_thread.join(timeout=5)
             if stderr_thread:
                 stderr_thread.join(timeout=5)
+            if tps_thread:
+                tps_thread.join(timeout=5)
             with self._lock:
                 self._stopping = False
 
@@ -505,6 +714,21 @@ class ServerManager:
             if not running:
                 self._players.clear()
             status["players"] = {"online": len(self._players)}
+            tps_value = self._tps
+            tps_at = self._tps_at
+        if running:
+            # Whether this server can report a tick rate at all, so the UI can
+            # say "n/a" for an old vanilla/Fabric server instead of showing a
+            # perpetual "—" that looks like a bug.
+            status["tpsSupported"] = self._tps_probe is not None
+            # A stale reading is dropped rather than frozen on screen: a number
+            # that stopped updating still reads as "the server is fine".
+            if (
+                tps_value is not None
+                and tps_at
+                and (time.monotonic() - tps_at) <= self.TPS_STALE_AFTER_SEC
+            ):
+                status["tps"] = round(tps_value, 2)
         return status
 
     @staticmethod

@@ -18,7 +18,7 @@
 ---
 
 <div align="center">
-  <img width="2560" height="1313" alt="Overview" src="https://github.com/user-attachments/assets/7ed784e6-eb1d-4305-bc98-3800a785fbc1" />
+  <img src="assets/screenshots/overview.png" alt="Fabricator dashboard — server overview" width="1280" />
 </div>
 
 
@@ -30,7 +30,9 @@
 |---|---|---|
 | 🧩 | **Loaders**: Fabric, Quilt, NeoForge, Forge, Paper, Purpur, Folia, Pufferfish, Vanilla | ✅ Available |
 | 📦 | **Mod & plugin management**: install, remove, and browse Modrinth mods and plugins | ✅ Available |
+| 🧰 | **Modpack import**: find popular Modrinth packs, search by name or link, or upload an exported `.mrpack` | ✅ Available |
 | 📋 | **Logs & monitoring**: live log stream, TPS and RAM graphs | ✅ Available |
+| 📁 | **File explorer & editor**: browse the server tree, search files, and edit configuration files in the panel | ✅ Available |
 | 👥 | **Player management**: online players, player heads, custom actions | ✅ Available |
 | 💾 | **Backups & restore**: manual snapshots, restore from any backup | ✅ Available |
 | 🌍 | **World import**: upload a world archive and swap it in | ✅ Available |
@@ -46,8 +48,35 @@
 | 🔄 | **One-click Minecraft / Fabric server upgrades** | 📋 Planned |
 | 📊 | **Metrics tab**: CPU, RAM, and usage over time | 📋 Planned |
 | 🔐 | **User roles and permissions** | 📋 Planned |
-| ✏️ | **Editor & files**: better text editor, view archived logs | 📋 Planned |
+| ✏️ | **Advanced editor & archived logs** | 📋 Planned |
 | 📥 | **More install targets**: Proxmox VE, CasaOS, Umbrel, Unraid, Coolify/Dokploy | 📋 Planned |
+
+---
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%">
+      <img src="assets/screenshots/console.png" alt="Live console with log level filters and a command input" />
+      <sub><b>Console</b> — live log stream, level filters, and a command input</sub>
+    </td>
+    <td width="50%">
+      <img src="assets/screenshots/mods.png" alt="Browsing Modrinth mods from the panel" />
+      <sub><b>Mods</b> — search Modrinth and install mods or plugins in one click</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="assets/screenshots/files.png" alt="File explorer with server.properties open in the editor" />
+      <sub><b>Files</b> — browse the server tree and edit configs in the panel</sub>
+    </td>
+    <td width="50%">
+      <img src="assets/screenshots/createserver.png" alt="Create New Server dialog with the mod loader dropdown open" />
+      <sub><b>New server</b> — pick a version and loader, or import a modpack</sub>
+    </td>
+  </tr>
+</table>
 
 ---
 
@@ -225,8 +254,12 @@ To run **without** the built-in login (only if you front Fabricator with your
 own reverse-proxy authentication), set `FABRICATOR_DISABLE_AUTH=1`. This is the
 only supported way to disable it.
 
-**Change or reset the password.** Once logged in, change it from the panel header
-(**Change password**). Forgot it / locked out? Delete `auth.json` from the data
+**Change, turn off, or reset the password.** Once logged in, open
+**Settings → Security** to change the password. From the same screen you can turn
+password protection off (after confirming the current password) or turn it back on
+with a new password. Only turn it off on a trusted network: anyone who can reach
+Fabricator will then be able to manage your servers. Forgot it / locked out? Delete
+`auth.json` from the data
 directory and restart — the app drops back into setup mode so you can set a new
 one. The file lives next to `servers.json`: `/var/lib/fabricator/auth.json` under
 systemd, `/data/auth.json` in Docker. (Deleting it only resets the password/key;

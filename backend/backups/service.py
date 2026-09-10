@@ -11,9 +11,11 @@ full sequence end-to-end and pushes phase updates into
   — losing tail-end ticks of game state is preferable to refusing the
   scheduled backup outright.
 
-- **Shutdown.** ``cfg["shutdown"]`` (or a flush failure) stops the
-  server unconditionally before the staging copy. ``was_running`` is
-  remembered so we restart at the end.
+- **Shutdown.** ``cfg["shutdown"]`` stops the server before the staging
+  copy; ``was_running`` is remembered so we restart at the end. A flush
+  failure does NOT escalate to a stop — it records the warning above and
+  the copy proceeds against the live server, on the same reasoning: an
+  unattended backup should not take a running server down on its own.
 
 - **Hybrid compress.** The "skip world subdirectories from compression
   to avoid chunk corruption" rule in the brief is honoured by producing
@@ -65,6 +67,11 @@ logger = logging.getLogger(__name__)
 _SAVED_GAME_RE = re.compile(r"Saved the game", re.IGNORECASE)
 _FLUSH_WAIT_SECONDS = 60.0
 _STOP_WAIT_SECONDS = 120.0
+
+# Cap on how many per-entry staging warnings reach the snapshot record. They are
+# joined into a single message string, so an unbounded list would bloat the
+# per-server JSON; the complete set is always logged.
+_MAX_RECORDED_WARNINGS = 10
 
 
 # ---------------------------------------------------------------------------
@@ -307,6 +314,7 @@ def _execute_backup(
             cfg=cfg,
             server=server,
             job_id=job_id,
+            warnings=warnings,
         )
 
         progress.update(job_id, phase="finalizing")
@@ -420,8 +428,14 @@ def _build_archive(
     cfg: Dict[str, Any],
     server: Dict[str, Any],
     job_id: str,
+    warnings: Optional[List[str]] = None,
 ) -> Tuple[Path, int]:
-    """Stage a copy, build the tar(.gz), atomic-publish, return (path, size)."""
+    """Stage a copy, build the tar(.gz), atomic-publish, return (path, size).
+
+    ``warnings`` collects non-fatal staging problems (files the live server
+    deleted mid-copy) so they land on the snapshot record as ``status="warning"``
+    instead of disappearing.
+    """
     timestamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
     config_slug = slugify(cfg.get("name") or "backup") or "backup"
 
@@ -437,9 +451,24 @@ def _build_archive(
     staging_root.mkdir(parents=True, exist_ok=False)
     try:
         copy_root = staging_root / "tree"
-        _copy_tree_with_exclusions(
+        copy_warnings = _copy_tree_with_exclusions(
             install_path, copy_root, exclusions
         )
+        if copy_warnings:
+            logger.warning(
+                "Backup staging skipped %d entr%s that vanished mid-copy: %s",
+                len(copy_warnings),
+                "y" if len(copy_warnings) == 1 else "ies",
+                "; ".join(copy_warnings[:5]),
+            )
+            if warnings is not None:
+                # The snapshot's message is a joined string in a JSON record, so
+                # a busy server shedding hundreds of temp files must not turn it
+                # into a novel. The full list is in the log above.
+                warnings.extend(copy_warnings[:_MAX_RECORDED_WARNINGS])
+                overflow = len(copy_warnings) - _MAX_RECORDED_WARNINGS
+                if overflow > 0:
+                    warnings.append(f"...and {overflow} more skipped during staging")
 
         progress.update(job_id, phase="archiving")
         compress = bool(cfg.get("compress", True))
@@ -530,16 +559,65 @@ def _make_ignore(exclusions: List[str], install_root: Path) -> Callable:
 
 def _copy_tree_with_exclusions(
     src: Path, dst: Path, exclusions: List[str]
-) -> None:
-    """Mirror ``src`` to ``dst`` skipping anything matching ``exclusions``."""
+) -> List[str]:
+    """Mirror ``src`` to ``dst`` skipping anything matching ``exclusions``.
+
+    Returns warnings for entries that could not be copied. The default backup
+    runs against a LIVE server (``flush=True, shutdown=False``), so the tree
+    shifts under the copy: a rotated log, a temp region file or a lock file can
+    vanish between the directory scan and the read. ``shutil.copytree`` collects
+    those into a single ``shutil.Error`` at the end, which used to fail the
+    entire backup over one file the server itself had just deleted.
+
+    An error whose source no longer exists is therefore downgraded to a
+    warning — the file is genuinely gone, and nothing is served by refusing the
+    other several gigabytes. Anything still on disk (a permission problem, a
+    full destination disk) is a real failure and re-raised.
+
+    ``ignore_dangling_symlinks`` covers the related case up front: with
+    ``symlinks=False`` copytree resolves links, and a broken one would
+    otherwise fail the backup deterministically on every single run.
+    """
     dst.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(
-        src,
-        dst,
-        ignore=_make_ignore(exclusions, src),
-        dirs_exist_ok=True,
-        symlinks=False,
-    )
+    try:
+        shutil.copytree(
+            src,
+            dst,
+            ignore=_make_ignore(exclusions, src),
+            dirs_exist_ok=True,
+            symlinks=False,
+            ignore_dangling_symlinks=True,
+        )
+    except shutil.Error as exc:
+        return _classify_copy_errors(exc, src)
+    return []
+
+
+def _classify_copy_errors(exc: shutil.Error, src: Path) -> List[str]:
+    """Split copytree's error list into "vanished" warnings and real failures.
+
+    ``shutil.Error`` carries a list of ``(srcname, dstname, why)`` triples
+    (nested copytree calls flatten theirs into the same list). Existence is
+    re-checked at the source rather than pattern-matching ``why``, which is a
+    plain string whose wording is not part of any contract.
+
+    Re-raises the original error when ANY entry is still present, so a genuine
+    problem is never masked by transient churn elsewhere in the tree.
+    """
+    warnings: List[str] = []
+    for entry in exc.args[0]:
+        try:
+            src_name, _dst_name, why = entry
+        except (TypeError, ValueError):
+            raise exc  # unexpected shape — do not swallow it
+        if os.path.exists(src_name):
+            raise exc  # still there: a real error, not the server churning
+        try:
+            label = str(Path(src_name).relative_to(src))
+        except ValueError:
+            label = str(src_name)
+        warnings.append(f"skipped {label}: removed during backup ({why})")
+    return warnings
 
 
 def _add_directory(tf: tarfile.TarFile, src: Path, arcname: str) -> None:

@@ -158,6 +158,44 @@ export default {
   justify-content: flex-end;
 }
 
+/* Mobile: the overlay's 20px inset and the container's 90vh cap leave a modal
+   floating in a thin frame on a phone. Below the breakpoint it takes the sheet
+   treatment instead — flush to the bottom edge, full width, and tall enough to
+   use the screen it has. */
+@media (max-width: 768px) {
+  .modal-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .modal-container {
+    max-width: none;
+    max-height: 92dvh;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    border-bottom: none;
+  }
+
+  .modal-header {
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .modal-body {
+    padding: var(--space-4);
+  }
+
+  .modal-footer {
+    padding: var(--space-3) var(--space-4);
+    /* Clears the home indicator on iOS so the primary action isn't half under
+       the system gesture area. */
+    padding-bottom: max(var(--space-3), env(safe-area-inset-bottom));
+  }
+
+  /* Footer buttons split the row instead of clustering right. */
+  .modal-footer > * {
+    flex: 1;
+  }
+}
+
 /* Transition animations */
 .modal-enter-active,
 .modal-leave-active {
@@ -180,6 +218,15 @@ export default {
 
 .modal-leave-to .modal-container {
   transform: scale(0.96) translateY(8px);
+}
+
+/* A sheet anchored to the bottom edge should slide from it, not scale toward
+   the middle — the desktop transform reads as the wrong gesture here. */
+@media (max-width: 768px) {
+  .modal-enter-from .modal-container,
+  .modal-leave-to .modal-container {
+    transform: translateY(100%);
+  }
 }
 
 /* Modal body scrollbar */

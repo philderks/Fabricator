@@ -48,6 +48,9 @@ const displayLabel = computed(() => props.label || meta.value.label)
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
   font-size: var(--text-xs);
+  /* Lets the pill shrink below its text's min-content width when it's a flex
+     item in a tight row, handing the overflow to __sub's ellipsis below. */
+  min-width: 0;
 }
 
 .status-pill__dot {
@@ -60,10 +63,16 @@ const displayLabel = computed(() => props.label || meta.value.label)
 .status-pill__label {
   color: var(--text-muted);
   font-weight: 500;
+  /* The status word is the point of the pill — it never truncates. */
+  white-space: nowrap;
 }
 
 .status-pill__sub {
   color: var(--text-disabled);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .status-pill--running .status-pill__label {

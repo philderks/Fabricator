@@ -7,6 +7,9 @@
 2. **Mandatory safety snapshot.** Fast uncompressed ``.tar`` of the live
    server dir into the *owning config's* ``storagePath`` named
    ``safety-<configSlug>-<ts>.tar``. Recorded with ``type="safety"``.
+   Snapshots without an owning config (``configId: null`` — quick backups,
+   pre-upgrade snapshots, world-import safety tars) place it in the default
+   ``<install>/backups`` instead.
    If this step raises ANY exception the entire restore aborts, the
    live dir is NEVER touched, and the server is restarted if it was
    running. Non-negotiable per the brief and pinned by a dedicated test.
@@ -38,7 +41,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from backend.backups import progress, storage
+from backend.backups import archive, progress, storage
 from backend.server import storage as server_storage
 from backend.server.locks import get_server_lock
 from backend.server.registry import get_server_process_registry
@@ -137,17 +140,15 @@ def run_restore(
             f"Archive {archive_path} no longer exists on disk"
         )
 
+    # The safety snapshot lands in the owning config's storage dir when the
+    # snapshot has one. Snapshots recorded with ``configId: null`` — quick
+    # backups, pre-upgrade snapshots, world-import safety tars — have no
+    # config, so they fall back to the default ``<install>/backups`` location
+    # (the same place the world importer writes its own safety tar). A missing
+    # config must NOT abort the restore: it used to, which made every ad-hoc
+    # snapshot unrestorable, including the pre-upgrade snapshot that
+    # ``server/upgrade.py`` documents as the upgrade recovery path.
     cfg = storage.get_config_record(server_id, snapshot.get("configId") or "")
-    if not cfg:
-        progress.update(
-            job_id,
-            phase="failed",
-            error="Owning backup config not found (cannot place safety snapshot)",
-        )
-        raise ValueError(
-            "Owning backup config not found — restore aborted because the "
-            "mandatory safety snapshot has no storage path"
-        )
 
     server = server_storage.get_server(server_id)
     if not server:
@@ -156,7 +157,10 @@ def run_restore(
 
     registry = get_server_process_registry()
     install_path = registry.resolve_install_path(server)
-    safety_storage = storage.resolve_config_storage_path(cfg)
+    if cfg:
+        safety_storage = storage.resolve_config_storage_path(cfg)
+    else:
+        safety_storage = install_path / "backups"
     safety_storage.mkdir(parents=True, exist_ok=True)
 
     server_lock = get_server_lock(server_id)
@@ -295,13 +299,18 @@ def run_restore(
 def _write_safety_snapshot(
     *,
     install_path: Path,
-    cfg: Dict[str, Any],
+    cfg: Optional[Dict[str, Any]],
     storage_path: Path,
     server_id: str,
 ) -> Dict[str, Any]:
-    """Build the mandatory safety tar and return its snapshot record."""
+    """Build the mandatory safety tar and return its snapshot record.
+
+    ``cfg`` is ``None`` when the restored snapshot has no owning config (an
+    ad-hoc/quick backup); the safety record is then itself ad-hoc
+    (``configId: null``) and named with the generic slug.
+    """
     timestamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
-    config_slug = slugify(cfg.get("name") or "backup") or "backup"
+    config_slug = slugify((cfg or {}).get("name") or "backup") or "backup"
     safety_name = f"safety-{config_slug}-{timestamp}.tar"
     final_path = storage_path / safety_name
     # If a previous safety with the same name exists (very unlikely —
@@ -316,9 +325,9 @@ def _write_safety_snapshot(
     # Exclude the storage dir wherever it sits inside the install tree — it may
     # be NESTED (e.g. <install>/data/backups), not just a direct child — so we
     # never recursively pack prior backups into the safety tar (which would grow
-    # it with every restore). A tarfile filter on the arcname drops only the
-    # storage subtree while keeping unrelated siblings under the same
-    # intermediate dir (e.g. <install>/data/other).
+    # it with every restore). Skipping by arcname drops only the storage subtree
+    # while keeping unrelated siblings under the same intermediate dir
+    # (e.g. <install>/data/other).
     try:
         storage_rel = (
             storage_path.resolve().relative_to(install_path.resolve()).as_posix()
@@ -326,18 +335,10 @@ def _write_safety_snapshot(
     except (ValueError, OSError):
         storage_rel = None  # storage lives outside the install tree — nothing to skip
 
-    def _drop_storage(tarinfo):
-        if storage_rel and (
-            tarinfo.name == storage_rel
-            or tarinfo.name.startswith(storage_rel + "/")
-        ):
-            return None
-        return tarinfo
-
     try:
-        with tarfile.open(tmp_path, "w") as tf:
-            for entry in sorted(install_path.iterdir()):
-                tf.add(entry, arcname=entry.name, filter=_drop_storage)
+        warnings = archive.write_tree_tar(
+            install_path, tmp_path, skip=archive.subtree_skipper(storage_rel),
+        )
         os.replace(tmp_path, final_path)
     except Exception:
         try:
@@ -346,23 +347,39 @@ def _write_safety_snapshot(
             pass
         raise
 
+    message = "Pre-restore safety snapshot"
+    if warnings:
+        logger.warning(
+            "Safety snapshot for %s skipped %d unreadable entr%s: %s",
+            server_id, len(warnings),
+            "y" if len(warnings) == 1 else "ies", "; ".join(warnings[:5]),
+        )
+        message += f" ({len(warnings)} unreadable entries skipped)"
+
     return storage.record_snapshot(
         server_id,
         {
-            "configId": cfg.get("id"),
+            "configId": cfg.get("id") if cfg else None,
             "type": "safety",
             "filePath": str(final_path),
             "fileName": final_path.name,
             "sizeBytes": final_path.stat().st_size,
             "durationSeconds": None,
-            "status": "success",
-            "message": "Pre-restore safety snapshot",
+            "status": "warning" if warnings else "success",
+            "message": message,
         },
     )
 
 
 def _extract_archive(archive_path: Path, destination: Path) -> None:
-    """Extract a backup archive (plain tar, tar.gz, or hybrid outer tar)."""
+    """Extract a backup archive (plain tar, tar.gz, or hybrid outer tar).
+
+    ``allow_internal_links=True`` throughout: archives written from here on
+    contain no link members at all (see :mod:`backend.backups.archive`), but
+    safety snapshots taken by older builds stored symlinks verbatim, and the
+    strict default made every one of them unrestorable. Links resolving OUTSIDE
+    the destination are still refused, which is the property that matters.
+    """
     with tarfile.open(archive_path, "r:*") as outer:
         names = set(outer.getnames())
         if {"data.tar.gz", "worlds.tar"}.issubset(names):
@@ -371,9 +388,9 @@ def _extract_archive(archive_path: Path, destination: Path) -> None:
             data_inner = destination / "data.tar.gz"
             worlds_inner = destination / "worlds.tar"
             with tarfile.open(data_inner, "r:gz") as tf:
-                safe_extract_tar(tf, destination)
+                safe_extract_tar(tf, destination, allow_internal_links=True)
             with tarfile.open(worlds_inner, "r") as tf:
-                safe_extract_tar(tf, destination)
+                safe_extract_tar(tf, destination, allow_internal_links=True)
             try:
                 data_inner.unlink()
             except OSError:
@@ -388,7 +405,7 @@ def _extract_archive(archive_path: Path, destination: Path) -> None:
         # Reopen because extractall consumes the iterator state in some
         # Python versions when we already inspected getnames().
     with tarfile.open(archive_path, "r:*") as tf:
-        safe_extract_tar(tf, destination)
+        safe_extract_tar(tf, destination, allow_internal_links=True)
 
 
 def _filtered_outer_members(tf: tarfile.TarFile) -> List[tarfile.TarInfo]:

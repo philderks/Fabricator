@@ -1251,10 +1251,19 @@ const onReset = () => {
 
 <style scoped>
 .settings-page {
+  /* One definition for the reading column, so the fixed action bar below can
+     line its buttons up with it instead of drifting off on a wide display.
+     Inherited rather than laid out, so `position: fixed` doesn't break it. */
+  --settings-column: 880px;
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  max-width: 880px;
+  width: 100%;
+  max-width: var(--settings-column);
+  /* Centers the column instead of leaving it flush against the sidebar with a
+     growing dead zone on wide/ultrawide monitors. The fixed footer below
+     mirrors this with the same margin so its buttons stay under the column. */
+  margin: 0 auto;
   padding-bottom: 80px;
 }
 
@@ -1314,6 +1323,20 @@ const onReset = () => {
 .settings-page__mode-button--active {
   border-color: var(--primary);
   color: var(--primary);
+}
+
+/* Panel renders its body as a plain block and global.css zeroes every margin,
+   so stacked blocks inside one panel had nothing between them. It only looked
+   broken in places because two rules below were patching it by hand — a
+   margin-bottom on notices, a margin-top on toggle groups — which covered the
+   adjacencies those happened to sit in and missed the rest. In Java Runtime
+   that left the runtime/path grid flush against the JVM Arguments label
+   whenever no warning was showing. One gap here replaces both patches and
+   spaces every panel on the page the same way. */
+.settings-page :deep(.panel__body) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
 }
 
 .settings-page__upgrade-actions {
@@ -1428,11 +1451,11 @@ const onReset = () => {
   white-space: nowrap;
 }
 
+/* Spacing above comes from the panel body's gap now, not a margin here. */
 .settings-page__toggles {
   display: flex;
   flex-direction: column;
   gap: 0;
-  margin-top: var(--space-3);
 }
 
 .settings-page__toggle {
@@ -1474,7 +1497,6 @@ const onReset = () => {
   border-radius: var(--radius-sm);
   font-size: var(--text-sm);
   line-height: var(--leading-normal);
-  margin-bottom: var(--space-3);
 }
 
 .settings-page__notice strong {
@@ -1501,14 +1523,22 @@ const onReset = () => {
   background: var(--bg-primary);
   border-top: 1px solid var(--border-color);
   box-shadow: var(--shadow-up);
-  padding: var(--space-4) var(--space-5);
+  /* Same gutter the routed content uses, so the inner column below starts on
+     exactly the same line as the panels above it — including on mobile, where
+     that token tightens. */
+  padding: var(--space-4) var(--app-content-padding);
   z-index: 10;
 }
 
+/* The bar stays full-bleed — it is what separates the actions from the page —
+   but its buttons are capped to the content column, so Save lands just under
+   the last panel rather than at the far edge of an ultrawide screen. */
 .settings-page__footer-inner {
   display: flex;
   justify-content: flex-end;
   gap: var(--space-3);
+  max-width: var(--settings-column);
+  margin: 0 auto;
 }
 
 .settings-page__danger {
@@ -1524,4 +1554,23 @@ const onReset = () => {
   line-height: var(--leading-normal);
 }
 
+/* The footer needs no `left` override: --sidebar-width resolves to 0 below the
+   breakpoint (global.css), so it already spans the full width once the sidebar
+   becomes a drawer. Only the field grids and the footer's own padding change. */
+@media (max-width: 768px) {
+  .settings-page__grid,
+  .settings-page__grid--three {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-page__footer {
+    padding: var(--space-3);
+  }
+
+  /* Stretch the save/reset pair across the bar — at this width there is no
+     reason to leave them huddled in a corner, and they become easy targets. */
+  .settings-page__footer-inner > * {
+    flex: 1;
+  }
+}
 </style>

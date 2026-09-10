@@ -135,6 +135,8 @@ _NEVER = [
     ("POST", "/api/auth/setup"),
     ("POST", "/api/auth/login"),
     ("POST", "/api/auth/change-password"),
+    ("POST", "/api/auth/disable"),
+    ("POST", "/api/auth/enable"),
     ("POST", "/api/auth/logout"),
     # MCP integration management — a token can never manage tokens or the switch
     ("GET", "/api/integrations/mcp"),

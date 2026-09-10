@@ -565,4 +565,11 @@ function onClose() {
     grid-template-columns: 1fr;
   }
 }
+/* Mobile: the panel is already width:100% under a 920px cap, so it fills the
+   screen — the border and radius are all that still read as "drawer". */
+@media (max-width: 768px) {
+  .manage-panel {
+    border-left: none;
+  }
+}
 </style>

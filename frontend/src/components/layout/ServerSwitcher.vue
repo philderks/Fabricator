@@ -3,6 +3,8 @@ import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useServerStore } from '../../stores/server'
 import { useAuthStore } from '../../stores/auth'
+import { useSidebarCollapsed } from '../../composables/useSidebarCollapsed'
+import { useMobileNav } from '../../composables/useMobileNav'
 import { getEffectiveStatus as statusOf } from '../../utils/getEffectiveStatus'
 
 const route = useRoute()
@@ -50,6 +52,21 @@ const metaText = (s) => {
   return parts.join(' · ')
 }
 
+const { collapsed } = useSidebarCollapsed()
+const { isMobile, close: closeDrawer } = useMobileNav()
+
+// The rail treatment is desktop-only, matching AppSidebar's own `isRail`: on
+// mobile this sits inside a full-width drawer, where stripping the switcher
+// down to a bare status dot would leave the drawer with no indication of which
+// server you are looking at.
+const isRail = computed(() => collapsed.value && !isMobile.value)
+
+// Railed, the trigger keeps only the status dot, so a title carries the name
+// and meta the row would otherwise show.
+const triggerTitle = computed(() =>
+  isRail.value ? `${currentServer.value.name} — ${metaText(currentServer.value)}` : null
+)
+
 const toggle = () => {
   if (!open.value) {
     // Refresh the list when opening the dropdown — covers status changes,
@@ -70,6 +87,10 @@ const switchTo = (id) => {
 
 const goToAddServer = () => {
   close()
+  // Unlike switchTo, this opens a modal instead of navigating, so the mobile
+  // drawer won't be dismissed by AppSidebar's route watcher — and the drawer
+  // sits above the modal layer. Dismiss it here.
+  closeDrawer()
   // Modal is mounted at App.vue and provided as `showCreateModal`, so this
   // works from any layout (no need to route to "/" first).
   showCreateModal.value = true
@@ -92,12 +113,13 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="server-switcher">
+  <div class="server-switcher" :class="{ 'is-collapsed': isRail }">
     <button
       type="button"
       class="server-switcher__trigger"
       :aria-expanded="open"
       aria-haspopup="listbox"
+      :title="triggerTitle"
       @click="toggle"
     >
       <span class="server-switcher__dot" :style="{ background: dotColor(currentServer) }"></span>
@@ -155,6 +177,32 @@ onBeforeUnmount(() => {
 .server-switcher {
   margin: var(--space-2);
   position: relative;
+}
+
+/* Rail: the status dot is the whole control. The name/meta and chevron are
+   dropped outright rather than visually hidden — the trigger's `title` carries
+   both, so nothing is lost to assistive tech. */
+.server-switcher.is-collapsed .server-switcher__info,
+.server-switcher.is-collapsed .server-switcher__chevron {
+  display: none;
+}
+
+.server-switcher.is-collapsed .server-switcher__trigger {
+  justify-content: center;
+  gap: 0;
+  padding-left: 0;
+  padding-right: 0;
+  /* Matches the nav icons' row height so the rail reads as one column. */
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+/* Opens rightward out over the content instead of trying to fit the rail —
+   the sidebar no longer clips, so the menu keeps a readable width and the
+   switcher stays one click from the rail. */
+.server-switcher.is-collapsed .server-switcher__dropdown {
+  right: auto;
+  min-width: 190px;
 }
 
 .server-switcher__trigger {

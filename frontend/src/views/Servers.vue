@@ -93,7 +93,7 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   min-height: 100%;
-  padding: var(--space-5);
+  padding: var(--app-content-padding);
 }
 
 .servers-page__empty {

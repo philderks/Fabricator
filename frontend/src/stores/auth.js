@@ -14,7 +14,9 @@ import {
   postLogin,
   postLogout,
   postSetup,
-  postChangePassword
+  postChangePassword,
+  postDisablePassword,
+  postEnablePassword
 } from '../api/auth'
 
 export const useAuthStore = defineStore('auth', () => {
@@ -82,6 +84,35 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  async function disablePassword(currentPassword) {
+    try {
+      await postDisablePassword(currentPassword)
+      // The server cleared the session, but with auth off there is nothing to
+      // be authenticated against — reflect both so the router guard doesn't
+      // bounce to /login for a now-open install.
+      enabled.value = false
+      isAuthenticated.value = false
+      needsSetup.value = false
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, error }
+    }
+  }
+
+  async function enablePassword(newPassword) {
+    try {
+      await postEnablePassword(newPassword)
+      // The server logs us in as part of enabling, so we stay where we are
+      // rather than being thrown to the login page.
+      enabled.value = true
+      isAuthenticated.value = true
+      needsSetup.value = false
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, error }
+    }
+  }
+
   async function logout() {
     try {
       await postLogout()
@@ -106,6 +137,8 @@ export const useAuthStore = defineStore('auth', () => {
     setup,
     login,
     changePassword,
+    disablePassword,
+    enablePassword,
     logout,
     markUnauthenticated
   }

@@ -3,7 +3,12 @@
 Under FABRICATOR_MANAGED, PUT /api/servers/<id>/settings rejects `command`,
 `javaPath`, `jvmArgs`, and the whole `launch` object (installer-owned) with an
 explicit 4xx naming the field — no silent strip. Off-flag the guard does not
-fire, though the values are still validated on their own merits (#54).
+fire for `javaPath` / `jvmArgs`, though the values are still validated on their
+own merits (#54).
+
+`command` and `launch` are refused off-flag too, but by the settings allowlist
+rather than by this guard — see ``test_command_and_launch_are_never_settable``
+and tests/test_settings_allowlist.py.
 """
 from __future__ import annotations
 
@@ -61,11 +66,17 @@ def test_managed_allows_benign_settings(client, app, tmp_servers_root, monkeypat
 def test_unmanaged_passes_forbidden_keys_through(client, app, tmp_servers_root, monkeypatch):
     """Off-flag, the managed guard does not fire for these keys.
 
-    `javaPath` is a real executable here because the settings route validates
-    the value once it gets past the managed guard (#54) — the point of this
-    test is that the guard stays out of the way, not that any value is
-    accepted. `sys.executable` is simply a path guaranteed to exist and be
-    executable on whatever runs the suite.
+    `javaPath` and `jvmArgs` are per-server launch tuning the settings form
+    owns (#54), so off-flag they are ordinary settings. `javaPath` is a real
+    executable here because the route validates the value once it gets past the
+    managed guard — the point of this test is that the guard stays out of the
+    way, not that any value is accepted. `sys.executable` is simply a path
+    guaranteed to exist and be executable on whatever runs the suite.
+
+    `command` and `launch` used to ride along in this assertion. They are now
+    refused by the settings allowlist for every caller, managed or not (they
+    are installer-owned, never client-set), so they are pinned separately in
+    ``test_command_and_launch_are_never_settable`` below.
     """
     import sys
 
@@ -73,9 +84,30 @@ def test_unmanaged_passes_forbidden_keys_through(client, app, tmp_servers_root, 
     monkeypatch.delenv("FABRICATOR_MANAGED", raising=False)
     resp = client.put(
         f"/api/servers/{sid}/settings",
-        json={"javaPath": sys.executable, "launch": {"type": "jar"}},
+        json={"javaPath": sys.executable, "jvmArgs": "-XX:+UseZGC"},
     )
     assert resp.status_code == 200, resp.get_json()
+
+
+def test_command_and_launch_are_never_settable(client, app, tmp_servers_root, monkeypatch):
+    """`command` and `launch` are installer-owned and written only by the
+    installer/upgrade paths through storage directly. The settings route
+    refuses them off-flag too, so the managed guard is no longer the only thing
+    standing between a client and the launch spec."""
+    monkeypatch.delenv("FABRICATOR_MANAGED", raising=False)
+
+    sid = _make_server(app, tmp_servers_root, 25907, "g")
+    resp = client.put(
+        f"/api/servers/{sid}/settings", json={"launch": {"type": "jar"}}
+    )
+    assert resp.status_code == 400, resp.get_json()
+    assert "launch" in resp.get_json().get("error", "")
+
+    resp = client.put(
+        f"/api/servers/{sid}/settings", json={"command": "java -jar evil.jar"}
+    )
+    assert resp.status_code == 400, resp.get_json()
+    assert "command" in resp.get_json().get("error", "")
 
 
 def test_managed_rejects_jvm_args(client, app, tmp_servers_root, monkeypatch):

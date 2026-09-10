@@ -475,4 +475,15 @@ onUnmounted(() => {
   font-size: var(--text-xs);
   color: var(--text-primary);
 }
+@media (max-width: 768px) {
+  /* The toolbar already wraps; this just stops the two top actions from
+     stacking into a narrow column once they land on their own row. */
+  .backups-page__top-actions {
+    flex: 1;
+  }
+
+  .backups-page__top-actions > * {
+    flex: 1;
+  }
+}
 </style>

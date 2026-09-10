@@ -90,10 +90,17 @@
 
     <div v-if="imp.loading.value" class="loading-state">
       <div class="spinner"></div>
-      <p>Searching modpacks...</p>
+      <p>{{ imp.showingPopular.value ? 'Loading modpacks…' : 'Searching modpacks...' }}</p>
     </div>
 
-    <div v-else-if="imp.searchResults.value.length" class="results-grid">
+    <!-- One branch for "there are results", so the heading rides with the grid
+         and the empty state below stays on the same if/else chain. -->
+    <template v-else-if="imp.searchResults.value.length">
+      <p v-if="imp.showingPopular.value" class="results-heading">
+        Popular on Modrinth for {{ loaderLabel }} {{ mcVersion }}
+      </p>
+
+      <div class="results-grid">
       <SearchResultCard
         v-for="pack in imp.searchResults.value"
         :key="pack.project_id || pack.id"
@@ -111,8 +118,9 @@
         >
           Install
         </AppButton>
-      </SearchResultCard>
-    </div>
+        </SearchResultCard>
+      </div>
+    </template>
 
     <div v-else class="modpack-browser-empty">
       <svg class="modpack-browser-empty__icon" width="64" height="64" viewBox="0 0 24 24" fill="none">
@@ -125,6 +133,9 @@
       <h3 class="modpack-browser-empty__heading" v-else>Resolve a modpack link</h3>
       <p class="modpack-browser-empty__body" v-if="importMethod === 'file'">
         Pick a .mrpack exported from the Modrinth app. Its mods are fetched from Modrinth; config and other extras come from the pack's overrides.
+      </p>
+      <p class="modpack-browser-empty__body" v-else-if="importMethod === 'search' && imp.showingPopular.value">
+        No modpacks are listed for {{ loaderLabel }} {{ mcVersion }}. Try searching by name, or check that this Minecraft version has compatible packs.
       </p>
       <p class="modpack-browser-empty__body" v-else-if="importMethod === 'search' && imp.searchDone.value">
         No modpacks found for "{{ imp.searchQuery.value }}" on {{ loaderLabel }} {{ mcVersion }}. Try different keywords or check that your server's MC version has compatible modpacks.
@@ -232,11 +243,16 @@ const canInstall = computed(() =>
 )
 
 watch(() => props.show, (next) => {
-  if (!next) {
-    importMethod.value = 'search'
-    imp.resetAll()
-    clearUploadedPack()
+  if (next) {
+    // Open onto something browsable instead of an empty box. Filtered to this
+    // server's version and loader, as the heading promises — a popular pack it
+    // cannot install is worse than no suggestion at all.
+    imp.loadPopular()
+    return
   }
+  importMethod.value = 'search'
+  imp.resetAll()
+  clearUploadedPack()
 })
 
 watch(importMethod, (next) => {
@@ -442,6 +458,17 @@ function formatModpackMeta(pack) {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* Says what the list is when nothing has been typed, so top-downloads results
+   are not mistaken for matches to a query. */
+.results-heading {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .results-grid {

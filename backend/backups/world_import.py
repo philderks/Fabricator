@@ -46,7 +46,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from backend.backups import progress, storage
+from backend.backups import archive, progress, storage
 from backend.server import storage as server_storage
 from backend.server.locks import get_server_lock
 from backend.server.registry import get_server_process_registry
@@ -72,6 +72,82 @@ def max_upload_bytes() -> int:
     return env_max_bytes(
         "FABRICATOR_MAX_WORLD_UPLOAD_BYTES", _DEFAULT_MAX_UPLOAD_BYTES
     )
+
+
+# ---------------------------------------------------------------------------
+# Upload staging + sweep
+# ---------------------------------------------------------------------------
+#
+# An upload is streamed to disk before the import worker starts, and the worker
+# unlinks it in its ``finally``. Nothing covered the gap: if the process died
+# between the 202 and the worker finishing, a file up to the 10 GiB cap was
+# orphaned with nothing left to remember it. These uploads are swept the same
+# way staged .mrpack archives are (see modrinth.mrpack.sweep_expired) — on the
+# next upload, plus once at startup, which is the moment right after the unclean
+# shutdown that strands them.
+
+# Matches the mrpack staging TTL. An import holds its file for minutes at most,
+# and in-flight paths are tracked below regardless, so this only ever sees
+# genuinely abandoned uploads.
+UPLOAD_TTL_SECONDS = 6 * 60 * 60
+
+_UPLOAD_GLOB = "world-*.upload"
+
+# Uploads an import is currently working with. Consulted by the sweep so a live
+# import can never have its archive pulled out from under it, however long it
+# runs. Mirrors the ``live_paths`` guard in mrpack.sweep_expired.
+_active_uploads: set = set()
+_active_uploads_lock = threading.Lock()
+
+
+def uploads_dir() -> Path:
+    """Directory holding uploaded-but-not-yet-imported world archives.
+
+    Shared with the .mrpack staging area (``modrinth.mrpack.staging_dir``) so
+    both kinds of upload land in one place an operator can inspect or clear.
+    Always under ``SERVERS_ROOT``, which is the same filesystem as every install
+    path, so moving out of it is never a cross-device copy.
+    """
+    from backend.core.config import get_config
+
+    return Path(get_config().SERVERS_ROOT) / ".uploads"
+
+
+def new_upload_path(server_id: str) -> Path:
+    """Return a fresh, unique staging path for ``server_id``'s upload."""
+    return uploads_dir() / f"world-{server_id}-{uuid.uuid4().hex}.upload"
+
+
+def sweep_stale_uploads(now: Optional[float] = None) -> int:
+    """Delete abandoned world uploads past the TTL. Returns how many went.
+
+    Best-effort throughout: a sweep is housekeeping and must never be the reason
+    an upload or a boot fails. Uploads an import is actively using are skipped
+    no matter their age.
+    """
+    cutoff = (time.time() if now is None else now) - UPLOAD_TTL_SECONDS
+
+    try:
+        candidates = list(uploads_dir().glob(_UPLOAD_GLOB))
+    except OSError:  # pragma: no cover - unreadable/absent staging dir
+        return 0
+
+    with _active_uploads_lock:
+        live = set(_active_uploads)
+
+    removed = 0
+    for orphan in candidates:
+        if orphan in live:
+            continue
+        try:
+            if orphan.stat().st_mtime >= cutoff:
+                continue
+            orphan.unlink()
+        except OSError:  # pragma: no cover - vanished or locked; nothing to do
+            continue
+        removed += 1
+        logger.info("Removed abandoned world upload %s", orphan)
+    return removed
 
 
 class InvalidWorldArchiveError(Exception):
@@ -174,10 +250,17 @@ def run_world_import(
         )
 
     archive_path = Path(archive_path)
+    # Claim the upload for the whole run so a concurrent sweep cannot delete the
+    # archive this import is reading. Released in the outermost finally.
+    with _active_uploads_lock:
+        _active_uploads.add(archive_path)
+
     server = server_storage.get_server(server_id)
     if not server:
         progress.update(job_id, phase="failed", error="Server not found")
         archive_path.unlink(missing_ok=True)
+        with _active_uploads_lock:
+            _active_uploads.discard(archive_path)
         raise ValueError(f"Server {server_id!r} not found")
 
     registry = get_server_process_registry()
@@ -310,6 +393,8 @@ def run_world_import(
         if staging_root is not None and staging_root.exists():
             shutil.rmtree(staging_root, ignore_errors=True)
         archive_path.unlink(missing_ok=True)
+        with _active_uploads_lock:
+            _active_uploads.discard(archive_path)
         server_lock.release()
 
 
@@ -561,8 +646,8 @@ def _write_safety_snapshot(
 
     # Exclude the storage dir wherever it sits inside the install tree (mirror of
     # restore._write_safety_snapshot). Here storage_path is <install>/backups (a
-    # direct child), but a tarfile arcname filter keeps the two copies identical
-    # and correct even if that ever nests — no recursive self-inclusion.
+    # direct child), but skipping by arcname keeps the two copies identical and
+    # correct even if that ever nests — no recursive self-inclusion.
     try:
         storage_rel = (
             storage_path.resolve().relative_to(install_path.resolve()).as_posix()
@@ -570,22 +655,23 @@ def _write_safety_snapshot(
     except (ValueError, OSError):
         storage_rel = None
 
-    def _drop_storage(tarinfo):
-        if storage_rel and (
-            tarinfo.name == storage_rel
-            or tarinfo.name.startswith(storage_rel + "/")
-        ):
-            return None
-        return tarinfo
-
     try:
-        with tarfile.open(tmp_path, "w") as tf:
-            for entry in sorted(install_path.iterdir()):
-                tf.add(entry, arcname=entry.name, filter=_drop_storage)
+        warnings = archive.write_tree_tar(
+            install_path, tmp_path, skip=archive.subtree_skipper(storage_rel),
+        )
         os.replace(tmp_path, final_path)
     except Exception:
         tmp_path.unlink(missing_ok=True)
         raise
+
+    message = "Pre-import safety snapshot"
+    if warnings:
+        logger.warning(
+            "Safety snapshot for %s skipped %d unreadable entr%s: %s",
+            server_id, len(warnings),
+            "y" if len(warnings) == 1 else "ies", "; ".join(warnings[:5]),
+        )
+        message += f" ({len(warnings)} unreadable entries skipped)"
 
     return storage.record_snapshot(
         server_id,
@@ -596,8 +682,8 @@ def _write_safety_snapshot(
             "fileName": final_path.name,
             "sizeBytes": final_path.stat().st_size,
             "durationSeconds": None,
-            "status": "success",
-            "message": "Pre-import safety snapshot",
+            "status": "warning" if warnings else "success",
+            "message": message,
         },
     )
 

@@ -64,6 +64,17 @@ def create_app() -> Flask:
     from backend.server.routes import cleanup_stale_statuses
     cleanup_stale_statuses()
 
+    # Same idea for abandoned world uploads (up to 10 GiB each). They are
+    # stranded by exactly the unclean shutdown this boot follows, so sweeping
+    # here catches the case the on-next-upload sweep cannot: an interrupted
+    # import on an install that never imports another world. Best-effort —
+    # housekeeping must never stop the app from starting.
+    try:
+        from backend.backups.world_import import sweep_stale_uploads
+        sweep_stale_uploads()
+    except Exception:  # pragma: no cover - defensive
+        app.logger.warning("Could not sweep abandoned world uploads", exc_info=True)
+
     # Boot the backup scheduler AFTER stale-status cleanup so any
     # config we re-register doesn't try to fire against a server that
     # was just transitioned out of 'installing'. Idempotent across
