@@ -58,6 +58,7 @@ class ServerProcessRegistry:
                 if key not in ('command', 'javaPath', 'jvmArgs')
             }
             server['memory'] = gb
+            server['memoryMin'] = gb
             server['memoryUnit'] = 'GB'
             launch = server.get('launch')
             if isinstance(launch, dict):
@@ -73,11 +74,12 @@ class ServerProcessRegistry:
                 return [str(part) for part in custom_command]
 
         memory = server.get('memory', 4)
+        memory_min = server.get('memoryMin', memory)
         # memoryUnit selects the JVM heap suffix: 'MB' -> M, anything else
         # (default/legacy records without the field) -> G. The value itself is
         # taken verbatim, so 1536 + MB yields -Xmx1536M.
         mem_suffix = 'M' if str(server.get('memoryUnit', 'GB')).upper() == 'MB' else 'G'
-        xms = f'-Xms{memory}{mem_suffix}'
+        xms = f'-Xms{memory_min}{mem_suffix}'
         xmx = f'-Xmx{memory}{mem_suffix}'
         java_exec = self._resolve_java_exec(server)
         launch = server.get('launch')

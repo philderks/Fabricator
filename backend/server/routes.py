@@ -503,10 +503,11 @@ def _java_compat_payload(mc_version: str) -> dict:
 # tests/test_settings_allowlist.py fails RED if either drifts away from it:
 #
 #   * every field _build_server_properties reads off the record, and
-#   * the record-level tuning the settings form owns (name / memory / launch).
+#   * the record-level tuning the settings form owns
+#     (name / memory / memoryMin / launch).
 
 _SETTINGS_RECORD_FIELDS = frozenset({
-    'name', 'memory', 'memoryUnit', 'javaPath', 'jvmArgs',
+    'name', 'memory', 'memoryMin', 'memoryUnit', 'javaPath', 'jvmArgs',
 })
 
 _SETTINGS_PROPERTY_FIELDS = frozenset({
@@ -583,6 +584,60 @@ def _normalize_port(data: dict) -> str | None:
         data['port'] = _coerce_port(data['port'])
     except ValueError as exc:
         return str(exc)
+    return None
+
+
+def _normalize_memory(data: dict, server: dict | None = None) -> str | None:
+    """Validate and normalize JVM heap settings.
+
+    ``memory`` is the maximum heap (-Xmx), while ``memoryMin`` is the
+    initial/minimum heap (-Xms). Legacy records without ``memoryMin`` use
+    ``memory`` for both values.
+    """
+    if not any(key in data for key in ('memory', 'memoryMin', 'memoryUnit')):
+        return None
+
+    if server:
+        current_memory = server.get('memory', 4)
+        current_memory_min = server.get('memoryMin', current_memory)
+        current_unit = server.get('memoryUnit', 'GB')
+    else:
+        current_memory = data.get('memory', 4)
+        current_memory_min = data.get('memoryMin', current_memory)
+        current_unit = data.get('memoryUnit', 'GB')
+
+    memory = data.get('memory', current_memory)
+    memory_min = data.get('memoryMin', current_memory_min)
+    memory_unit = str(data.get('memoryUnit', current_unit)).upper()
+
+    if memory_unit not in ('GB', 'MB'):
+        return 'Memory unit must be GB or MB'
+
+    try:
+        memory = float(memory)
+        memory_min = float(memory_min)
+    except (TypeError, ValueError):
+        return 'Memory values must be numbers'
+
+    if memory <= 0 or memory_min <= 0:
+        return 'Memory values must be greater than zero'
+
+    if memory_min > memory:
+        return 'Minimum memory cannot exceed maximum memory'
+
+    # Keep integer values as ints rather than persisting 8.0, while still
+    # permitting values such as 0.5 GB.
+    if 'memory' in data:
+        data['memory'] = int(memory) if memory.is_integer() else memory
+
+    if 'memoryMin' in data:
+        data['memoryMin'] = (
+            int(memory_min) if memory_min.is_integer() else memory_min
+        )
+
+    if 'memoryUnit' in data:
+        data['memoryUnit'] = memory_unit
+
     return None
 
 
@@ -709,6 +764,13 @@ def create_server():
     # too, and an unvalidated value here would produce a server that installs
     # fine and then refuses to start.
     error = _normalize_launch_overrides(data)
+    if error:
+        return jsonify({'error': error}), 400
+
+    # Validate JVM heap settings before persisting them. ``memory`` is -Xmx
+    # and ``memoryMin`` is -Xms; when memoryMin is omitted it inherits memory
+    # for compatibility with existing clients.
+    error = _normalize_memory(data)
     if error:
         return jsonify({'error': error}), 400
 
@@ -1220,6 +1282,10 @@ def update_server_settings(server_id, server):
     # Normalize the launch-tuning fields before anything is persisted: a bad
     # value here would otherwise only surface as a server that refuses to start.
     error = _normalize_launch_overrides(data)
+    if error:
+        return jsonify({'error': error}), 400
+
+    error = _normalize_memory(data, server)
     if error:
         return jsonify({'error': error}), 400
 

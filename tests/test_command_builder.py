@@ -158,6 +158,66 @@ def test_build_command_memory_unit_defaults_to_gb(tmp_path, monkeypatch):
     assert cmd == ["java", "-Xms4G", "-Xmx4G", "-jar", "server.jar", "nogui"]
 
 
+
+
+def test_build_command_separate_min_max_heap(tmp_path, monkeypatch):
+    """memoryMin controls -Xms independently from memory/-Xmx."""
+    reg = _make_registry(tmp_path)
+    monkeypatch.setattr(reg, "_resolve_java_exec", lambda s: "java")
+
+    server = {
+        "id": "srv_x",
+        "memoryMin": 4,
+        "memory": 8,
+        "launch": {
+            "type": "jar",
+            "jar": "server.jar",
+            "jvm_args": [],
+            "program_args": ["nogui"],
+        },
+    }
+
+    cmd = reg._build_command(server)
+
+    assert cmd == [
+        "java",
+        "-Xms4G",
+        "-Xmx8G",
+        "-jar",
+        "server.jar",
+        "nogui",
+    ]
+
+
+def test_build_command_separate_min_max_heap_mb(tmp_path, monkeypatch):
+    """memoryMin and memory share memoryUnit when expressed in MB."""
+    reg = _make_registry(tmp_path)
+    monkeypatch.setattr(reg, "_resolve_java_exec", lambda s: "java")
+
+    server = {
+        "id": "srv_x",
+        "memoryMin": 4096,
+        "memory": 8192,
+        "memoryUnit": "MB",
+        "launch": {
+            "type": "jar",
+            "jar": "server.jar",
+            "jvm_args": [],
+            "program_args": ["nogui"],
+        },
+    }
+
+    cmd = reg._build_command(server)
+
+    assert cmd == [
+        "java",
+        "-Xms4096M",
+        "-Xmx8192M",
+        "-jar",
+        "server.jar",
+        "nogui",
+    ]
+
 def test_build_command_args_file_launch(tmp_path, monkeypatch):
     reg = _make_registry(tmp_path)
     monkeypatch.setattr(reg, "_resolve_java_exec", lambda s: "/opt/java/bin/java")
@@ -243,6 +303,7 @@ def test_managed_pins_heap_and_ignores_record_overrides(tmp_path, monkeypatch):
 
     server = {
         "id": "srv_x",
+        "memoryMin": 1,
         "memory": 3,
         "memoryUnit": "MB",
         "javaPath": "/evil/java",

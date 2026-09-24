@@ -529,18 +529,33 @@
       <Panel title="Advanced">
 
         <div class="form-row">
-          <FormField label="Memory Allocation (GB)">
+          <FormField label="Minimum Memory (GB)">
             <template #default="{ id, describedBy }">
               <input
-                :id="id"
-                v-model.number="formData.memory"
-                type="number"
-                min="1"
-                max="32"
-                step="0.5"
-                placeholder="4"
-                :aria-describedby="describedBy"
-              >
+                  :id="id"
+                  v-model.number="formData.memoryMin"
+                  type="number"
+                  min="1"
+                  :max="formData.memory"
+                  step="0.5"
+                  placeholder="2"
+                  :aria-describedby="describedBy"
+                  >
+            </template>
+          </FormField>
+
+          <FormField label="Maximum Memory (GB)">
+            <template #default="{ id, describedBy }">
+              <input
+                  :id="id"
+                  v-model.number="formData.memory"
+                  type="number"
+                  :min="formData.memoryMin || 1"
+                  max="32"
+                  step="0.5"
+                  placeholder="4"
+                  :aria-describedby="describedBy"
+                  >
             </template>
           </FormField>
 
@@ -751,6 +766,7 @@ export default {
         spawnAnimals: true,
         spawnMonsters: true,
         spawnNpcs: true,
+        memoryMin: 2,
         memory: 4,
         javaPath: '',
         simulationDistance: 10,
@@ -1023,6 +1039,7 @@ export default {
         spawnAnimals: this.formData.spawnAnimals,
         spawnMonsters: this.formData.spawnMonsters,
         spawnNpcs: this.formData.spawnNpcs,
+        memoryMin: this.formData.memoryMin,
         memory: this.formData.memory,
         simulationDistance: this.formData.simulationDistance,
         onlineMode: this.formData.onlineMode,
@@ -1787,6 +1804,7 @@ export default {
         spawnAnimals: true,
         spawnMonsters: true,
         spawnNpcs: true,
+        memoryMin: 2,
         memory: 4,
         javaPath: '',
         simulationDistance: 10,

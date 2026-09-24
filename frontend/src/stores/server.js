@@ -216,6 +216,7 @@ export const useServerStore = defineStore('server', () => {
     textFilteringVersion: data.textFilteringVersion ?? 0,
     viewDistance: data.viewDistance ?? 10,
     simulationDistance: data.simulationDistance ?? 10,
+    memoryMin: data.memoryMin ?? data.memory ?? 4,
     memory: data.memory ?? 4,
     memoryUnit: data.memoryUnit === 'MB' ? 'MB' : 'GB',
     // Launch tuning (#54). Empty string means "no override": javaPath falls
