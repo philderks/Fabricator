@@ -21,18 +21,40 @@ const contentNounLower = computed(() => contentNoun.value.toLowerCase())
 
 const RECENT_LOG_PREVIEW_LINES = 16
 
-// ramMetrics is always in GB; the Overview memory-unit preference only changes
-// how we present it here (GB with one decimal, or whole MB).
+// JVM heap metrics are normalized to GB by the server store. The memory-unit
+// preference only controls how they are presented here.
 const ramUnitLabel = computed(() => prefs.memoryUnit)
-const formatRam = (gb) =>
-  prefs.memoryUnit === 'MB' ? String(Math.round(gb * 1024)) : gb.toFixed(1)
-const ramUsedDisplay = computed(() => formatRam(store.ramMetrics.used))
-const ramTotalDisplay = computed(() => formatRam(store.ramMetrics.total))
-const ramPercent = computed(() => {
+
+const formatRam = (gb) => {
+  if (typeof gb !== 'number') return '-'
+  return prefs.memoryUnit === 'MB' ? String(Math.round(gb * 1024)) : gb.toFixed(1)
+}
+
+const heapUsedDisplay = computed(() => formatRam(store.ramMetrics.heapUsed))
+const heapMaxDisplay = computed(() => formatRam(store.ramMetrics.heapMax))
+const heapCommittedDisplay = computed(() => formatRam(store.ramMetrics.heapCommitted))
+const rssDisplay = computed(() => formatRam(store.ramMetrics.rss))
+
+const heapAvailable = computed(() => {
   const m = store.ramMetrics
-  if (!m.total) return 0
-  return Math.round((m.used / m.total) * 100)
+  return (
+    typeof m.heapUsed === 'number'
+    && typeof m.heapMax === 'number'
+    && m.heapMax > 0
+  )
 })
+
+const heapPercent = computed(() => {
+  if (!heapAvailable.value) return 0
+
+  const m = store.ramMetrics
+  return Math.round((m.heapUsed / m.heapMax) * 100)
+})
+
+const heapBarWidth = computed(() =>
+  Math.min(100, Math.max(0, heapPercent.value))
+)
+  
 // Backend reports the raw process CPU% (can exceed 100 on multi-core hosts)
 // plus the host core count. We mirror the RAM row — a used/total pair plus a
 // utilization percent — and let the setting choose the units.
@@ -190,12 +212,20 @@ onUnmounted(() => {
         <Panel title="Performance">
           <div class="overview-page__perf">
             <div class="overview-page__perf-row">
-              <span class="overview-page__perf-label">RAM</span>
-              <span class="overview-page__perf-value">{{ ramUsedDisplay }} / {{ ramTotalDisplay }} {{ ramUnitLabel }}</span>
-              <span class="overview-page__perf-pct">{{ ramPercent }}%</span>
+              <span class="overview-page__perf-label">Heap Usage</span>
+              <span class="overview-page__perf-value">{{ heapUsedDisplay }} / {{ heapMaxDisplay }} {{ ramUnitLabel }}</span>
+              <span class="overview-page__perf-pct">{{ heapAvailable ? `${heapPercent}%` : '-' }}</span>
             </div>
             <div class="overview-page__bar">
-              <div class="overview-page__bar-fill" :style="{ width: ramPercent + '%' }"></div>
+              <div class="overview-page__bar-fill" :style="{ width: heapBarWidth + '%' }"></div>
+            </div>
+            <div class="overview-page__perf-row">
+              <span class="overview-page__perf-label">Committed Memory</span>
+              <span class="overview-page__perf-value">{{ heapCommittedDisplay }} {{ ramUnitLabel }}</span>
+            </div>
+            <div class="overview-page__perf-row">
+              <span class="overview-page__perf-label">Total Process Memory</span>
+              <span class="overview-page__perf-value">{{ rssDisplay }} {{ ramUnitLabel }}</span>
             </div>
             <div class="overview-page__perf-row">
               <span class="overview-page__perf-label">CPU</span>

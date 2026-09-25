@@ -390,23 +390,30 @@ export const useServerStore = defineStore('server', () => {
 
   const ramMetrics = computed(() => {
     const runtimeRam = server.value?.runtime?.ram
-    const runtimeLimit = typeof runtimeRam?.limitGB === 'number' ? runtimeRam.limitGB : null
-    // Fallback total (used while stopped, before a real -Xmx limit is known).
-    // memory is expressed in memoryUnit; normalize MB to GB so the bar's units
-    // stay consistent with used (always GB).
+    // Configured maximum heap. This is used as a fallback whilie stopped or
+    // before the JVM has reported its runtime heap statistics
     const configuredUnit = server.value?.memoryUnit ?? serverSettings.value?.memoryUnit ?? 'GB'
     const configuredValue = Number(server.value?.memory ?? serverSettings.value?.memory ?? 0)
-    const configuredTotal = configuredUnit === 'MB' ? configuredValue / 1024 : configuredValue
-    let total = runtimeLimit ?? configuredTotal
-    if (!Number.isFinite(total) || total <= 0) total = 1
-    let used = 0
-    if (runtimeRam) {
-      if (typeof runtimeRam.usedGB === 'number') used = runtimeRam.usedGB
-      else if (typeof runtimeRam.usedBytes === 'number') used = runtimeRam.usedBytes / (1024 ** 3)
-      else if (typeof runtimeRam.used === 'number') used = runtimeRam.used
+    const configuredMax = configuredUnit === 'MB' ? configuredValue / 1024 : configuredValue
+
+    const toGB = (bytes) =>
+      typeof bytes === 'number' && Number.isFinite(bytes)
+        ? bytes / (1024 ** 3)
+        : null
+
+    const runtimeHeapMax = toGB(runtimeRam?.heapMaxBytes)
+    
+    return { 
+      heapUsed: toGB(runtimeRam?.heapUsedBytes), 
+      heapCommitted: toGB(runtimeRam?.heapCommittedBytes),
+      heapMax: runtimeHeapMax !== null && runtimeHeapMax > 0
+        ? runtimeHeapMax
+        : configuredMax > 0
+          ? configuredMax
+          : null,
+      rss: toGB(runtimeRam?.rssBytes),
+      running: serverStatus.value.status === 'running'
     }
-    used = Math.max(0, Math.min(used, total))
-    return { used, total, running: serverStatus.value.status === 'running' }
   })
 
   const filteredMods = computed(() => {
