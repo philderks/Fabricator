@@ -59,17 +59,6 @@ class ForgeInstaller(InstallerBase):
         "promotions_slim.json"
     )
     MAVEN_BASE = "https://maven.minecraftforge.net"
-    USER_AGENT = (
-        "philderks/Fabricator/1.0.0 (https://github.com/philderks/Fabricator)"
-    )
-
-    def __init__(self, install_path: Path):
-        super().__init__(install_path)
-        self.session = requests.Session()
-        self.session.headers.update({
-            "User-Agent": self.USER_AGENT,
-            "Accept": "application/json",
-        })
 
     @property
     def loader_name(self) -> str:
@@ -377,47 +366,28 @@ class ForgeInstaller(InstallerBase):
                 )
         except ValueError as exc:
             msg = str(exc)
-            self._report(progress_callback, "failed", error=msg)
-            return InstallResult(
-                success=False,
-                status=InstallStatus.FAILED,
-                message=msg,
-                details={"mc_version": mc_version},
-            )
+            return self._fail(progress_callback, msg, mc_version=mc_version)
 
         self._report(progress_callback, "resolving_versions")
         promos = self._fetch_promotions()
         if not promos:
             msg = "Could not fetch Forge promotions list. Check connectivity."
-            self._report(progress_callback, "failed", error=msg)
-            return InstallResult(
-                success=False,
-                status=InstallStatus.FAILED,
-                message=msg,
-                details={"mc_version": mc_version},
-            )
+            return self._fail(progress_callback, msg, mc_version=mc_version)
 
         build = loader_version or self._select_build_version(mc_version, promos)
         if not build:
             msg = f"No Forge release found for Minecraft {mc_version}."
-            self._report(progress_callback, "failed", error=msg)
-            return InstallResult(
-                success=False,
-                status=InstallStatus.FAILED,
-                message=msg,
-                details={"mc_version": mc_version},
-            )
+            return self._fail(progress_callback, msg, mc_version=mc_version)
 
         try:
             build = validate_version_token(build, field_name="build")
         except ValueError as exc:
             msg = str(exc)
-            self._report(progress_callback, "failed", error=msg)
-            return InstallResult(
-                success=False,
-                status=InstallStatus.FAILED,
-                message=msg,
-                details={"mc_version": mc_version, "loader_version": build},
+            return self._fail(
+                progress_callback,
+                msg,
+                mc_version=mc_version,
+                loader_version=build,
             )
 
         installer_jar, dl_error = self._download_installer_jar(
@@ -425,12 +395,11 @@ class ForgeInstaller(InstallerBase):
         )
         if not installer_jar or not installer_jar.exists():
             msg = dl_error or "Failed to download Forge installer JAR."
-            self._report(progress_callback, "failed", error=msg)
-            return InstallResult(
-                success=False,
-                status=InstallStatus.FAILED,
-                message=msg,
-                details={"mc_version": mc_version, "loader_version": build},
+            return self._fail(
+                progress_callback,
+                msg,
+                mc_version=mc_version,
+                loader_version=build,
             )
 
         # Run the installer subprocess. EXPLICIT --installServer <path>: the
@@ -460,21 +429,19 @@ class ForgeInstaller(InstallerBase):
             )
         except SubprocessTimeout as exc:
             msg = f"Forge installer timed out: {exc}"
-            self._report(progress_callback, "failed", error=msg)
-            return InstallResult(
-                success=False,
-                status=InstallStatus.FAILED,
-                message=msg,
-                details={"mc_version": mc_version, "loader_version": build},
+            return self._fail(
+                progress_callback,
+                msg,
+                mc_version=mc_version,
+                loader_version=build,
             )
         except OSError as exc:
             msg = f"Failed to invoke Forge installer: {exc}"
-            self._report(progress_callback, "failed", error=msg)
-            return InstallResult(
-                success=False,
-                status=InstallStatus.FAILED,
-                message=msg,
-                details={"mc_version": mc_version, "loader_version": build},
+            return self._fail(
+                progress_callback,
+                msg,
+                mc_version=mc_version,
+                loader_version=build,
             )
 
         if completed.returncode != 0:
@@ -486,16 +453,12 @@ class ForgeInstaller(InstallerBase):
                 " | ".join(tail[-3:]) if tail else f"returncode {completed.returncode}"
             )
             msg = f"Forge installer failed: {tail_str}"
-            self._report(progress_callback, "failed", error=msg)
-            return InstallResult(
-                success=False,
-                status=InstallStatus.FAILED,
-                message=msg,
-                details={
-                    "mc_version": mc_version,
-                    "loader_version": build,
-                    "returncode": completed.returncode,
-                },
+            return self._fail(
+                progress_callback,
+                msg,
+                mc_version=mc_version,
+                loader_version=build,
+                returncode=completed.returncode,
             )
 
         self._report(progress_callback, "detecting_artifacts")
@@ -509,12 +472,11 @@ class ForgeInstaller(InstallerBase):
                 f"forge-{mc_version}-{build}[-universal].jar (legacy) in "
                 "install root."
             )
-            self._report(progress_callback, "failed", error=msg)
-            return InstallResult(
-                success=False,
-                status=InstallStatus.FAILED,
-                message=msg,
-                details={"mc_version": mc_version, "loader_version": build},
+            return self._fail(
+                progress_callback,
+                msg,
+                mc_version=mc_version,
+                loader_version=build,
             )
 
         self._report(progress_callback, "writing_eula")
@@ -535,26 +497,3 @@ class ForgeInstaller(InstallerBase):
             },
             launch=launch,
         )
-
-    def install_with_config(
-        self,
-        mc_version: str,
-        server_config: Dict[str, Any],
-        loader_version: Optional[str] = None,
-        progress_callback: Optional[
-            "Callable[[str, Dict[str, Any]], None]"
-        ] = None,
-    ) -> InstallResult:
-        result = self.install(
-            mc_version, loader_version, progress_callback=progress_callback
-        )
-        if not result.success:
-            return result
-
-        properties = self.generate_server_properties(server_config)
-        self._write_server_properties(properties)
-        if result.details:
-            result.details["server_properties"] = str(
-                self.install_path / "server.properties"
-            )
-        return result

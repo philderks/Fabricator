@@ -108,12 +108,8 @@ export async function getBackupJob(jobId) {
  * upload progress events. Worlds are large, so `onProgress(pct)` drives a real
  * progress bar during the upload before the job even starts.
  *
- * @param {string} serverId
- * @param {File} file
- * @param {object} [opts]
  * @param {(pct:number)=>void} [opts.onProgress] 0–100, or -1 when indeterminate
  * @param {(abort:()=>void)=>void} [opts.registerAbort] receives a cancel fn
- * @returns {Promise<{job_id:string}>}
  */
 export function uploadWorld(serverId, file, { onProgress, registerAbort } = {}) {
   return new Promise((resolve, reject) => {

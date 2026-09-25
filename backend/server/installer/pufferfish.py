@@ -22,7 +22,6 @@ from __future__ import annotations
 import logging
 import re
 import requests
-from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from .base import (
@@ -32,7 +31,6 @@ from .base import (
     InstallStatus,
     LaunchSpec,
     download_with_hash_verify,
-    request_with_retry,
     validate_version_token,
 )
 
@@ -49,17 +47,6 @@ class PufferfishInstaller(InstallerBase):
     """Installer for Pufferfish servers (Jenkins-hosted)."""
 
     CI_BASE = "https://ci.pufferfish.host"
-    USER_AGENT = (
-        "philderks/Fabricator/1.0.0 (https://github.com/philderks/Fabricator)"
-    )
-
-    def __init__(self, install_path: Path):
-        super().__init__(install_path)
-        self.session = requests.Session()
-        self.session.headers.update({
-            "User-Agent": self.USER_AGENT,
-            "Accept": "application/json",
-        })
 
     @property
     def loader_name(self) -> str:
@@ -73,21 +60,6 @@ class PufferfishInstaller(InstallerBase):
         return ["paper", "spigot", "bukkit"]
 
     # ---------- CI helpers ----------
-
-    def _get_json(self, url: str) -> Dict[str, Any]:
-        def _do_request() -> Dict[str, Any]:
-            response = self.session.get(url, timeout=15)
-            response.raise_for_status()
-            return response.json()
-
-        return request_with_retry(
-            _do_request,
-            retries=3,
-            on_retry=lambda attempt, exc: logger.warning(
-                "Retrying Pufferfish CI fetch %s (attempt %d): %s",
-                url, attempt, exc,
-            ),
-        )
 
     def _fetch_jobs(self) -> List[Dict[str, Any]]:
         """Return the Jenkins job list (``[{"name": ...}, ...]``)."""
@@ -111,26 +83,10 @@ class PufferfishInstaller(InstallerBase):
             logger.warning("Failed to fetch Pufferfish CI jobs: %s", exc)
             return []
 
-        versions: List[str] = []
-        for job in jobs:
-            match = _JOB_RE.match(str(job.get("name") or ""))
-            if match:
-                versions.append(match.group(1))
-
-        versions.sort(key=self._mc_version_sort_key, reverse=True)
-        return [
-            {
-                "version": self._canonicalize_mc_version(v),
-                "stable": True,
-                "type": "release",
-            }
-            for v in versions
-        ]
-
-    def get_available_versions(
-        self, mc_version: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
-        return []
+        matches = (_JOB_RE.match(str(job.get("name") or "")) for job in jobs)
+        return self._mc_version_entries(
+            (m.group(1) for m in matches if m), stable=True
+        )
 
     def _resolve_job_name(self, mc_version: str) -> Optional[str]:
         """Return the exact Jenkins job name for ``mc_version`` if it exists.
@@ -220,13 +176,7 @@ class PufferfishInstaller(InstallerBase):
             mc_version = validate_version_token(mc_version, field_name="mc_version")
         except ValueError as exc:
             msg = str(exc)
-            self._report(progress_callback, "failed", error=msg)
-            return InstallResult(
-                success=False,
-                status=InstallStatus.FAILED,
-                message=msg,
-                details={"mc_version": mc_version},
-            )
+            return self._fail(progress_callback, msg, mc_version=mc_version)
 
         self._report(progress_callback, "resolving_versions")
         job_name = self._resolve_job_name(mc_version)
@@ -235,13 +185,7 @@ class PufferfishInstaller(InstallerBase):
                 f"No Pufferfish build found for Minecraft {mc_version}. "
                 "Pufferfish only publishes selected minor versions on its CI."
             )
-            self._report(progress_callback, "failed", error=msg)
-            return InstallResult(
-                success=False,
-                status=InstallStatus.FAILED,
-                message=msg,
-                details={"mc_version": mc_version},
-            )
+            return self._fail(progress_callback, msg, mc_version=mc_version)
 
         artifact_rel = self._resolve_artifact_path(job_name)
         if not artifact_rel:
@@ -249,12 +193,11 @@ class PufferfishInstaller(InstallerBase):
                 "Pufferfish CI did not expose a server jar under build/libs "
                 f"for {mc_version}. The CI layout may have changed."
             )
-            self._report(progress_callback, "failed", error=msg)
-            return InstallResult(
-                success=False,
-                status=InstallStatus.FAILED,
-                message=msg,
-                details={"mc_version": mc_version, "job": job_name},
+            return self._fail(
+                progress_callback,
+                msg,
+                mc_version=mc_version,
+                job=job_name,
             )
 
         download_url = (
@@ -286,40 +229,36 @@ class PufferfishInstaller(InstallerBase):
             )
         except HashVerifyError as exc:
             msg = f"Pufferfish server jar failed size check: {exc}"
-            self._report(progress_callback, "failed", error=msg)
-            return InstallResult(
-                success=False,
-                status=InstallStatus.FAILED,
-                message=msg,
-                details={"mc_version": mc_version, "job": job_name},
+            return self._fail(
+                progress_callback,
+                msg,
+                mc_version=mc_version,
+                job=job_name,
             )
         except requests.RequestException as exc:
             msg = f"Failed to download Pufferfish server jar: {exc}"
-            self._report(progress_callback, "failed", error=msg)
-            return InstallResult(
-                success=False,
-                status=InstallStatus.FAILED,
-                message=msg,
-                details={"mc_version": mc_version, "job": job_name},
+            return self._fail(
+                progress_callback,
+                msg,
+                mc_version=mc_version,
+                job=job_name,
             )
         except OSError as exc:
             msg = f"Failed to write Pufferfish server jar: {exc}"
-            self._report(progress_callback, "failed", error=msg)
-            return InstallResult(
-                success=False,
-                status=InstallStatus.FAILED,
-                message=msg,
-                details={"mc_version": mc_version, "job": job_name},
+            return self._fail(
+                progress_callback,
+                msg,
+                mc_version=mc_version,
+                job=job_name,
             )
 
         if not jar_path.exists():
             msg = "Failed to download Pufferfish server jar"
-            self._report(progress_callback, "failed", error=msg)
-            return InstallResult(
-                success=False,
-                status=InstallStatus.FAILED,
-                message=msg,
-                details={"mc_version": mc_version, "job": job_name},
+            return self._fail(
+                progress_callback,
+                msg,
+                mc_version=mc_version,
+                job=job_name,
             )
 
         self._report(progress_callback, "writing_eula")
@@ -345,26 +284,3 @@ class PufferfishInstaller(InstallerBase):
                 program_args=["nogui"],
             ),
         )
-
-    def install_with_config(
-        self,
-        mc_version: str,
-        server_config: Dict[str, Any],
-        loader_version: Optional[str] = None,
-        progress_callback: Optional[
-            "Callable[[str, Dict[str, Any]], None]"
-        ] = None,
-    ) -> InstallResult:
-        result = self.install(
-            mc_version, loader_version, progress_callback=progress_callback
-        )
-        if not result.success:
-            return result
-
-        properties = self.generate_server_properties(server_config)
-        self._write_server_properties(properties)
-        if result.details:
-            result.details["server_properties"] = str(
-                self.install_path / "server.properties"
-            )
-        return result
