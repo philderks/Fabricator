@@ -122,6 +122,82 @@ def test_ordinary_settings_still_save(client, app, tmp_servers_root):
     assert body["maxPlayers"] == 30
 
 
+def test_settings_accept_separate_min_max_memory(
+    client, app, tmp_servers_root
+):
+    sid = _make_server(app, tmp_servers_root, 25940, "heap")
+
+    resp = client.put(
+        f"/api/servers/{sid}/settings",
+        json={"memoryMin": 4, "memory": 8},
+    )
+
+    assert resp.status_code == 200, resp.get_json()
+    body = resp.get_json()
+    assert body["memoryMin"] == 4
+    assert body["memory"] == 8
+
+
+def test_settings_reject_min_memory_above_max(
+    client, app, tmp_servers_root
+):
+    sid = _make_server(app, tmp_servers_root, 25941, "heap-invalid")
+
+    resp = client.put(
+        f"/api/servers/{sid}/settings",
+        json={"memoryMin": 8, "memory": 4},
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json()["error"] == (
+        "Minimum memory cannot exceed maximum memory"
+    )
+
+
+def test_settings_reject_lowering_max_below_existing_min(
+    client, app, tmp_servers_root
+):
+    sid = _make_server(app, tmp_servers_root, 25942, "heap-partial")
+
+    resp = client.put(
+        f"/api/servers/{sid}/settings",
+        json={"memoryMin": 4, "memory": 8},
+    )
+    assert resp.status_code == 200, resp.get_json()
+
+    resp = client.put(
+        f"/api/servers/{sid}/settings",
+        json={"memory": 2},
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json()["error"] == (
+        "Minimum memory cannot exceed maximum memory"
+    )
+
+
+def test_settings_reject_raising_min_above_existing_max(
+    client, app, tmp_servers_root
+):
+    sid = _make_server(app, tmp_servers_root, 25943, "heap-partial-min")
+
+    resp = client.put(
+        f"/api/servers/{sid}/settings",
+        json={"memory": 8},
+    )
+    assert resp.status_code == 200, resp.get_json()
+
+    resp = client.put(
+        f"/api/servers/{sid}/settings",
+        json={"memoryMin": 12},
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json()["error"] == (
+        "Minimum memory cannot exceed maximum memory"
+    )
+
+
 def test_the_full_ui_payload_is_accepted(client, app, tmp_servers_root):
     """Every settable field at once — the shape the settings form actually
     submits. A missing allowlist entry shows up here as a 400."""
@@ -142,7 +218,7 @@ def _sample_value(field: str):
         return "normal"
     if field == "gamemode":
         return "survival"
-    if field in {"memory", "maxPlayers", "port", "queryPort", "rconPort"}:
+    if field in {"memory", "memoryMin", "maxPlayers", "port", "queryPort", "rconPort"}:
         return 25936 if field.endswith("ort") else 4
     return "x"
 
