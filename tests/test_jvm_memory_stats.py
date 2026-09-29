@@ -94,3 +94,69 @@ Collection set:
 
 def test_parse_jvm_memory_stats_unknown_format():
     assert ServerManager._parse_jvm_memory_stats("unknown format") is None
+
+
+# JDK 17/21 print G1 without "reserved"/"committed" and indent every line by
+# one space; Serial uses the long generation names. Formats taken from the
+# jdk17u/jdk21u print_on() sources.
+
+def test_parse_jvm_memory_stats_g1_jdk17_21():
+    output = """\
+64195:
+ garbage-first heap   total 264192K, used 134420K [0x00000000c0000000, 0x0000000100000000)
+  region size 1024K, 2 young (2048K), 1 survivors (1024K)
+"""
+
+    stats = ServerManager._parse_jvm_memory_stats(output)
+
+    assert stats is not None
+    assert stats.used_bytes == 134420 * 1024
+    assert stats.committed_bytes == 264192 * 1024
+    assert stats.max_bytes == 1024**3
+
+
+def test_parse_jvm_memory_stats_parallel_jdk17_21():
+    output = """\
+64268:
+ PSYoungGen      total 76288K, used 5242K [0x00000000eab00000, 0x00000000f0000000, 0x0000000100000000)
+  eden space 65536K, 8% used [0x00000000eab00000,0x00000000eb01ebd0,0x00000000eeb00000)
+ ParOldGen       total 175104K, used 132228K [0x00000000c0000000, 0x00000000cab00000, 0x00000000eab00000)
+  object space 175104K, 75% used [0x00000000c0000000,0x00000000c8121198,0x00000000cab00000)
+"""
+
+    stats = ServerManager._parse_jvm_memory_stats(output)
+
+    assert stats is not None
+    assert stats.used_bytes == (5242 + 132228) * 1024
+    assert stats.max_bytes == 1024**3
+
+
+def test_parse_jvm_memory_stats_serial_jdk17_21():
+    output = """\
+64331:
+ def new generation   total 78656K, used 5596K [0x00000000c0000000, 0x00000000c5550000, 0x00000000d5550000)
+  eden space 69952K,   8% used [0x00000000c0000000, 0x00000000c05770f0, 0x00000000c4450000)
+ tenured generation   total 174784K, used 132228K [0x00000000d5550000, 0x00000000e0000000, 0x0000000100000000)
+   the space 174784K,  75% used [0x00000000d5550000, 0x00000000dd671198, 0x00000000e0000000)
+"""
+
+    stats = ServerManager._parse_jvm_memory_stats(output)
+
+    assert stats is not None
+    assert stats.used_bytes == (5596 + 132228) * 1024
+    assert stats.committed_bytes == (78656 + 174784) * 1024
+    assert stats.max_bytes == 1024**3
+
+
+def test_failed_probe_is_cached(tmp_path, monkeypatch):
+    """A probe that yields nothing must not re-spawn jcmd on every status
+    call; get_status() is polled from many code paths."""
+    manager = ServerManager(cwd=str(tmp_path), command=["java", "-jar", "server.jar"])
+    monkeypatch.setattr(ServerManager, "is_running", property(lambda self: True))
+    manager._process = object()
+    calls = []
+    monkeypatch.setattr(manager, "_probe_jvm_memory_stats", lambda: calls.append(1))
+
+    assert manager._get_jvm_memory_stats() is None
+    assert manager._get_jvm_memory_stats() is None
+    assert len(calls) == 1

@@ -30,7 +30,14 @@ const formatRam = (gb) => {
   return prefs.memoryUnit === 'MB' ? String(Math.round(gb * 1024)) : gb.toFixed(1)
 }
 
-const heapUsedDisplay = computed(() => formatRam(store.ramMetrics.heapUsed))
+// Without heap stats (no jcmd, or an unparsed GC format) fall back to process
+// RAM against the configured max, so a running server never shows an empty bar.
+const ramUsed = computed(() => store.ramMetrics.heapUsed ?? store.ramMetrics.rss)
+const ramLabel = computed(() =>
+  typeof store.ramMetrics.heapUsed === 'number' ? 'Heap Usage' : 'RAM'
+)
+
+const heapUsedDisplay = computed(() => formatRam(ramUsed.value))
 const heapMaxDisplay = computed(() => formatRam(store.ramMetrics.heapMax))
 const heapCommittedDisplay = computed(() => formatRam(store.ramMetrics.heapCommitted))
 const rssDisplay = computed(() => formatRam(store.ramMetrics.rss))
@@ -38,7 +45,7 @@ const rssDisplay = computed(() => formatRam(store.ramMetrics.rss))
 const heapAvailable = computed(() => {
   const m = store.ramMetrics
   return (
-    typeof m.heapUsed === 'number'
+    typeof ramUsed.value === 'number'
     && typeof m.heapMax === 'number'
     && m.heapMax > 0
   )
@@ -47,14 +54,13 @@ const heapAvailable = computed(() => {
 const heapPercent = computed(() => {
   if (!heapAvailable.value) return 0
 
-  const m = store.ramMetrics
-  return Math.round((m.heapUsed / m.heapMax) * 100)
+  return Math.round((ramUsed.value / store.ramMetrics.heapMax) * 100)
 })
 
 const heapBarWidth = computed(() =>
   Math.min(100, Math.max(0, heapPercent.value))
 )
-  
+
 // Backend reports the raw process CPU% (can exceed 100 on multi-core hosts)
 // plus the host core count. We mirror the RAM row — a used/total pair plus a
 // utilization percent — and let the setting choose the units.
@@ -212,7 +218,7 @@ onUnmounted(() => {
         <Panel title="Performance">
           <div class="overview-page__perf">
             <div class="overview-page__perf-row">
-              <span class="overview-page__perf-label">Heap Usage</span>
+              <span class="overview-page__perf-label">{{ ramLabel }}</span>
               <span class="overview-page__perf-value">{{ heapUsedDisplay }} / {{ heapMaxDisplay }} {{ ramUnitLabel }}</span>
               <span class="overview-page__perf-pct">{{ heapAvailable ? `${heapPercent}%` : '-' }}</span>
             </div>

@@ -391,7 +391,7 @@ export const useServerStore = defineStore('server', () => {
 
   const ramMetrics = computed(() => {
     const runtimeRam = server.value?.runtime?.ram
-    // Configured maximum heap. This is used as a fallback whilie stopped or
+    // Configured maximum heap. This is used as a fallback while stopped or
     // before the JVM has reported its runtime heap statistics
     const configuredUnit = server.value?.memoryUnit ?? serverSettings.value?.memoryUnit ?? 'GB'
     const configuredValue = Number(server.value?.memory ?? serverSettings.value?.memory ?? 0)
@@ -403,9 +403,9 @@ export const useServerStore = defineStore('server', () => {
         : null
 
     const runtimeHeapMax = toGB(runtimeRam?.heapMaxBytes)
-    
-    return { 
-      heapUsed: toGB(runtimeRam?.heapUsedBytes), 
+
+    return {
+      heapUsed: toGB(runtimeRam?.heapUsedBytes),
       heapCommitted: toGB(runtimeRam?.heapCommittedBytes),
       heapMax: runtimeHeapMax !== null && runtimeHeapMax > 0
         ? runtimeHeapMax
