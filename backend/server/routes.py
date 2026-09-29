@@ -798,7 +798,16 @@ def create_server():
 @server_bp.route('/servers/<server_id>', methods=['GET'])
 @require_server
 def get_server_details(server_id, server):
-    return jsonify(_augment_with_runtime(server))
+    augmented = _augment_with_runtime(server)
+    # JVM heap stats are opt-in (Settings -> Display): probing runs jcmd, so
+    # only the Overview asks for them, and only when the user enabled it.
+    runtime = augmented.get('runtime')
+    if request.args.get('heap') == '1' and runtime:
+        manager = _registry().get_manager(server_id)
+        heap = manager.jvm_heap_info() if manager else None
+        if heap:
+            runtime['ram'] = {**(runtime.get('ram') or {}), **heap}
+    return jsonify(augmented)
 
 
 @server_bp.route('/servers/<server_id>/java-status', methods=['GET'])

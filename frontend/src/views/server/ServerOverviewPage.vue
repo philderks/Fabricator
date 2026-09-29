@@ -225,11 +225,11 @@ onUnmounted(() => {
             <div class="overview-page__bar">
               <div class="overview-page__bar-fill" :style="{ width: heapBarWidth + '%' }"></div>
             </div>
-            <div class="overview-page__perf-row">
+            <div v-if="prefs.showHeapStats" class="overview-page__perf-row">
               <span class="overview-page__perf-label">Committed Memory</span>
               <span class="overview-page__perf-value">{{ heapCommittedDisplay }} {{ ramUnitLabel }}</span>
             </div>
-            <div class="overview-page__perf-row">
+            <div v-if="prefs.showHeapStats" class="overview-page__perf-row">
               <span class="overview-page__perf-label">Total Process Memory</span>
               <span class="overview-page__perf-value">{{ rssDisplay }} {{ ramUnitLabel }}</span>
             </div>

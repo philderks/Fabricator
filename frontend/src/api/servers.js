@@ -13,8 +13,8 @@ export async function getServers() {
   return get('/api/servers')
 }
 
-export async function getServer(serverId) {
-  return get(`/api/servers/${serverId}`)
+export async function getServer(serverId, { heap = false } = {}) {
+  return get(`/api/servers/${serverId}${heap ? '?heap=1' : ''}`)
 }
 
 export async function createServer(serverData) {

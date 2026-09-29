@@ -32,6 +32,7 @@ import {
   createServerFolder
 } from '../api/servers'
 import { useToast } from '../composables/useToast'
+import { usePreferencesStore } from './preferences'
 import {
   enrichInstalledModsWithModrinth,
   invalidateModrinthMetaCache
@@ -100,6 +101,7 @@ function isPathInside(childPath, ancestorPath) {
 export const useServerStore = defineStore('server', () => {
   const router = useRouter()
   const toast = useToast()
+  const prefs = usePreferencesStore()
 
   // ---------- State ----------
   // Pushed by ServerLayout via watchers with immediate: true. We do NOT call
@@ -505,7 +507,7 @@ export const useServerStore = defineStore('server', () => {
     const { silent = false } = options
     if (!silent) serverLoading.value = true
     try {
-      const data = await getServer(currentServerId.value)
+      const data = await getServer(currentServerId.value, { heap: prefs.showHeapStats })
       server.value = data
       // Mirror the freshly augmented record into serversList so the sidebar
       // dropdown trigger reflects the same status as the detail page header.

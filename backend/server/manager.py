@@ -686,19 +686,9 @@ class ServerManager:
         status_value = "running" if running else "stopped"
         message = "Server process is running" if running else "Server process is not running"
         rss_bytes = self._get_rss_usage_bytes()
-        jvm_memory = self._get_jvm_memory_stats()
         status = {"status": status_value, "message": message}
-        ram_info = {}
         if rss_bytes is not None:
-            ram_info["rssBytes"] = rss_bytes
-
-        if jvm_memory is not None:
-            ram_info["heapUsedBytes"] = jvm_memory.used_bytes
-            ram_info["heapCommittedBytes"] = jvm_memory.committed_bytes
-            ram_info["heapMaxBytes"] = jvm_memory.max_bytes
-
-        if ram_info:
-            status["ram"] = ram_info
+            status["ram"] = {"rssBytes": rss_bytes}
         cpu_percent = self._get_cpu_percent()
         if cpu_percent is not None:
             status["cpu"] = cpu_percent
@@ -1090,6 +1080,21 @@ Collection set:
             return cls._jvm_memory_stats_from_match(match)
 
         return cls._parse_generational_jvm_memory_stats(output)
+
+    def jvm_heap_info(self) -> Optional[dict]:
+        """Heap fields for the ``ram`` block, or None when unavailable.
+
+        Kept out of status() on purpose: status() is a hot path, and jcmd
+        spawns a JVM, so only callers that asked for heap stats pay for it.
+        """
+        stats = self._get_jvm_memory_stats()
+        if stats is None:
+            return None
+        return {
+            "heapUsedBytes": stats.used_bytes,
+            "heapCommittedBytes": stats.committed_bytes,
+            "heapMaxBytes": stats.max_bytes,
+        }
 
     def _get_jvm_memory_stats(self) -> Optional[JvmMemoryStats]:
         if not self.is_running or not self._process:

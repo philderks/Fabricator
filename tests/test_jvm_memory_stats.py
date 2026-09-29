@@ -160,3 +160,43 @@ def test_failed_probe_is_cached(tmp_path, monkeypatch):
     assert manager._get_jvm_memory_stats() is None
     assert manager._get_jvm_memory_stats() is None
     assert len(calls) == 1
+
+
+def test_heap_stats_only_probed_when_requested(client, app, tmp_servers_root, monkeypatch):
+    """Heap stats are opt-in: the detail route runs the jcmd probe only for
+    ?heap=1, and status() (the hot path) never does."""
+    from backend.server.registry import get_server_process_registry
+    from tests.test_settings_allowlist import _make_server
+
+    sid = _make_server(app, tmp_servers_root, 25950, "heap-optin")
+    probes = []
+
+    class FakeManager:
+        def jvm_heap_info(self):
+            probes.append(1)
+            return {"heapUsedBytes": 1, "heapCommittedBytes": 2, "heapMaxBytes": 3}
+
+    registry = get_server_process_registry()
+    monkeypatch.setattr(registry, "get_manager", lambda server_id: FakeManager())
+    monkeypatch.setattr(
+        registry, "get_status",
+        lambda server_id: {"status": "running", "ram": {"rssBytes": 5}},
+    )
+
+    plain = client.get(f"/api/servers/{sid}").get_json()
+    assert plain["runtime"]["ram"] == {"rssBytes": 5}
+    assert probes == []
+
+    ram = client.get(f"/api/servers/{sid}?heap=1").get_json()["runtime"]["ram"]
+    assert ram == {"rssBytes": 5, "heapUsedBytes": 1, "heapCommittedBytes": 2, "heapMaxBytes": 3}
+    assert probes == [1]
+
+
+def test_status_does_not_probe_jvm(tmp_path, monkeypatch):
+    manager = ServerManager(cwd=str(tmp_path), command=["java", "-jar", "server.jar"])
+    monkeypatch.setattr(
+        manager, "_get_jvm_memory_stats",
+        lambda: (_ for _ in ()).throw(AssertionError("status() probed jcmd")),
+    )
+
+    assert "status" in manager.status()
