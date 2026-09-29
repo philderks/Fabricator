@@ -127,12 +127,18 @@ const memoryLimits = computed(() =>
 const onMemoryUnitChange = (nextUnit) => {
   const s = store.serverSettings
   if (!s || nextUnit === s.memoryUnit) return
-  const current = Number(s.memory) || 0
-  if (nextUnit === 'MB' && s.memoryUnit === 'GB') {
-    s.memory = Math.round(current * 1024)
-  } else if (nextUnit === 'GB' && s.memoryUnit === 'MB') {
-    s.memory = Math.round((current / 1024) * 100) / 100
+  const convert = (value) => {
+    const current = Number(value) || 0
+    if (nextUnit === 'MB' && s.memoryUnit === 'GB') {
+      return Math.round(current * 1024)
+    } else if (nextUnit === 'GB' && s.memoryUnit === 'MB') {
+      return Math.round((current / 1024) * 100) / 100
+    }
+    return current
   }
+
+  s.memoryMin = convert(s.memoryMin ?? s.memory)
+  s.memory = convert(s.memory)
   s.memoryUnit = nextUnit
 }
 
@@ -1074,7 +1080,7 @@ const onReset = () => {
       </div>
 
       <div class="settings-page__grid settings-page__grid--three">
-        <FormField v-if="!auth.managed" label="Memory Allocation">
+        <FormField v-if="!auth.managed" label="Minimum Memory" hint="Initial JVM heap size (-Xms).">
           <template #default="{ id, describedBy }">
             <div class="settings-page__memory">
               <input
@@ -1082,24 +1088,44 @@ const onReset = () => {
                 class="settings-page__input settings-page__memory-value"
                 type="number"
                 :min="memoryLimits.min"
-                :max="memoryLimits.max"
+                :max="store.serverSettings.memory"
                 :step="memoryLimits.step"
-                v-model.number="store.serverSettings.memory"
+                v-model.number="store.serverSettings.memoryMin"
                 :disabled="!store.canEditSettings"
                 :aria-describedby="describedBy"
               />
-              <select
-                class="settings-page__select settings-page__memory-unit"
-                :value="store.serverSettings.memoryUnit"
-                :disabled="!store.canEditSettings"
-                aria-label="Memory unit"
-                @change="onMemoryUnitChange($event.target.value)"
-              >
-                <option value="GB">GB</option>
-                <option value="MB">MB</option>
-              </select>
+              <span class="settings-page__memory-unit">
+                {{ store.serverSettings.memoryUnit }}
+              </span>
             </div>
           </template>
+        </FormField>
+        <FormField v-if="!auth.managed" label="Maximum Memory" hint="Maximum JVM heap size (-Xmx).">
+            <template #default="{ id, describedBy }">
+              <div class="settings-page__memory">
+                <input
+                    :id="id"
+                    class="settings-page__input settings-page__memory-value"
+                    type="number"
+                    :min="store.serverSettings.memoryMin || memoryLimits.min"
+                    :max="memoryLimits.max"
+                    :step="memoryLimits.step"
+                    v-model.number="store.serverSettings.memory"
+                    :disabled="!store.canEditSettings"
+                    :aria-describedby="describedBy"
+                    />
+                <select
+                    class="settings-page__select settings-page__memory-unit"
+                    :value="store.serverSettings.memoryUnit"
+                    :disabled="!store.canEditSettings"
+                    aria-label="Memory unit"
+                    @change="onMemoryUnitChange($event.target.value)"
+                    >
+                    <option value="GB">GB</option>
+                    <option value="MB">MB</option>
+                </select>
+              </div>
+            </template>
         </FormField>
         <FormField label="View Distance (chunks)">
           <template #default="{ id, describedBy }">
