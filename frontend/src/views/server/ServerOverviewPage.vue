@@ -30,9 +30,15 @@ const formatRam = (gb) => {
   return prefs.memoryUnit === 'MB' ? String(Math.round(gb * 1024)) : gb.toFixed(1)
 }
 
-// Without heap stats (no jcmd, or an unparsed GC format) fall back to process
-// RAM against the configured max, so a running server never shows an empty bar.
-const ramUsed = computed(() => store.ramMetrics.heapUsed ?? store.ramMetrics.rss)
+// Without heap stats (toggle off, no jcmd, or an unparsed GC format) this is
+// the pre-heap-stats RAM row: process RAM capped at the configured max, 0 while
+// stopped. The cap matters: RSS always exceeds -Xmx, and "4.6 / 4.0 GB" reads
+// like the server is over its limit.
+const ramUsed = computed(() => {
+  const m = store.ramMetrics
+  if (typeof m.heapUsed === 'number') return m.heapUsed
+  return Math.min(m.rss ?? 0, m.heapMax ?? Infinity)
+})
 const ramLabel = computed(() =>
   typeof store.ramMetrics.heapUsed === 'number' ? 'Heap Usage' : 'RAM'
 )
@@ -54,12 +60,9 @@ const heapAvailable = computed(() => {
 const heapPercent = computed(() => {
   if (!heapAvailable.value) return 0
 
-  return Math.round((ramUsed.value / store.ramMetrics.heapMax) * 100)
+  const pct = Math.round((ramUsed.value / store.ramMetrics.heapMax) * 100)
+  return Math.min(100, Math.max(0, pct))
 })
-
-const heapBarWidth = computed(() =>
-  Math.min(100, Math.max(0, heapPercent.value))
-)
 
 // Backend reports the raw process CPU% (can exceed 100 on multi-core hosts)
 // plus the host core count. We mirror the RAM row — a used/total pair plus a
@@ -223,7 +226,7 @@ onUnmounted(() => {
               <span class="overview-page__perf-pct">{{ heapAvailable ? `${heapPercent}%` : '-' }}</span>
             </div>
             <div class="overview-page__bar">
-              <div class="overview-page__bar-fill" :style="{ width: heapBarWidth + '%' }"></div>
+              <div class="overview-page__bar-fill" :style="{ width: heapPercent + '%' }"></div>
             </div>
             <div v-if="prefs.showHeapStats" class="overview-page__perf-row">
               <span class="overview-page__perf-label">Committed Memory</span>

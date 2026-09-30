@@ -200,3 +200,20 @@ def test_status_does_not_probe_jvm(tmp_path, monkeypatch):
     )
 
     assert "status" in manager.status()
+
+
+def test_failed_probe_keeps_last_good_reading(tmp_path, monkeypatch):
+    """A probe that times out on a busy server must not blank a reading we
+    already have, or the Overview flips between heap and RAM fallback."""
+    from backend.server.manager import JvmMemoryStats
+
+    manager = ServerManager(cwd=str(tmp_path), command=["java", "-jar", "server.jar"])
+    monkeypatch.setattr(ServerManager, "is_running", property(lambda self: True))
+    manager._process = object()
+    good = JvmMemoryStats(used_bytes=1, committed_bytes=2, max_bytes=3)
+    results = iter([good, None])
+    monkeypatch.setattr(manager, "_probe_jvm_memory_stats", lambda: next(results))
+
+    assert manager._get_jvm_memory_stats() == good
+    manager._jvm_memory_stats_at -= ServerManager.JVM_MEMORY_SAMPLE_INTERVAL_SEC
+    assert manager._get_jvm_memory_stats() == good

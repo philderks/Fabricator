@@ -1113,7 +1113,12 @@ Collection set:
             return self._jvm_memory_stats
 
         self._jvm_memory_stats_at = now
-        self._jvm_memory_stats = self._probe_jvm_memory_stats()
+        # Keep the last good reading when a probe fails (e.g. jcmd timing out
+        # on a busy server) so the Overview doesn't flip to the RAM fallback.
+        # The reset above clears it once the process stops.
+        self._jvm_memory_stats = (
+            self._probe_jvm_memory_stats() or self._jvm_memory_stats
+        )
         return self._jvm_memory_stats
 
     def _probe_jvm_memory_stats(self) -> Optional[JvmMemoryStats]:
