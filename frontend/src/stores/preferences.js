@@ -49,5 +49,11 @@ export const usePreferencesStore = defineStore('preferences', () => {
   const memoryUnit = ref(persisted.memoryUnit === 'MB' ? 'MB' : 'GB')
   watch(memoryUnit, (unit) => persist({ memoryUnit: unit }))
 
-  return { cpuDisplayMode, memoryUnit }
+  // Detailed JVM heap readout on the Overview (heap used/committed plus total
+  // process memory). Off by default: fetching it runs jcmd against the server
+  // every few seconds, which most people don't need.
+  const showHeapStats = ref(persisted.showHeapStats === true)
+  watch(showHeapStats, (on) => persist({ showHeapStats: on }))
+
+  return { cpuDisplayMode, memoryUnit, showHeapStats }
 })

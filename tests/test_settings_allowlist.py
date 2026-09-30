@@ -198,6 +198,34 @@ def test_settings_reject_raising_min_above_existing_max(
     )
 
 
+def test_settings_legacy_record_can_lower_max_alone(
+    client, app, tmp_servers_root
+):
+    """A record saved before memoryMin existed has an implicit min == max;
+    lowering memory on its own must not be refused against the old max."""
+    sid = _make_server(app, tmp_servers_root, 25944, "heap-legacy")
+    assert client.put(
+        f"/api/servers/{sid}/settings", json={"memory": 8}
+    ).status_code == 200
+
+    resp = client.put(f"/api/servers/{sid}/settings", json={"memory": 4})
+
+    assert resp.status_code == 200, resp.get_json()
+    assert resp.get_json()["memory"] == 4
+
+
+def test_settings_reject_non_finite_memory(client, app, tmp_servers_root):
+    sid = _make_server(app, tmp_servers_root, 25945, "heap-inf")
+
+    for value in ("inf", "nan"):
+        resp = client.put(
+            f"/api/servers/{sid}/settings",
+            json={"memory": value, "memoryMin": 1},
+        )
+        assert resp.status_code == 400, value
+        assert resp.get_json()["error"] == "Memory values must be finite numbers"
+
+
 def test_the_full_ui_payload_is_accepted(client, app, tmp_servers_root):
     """Every settable field at once — the shape the settings form actually
     submits. A missing allowlist entry shows up here as a 400."""

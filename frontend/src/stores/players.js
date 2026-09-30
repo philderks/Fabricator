@@ -22,6 +22,44 @@ import * as api from '../api/players'
 
 const ONLINE_POLL_MS = 5000
 
+/**
+ * Write `mutate()` to `target` now; restore it and re-throw if `call()` fails.
+ *
+ * Resolves to `undefined`, never to the response: these actions report through
+ * the store's own state, and handing the raw payload back would invite a caller
+ * to read it from here instead.
+ */
+async function optimistic(target, mutate, call) {
+  const before = target.value
+  mutate()
+  try {
+    await call()
+  } catch (e) {
+    target.value = before
+    throw e
+  }
+}
+
+/**
+ * Append `entry` now, then swap it for what the server recorded — the
+ * placeholder carries no UUID until the server resolves one. A failure removes
+ * just that entry, so a concurrent change isn't discarded with it.
+ */
+async function optimisticAdd(list, entry, call, reconcile) {
+  list.value = [...list.value, entry]
+  try {
+    const result = await call()
+    list.value = list.value.map(e => (e === entry ? reconcile(result) : e))
+  } catch (e) {
+    list.value = list.value.filter(x => x !== entry)
+    throw e
+  }
+}
+
+/** Case-insensitive "every entry but this one" filter on a name-ish field. */
+const excluding = (field, value) => (e) =>
+  (e[field] || '').toLowerCase() !== String(value).toLowerCase()
+
 export const usePlayersStore = defineStore('players', () => {
   const serverStore = useServerStore()
 
@@ -107,115 +145,76 @@ export const usePlayersStore = defineStore('players', () => {
 
   async function addWhitelist(name) {
     const id = currentServerId.value
-    const optimistic = { name, uuid: null }
-    whitelist.value = [...whitelist.value, optimistic]
-    try {
-      const result = await api.addToWhitelist(id, name)
-      whitelist.value = whitelist.value.map(e =>
-        e === optimistic ? { name: result.name, uuid: result.uuid || null } : e
-      )
-    } catch (e) {
-      whitelist.value = whitelist.value.filter(e => e !== optimistic)
-      throw e
-    }
+    return optimisticAdd(
+      whitelist,
+      { name, uuid: null },
+      () => api.addToWhitelist(id, name),
+      (r) => ({ name: r.name, uuid: r.uuid || null })
+    )
   }
 
   async function removeWhitelist(name) {
-    const id = currentServerId.value
-    const before = whitelist.value
-    whitelist.value = whitelist.value.filter(
-      e => (e.name || '').toLowerCase() !== name.toLowerCase()
+    return optimistic(
+      whitelist,
+      () => { whitelist.value = whitelist.value.filter(excluding('name', name)) },
+      () => api.removeFromWhitelist(currentServerId.value, name)
     )
-    try {
-      await api.removeFromWhitelist(id, name)
-    } catch (e) {
-      whitelist.value = before
-      throw e
-    }
   }
 
   async function toggleWhitelistActive(active) {
-    const previous = whitelistActive.value
-    whitelistActive.value = active
-    try {
-      await api.setWhitelistActive(currentServerId.value, active)
-    } catch (e) {
-      whitelistActive.value = previous
-      throw e
-    }
+    return optimistic(
+      whitelistActive,
+      () => { whitelistActive.value = active },
+      () => api.setWhitelistActive(currentServerId.value, active)
+    )
   }
 
   async function addOp(name, level) {
     const id = currentServerId.value
-    const optimistic = { name, level, uuid: null }
-    ops.value = [...ops.value, optimistic]
-    try {
-      const result = await api.addOp(id, name, level)
-      ops.value = ops.value.map(e =>
-        e === optimistic
-          ? { name: result.name, uuid: result.uuid || null, level: result.level ?? level }
-          : e
-      )
-    } catch (e) {
-      ops.value = ops.value.filter(e => e !== optimistic)
-      throw e
-    }
+    return optimisticAdd(
+      ops,
+      { name, level, uuid: null },
+      () => api.addOp(id, name, level),
+      (r) => ({ name: r.name, uuid: r.uuid || null, level: r.level ?? level })
+    )
   }
 
   async function setOpLevel(name, level) {
-    const before = ops.value
-    ops.value = ops.value.map(e =>
-      (e.name || '').toLowerCase() === name.toLowerCase() ? { ...e, level } : e
+    return optimistic(
+      ops,
+      () => {
+        ops.value = ops.value.map(e =>
+          (e.name || '').toLowerCase() === name.toLowerCase() ? { ...e, level } : e
+        )
+      },
+      () => api.setOpLevel(currentServerId.value, name, level)
     )
-    try {
-      await api.setOpLevel(currentServerId.value, name, level)
-    } catch (e) {
-      ops.value = before
-      throw e
-    }
   }
 
   async function removeOp(name) {
-    const before = ops.value
-    ops.value = ops.value.filter(
-      e => (e.name || '').toLowerCase() !== name.toLowerCase()
+    return optimistic(
+      ops,
+      () => { ops.value = ops.value.filter(excluding('name', name)) },
+      () => api.removeOp(currentServerId.value, name)
     )
-    try {
-      await api.removeOp(currentServerId.value, name)
-    } catch (e) {
-      ops.value = before
-      throw e
-    }
   }
 
   async function addBan(name, reason) {
     const id = currentServerId.value
-    const optimistic = { name, reason, uuid: null }
-    bans.value = [...bans.value, optimistic]
-    try {
-      const result = await api.banPlayer(id, name, reason || null)
-      bans.value = bans.value.map(e =>
-        e === optimistic
-          ? { name: result.name, uuid: result.uuid || null, reason: result.reason }
-          : e
-      )
-    } catch (e) {
-      bans.value = bans.value.filter(e => e !== optimistic)
-      throw e
-    }
+    return optimisticAdd(
+      bans,
+      { name, reason, uuid: null },
+      () => api.banPlayer(id, name, reason || null),
+      (r) => ({ name: r.name, uuid: r.uuid || null, reason: r.reason })
+    )
   }
 
   async function removeBan(name) {
-    const before = bans.value
-    bans.value = bans.value.filter(
-      e => (e.name || '').toLowerCase() !== name.toLowerCase()
+    return optimistic(
+      bans,
+      () => { bans.value = bans.value.filter(excluding('name', name)) },
+      () => api.unbanPlayer(currentServerId.value, name)
     )
-    try {
-      await api.unbanPlayer(currentServerId.value, name)
-    } catch (e) {
-      bans.value = before
-      throw e
-    }
   }
 
   async function kick(name, reason = null) {
@@ -226,39 +225,28 @@ export const usePlayersStore = defineStore('players', () => {
 
   async function addIpBan(ip, reason = null) {
     const id = currentServerId.value
-    const optimistic = { ip, reason }
-    ipBans.value = [...ipBans.value, optimistic]
-    try {
-      const result = await api.banIp(id, ip, reason || null)
-      ipBans.value = ipBans.value.map(e => e === optimistic ? result : e)
-    } catch (e) {
-      ipBans.value = ipBans.value.filter(e => e !== optimistic)
-      throw e
-    }
+    return optimisticAdd(
+      ipBans,
+      { ip, reason },
+      () => api.banIp(id, ip, reason || null),
+      (r) => r
+    )
   }
 
   async function removeIpBan(ip) {
-    const before = ipBans.value
-    ipBans.value = ipBans.value.filter(
-      e => (e.ip || '').toLowerCase() !== ip.toLowerCase()
+    return optimistic(
+      ipBans,
+      () => { ipBans.value = ipBans.value.filter(excluding('ip', ip)) },
+      () => api.unbanIp(currentServerId.value, ip)
     )
-    try {
-      await api.unbanIp(currentServerId.value, ip)
-    } catch (e) {
-      ipBans.value = before
-      throw e
-    }
   }
 
   async function toggleEnforceWhitelist(active) {
-    const previous = enforceWhitelist.value
-    enforceWhitelist.value = active
-    try {
-      await api.setEnforceWhitelist(currentServerId.value, active)
-    } catch (e) {
-      enforceWhitelist.value = previous
-      throw e
-    }
+    return optimistic(
+      enforceWhitelist,
+      () => { enforceWhitelist.value = active },
+      () => api.setEnforceWhitelist(currentServerId.value, active)
+    )
   }
 
   function resetState() {

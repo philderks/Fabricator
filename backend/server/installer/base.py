@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Callable, List, Dict, Any, TypeVar
+from typing import Any, Callable, Dict, Iterable, List, TypeVar
 
 import requests
 
@@ -34,6 +34,12 @@ _DOWNLOAD_CHUNK_SIZE = 65536
 # Modelled on ``ModrinthClient._FILENAME_RE`` (the established pattern for
 # the same kind of trust-boundary check on user-influenced strings).
 LOADER_VERSION_RE = re.compile(r"^[A-Za-z0-9._+\-]{1,128}$")
+
+# A stable Minecraft release is a bare ``1.y`` / ``1.y.z``. Every mainstream
+# Minecraft release for the entire modern era is ``1.x``; upstreams also list
+# experimental families (e.g. ``26.2``) and prerelease builds (``-rc``/``-pre``
+# suffixes), which ``_mc_version_entries`` surfaces but marks non-stable.
+_STABLE_MC_RE = re.compile(r"^1\.\d+(\.\d+)?$")
 
 
 def validate_version_token(value: str, *, field_name: str) -> str:
@@ -536,6 +542,12 @@ class InstallResult:
 class InstallerBase(ABC):
     """Abstract base class for Minecraft server installers."""
 
+    #: Sent on every upstream request an installer makes. One value for every
+    #: loader — upstream operators identify Fabricator, not the loader.
+    USER_AGENT = (
+        "philderks/Fabricator/1.0.0 (https://github.com/philderks/Fabricator)"
+    )
+
     @staticmethod
     def _canonicalize_mc_version(v: str) -> str:
         """Strip trailing '.0' patch from a Minecraft version string.
@@ -593,6 +605,112 @@ class InstallerBase(ABC):
         """
         self.install_path = Path(install_path)
         self.java_exec: str | None = None
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": self.USER_AGENT,
+            "Accept": "application/json",
+        })
+
+    @classmethod
+    def _mc_version_entries(
+        cls, raw_versions: Iterable[Any], *, stable: bool | None = None
+    ) -> List[Dict[str, Any]]:
+        """Normalise raw MC version strings into ``get_minecraft_versions`` shape.
+
+        Drops blanks, classifies each entry, and sorts newest-first — the
+        upstream list order is not trusted because the frontend takes the first
+        stable entry as a new server's default selection.
+
+        Does NOT deduplicate: only PaperMC's payload can repeat a version (the
+        same one can sit under two families), so that belongs to its flattening
+        step, not here — the flat-list sources have nothing to dedupe.
+
+        ``stable=None`` (the default) classifies per entry: a mainstream
+        Minecraft release is a bare ``1.y`` / ``1.y.z``, and anything else
+        (experimental families like ``26.2``, ``-rc``/``-pre`` builds) is
+        surfaced but marked non-stable so it stays behind the snapshot toggle.
+        Pass ``stable=True`` when the source only publishes releases.
+        """
+        out: List[Dict[str, Any]] = []
+        for value in raw_versions:
+            text = str(value or "")
+            if not text:
+                continue
+            is_stable = _STABLE_MC_RE.match(text) is not None if stable is None else stable
+            out.append({
+                "version": cls._canonicalize_mc_version(text),
+                "stable": is_stable,
+                "type": "release" if is_stable else "snapshot",
+            })
+        out.sort(key=lambda e: cls._mc_version_sort_key(e["version"]), reverse=True)
+        return out
+
+    def _get_json(self, url: str) -> Dict[str, Any]:
+        """GET + parse JSON with backoff on transient errors.
+
+        Every loader's version/build metadata fetch is an idempotent GET, so
+        5xx and connection resets are safe to retry.
+        """
+        def _do_request() -> Dict[str, Any]:
+            response = self.session.get(url, timeout=15)
+            response.raise_for_status()
+            return response.json()
+
+        return request_with_retry(
+            _do_request,
+            retries=3,
+            on_retry=lambda attempt, exc: logger.warning(
+                "Retrying %s fetch %s (attempt %d): %s",
+                self.loader_name, url, attempt, exc,
+            ),
+        )
+
+    def _fail(
+        self,
+        callback: 'Callable[[str, Dict[str, Any]], None] | None',
+        message: str,
+        **details: Any,
+    ) -> InstallResult:
+        """Report the ``failed`` phase and return the matching FAILED result.
+
+        Every install failure path is this same pair — emit the phase carrying
+        the message, then hand back a result carrying the same message plus
+        whatever identifying detail the caller had at that point.
+        """
+        self._report(callback, "failed", error=message)
+        return InstallResult(
+            success=False,
+            status=InstallStatus.FAILED,
+            message=message,
+            details=details or None,
+        )
+
+    def install_with_config(
+        self,
+        mc_version: str,
+        server_config: Dict[str, Any],
+        loader_version: str | None = None,
+        progress_callback: 'Callable[[str, Dict[str, Any]], None] | None' = None,
+    ) -> InstallResult:
+        """Install, then write ``server.properties`` from ``server_config``.
+
+        A successful install is the precondition: a failed one returns
+        untouched so the caller sees the install's own error rather than a
+        properties-write error layered on top of it.
+        """
+        result = self.install(
+            mc_version, loader_version, progress_callback=progress_callback
+        )
+        if not result.success:
+            return result
+
+        properties = self.generate_server_properties(server_config)
+        self._write_server_properties(properties)
+        if result.details:
+            result.details["server_properties"] = str(
+                self.install_path / "server.properties"
+            )
+        return result
 
     @property
     @abstractmethod
@@ -687,15 +805,17 @@ class InstallerBase(ABC):
         except Exception:
             pass
 
-    @abstractmethod
     def get_available_versions(self, mc_version: str | None = None) -> List[Dict[str, Any]]:
         """Get loader-native version metadata for ``mc_version``.
 
         Shape is loader-specific — the frontend treats this payload opaquely
-        per loader. Loaders that do not expose a separate loader version
-        (e.g. Vanilla) must return ``[]``.
+        per loader. The default is ``[]``, which is correct for every loader
+        with no separately-pickable version: Vanilla has none, and the
+        prebuilt-jar platforms (Paper, Folia, Purpur, Pufferfish) expose build
+        numbers that are always resolved to the newest at install time rather
+        than chosen by the user.
         """
-        pass
+        return []
 
     @abstractmethod
     def get_minecraft_versions(self) -> List[Dict[str, Any]]:

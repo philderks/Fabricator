@@ -30,17 +30,6 @@ class VanillaInstaller(InstallerBase):
     MANIFEST_URL = (
         "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
     )
-    USER_AGENT = (
-        "philderks/Fabricator/1.0.0 (https://github.com/philderks/Fabricator)"
-    )
-
-    def __init__(self, install_path: Path):
-        super().__init__(install_path)
-        self.session = requests.Session()
-        self.session.headers.update({
-            "User-Agent": self.USER_AGENT,
-            "Accept": "application/json",
-        })
 
     @property
     def loader_name(self) -> str:
@@ -91,12 +80,6 @@ class VanillaInstaller(InstallerBase):
                 "type": mc_type,
             })
         return out
-
-    def get_available_versions(
-        self, mc_version: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
-        # Vanilla has no separate loader versions.
-        return []
 
     def _find_version_entry(
         self, mc_version: str, manifest: Dict[str, Any]
@@ -190,35 +173,18 @@ class VanillaInstaller(InstallerBase):
             manifest = self._fetch_manifest()
         except requests.RequestException as exc:
             msg = f"Could not fetch Mojang manifest: {exc}"
-            self._report(progress_callback, "failed", error=msg)
-            return InstallResult(
-                success=False,
-                status=InstallStatus.FAILED,
-                message=msg,
-            )
+            return self._fail(progress_callback, msg)
 
         entry = self._find_version_entry(mc_version, manifest)
         if not entry:
             msg = f"Unknown Minecraft version: {mc_version}"
-            self._report(progress_callback, "failed", error=msg)
-            return InstallResult(
-                success=False,
-                status=InstallStatus.FAILED,
-                message=msg,
-                details={"mc_version": mc_version},
-            )
+            return self._fail(progress_callback, msg, mc_version=mc_version)
 
         try:
             version_meta = self._fetch_version_meta(entry["url"])
         except (requests.RequestException, KeyError) as exc:
             msg = f"Could not fetch version metadata: {exc}"
-            self._report(progress_callback, "failed", error=msg)
-            return InstallResult(
-                success=False,
-                status=InstallStatus.FAILED,
-                message=msg,
-                details={"mc_version": mc_version},
-            )
+            return self._fail(progress_callback, msg, mc_version=mc_version)
 
         server_dl = (version_meta.get("downloads") or {}).get("server") or {}
         server_url = server_dl.get("url")
@@ -227,13 +193,7 @@ class VanillaInstaller(InstallerBase):
                 f"Minecraft {mc_version} has no server download "
                 "(versions older than ~1.2.5 are server-less)."
             )
-            self._report(progress_callback, "failed", error=msg)
-            return InstallResult(
-                success=False,
-                status=InstallStatus.FAILED,
-                message=msg,
-                details={"mc_version": mc_version},
-            )
+            return self._fail(progress_callback, msg, mc_version=mc_version)
 
         # Mojang piston-meta publishes ``downloads.server.sha1`` for every
         # version that has a server JAR. Refusing to install when the field
@@ -247,13 +207,7 @@ class VanillaInstaller(InstallerBase):
                 "server JAR SHA1; refusing to install without an "
                 "integrity check."
             )
-            self._report(progress_callback, "failed", error=msg)
-            return InstallResult(
-                success=False,
-                status=InstallStatus.FAILED,
-                message=msg,
-                details={"mc_version": mc_version},
-            )
+            return self._fail(progress_callback, msg, mc_version=mc_version)
 
         jar_path, dl_error = self._download_server_jar(
             server_url,
@@ -262,13 +216,7 @@ class VanillaInstaller(InstallerBase):
         )
         if not jar_path or not jar_path.exists():
             msg = dl_error or "Failed to download vanilla server jar"
-            self._report(progress_callback, "failed", error=msg)
-            return InstallResult(
-                success=False,
-                status=InstallStatus.FAILED,
-                message=msg,
-                details={"mc_version": mc_version},
-            )
+            return self._fail(progress_callback, msg, mc_version=mc_version)
 
         self._report(progress_callback, "writing_eula")
         self._write_eula(accepted=True)
@@ -292,26 +240,3 @@ class VanillaInstaller(InstallerBase):
                 program_args=["nogui"],
             ),
         )
-
-    def install_with_config(
-        self,
-        mc_version: str,
-        server_config: Dict[str, Any],
-        loader_version: Optional[str] = None,
-        progress_callback: Optional[
-            "Callable[[str, Dict[str, Any]], None]"
-        ] = None,
-    ) -> InstallResult:
-        result = self.install(
-            mc_version, loader_version, progress_callback=progress_callback
-        )
-        if not result.success:
-            return result
-
-        properties = self.generate_server_properties(server_config)
-        self._write_server_properties(properties)
-        if result.details:
-            result.details["server_properties"] = str(
-                self.install_path / "server.properties"
-            )
-        return result

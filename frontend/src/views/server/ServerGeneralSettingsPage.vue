@@ -227,6 +227,11 @@ onMounted(async () => {
         hint="Off shows average system load (0–100%, like Task Manager). On shows the raw process usage, which can exceed 100% on multi-core hosts."
         @update:model-value="prefs.cpuDisplayMode = $event ? 'total' : 'average'"
       />
+      <ToggleRow
+        v-model="prefs.showHeapStats"
+        label="Show JVM heap details on the Overview"
+        hint="Replaces the RAM readout with Java heap usage, committed heap and total process memory. Reads them from the running server via jcmd every few seconds, so leave it off if you don't need it."
+      />
     </Panel>
 
     <JavaManagerPanel v-if="activeSection === 'java'" />

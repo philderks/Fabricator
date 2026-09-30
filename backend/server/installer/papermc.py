@@ -18,7 +18,6 @@ sticks to the strict ``folia`` facet.
 from __future__ import annotations
 
 import logging
-import re
 import requests
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -30,19 +29,11 @@ from .base import (
     InstallStatus,
     LaunchSpec,
     download_with_hash_verify,
-    request_with_retry,
     validate_version_token,
 )
 
 
 logger = logging.getLogger(__name__)
-
-# A stable Minecraft release is a bare ``1.y`` / ``1.y.z``. Every mainstream
-# Minecraft release for the entire modern era is ``1.x``; Fill also lists
-# experimental families (e.g. ``26.2``) and prerelease builds
-# (``-rc``/``-pre`` suffixes), which we surface but mark non-stable so the UI
-# keeps them behind the snapshot toggle and never defaults a new server to one.
-_STABLE_MC_RE = re.compile(r"^1\.\d+(\.\d+)?$")
 
 # The Fill v3 build "download" key for the runnable server jar.
 _SERVER_DOWNLOAD_KEY = "server:default"
@@ -58,9 +49,6 @@ class PaperMCInstaller(InstallerBase):
     API_BASE = "https://fill.papermc.io/v3/projects"
     #: PaperMC project slug — subclasses override.
     PROJECT: str = ""
-    USER_AGENT = (
-        "philderks/Fabricator/1.0.0 (https://github.com/philderks/Fabricator)"
-    )
 
     def __init__(self, install_path: Path):
         super().__init__(install_path)
@@ -68,11 +56,6 @@ class PaperMCInstaller(InstallerBase):
             raise ValueError(
                 f"{type(self).__name__} must set a PROJECT slug"
             )
-        self.session = requests.Session()
-        self.session.headers.update({
-            "User-Agent": self.USER_AGENT,
-            "Accept": "application/json",
-        })
 
     content_kind = "plugin"
 
@@ -80,25 +63,6 @@ class PaperMCInstaller(InstallerBase):
 
     def _project_url(self, *parts: str) -> str:
         return "/".join((self.API_BASE, self.PROJECT, *parts))
-
-    def _get_json(self, url: str) -> Dict[str, Any]:
-        """GET + parse JSON with backoff on transient errors.
-
-        Retry-wrapped (parity with the vanilla/forge fetchers): the Fill API is
-        an idempotent GET, so 5xx / connection resets are safe to retry.
-        """
-        def _do_request() -> Dict[str, Any]:
-            response = self.session.get(url, timeout=15)
-            response.raise_for_status()
-            return response.json()
-
-        return request_with_retry(
-            _do_request,
-            retries=3,
-            on_retry=lambda attempt, exc: logger.warning(
-                "Retrying PaperMC fetch %s (attempt %d): %s", url, attempt, exc,
-            ),
-        )
 
     # ---------- Version listing ----------
 
@@ -118,31 +82,11 @@ class PaperMCInstaller(InstallerBase):
             return []
 
         families = payload.get("versions") or {}
-        out: List[Dict[str, Any]] = []
-        seen: set[str] = set()
-        for _family, version_list in families.items():
-            for v in version_list or []:
-                if not v or v in seen:
-                    continue
-                seen.add(v)
-                stable = bool(_STABLE_MC_RE.match(str(v)))
-                out.append({
-                    "version": self._canonicalize_mc_version(str(v)),
-                    "stable": stable,
-                    "type": "release" if stable else "snapshot",
-                })
-        # Sort newest-first explicitly rather than trusting the API's list order
-        # — the frontend takes the first stable entry as the default selection.
-        out.sort(key=lambda e: self._mc_version_sort_key(e["version"]), reverse=True)
-        return out
-
-    def get_available_versions(
-        self, mc_version: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
-        # PaperMC exposes build numbers rather than a separate "loader version"
-        # the user picks; we always resolve the newest stable build at install
-        # time, so there is no per-loader version to surface here.
-        return []
+        # dict.fromkeys dedupes while keeping first-seen order: the same version
+        # can be listed under two families, and the UI must not offer it twice.
+        return self._mc_version_entries(dict.fromkeys(
+            v for version_list in families.values() for v in (version_list or [])
+        ))
 
     def _select_build(self, mc_version: str) -> Optional[Dict[str, Any]]:
         """Return the newest ``STABLE``-channel build dict for ``mc_version``.
@@ -191,13 +135,7 @@ class PaperMCInstaller(InstallerBase):
             mc_version = validate_version_token(mc_version, field_name="mc_version")
         except ValueError as exc:
             msg = str(exc)
-            self._report(progress_callback, "failed", error=msg)
-            return InstallResult(
-                success=False,
-                status=InstallStatus.FAILED,
-                message=msg,
-                details={"mc_version": mc_version},
-            )
+            return self._fail(progress_callback, msg, mc_version=mc_version)
 
         self._report(progress_callback, "resolving_versions")
         build = self._select_build(mc_version)
@@ -206,13 +144,7 @@ class PaperMCInstaller(InstallerBase):
                 f"No {self.PROJECT.capitalize()} build found for "
                 f"Minecraft {mc_version}."
             )
-            self._report(progress_callback, "failed", error=msg)
-            return InstallResult(
-                success=False,
-                status=InstallStatus.FAILED,
-                message=msg,
-                details={"mc_version": mc_version},
-            )
+            return self._fail(progress_callback, msg, mc_version=mc_version)
 
         build_number = build.get("id")
         download = (build.get("downloads") or {}).get(_SERVER_DOWNLOAD_KEY) or {}
@@ -223,12 +155,11 @@ class PaperMCInstaller(InstallerBase):
                 f"{self.PROJECT.capitalize()} build {build_number} for "
                 f"{mc_version} has no downloadable server artefact."
             )
-            self._report(progress_callback, "failed", error=msg)
-            return InstallResult(
-                success=False,
-                status=InstallStatus.FAILED,
-                message=msg,
-                details={"mc_version": mc_version, "build": build_number},
+            return self._fail(
+                progress_callback,
+                msg,
+                mc_version=mc_version,
+                build=build_number,
             )
 
         jar_path = self.install_path / "server.jar"
@@ -257,40 +188,36 @@ class PaperMCInstaller(InstallerBase):
             )
         except HashVerifyError as exc:
             msg = f"{self.PROJECT.capitalize()} server jar failed integrity check: {exc}"
-            self._report(progress_callback, "failed", error=msg)
-            return InstallResult(
-                success=False,
-                status=InstallStatus.FAILED,
-                message=msg,
-                details={"mc_version": mc_version, "build": build_number},
+            return self._fail(
+                progress_callback,
+                msg,
+                mc_version=mc_version,
+                build=build_number,
             )
         except requests.RequestException as exc:
             msg = f"Failed to download {self.PROJECT.capitalize()} server jar: {exc}"
-            self._report(progress_callback, "failed", error=msg)
-            return InstallResult(
-                success=False,
-                status=InstallStatus.FAILED,
-                message=msg,
-                details={"mc_version": mc_version, "build": build_number},
+            return self._fail(
+                progress_callback,
+                msg,
+                mc_version=mc_version,
+                build=build_number,
             )
         except OSError as exc:
             msg = f"Failed to write {self.PROJECT.capitalize()} server jar: {exc}"
-            self._report(progress_callback, "failed", error=msg)
-            return InstallResult(
-                success=False,
-                status=InstallStatus.FAILED,
-                message=msg,
-                details={"mc_version": mc_version, "build": build_number},
+            return self._fail(
+                progress_callback,
+                msg,
+                mc_version=mc_version,
+                build=build_number,
             )
 
         if not jar_path.exists():
             msg = f"Failed to download {self.PROJECT.capitalize()} server jar"
-            self._report(progress_callback, "failed", error=msg)
-            return InstallResult(
-                success=False,
-                status=InstallStatus.FAILED,
-                message=msg,
-                details={"mc_version": mc_version, "build": build_number},
+            return self._fail(
+                progress_callback,
+                msg,
+                mc_version=mc_version,
+                build=build_number,
             )
 
         self._report(progress_callback, "writing_eula")
@@ -319,29 +246,6 @@ class PaperMCInstaller(InstallerBase):
                 program_args=["nogui"],
             ),
         )
-
-    def install_with_config(
-        self,
-        mc_version: str,
-        server_config: Dict[str, Any],
-        loader_version: Optional[str] = None,
-        progress_callback: Optional[
-            "Callable[[str, Dict[str, Any]], None]"
-        ] = None,
-    ) -> InstallResult:
-        result = self.install(
-            mc_version, loader_version, progress_callback=progress_callback
-        )
-        if not result.success:
-            return result
-
-        properties = self.generate_server_properties(server_config)
-        self._write_server_properties(properties)
-        if result.details:
-            result.details["server_properties"] = str(
-                self.install_path / "server.properties"
-            )
-        return result
 
 
 class PaperInstaller(PaperMCInstaller):

@@ -27,20 +27,6 @@ class FabricInstaller(InstallerBase):
     """
 
     META_API_BASE = "https://meta.fabricmc.net/v2"
-    USER_AGENT = "philderks/Fabricator/1.0.0 (https://github.com/philderks/Fabricator)"
-
-    def __init__(self, install_path: Path):
-        """Initialize Fabric installer.
-        
-        Args:
-            install_path: Directory where server will be installed
-        """
-        super().__init__(install_path)
-        self.session = requests.Session()
-        self.session.headers.update({
-            "User-Agent": self.USER_AGENT,
-            "Accept": "application/json"
-        })
 
     @property
     def loader_name(self) -> str:
@@ -280,13 +266,7 @@ class FabricInstaller(InstallerBase):
             loader_version = self._get_latest_loader_version(mc_version)
             if not loader_version:
                 msg = f"Could not find Fabric loader for MC {mc_version}"
-                self._report(progress_callback, "failed", error=msg)
-                return InstallResult(
-                    success=False,
-                    status=InstallStatus.FAILED,
-                    message=msg,
-                    details={"mc_version": mc_version}
-                )
+                return self._fail(progress_callback, msg, mc_version=mc_version)
 
         logger.info("Using loader version: %s", loader_version)
 
@@ -299,12 +279,11 @@ class FabricInstaller(InstallerBase):
                     "Could not determine Fabric installer version. "
                     "Check network connectivity or Fabric Meta availability."
                 )
-                self._report(progress_callback, "failed", error=msg)
-                return InstallResult(
-                    success=False,
-                    status=InstallStatus.FAILED,
-                    message=msg,
-                    details={"mc_version": mc_version, "loader_version": loader_version}
+                return self._fail(
+                    progress_callback,
+                    msg,
+                    mc_version=mc_version,
+                    loader_version=loader_version,
                 )
 
         logger.info("Using installer version: %s", installer_version)
@@ -320,15 +299,11 @@ class FabricInstaller(InstallerBase):
 
         if not jar_path or not jar_path.exists():
             msg = "Failed to download Fabric server JAR"
-            self._report(progress_callback, "failed", error=msg)
-            return InstallResult(
-                success=False,
-                status=InstallStatus.FAILED,
-                message=msg,
-                details={
-                    "mc_version": mc_version,
-                    "loader_version": loader_version
-                }
+            return self._fail(
+                progress_callback,
+                msg,
+                mc_version=mc_version,
+                loader_version=loader_version,
             )
 
         # Pre-create .fabric cache directory so the launcher can
@@ -377,34 +352,24 @@ class FabricInstaller(InstallerBase):
             "Callable[[str, Dict[str, Any]], None]"
         ] = None,
     ) -> InstallResult:
-        """Install a Fabric server with full configuration.
-        
-        Args:
-            mc_version: Minecraft version to install
-            server_config: Server configuration dictionary
-            loader_version: Optional specific loader version
-            
-        Returns:
-            InstallResult with success status and details
+        """As :meth:`InstallerBase.install_with_config`, plus ``installer_version``.
+
+        Overridden only to carry Fabric's extra installer-version argument
+        through to :meth:`install`; the properties-writing half is identical.
         """
-        # First do the basic installation
         result = self.install(
             mc_version,
             loader_version,
             installer_version,
             progress_callback=progress_callback,
         )
-        
         if not result.success:
             return result
-        
-        # Generate and write server.properties
-        logger.info("Writing server.properties...")
+
         properties = self.generate_server_properties(server_config)
         self._write_server_properties(properties)
-        
-        # Update result details
         if result.details:
-            result.details["server_properties"] = str(self.install_path / "server.properties")
-        
+            result.details["server_properties"] = str(
+                self.install_path / "server.properties"
+            )
         return result

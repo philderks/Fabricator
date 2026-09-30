@@ -158,8 +158,6 @@ def test_build_command_memory_unit_defaults_to_gb(tmp_path, monkeypatch):
     assert cmd == ["java", "-Xms4G", "-Xmx4G", "-jar", "server.jar", "nogui"]
 
 
-
-
 def test_build_command_separate_min_max_heap(tmp_path, monkeypatch):
     """memoryMin controls -Xms independently from memory/-Xmx."""
     reg = _make_registry(tmp_path)
@@ -217,6 +215,7 @@ def test_build_command_separate_min_max_heap_mb(tmp_path, monkeypatch):
         "server.jar",
         "nogui",
     ]
+
 
 def test_build_command_args_file_launch(tmp_path, monkeypatch):
     reg = _make_registry(tmp_path)

@@ -3,6 +3,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 import logging
+import math
 import os
 import re
 import shutil
@@ -597,18 +598,12 @@ def _normalize_memory(data: dict, server: dict | None = None) -> str | None:
     if not any(key in data for key in ('memory', 'memoryMin', 'memoryUnit')):
         return None
 
-    if server:
-        current_memory = server.get('memory', 4)
-        current_memory_min = server.get('memoryMin', current_memory)
-        current_unit = server.get('memoryUnit', 'GB')
-    else:
-        current_memory = data.get('memory', 4)
-        current_memory_min = data.get('memoryMin', current_memory)
-        current_unit = data.get('memoryUnit', 'GB')
-
-    memory = data.get('memory', current_memory)
-    memory_min = data.get('memoryMin', current_memory_min)
-    memory_unit = str(data.get('memoryUnit', current_unit)).upper()
+    server = server or {}
+    memory = data.get('memory', server.get('memory', 4))
+    # A legacy record's implicit min tracks whatever max is being saved, so
+    # lowering memory alone does not trip the min > max check.
+    memory_min = data.get('memoryMin', server.get('memoryMin', memory))
+    memory_unit = str(data.get('memoryUnit', server.get('memoryUnit', 'GB'))).upper()
 
     if memory_unit not in ('GB', 'MB'):
         return 'Memory unit must be GB or MB'
@@ -618,6 +613,11 @@ def _normalize_memory(data: dict, server: dict | None = None) -> str | None:
         memory_min = float(memory_min)
     except (TypeError, ValueError):
         return 'Memory values must be numbers'
+
+    # isfinite: float() accepts 'inf'/'nan', which would persist as
+    # non-JSON Infinity/NaN and launch with -Xmxinf.
+    if not (math.isfinite(memory) and math.isfinite(memory_min)):
+        return 'Memory values must be finite numbers'
 
     if memory <= 0 or memory_min <= 0:
         return 'Memory values must be greater than zero'
@@ -798,7 +798,16 @@ def create_server():
 @server_bp.route('/servers/<server_id>', methods=['GET'])
 @require_server
 def get_server_details(server_id, server):
-    return jsonify(_augment_with_runtime(server))
+    augmented = _augment_with_runtime(server)
+    # JVM heap stats are opt-in (Settings -> Display): probing runs jcmd, so
+    # only the Overview asks for them, and only when the user enabled it.
+    runtime = augmented.get('runtime')
+    if request.args.get('heap') == '1' and runtime:
+        manager = _registry().get_manager(server_id)
+        heap = manager.jvm_heap_info() if manager else None
+        if heap:
+            runtime['ram'] = {**(runtime.get('ram') or {}), **heap}
+    return jsonify(augmented)
 
 
 @server_bp.route('/servers/<server_id>/java-status', methods=['GET'])

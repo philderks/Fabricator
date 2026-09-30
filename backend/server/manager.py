@@ -127,7 +127,7 @@ class ServerManager:
         self._process: Optional[subprocess.Popen] = None
         self._ps_process: Optional["psutil.Process"] = None  # type: ignore[name-defined]
         self._jvm_memory_stats: Optional[JvmMemoryStats] = None
-        self._jvm_memory_stats_at = 0.0
+        self._jvm_memory_stats_at: Optional[float] = None
         self._stdout_thread: Optional[threading.Thread] = None
         self._stderr_thread: Optional[threading.Thread] = None
         # Each entry is ``(capture_ts, text)`` where capture_ts is an ISO-Z
@@ -686,19 +686,9 @@ class ServerManager:
         status_value = "running" if running else "stopped"
         message = "Server process is running" if running else "Server process is not running"
         rss_bytes = self._get_rss_usage_bytes()
-        jvm_memory = self._get_jvm_memory_stats()
         status = {"status": status_value, "message": message}
-        ram_info = {}
         if rss_bytes is not None:
-            ram_info["rssBytes"] = rss_bytes
-
-        if jvm_memory is not None:
-            ram_info["heapUsedBytes"] = jvm_memory.used_bytes
-            ram_info["heapCommittedBytes"] = jvm_memory.committed_bytes
-            ram_info["heapMaxBytes"] = jvm_memory.max_bytes
-
-        if ram_info:
-            status["ram"] = ram_info
+            status["ram"] = {"rssBytes": rss_bytes}
         cpu_percent = self._get_cpu_percent()
         if cpu_percent is not None:
             status["cpu"] = cpu_percent
@@ -894,7 +884,8 @@ class ServerManager:
             return None
 
         java_path = os.path.realpath(java_path)
-        jcmd_path = os.path.join(os.path.dirname(java_path), "jcmd")
+        jcmd_name = "jcmd.exe" if platform_utils.is_windows() else "jcmd"
+        jcmd_path = os.path.join(os.path.dirname(java_path), jcmd_name)
 
         if os.path.isfile(jcmd_path) and os.access(jcmd_path, os.X_OK):
             return jcmd_path
@@ -923,8 +914,12 @@ DefNew     total 78656K, used 5596K [0x00000000c0000000, 0x00000000c5550000, 0x0
 Tenured    total 174784K, used 132228K [0x00000000d5550000, 0x00000000e0000000, 0x0000000100000000)
  the  space 174784K,  75% used [0x00000000d5550000, 0x00000000dd671198, 0x00000000e0000000)
         """
+        # JDK 17/21 indent each line by one space and name the Serial
+        # generations "def new generation" / "tenured generation"; 22+
+        # dropped the indent and switched to DefNew / Tenured.
         generation_pattern = re.compile(
-            r"^(?P<generation>PSYoungGen|ParOldGen|DefNew|Tenured)\s+"
+            r"^\s*(?P<generation>PSYoungGen|ParOldGen|DefNew|Tenured"
+            r"|def new generation|tenured generation)\s+"
             r"total\s+(?P<committed>\d+[KMG]),\s+"
             r"used\s+(?P<used>\d+[KMG])\s+"
             r"\[(?P<start>0x[0-9a-fA-F]+),\s*"
@@ -941,6 +936,7 @@ Tenured    total 174784K, used 132228K [0x00000000d5550000, 0x00000000e0000000, 
         if names not in (
             {"PSYoungGen", "ParOldGen"},
             {"DefNew", "Tenured"},
+            {"def new generation", "tenured generation"},
         ):
             return None
 
@@ -1001,7 +997,7 @@ Tenured    total 174784K, used 132228K [0x00000000d5550000, 0x00000000e0000000, 
         """
         Parse the output of `jcmd <pid> GC.heap_info` for various garbage collectors.
         ZGC, G1GC, and Shenandoah are simple enough to parse with regex while ParallelGC
-        and SerialGC require a more complex parsing due to their generational nature, 
+        and SerialGC require a more complex parsing due to their generational nature,
         hence we defer that to the `_parse_generational_jvm_memory_stats` method.
         """
         # ZGC
@@ -1019,10 +1015,10 @@ ZHeap            used 142M, capacity 256M, max capacity 1024M
         )
         if match:
             return cls._jvm_memory_stats_from_match(match)
-            
-        # G1
+
+        # G1 (JDK 22+)
         """
-        Exmample output:
+        Example output:
 garbage-first heap   total reserved 1048576K, committed 264192K, used 134420K [0x00000000c0000000, 0x0000000100000000)
  region size 1024K, 2 young (2048K), 1 survivors (1024K)
         """
@@ -1035,6 +1031,30 @@ garbage-first heap   total reserved 1048576K, committed 264192K, used 134420K [0
         )
         if match:
             return cls._jvm_memory_stats_from_match(match)
+
+        # G1 (JDK 17/21): no reserved size, so max comes from the reserved
+        # address range, the same way the generational parser derives it.
+        """
+        Example output:
+ garbage-first heap   total 264192K, used 134420K [0x00000000c0000000, 0x0000000100000000)
+        """
+        match = re.search(
+            r"garbage-first heap\s+"
+            r"total\s+(?P<committed>\d+[KMG]),\s+"
+            r"used\s+(?P<used>\d+[KMG])\s+"
+            r"\[(?P<start>0x[0-9a-fA-F]+),\s*(?P<end>0x[0-9a-fA-F]+)\)",
+            output,
+        )
+        if match:
+            used_bytes = cls._parse_memory_quantity(match.group("used"))
+            committed_bytes = cls._parse_memory_quantity(match.group("committed"))
+            if used_bytes is None or committed_bytes is None:
+                return None
+            return JvmMemoryStats(
+                used_bytes=used_bytes,
+                committed_bytes=committed_bytes,
+                max_bytes=int(match.group("end"), 16) - int(match.group("start"), 16),
+            )
 
         # Shenandoah
         """
@@ -1061,20 +1081,47 @@ Collection set:
 
         return cls._parse_generational_jvm_memory_stats(output)
 
+    def jvm_heap_info(self) -> Optional[dict]:
+        """Heap fields for the ``ram`` block, or None when unavailable.
+
+        Kept out of status() on purpose: status() is a hot path, and jcmd
+        spawns a JVM, so only callers that asked for heap stats pay for it.
+        """
+        stats = self._get_jvm_memory_stats()
+        if stats is None:
+            return None
+        return {
+            "heapUsedBytes": stats.used_bytes,
+            "heapCommittedBytes": stats.committed_bytes,
+            "heapMaxBytes": stats.max_bytes,
+        }
+
     def _get_jvm_memory_stats(self) -> Optional[JvmMemoryStats]:
         if not self.is_running or not self._process:
             self._jvm_memory_stats = None
-            self._jvm_memory_stats_at = 0.0
+            self._jvm_memory_stats_at = None
             return None
 
         now = time.monotonic()
 
+        # Failures are cached too: get_status() is a hot path (players,
+        # backups, server list), and jcmd spawns a whole JVM per call.
         if (
-            self._jvm_memory_stats is not None
+            self._jvm_memory_stats_at is not None
             and now - self._jvm_memory_stats_at < self.JVM_MEMORY_SAMPLE_INTERVAL_SEC
         ):
             return self._jvm_memory_stats
 
+        self._jvm_memory_stats_at = now
+        # Keep the last good reading when a probe fails (e.g. jcmd timing out
+        # on a busy server) so the Overview doesn't flip to the RAM fallback.
+        # The reset above clears it once the process stops.
+        self._jvm_memory_stats = (
+            self._probe_jvm_memory_stats() or self._jvm_memory_stats
+        )
+        return self._jvm_memory_stats
+
+    def _probe_jvm_memory_stats(self) -> Optional[JvmMemoryStats]:
         jcmd = self._get_jcmd_executable()
         if not jcmd:
             return None
@@ -1090,17 +1137,12 @@ Collection set:
                 text=True,
                 timeout=2,
                 check=True,
+                **platform_utils.subprocess_no_window_kwargs(),
             )
         except (OSError, subprocess.SubprocessError):
             return None
 
-        stats = self._parse_jvm_memory_stats(result.stdout)
-        if stats is None:
-            return None
-
-        self._jvm_memory_stats = stats
-        self._jvm_memory_stats_at = now
-        return stats
+        return self._parse_jvm_memory_stats(result.stdout)
 
     def _get_cpu_percent(self) -> Optional[float]:
         process = self._get_psutil_process()

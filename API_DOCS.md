@@ -112,33 +112,66 @@ the files.
 **Response (201):** the created server, including a `javaRequirement` block describing the
 required Java major, what was detected, and a `recommended_install` download hint.
 
-**Errors:** `400` missing fields or the port is already used by another server · `500` on write failure
+**Errors:** `400` missing fields, the port is already used by another server, or invalid memory
+fields (validated as in [settings](#put-apiserversserver_idsettings)) · `500` on write failure
 
 #### `GET /api/servers/<server_id>`
 
 Single server, augmented with runtime state. `404` if unknown.
 
+While the server runs, `runtime.ram` holds the process's resident memory:
+
+```json
+{ "rssBytes": 5234491392 }
+```
+
+**Query:** `heap=1` adds JVM heap figures, read from the running server with `jcmd`:
+
+```json
+{
+  "rssBytes": 5234491392,
+  "heapUsedBytes": 2147483648,
+  "heapCommittedBytes": 3221225472,
+  "heapMaxBytes": 4294967296
+}
+```
+
+The heap figures are left out when they can't be read (no `jcmd` next to the server's Java, or a
+GC output format Fabricator doesn't recognise). Probing starts a short-lived JVM, so results are
+cached for 5 seconds per server, and only this endpoint probes — the server list and other
+endpoints never do.
+
 #### `PUT /api/servers/<server_id>/settings`
 
 Update server settings and rewrite `server.properties`. `id` and `createdAt` are ignored if sent.
 
-Two fields are launch tuning rather than `server.properties`, and take effect on the next start:
+These fields are launch tuning rather than `server.properties`, and take effect on the next start:
 
 | Field | Meaning |
 | --- | --- |
+| `memory` | Maximum heap (`-Xmx`), in `memoryUnit`. Must be a finite number greater than zero. |
+| `memoryMin` | Initial heap (`-Xms`), in `memoryUnit`. Same rules as `memory`, and must not exceed it. Records without it launch with `-Xms` equal to `-Xmx`. |
+| `memoryUnit` | `GB` (default) or `MB`; applies to both `memory` and `memoryMin`. |
 | `javaPath` | JVM to run this server on. A path is checked for existence and the executable bit; a bare command name (`java`, `java21`) is accepted and resolved on `PATH` at launch. Empty string clears the override, falling back to a managed runtime matching the MC version. |
 | `jvmArgs` | Extra JVM flags, as the string the user typed (split shell-style at launch). Appended **after** the installer's own `launch.jvm_args`, so a repeated option resolves in the user's favour. Empty string clears them. |
 
 `jvmArgs` refuses arguments that would contradict other settings or the installer: `-Xmx`/`-Xms`
-and friends (use the `memory` field, or the two would silently disagree), `-jar` / `-cp` /
+and friends (use the `memory` / `memoryMin` fields, or the two would silently disagree), `-jar` / `-cp` /
 `--class-path` / `--module-path`, and `@argfile`. Max 2000 characters and 64 arguments.
 
 **Errors:** `409` if the server is running (stop it first) · `404` unknown server · `400` invalid
-`javaPath` / `jvmArgs`, with a message naming the offending value · `500` if `server.properties`
-cannot be written
+`javaPath` / `jvmArgs`, with a message naming the offending value · `400` invalid memory fields
+(`Memory unit must be GB or MB`, `Memory values must be numbers`, `Memory values must be finite
+numbers`, `Memory values must be greater than zero`, `Minimum memory cannot exceed maximum
+memory`) · `500` if `server.properties` cannot be written
+
+A partial update is checked against the stored values: sending only `memory` fails if it would drop
+below the stored `memoryMin`.
 
 In managed mode `javaPath`, `jvmArgs`, `command` and `launch` are all rejected with `400` — the
-deployment owns the JVM. `POST /api/servers` validates `javaPath` and `jvmArgs` the same way.
+deployment owns the JVM. The memory fields are accepted but ignored at launch: the heap is pinned to
+`FABRICATOR_MANAGED_MEMORY_GB` for both `-Xms` and `-Xmx`. `POST /api/servers` validates `javaPath`,
+`jvmArgs` and the memory fields the same way.
 
 #### `PUT /api/servers/<server_id>/autostart`
 
@@ -356,7 +389,7 @@ registry rejected it (e.g. the server is not running).
 #### `GET /api/servers/<server_id>/metrics`
 
 ```json
-{ "status": "running", "ram": 2147483648, "pid": 12345 }
+{ "status": "running", "ram": { "rssBytes": 2147483648 }, "pid": 12345 }
 ```
 
 #### `GET /api/metrics/system`
