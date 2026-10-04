@@ -292,6 +292,64 @@ def resolve_installed_mods(server_id, server):
     return jsonify({'resolved': resolved})
 
 
+@modrinth_bp.route('/servers/<server_id>/updates', methods=['GET'])
+@require_server
+def check_mod_updates(server_id, server):
+    """Jars in the mods folder with a newer compatible release (#80).
+
+    One upstream request for the whole folder. Returns ``{updates: {filename:
+    {projectId, versionId, versionNumber}}}``. Jars the user pinned to a chosen
+    version (#56) and jars Modrinth doesn't know are left out.
+    """
+    mods_folder, error = _resolve_mods_folder(server)
+    if error:
+        payload, status = error
+        return jsonify(payload), status
+
+    mods_path = Path(mods_folder)
+    if not mods_path.is_dir() or not server.get('version'):
+        return jsonify({'updates': {}})
+
+    manifest = storage.get_content_manifest(server_id)
+    by_hash = {}
+    for path in mods_path.iterdir():
+        if not path.is_file() or path.suffix.lower() != '.jar':
+            continue
+        if (manifest.get(path.name) or {}).get('pinned'):
+            continue
+        digest = installed.file_sha1(path)
+        if digest:
+            by_hash.setdefault(digest, []).append(path.name)
+
+    if not by_hash:
+        return jsonify({'updates': {}})
+
+    try:
+        latest = modrinth_client.get_latest_versions_by_hashes(
+            list(by_hash),
+            loaders=_server_loader_facets(server, server.get('loader')),
+            game_versions=[server['version']],
+        )
+    except ModrinthApiError as exc:
+        return _modrinth_error_response(exc)
+
+    updates = {}
+    for digest, filenames in by_hash.items():
+        version = latest.get(digest)
+        if not isinstance(version, dict):
+            continue
+        # The newest release still contains this exact file: up to date.
+        if any((f.get('hashes') or {}).get('sha1') == digest for f in version.get('files') or []):
+            continue
+        for name in filenames:
+            updates[name] = {
+                'projectId': version.get('project_id'),
+                'versionId': version.get('id'),
+                'versionNumber': version.get('version_number'),
+            }
+    return jsonify({'updates': updates})
+
+
 @modrinth_bp.route('/search', methods=['GET'])
 def search_mods():
     query = request.args.get('query', '')
@@ -575,7 +633,10 @@ def install_mod(mod_id, server):
         return _modrinth_error_response(exc)
 
     _record_content_install(
-        server_id, mod_id, file_path.name, resolved, pinned=bool(version_id)
+        server_id, mod_id, file_path.name, resolved,
+        # Update-all names the version it found but sends pin=false: an update
+        # isn't a deliberate choice to hold that version.
+        pinned=bool(version_id) and data.get('pin') is not False,
     )
 
     # Only after the replacement is on disk: a failed download must leave the

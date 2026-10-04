@@ -47,11 +47,14 @@ export async function getModVersions(modId, filters = {}, options = {}) {
  *   removed only after the new one is safely on disk. Must be a bare filename
  *   inside the mods folder. This is what makes a version *change* rather than
  *   a second copy.
+ * @param {boolean} [options.pin] - `false` installs `version_id` without
+ *   recording a pin; update-all uses it (#80).
  */
-export async function installMod(modId, { mc_version, loader, server_id, version_id, replaces }) {
+export async function installMod(modId, { mc_version, loader, server_id, version_id, replaces, pin }) {
   const body = { mc_version, loader, server_id }
   if (version_id) body.version_id = version_id
   if (replaces) body.replaces = replaces
+  if (pin === false) body.pin = false
   return post(`/api/modrinth/mod/${modId}/install`, body)
 }
 
@@ -106,6 +109,11 @@ export async function resolveInstalledMods(serverId, options = {}) {
     {},
     { signal: options.signal }
   )
+}
+
+/** Jars with a newer compatible release: `{ updates: { filename: { projectId, versionId, versionNumber } } }` (#80). */
+export async function checkModUpdates(serverId) {
+  return get(`/api/modrinth/servers/${encodeURIComponent(serverId)}/updates`)
 }
 
 /**

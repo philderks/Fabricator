@@ -803,6 +803,29 @@ absent from `resolved`. A missing mods folder returns `{ "resolved": {} }`.
 
 **Error (404):** unknown server · **(400):** mods folder could not be resolved
 
+#### `GET /api/modrinth/servers/<server_id>/updates`
+
+Jars in the mods folder that have a newer release for the server's Minecraft version and loader.
+One upstream request for the whole folder (Modrinth's bulk `version_files/update`). Releases only;
+jars pinned to a chosen version and jars Modrinth does not recognise are left out.
+
+```json
+{
+  "updates": {
+    "sodium-fabric-0.6.0+mc1.21.1.jar": {
+      "projectId": "AANobbMI",
+      "versionId": "u1PEsyCU",
+      "versionNumber": "mc1.21.1-0.6.13-fabric"
+    }
+  }
+}
+```
+
+Apply one with `POST /api/modrinth/mod/<projectId>/install` and `version_id`, `replaces` (the old
+filename) and `pin: false`.
+
+**Error (404):** unknown server · **(400):** mods folder could not be resolved
+
 #### `GET /api/modrinth/search`
 
 **Query:** `query` (string) · `mc_version` (string, optional) · `loader` (string, optional) ·
@@ -937,7 +960,9 @@ Direct download URL for the best matching version.
 Download a mod and install it into the server's mods folder. The download is hash-verified.
 
 **Body:** `mc_version` (string, **required**) · `server_id` (string, **required**) ·
-`loader` (string, optional, default `fabric`)
+`loader` (string, optional, default `fabric`) · `version_id` (string, optional: install exactly this
+version, recorded as pinned) · `replaces` (string, optional: jar to remove once the new one is on
+disk) · `pin` (bool, optional: `false` installs `version_id` without pinning it, as update-all does)
 
 ```json
 { "mc_version": "1.20.1", "server_id": "srv_a1b2c3d4", "loader": "fabric" }

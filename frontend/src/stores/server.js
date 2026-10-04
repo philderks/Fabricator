@@ -2,6 +2,7 @@ import { computed, reactive, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { useRouter } from 'vue-router'
 import {
+  checkModUpdates,
   installMod,
   installModpack,
   installUploadedModpack,
@@ -128,6 +129,10 @@ export const useServerStore = defineStore('server', () => {
   const modToRemove = ref(null)
   const selectedModPaths = ref(new Set())
   const bulkDeleting = ref(false)
+  // filename -> { projectId, versionId, versionNumber } for jars with a newer
+  // compatible release (#80).
+  const modUpdates = ref({})
+  const updatingMods = ref(false)
   const installLoading = ref(false)
   const modpackInstalling = ref(false)
   const actionState = ref({ start: false, stop: false, restart: false, install: false })
@@ -567,12 +572,60 @@ export const useServerStore = defineStore('server', () => {
       installedMods.value = await enrichInstalledModsWithModrinth(base, {
         serverId: currentServerId.value
       })
+      // Not awaited: the list is usable before the update check answers.
+      loadModUpdates()
     } catch (error) {
       console.error('Failed to load mods:', error)
       toast.error('Failed to load installed mods', 'Error')
     } finally {
       modsLoading.value = false
     }
+  }
+
+  async function loadModUpdates() {
+    const id = currentServerId.value
+    try {
+      const { updates } = await checkModUpdates(id)
+      // Ignore a late answer for a server the user has since left.
+      if (id === currentServerId.value) modUpdates.value = updates || {}
+    } catch {
+      // Offline or rate limited: just no update button this time.
+    }
+  }
+
+  /**
+   * Update every mod with a newer release, one install at a time. Each is a
+   * replace-install, so a failed download leaves that mod on its old version.
+   * `pin: false` keeps updated mods eligible for the next update-all.
+   */
+  async function updateAllMods() {
+    const entries = Object.entries(modUpdates.value)
+    if (!entries.length || !server.value || updatingMods.value) return
+    updatingMods.value = true
+    // Captured up front: the user may switch servers while this runs.
+    const target = { id: currentServerId.value, version: server.value.version, loader: server.value.loader }
+    const failed = []
+    for (const [filename, update] of entries) {
+      try {
+        await installMod(update.projectId, {
+          mc_version: target.version,
+          loader: target.loader,
+          server_id: target.id,
+          version_id: update.versionId,
+          replaces: filename,
+          pin: false
+        })
+        invalidateModrinthMetaCache(filename)
+      } catch (error) {
+        console.error(`Update failed for ${filename}:`, error)
+        failed.push(filename)
+      }
+    }
+    const done = entries.length - failed.length
+    if (done) toast.success(`${done} mod${done === 1 ? '' : 's'} updated`, 'Mods Updated')
+    if (failed.length) toast.error(`Could not update: ${failed.join(', ')}`, 'Update Failed')
+    updatingMods.value = false
+    if (target.id === currentServerId.value) await loadMods()
   }
 
   async function loadLogs(limit = 1000) {
@@ -1477,6 +1530,8 @@ export const useServerStore = defineStore('server', () => {
     modToRemove.value = null
     selectedModPaths.value = new Set()
     bulkDeleting.value = false
+    modUpdates.value = {}
+    updatingMods.value = false
     serverLoading.value = true
     modsLoading.value = false
     logsLoading.value = false
@@ -1535,6 +1590,8 @@ export const useServerStore = defineStore('server', () => {
     modToRemove,
     selectedModPaths,
     bulkDeleting,
+    modUpdates,
+    updatingMods,
     installLoading,
     modpackInstalling,
     actionState,
@@ -1643,6 +1700,7 @@ export const useServerStore = defineStore('server', () => {
     toggleSelectAllMods,
     clearModSelection,
     handleBulkRemoveMods,
+    updateAllMods,
     handleStart,
     handleInstall,
     handleStop,
