@@ -297,9 +297,11 @@ def resolve_installed_mods(server_id, server):
 def check_mod_updates(server_id, server):
     """Jars in the mods folder with a newer compatible release (#80).
 
-    One upstream request for the whole folder. Returns ``{updates: {filename:
-    {projectId, versionId, versionNumber}}}``. Jars the user pinned to a chosen
-    version (#56) and jars Modrinth doesn't know are left out.
+    One upstream request for the whole folder, plus one for dependency titles
+    when an update needs a mod that isn't installed. Returns ``{updates:
+    {filename: {projectId, versionId, versionNumber}}, dependencies:
+    [{projectId, slug, title}]}``. Jars the user pinned to a chosen version
+    (#56) and jars Modrinth doesn't know are left out.
     """
     mods_folder, error = _resolve_mods_folder(server)
     if error:
@@ -308,7 +310,7 @@ def check_mod_updates(server_id, server):
 
     mods_path = Path(mods_folder)
     if not mods_path.is_dir() or not server.get('version'):
-        return jsonify({'updates': {}})
+        return jsonify({'updates': {}, 'dependencies': []})
 
     manifest = storage.get_content_manifest(server_id)
     by_hash = {}
@@ -322,7 +324,7 @@ def check_mod_updates(server_id, server):
             by_hash.setdefault(digest, []).append(path.name)
 
     if not by_hash:
-        return jsonify({'updates': {}})
+        return jsonify({'updates': {}, 'dependencies': []})
 
     try:
         latest = modrinth_client.get_latest_versions_by_hashes(
@@ -334,6 +336,7 @@ def check_mod_updates(server_id, server):
         return _modrinth_error_response(exc)
 
     updates = {}
+    required = set()
     for digest, filenames in by_hash.items():
         version = latest.get(digest)
         if not isinstance(version, dict):
@@ -347,7 +350,31 @@ def check_mod_updates(server_id, server):
                 'versionId': version.get('id'),
                 'versionNumber': version.get('version_number'),
             }
-    return jsonify({'updates': updates})
+        required.update(
+            dep.get('project_id') for dep in version.get('dependencies') or []
+            if dep.get('dependency_type') == 'required' and dep.get('project_id')
+        )
+
+    # Installed = every jar Modrinth just answered for, plus the manifest
+    # (which also covers pinned jars, skipped above).
+    present = {v.get('project_id') for v in latest.values() if isinstance(v, dict)}
+    present.update(e.get('projectId') for e in manifest.values() if isinstance(e, dict))
+    missing = sorted(required - present)
+
+    dependencies = []
+    if missing:
+        try:
+            projects = {p.get('id'): p for p in modrinth_client.get_projects(missing)}
+        except ModrinthApiError:
+            projects = {}  # Titles are cosmetic; ids still install.
+        for pid in missing:
+            project = projects.get(pid) or {}
+            dependencies.append({
+                'projectId': pid,
+                'slug': project.get('slug'),
+                'title': project.get('title') or project.get('slug') or pid,
+            })
+    return jsonify({'updates': updates, 'dependencies': dependencies})
 
 
 @modrinth_bp.route('/search', methods=['GET'])

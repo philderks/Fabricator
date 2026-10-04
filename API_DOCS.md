@@ -817,12 +817,17 @@ jars pinned to a chosen version and jars Modrinth does not recognise are left ou
       "versionId": "u1PEsyCU",
       "versionNumber": "mc1.21.1-0.6.13-fabric"
     }
-  }
+  },
+  "dependencies": [
+    { "projectId": "P7dR8mSH", "slug": "fabric-api", "title": "Fabric API" }
+  ]
 }
 ```
 
-Apply one with `POST /api/modrinth/mod/<projectId>/install` and `version_id`, `replaces` (the old
-filename) and `pin: false`.
+`dependencies` lists required dependencies of those new versions that no installed jar provides
+(matched by hash and the install manifest). Install them first with a plain
+`POST /api/modrinth/mod/<projectId>/install`, then apply each update with `version_id`, `replaces`
+(the old filename) and `pin: false`.
 
 **Error (404):** unknown server · **(400):** mods folder could not be resolved
 
