@@ -1,30 +1,11 @@
-import { getModDetails, resolveInstalledMods } from '../api/modrinth'
-import { pLimit, withBackoff } from '../api/throttle'
-import { installedJarMatchesProjectRef } from './modrinthJarMatch'
+import { resolveInstalledMods } from '../api/modrinth'
 
 /**
  * @typedef {{ displayTitle: string, iconUrl: string | null, projectId: string, slug: string | null }} ResolvedMeta
  */
 
-/** @type {Map<string, ResolvedMeta | null>} */
+/** @type {Map<string, ResolvedMeta>} */
 const resolvedMetaByFilename = new Map()
-
-// Module-scoped limiter — shared across all enrichment runs so overlapping
-// invocations (e.g. multiple navigations) cooperatively share the budget.
-const limiter = pLimit(4)
-
-// Ceiling on filename-guessed lookups per enrichment run. The hash lookup
-// identifies everything Modrinth actually knows about, so anything reaching the
-// fallback is a jar that was repackaged, renamed or never published there —
-// a long tail that is not worth spending the API budget on. Without this cap a
-// folder of unrecognised jars reproduces the original fan-out (#52).
-const MAX_FALLBACK_LOOKUPS = 20
-
-// Prefix candidates tried per jar in the fallback, shortest first. A Modrinth
-// slug is nearly always the leading segment(s) of the filename, so two attempts
-// cover the realistic cases; the old unbounded longest-first walk spent one
-// request per hyphen-separated segment and 404'd through almost all of them.
-const MAX_PREFIX_CANDIDATES = 2
 
 /**
  * Drop a single filename (or the whole cache) from the resolved metadata
@@ -40,57 +21,6 @@ export function invalidateModrinthMetaCache(filename) {
   }
   if (typeof filename !== 'string') return
   resolvedMetaByFilename.delete(filename.toLowerCase())
-}
-
-/**
- * Map a Modrinth-style jar basename to project title + icon by guessing the
- * project slug from the filename.
- *
- * Fallback only — `enrichInstalledModsWithModrinth` resolves by content hash
- * first, which is exact. This is for jars the hash lookup didn't recognise, so
- * it is deliberately bounded to the shortest few prefixes rather than walking
- * every one.
- *
- * @param {string} filename
- * @param {{ signal?: AbortSignal }} [options]
- * @returns {Promise<ResolvedMeta | null>}
- */
-export async function resolveJarFilenameToModrinthMeta(filename, options = {}) {
-  if (!filename || !filename.toLowerCase().endsWith('.jar')) return null
-  const signal = options.signal
-  const stem = filename.slice(0, -4)
-  const parts = stem.split('-')
-
-  const candidates = []
-  for (let i = 1; i <= parts.length && candidates.length < MAX_PREFIX_CANDIDATES; i += 1) {
-    const candidate = parts.slice(0, i).join('-')
-    if (candidate) candidates.push(candidate)
-  }
-
-  for (const candidate of candidates) {
-    if (signal?.aborted) return null
-    try {
-      const d = await withBackoff(
-        () => getModDetails(candidate, { signal }),
-        { signal, retries: 2 }
-      )
-      const ref = { id: d.id, slug: d.slug }
-      if (!installedJarMatchesProjectRef(filename, ref)) continue
-      return {
-        displayTitle: d.title || d.slug || candidate,
-        iconUrl: d.icon_url || null,
-        // Kept so the caller can link to the project page. The match was
-        // verified above, but it's still filename-derived — callers surface it
-        // as `modrinthGuess`, never as the install manifest.
-        projectId: d.id,
-        slug: d.slug || null
-      }
-    } catch (error) {
-      if (error?.name === 'AbortError') return null
-      // 404 or network — try the next candidate
-    }
-  }
-  return null
 }
 
 /**
@@ -111,7 +41,6 @@ function _withMeta(mod, meta) {
     // A hash match knows exactly which release the jar is, so a jar dropped in
     // by hand stops reporting "local" (#56 — the reporter's stated workaround
     // was doing exactly that, and the panel then disagreed with reality).
-    // Filename-derived matches carry no version and leave it alone.
     version: meta.versionNumber || mod.version,
     modrinthGuess: meta.projectId
       ? {
@@ -139,8 +68,7 @@ async function _resolveByHash(serverId, signal) {
     payload = await resolveInstalledMods(serverId, { signal })
   } catch (error) {
     if (error?.name === 'AbortError') throw error
-    // Rate limited or offline. Degrade to the filename fallback rather than
-    // rendering nothing — the page still works, just with fewer icons.
+    // Rate limited or offline. The page still works, just with fewer icons.
     return byFilename
   }
 
@@ -167,7 +95,8 @@ async function _resolveByHash(serverId, signal) {
  * Returns a NEW list — does not mutate `mods` in place.
  *
  * Resolution order per jar: install manifest (already on the entry) → content
- * hash (one bulk request for the folder) → bounded filename guess.
+ * hash (one bulk request for the folder). Nothing else: unrecognised jars keep
+ * their filename (#81).
  *
  * @param {Array<{ name?: string, filename?: string, displayTitle?: string | null, iconUrl?: string | null }>} mods
  * @param {{ signal?: AbortSignal, serverId?: string | number }} [options]
@@ -202,46 +131,20 @@ export async function enrichInstalledModsWithModrinth(mods, options = {}) {
 
   if (pending.length === 0) return result
 
-  // Pass 1 — exact identification by content hash, one request for the folder.
+  // Exact identification by content hash, one request for the folder.
   const byHash = await _resolveByHash(options.serverId, signal)
   if (signal?.aborted) return result
 
-  const unresolved = []
+  // A hash miss means Modrinth doesn't have this exact file (hand-added,
+  // repackaged or never published there), so the jar keeps its filename.
+  // Guessing slugs from the name instead cost a 404 per jar on every page
+  // load (#81). The backend caches misses, so re-asking next load is free.
   for (const entry of pending) {
     const meta = byHash.get(entry.key)
-    if (meta) {
-      resolvedMetaByFilename.set(entry.key, meta)
-      result[entry.idx] = _withMeta(entry.mod, meta)
-    } else {
-      unresolved.push(entry)
-    }
+    if (!meta) continue
+    resolvedMetaByFilename.set(entry.key, meta)
+    result[entry.idx] = _withMeta(entry.mod, meta)
   }
 
-  // Pass 2 — bounded filename guessing for the leftovers only.
-  const tasks = unresolved.slice(0, MAX_FALLBACK_LOOKUPS).map((entry) =>
-    limiter(
-      async () => {
-        if (signal?.aborted) return
-        try {
-          const meta = await resolveJarFilenameToModrinthMeta(entry.filename, { signal })
-          // Don't poison cache with aborted resolutions.
-          if (signal?.aborted) return
-          resolvedMetaByFilename.set(entry.key, meta)
-          if (meta) {
-            result[entry.idx] = _withMeta(entry.mod, meta)
-          }
-        } catch (error) {
-          if (error?.name === 'AbortError') return
-          resolvedMetaByFilename.set(entry.key, null)
-        }
-      },
-      { signal }
-    ).catch((error) => {
-      // Swallow AbortError from the limiter — other tasks may still resolve.
-      if (error?.name !== 'AbortError') throw error
-    })
-  )
-
-  await Promise.allSettled(tasks)
   return result
 }

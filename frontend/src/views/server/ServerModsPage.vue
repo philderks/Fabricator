@@ -18,9 +18,13 @@ const onSearch = (event) => { store.modSearch = event.target.value }
 const modMeta = (mod) => {
   const parts = []
   if (mod.version) parts.push(mod.version)
+  const update = store.modUpdates[mod.filename]
+  if (update) parts.push(`update: ${update.versionNumber}`)
   if (mod.size) parts.push(formatFileSize(mod.size))
   return parts.join(' · ')
 }
+
+const updateCount = computed(() => Object.keys(store.modUpdates).length)
 
 const showEmpty = computed(() => !store.modsLoading && store.filteredMods.length === 0)
 
@@ -57,6 +61,14 @@ const selectAllLabel = computed(() => {
         @input="onSearch"
       />
       <div class="mods-page__actions">
+        <AppButton
+          v-if="updateCount > 0"
+          variant="ghost"
+          :loading="store.updatingMods"
+          @click="store.updateAllMods"
+        >
+          Update {{ updateCount }} {{ updateCount === 1 ? nounSingular.toLowerCase() : nounLower }}
+        </AppButton>
         <AppButton v-if="!isPlugin" variant="ghost" @click="store.openModpackBrowser">Browse modpacks</AppButton>
         <AppButton
           variant="primary"

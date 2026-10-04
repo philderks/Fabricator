@@ -373,3 +373,67 @@ def test_route_forwards_rate_limit_with_retry_after(client, tmp_servers_root, tm
     assert resp.status_code == 429
     assert resp.get_json()["retry_after"] == 12.0
     assert resp.headers["Retry-After"] == "12"
+
+
+def test_updates_route_reports_only_outdated_unpinned_jars(client, tmp_servers_root, tmp_path):
+    """#80: current jars and user-pinned jars (#56) are not offered updates."""
+    from backend.server import storage
+    server = _make_server(tmp_servers_root, name="S5", port=25615)
+    mods_dir = tmp_path / "mods"
+    _write_jar(mods_dir, "old.jar", b"old")
+    _write_jar(mods_dir, "current.jar", b"current")
+    _write_jar(mods_dir, "pinned.jar", b"pinned")
+    storage.record_content_install(server["id"], "pinned.jar", {"projectId": "Q", "pinned": True})
+
+    newer = {"id": "v2", "project_id": "P", "version_number": "2.0",
+             "files": [{"hashes": {"sha1": "f" * 40}}]}
+    same = {"id": "v1", "project_id": "C", "version_number": "1.0",
+            "files": [{"hashes": {"sha1": _sha1(b"current")}}]}
+
+    with patch("backend.modrinth.routes._resolve_mods_folder",
+               return_value=(str(mods_dir), None)), \
+         patch("backend.modrinth.routes.modrinth_client") as mc:
+        mc.get_latest_versions_by_hashes.return_value = {
+            _sha1(b"old"): newer, _sha1(b"current"): same,
+        }
+        resp = client.get(f"/api/modrinth/servers/{server['id']}/updates")
+
+    assert resp.status_code == 200
+    assert resp.get_json() == {"updates": {
+        "old.jar": {"projectId": "P", "versionId": "v2", "versionNumber": "2.0"}
+    }, "dependencies": []}
+    asked = mc.get_latest_versions_by_hashes.call_args
+    assert _sha1(b"pinned") not in asked[0][0]
+    assert asked.kwargs["game_versions"] == ["1.20.1"]
+
+
+def test_updates_route_reports_missing_required_dependencies(client, tmp_servers_root, tmp_path):
+    """A dependency counts as present if any jar or the manifest (pins) has it."""
+    from backend.server import storage
+    server = _make_server(tmp_servers_root, name="S6", port=25616)
+    mods_dir = tmp_path / "mods"
+    _write_jar(mods_dir, "old.jar", b"old")
+    _write_jar(mods_dir, "lib.jar", b"lib")
+    storage.record_content_install(server["id"], "pinned.jar", {"projectId": "PIN", "pinned": True})
+
+    deps = [
+        {"project_id": "LIB", "dependency_type": "required"},     # installed jar
+        {"project_id": "PIN", "dependency_type": "required"},     # pinned, in manifest
+        {"project_id": "NEW", "dependency_type": "required"},     # missing
+        {"project_id": "OPT", "dependency_type": "optional"},     # not required
+    ]
+    newer = {"id": "v2", "project_id": "P", "version_number": "2.0",
+             "files": [{"hashes": {"sha1": "f" * 40}}], "dependencies": deps}
+    lib = {"id": "l1", "project_id": "LIB", "files": [{"hashes": {"sha1": _sha1(b"lib")}}]}
+
+    with patch("backend.modrinth.routes._resolve_mods_folder",
+               return_value=(str(mods_dir), None)), \
+         patch("backend.modrinth.routes.modrinth_client") as mc:
+        mc.get_latest_versions_by_hashes.return_value = {_sha1(b"old"): newer, _sha1(b"lib"): lib}
+        mc.get_projects.return_value = [{"id": "NEW", "slug": "new-lib", "title": "New Lib"}]
+        resp = client.get(f"/api/modrinth/servers/{server['id']}/updates")
+
+    assert resp.get_json()["dependencies"] == [
+        {"projectId": "NEW", "slug": "new-lib", "title": "New Lib"}
+    ]
+    mc.get_projects.assert_called_once_with(["NEW"])

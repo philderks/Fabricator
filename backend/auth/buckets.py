@@ -48,6 +48,8 @@ _READ = [
     # stored record), the upstream host is fixed, and the response is bare
     # filenames plus public catalog metadata.
     ("GET", "/api/modrinth/servers/<server_id>/resolve-installed"),
+    # Same folder hashing, asking for newer releases instead (#80). Read-only.
+    ("GET", "/api/modrinth/servers/<server_id>/updates"),
     ("GET", "/api/servers/<server_id>/snapshots"),
     ("GET", "/api/servers/<server_id>/backup-summary"),
     ("GET", "/api/servers/<server_id>/backup-configs"),

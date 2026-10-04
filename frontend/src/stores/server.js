@@ -2,6 +2,7 @@ import { computed, reactive, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { useRouter } from 'vue-router'
 import {
+  checkModUpdates,
   installMod,
   installModpack,
   installUploadedModpack,
@@ -37,6 +38,8 @@ import {
   enrichInstalledModsWithModrinth,
   invalidateModrinthMetaCache
 } from '../utils/enrichInstalledModsModrinth'
+import { installedModDisplayName } from '../utils/installedModDisplay'
+import { installedEntryMatchesProjectRef } from '../utils/modrinthJarMatch'
 // Status-display logic consolidated in utils/getEffectiveStatus (F6/CC5);
 // keep alias for the existing call sites in this file.
 import { getEffectiveStatus as pickEffectiveStatus } from '../utils/getEffectiveStatus'
@@ -128,6 +131,12 @@ export const useServerStore = defineStore('server', () => {
   const modToRemove = ref(null)
   const selectedModPaths = ref(new Set())
   const bulkDeleting = ref(false)
+  // filename -> { projectId, versionId, versionNumber } for jars with a newer
+  // compatible release (#80).
+  const modUpdates = ref({})
+  // [{ projectId, slug, title }] required by those updates and not installed.
+  const modUpdateDeps = ref([])
+  const updatingMods = ref(false)
   const installLoading = ref(false)
   const modpackInstalling = ref(false)
   const actionState = ref({ start: false, stop: false, restart: false, install: false })
@@ -567,12 +576,110 @@ export const useServerStore = defineStore('server', () => {
       installedMods.value = await enrichInstalledModsWithModrinth(base, {
         serverId: currentServerId.value
       })
+      // Not awaited: the list is usable before the update check answers.
+      loadModUpdates()
     } catch (error) {
       console.error('Failed to load mods:', error)
       toast.error('Failed to load installed mods', 'Error')
     } finally {
       modsLoading.value = false
     }
+  }
+
+  async function loadModUpdates() {
+    const id = currentServerId.value
+    try {
+      const { updates, dependencies } = await checkModUpdates(id)
+      // Ignore a late answer for a server the user has since left.
+      if (id !== currentServerId.value) return
+      modUpdates.value = updates || {}
+      modUpdateDeps.value = dependencies || []
+    } catch {
+      // Offline or rate limited: just no update button this time.
+    }
+  }
+
+  /** Dependencies the updates need that no installed jar provides. The
+   *  backend matched by hash and manifest; the filename check here also
+   *  catches a hand-added jar Modrinth doesn't know. */
+  const missingUpdateDeps = computed(() =>
+    modUpdateDeps.value.filter((dep) => !installedMods.value.some((mod) =>
+      installedEntryMatchesProjectRef(mod, { id: dep.projectId, slug: dep.slug })
+    ))
+  )
+
+  function updateAllMods() {
+    const entries = Object.entries(modUpdates.value)
+    if (!entries.length || updatingMods.value) return
+    const n = entries.length
+    const deps = missingUpdateDeps.value
+    const byFilename = new Map(installedMods.value.map((m) => [m.filename, m]))
+    confirmModalData.value = {
+      title: 'Update Mods',
+      message: `Update ${n} mod${n === 1 ? '' : 's'} to the newest release?`,
+      description: deps.length
+        ? `The updates also need ${deps.length} mod${deps.length === 1 ? '' : 's'} you don't have, which will be installed first.`
+        : 'Each old jar is removed only once its replacement has downloaded.',
+      type: 'info',
+      confirmText: `Update ${n} mod${n === 1 ? '' : 's'}`,
+      cancelText: 'Cancel',
+      items: [
+        ...entries.map(([filename, u]) => {
+          const mod = byFilename.get(filename)
+          return `${mod ? installedModDisplayName(mod) : filename}: ${mod?.version || '?'} → ${u.versionNumber}`
+        }),
+        ...deps.map((d) => `New dependency: ${d.title}`)
+      ]
+    }
+    modToRemove.value = '__update__'
+    showConfirmModal.value = true
+  }
+
+  /**
+   * Install missing dependencies, then update every mod, one install at a
+   * time. Each update is a replace-install, so a failed download leaves that
+   * mod on its old version. `pin: false` keeps updated mods eligible for the
+   * next update-all.
+   */
+  async function confirmUpdateAllMods() {
+    showConfirmModal.value = false
+    modToRemove.value = null
+    const entries = Object.entries(modUpdates.value)
+    if (!entries.length || !server.value || updatingMods.value) return
+    updatingMods.value = true
+    // Captured up front: the user may switch servers while this runs.
+    const target = { id: currentServerId.value, version: server.value.version, loader: server.value.loader }
+    const base = { mc_version: target.version, loader: target.loader, server_id: target.id }
+    const jobs = [
+      // Dependencies first, as a single install does: newest compatible release.
+      ...missingUpdateDeps.value.map((dep) => ({
+        label: dep.title,
+        run: () => installMod(dep.projectId, base)
+      })),
+      ...entries.map(([filename, update]) => ({
+        label: filename,
+        run: async () => {
+          await installMod(update.projectId, {
+            ...base, version_id: update.versionId, replaces: filename, pin: false
+          })
+          invalidateModrinthMetaCache(filename)
+        }
+      }))
+    ]
+    const failed = []
+    for (const job of jobs) {
+      try {
+        await job.run()
+      } catch (error) {
+        console.error(`Update failed for ${job.label}:`, error)
+        failed.push(job.label)
+      }
+    }
+    const done = jobs.length - failed.length
+    if (done) toast.success(`${done} mod${done === 1 ? '' : 's'} updated or installed`, 'Mods Updated')
+    if (failed.length) toast.error(`Could not install: ${failed.join(', ')}`, 'Update Failed')
+    updatingMods.value = false
+    if (target.id === currentServerId.value) await loadMods()
   }
 
   async function loadLogs(limit = 1000) {
@@ -1173,6 +1280,10 @@ export const useServerStore = defineStore('server', () => {
       await confirmBulkRemoveMods()
       return
     }
+    if (modToRemove.value === '__update__') {
+      await confirmUpdateAllMods()
+      return
+    }
     const filename = modToRemove.value.filename || modToRemove.value.name
     try {
       await removeMod(currentServerId.value, filename)
@@ -1477,6 +1588,9 @@ export const useServerStore = defineStore('server', () => {
     modToRemove.value = null
     selectedModPaths.value = new Set()
     bulkDeleting.value = false
+    modUpdates.value = {}
+    modUpdateDeps.value = []
+    updatingMods.value = false
     serverLoading.value = true
     modsLoading.value = false
     logsLoading.value = false
@@ -1535,6 +1649,8 @@ export const useServerStore = defineStore('server', () => {
     modToRemove,
     selectedModPaths,
     bulkDeleting,
+    modUpdates,
+    updatingMods,
     installLoading,
     modpackInstalling,
     actionState,
@@ -1643,6 +1759,7 @@ export const useServerStore = defineStore('server', () => {
     toggleSelectAllMods,
     clearModSelection,
     handleBulkRemoveMods,
+    updateAllMods,
     handleStart,
     handleInstall,
     handleStop,

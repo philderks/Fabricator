@@ -279,6 +279,38 @@ class ModrinthClient:
                 resolved.update(payload)
         return resolved
 
+    def get_latest_versions_by_hashes(
+        self, hashes: List[str], loaders: List[str], game_versions: List[str]
+    ) -> Dict[str, Dict[str, Any]]:
+        """Newest release compatible with the server, per installed file hash.
+
+        ``POST /v2/version_files/update`` answers for a whole folder in one
+        request (#80). Hashes Modrinth doesn't know are omitted, as are files
+        with no compatible release. Releases only, matching what
+        :meth:`pick_best_version` prefers, so update-all never moves a mod onto
+        a beta.
+        """
+        unique = list(dict.fromkeys(h.lower() for h in hashes if h))
+        resolved: Dict[str, Dict[str, Any]] = {}
+        for start in range(0, len(unique), self.BULK_CHUNK_SIZE):
+            response = self._request(
+                "post",
+                f"{self.BASE_URL}/version_files/update",
+                json={
+                    "hashes": unique[start:start + self.BULK_CHUNK_SIZE],
+                    "algorithm": "sha1",
+                    "loaders": loaders,
+                    "game_versions": game_versions,
+                    "version_types": ["release"],
+                },
+                timeout=30,
+                error_context="Failed to check for updates",
+            )
+            payload = self._json(response, "Failed to check for updates")
+            if isinstance(payload, dict):
+                resolved.update(payload)
+        return resolved
+
     def get_projects(self, project_ids: List[str]) -> List[Dict[str, Any]]:
         """Fetch several projects in one request (``GET /v2/projects?ids=``).
 

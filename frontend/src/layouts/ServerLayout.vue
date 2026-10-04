@@ -287,7 +287,13 @@ onUnmounted(() => {
       :cancel-text="store.confirmModalData.cancelText"
       @confirm="store.confirmRemoveMod"
       @cancel="store.cancelRemoveMod"
-    />
+    >
+      <template v-if="store.confirmModalData.items?.length" #extra>
+        <ul class="confirm-list">
+          <li v-for="item in store.confirmModalData.items" :key="item">{{ item }}</li>
+        </ul>
+      </template>
+    </ConfirmModal>
 
     <ConfirmModal
       :show="store.showDeleteServerModal"
@@ -313,6 +319,24 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+/* Update-all's list of what will change; long folders scroll inside it. */
+.confirm-list {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  list-style: none;
+  max-height: 14rem;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.confirm-list li + li {
+  margin-top: var(--space-1);
+}
+
 .server-layout {
   display: flex;
   min-height: 100dvh;
