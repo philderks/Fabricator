@@ -79,6 +79,7 @@ const ALL_NAV_ITEMS = [
   { name: 'ServerMods',     label: null,             icon: 'mods'     },
   { name: 'ServerFiles',    label: 'nav.files',      icon: 'files'    },
   { name: 'ServerBackups',  label: 'nav.backups',    icon: 'backups'  },
+  { name: 'ServerSchedules', label: 'nav.schedules', icon: 'schedules' },
   { name: 'ServerPlayit',   label: 'nav.playit',     icon: 'network'  },
   { name: 'ServerSettings', label: 'nav.properties', icon: 'properties' }
 ]
@@ -370,6 +371,10 @@ onUnmounted(() => {
             <rect x="1.5" y="3" width="12" height="3" rx="0.6"/>
             <path d="M2.5 6v6.5A1 1 0 003.5 13.5h8A1 1 0 0012.5 12.5V6"/>
             <path d="M6 8.5h3"/>
+          </template>
+          <template v-else-if="item.icon === 'schedules'">
+            <circle cx="7.5" cy="7.5" r="6"/>
+            <path d="M7.5 4v3.5l2.5 1.5"/>
           </template>
           <template v-else-if="item.icon === 'network'">
             <circle cx="7.5" cy="7.5" r="6"/>

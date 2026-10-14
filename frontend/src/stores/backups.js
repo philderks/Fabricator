@@ -43,7 +43,7 @@ const FREQUENCY_PRESETS = [1, 6, 12, 24, 168]
  * string if the browser can't report one — the backend then falls back to
  * the host zone.
  */
-function browserTimeZone() {
+export function browserTimeZone() {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || ''
   } catch (_) {

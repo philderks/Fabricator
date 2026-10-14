@@ -11,6 +11,7 @@ import ServerPlayersPage from '../views/server/ServerPlayersPage.vue'
 import ServerModsPage from '../views/server/ServerModsPage.vue'
 import ServerFilesPage from '../views/server/ServerFilesPage.vue'
 import ServerBackupsPage from '../views/server/ServerBackupsPage.vue'
+import ServerSchedulesPage from '../views/server/ServerSchedulesPage.vue'
 import ServerPlayitPage from '../views/server/ServerPlayitPage.vue'
 import ServerSettingsPage from '../views/server/ServerSettingsPage.vue'
 import ServerGeneralSettingsPage from '../views/server/ServerGeneralSettingsPage.vue'
@@ -45,6 +46,7 @@ const routes = [
       { path: 'mods',     name: 'ServerMods',     component: ServerModsPage },
       { path: 'files',    name: 'ServerFiles',    component: ServerFilesPage },
       { path: 'backups',  name: 'ServerBackups',  component: ServerBackupsPage },
+      { path: 'schedules', name: 'ServerSchedules', component: ServerSchedulesPage },
       { path: 'playit',   name: 'ServerPlayit',   component: ServerPlayitPage },
       { path: 'properties', name: 'ServerSettings', component: ServerSettingsPage },
       { path: 'settings/:section?', name: 'ServerGeneralSettings', component: ServerGeneralSettingsPage }
