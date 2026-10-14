@@ -124,6 +124,13 @@ _NEVER = [
     ("DELETE", "/api/servers/<server_id>/backup-configs/<config_id>"),
     ("POST", "/api/servers/<server_id>/backup-configs/<config_id>/run"),
     ("POST", "/api/servers/<server_id>/backup-quick"),
+    # scheduled commands: steps are raw console commands + power actions, and
+    # the list is UI-only until an MCP tool exists for it (reads included).
+    ("GET", "/api/servers/<server_id>/schedules"),
+    ("POST", "/api/servers/<server_id>/schedules"),
+    ("PUT", "/api/servers/<server_id>/schedules/<schedule_id>"),
+    ("DELETE", "/api/servers/<server_id>/schedules/<schedule_id>"),
+    ("POST", "/api/servers/<server_id>/schedules/<schedule_id>/run"),
     # full-server migration is intentionally UI-only until a dedicated MCP tool
     # can present its backup and rollback contract.
     ("POST", "/api/servers/<server_id>/upgrade"),

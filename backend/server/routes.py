@@ -1548,6 +1548,11 @@ def delete_server_route(server_id, server):
         # Backup cleanup is best-effort — never block server deletion.
         pass
 
+    # Scheduled-command jobs; their records go with the server record below.
+    from backend.schedules.service import remove_job as remove_schedule_job
+    for schedule in server.get('schedules') or []:
+        remove_schedule_job(schedule.get('id'))
+
     storage.delete_server(server_id)
     discard_lock(server_id)
 
