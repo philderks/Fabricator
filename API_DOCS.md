@@ -807,7 +807,9 @@ If the server is not running when a schedule fires, the run is **skipped**, unle
 `start`. A failed step ends the run. Only the last run is kept (`lastRun`, in memory, cleared on
 panel restart).
 
-All routes below are UI-only: API tokens of either scope get `403`.
+The routes below are UI-only: API tokens of either scope get `403`. A `read` token still sees the
+list as the `schedules` field of the server record (`GET /api/servers/<server_id>`), the same way
+the console log shows commands that have run.
 
 #### `GET /api/servers/<server_id>/schedules`
 
@@ -836,7 +838,7 @@ The server's schedules, each annotated with `nextRunTime` (ISO UTC, `null` when 
 |---|---|---|
 | `interval` | `minutes` (1–10080) | Counted from when the schedule is saved. |
 | `daily` | `time` (`HH:MM`), `days` (`mon`…`sun`) | Empty `days` means every day. |
-| `cron` | `expression` (5 fields) | The day-of-week field must use names (`mon-fri`), not numbers. |
+| `cron` | `expression` (5 fields) | The day-of-week field must use names (`mon-fri`), not numbers, and may not be combined with a day of month. |
 
 Times are read in `timezone` (IANA). An empty `timezone` falls back to the host zone. There can be
 1–20 steps. A `command` must be a single line of at most 1000 characters.

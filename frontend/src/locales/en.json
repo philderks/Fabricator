@@ -1079,7 +1079,7 @@
       "days": "Days",
       "daysHint": "Leave all unchecked to run every day.",
       "cron": "Cron expression",
-      "cronHint": "minute hour day month weekday. Use day names (mon-sun) for weekdays.",
+      "cronHint": "minute hour day month weekday. Use day names (mon-sun) for weekdays, and set either the day or the weekday, not both.",
       "steps": "Steps",
       "stepsHint": "Steps run in order. Wait is the pause before a step, in seconds.",
       "wait": "Wait (s)",

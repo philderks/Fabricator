@@ -37,7 +37,9 @@ async function load() {
   if (!serverId) return
   loading.value = true
   try {
-    schedules.value = await listSchedules(serverId)
+    const list = await listSchedules(serverId)
+    // Drop a reply that lands after the user switched servers.
+    if (serverId === serverStore.currentServerId) schedules.value = list
   } catch (err) {
     toast.error(err?.message || t('schedules.loadFailed'), t('nav.schedules'))
   } finally {

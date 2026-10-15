@@ -40,7 +40,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from backend.backups import scheduler as sched_mod
 from backend.server import storage
-from backend.server.autostart import _start_one
+from backend.server.java_compat import resolve_required_java, skip_java_enforcement
 from backend.server.locks import get_server_lock
 from backend.server.registry import get_server_process_registry
 from backend.utils.time import iso_z_now
@@ -56,12 +56,9 @@ MAX_INTERVAL_MINUTES = 7 * 24 * 60
 MAX_COMMAND_LENGTH = 1000
 
 _HHMM = re.compile(r"([01]\d|2[0-3]):[0-5]\d")
-# A weekday number that isn't a step value (the 2 in */2). APScheduler 3 counts
-# weekdays from Monday=0 where crontab counts from Sunday=0, so "0 4 * * 0"
-# would silently fire on Monday. Names mean the same thing in both.
-_NUMERIC_WEEKDAY = re.compile(r"(?:^|[^/\d])\d")
 
-# Serialises read-modify-write of server["schedules"] across requests.
+# Serialises read-modify-write of server["schedules"] and the matching job
+# change, so two concurrent edits can't leave the job on the older version.
 _write_lock = threading.Lock()
 # ponytail: last run is in-memory only and resets on panel restart; persist it if users ask.
 _last_runs: Dict[str, Dict[str, Any]] = {}
@@ -149,8 +146,14 @@ def _clean_trigger(trigger: Any) -> Tuple[Optional[Dict[str, Any]], Optional[str
         fields = expression.split() if isinstance(expression, str) else []
         if len(fields) != 5:
             return None, "trigger.expression must be a 5-field cron expression"
-        if _NUMERIC_WEEKDAY.search(fields[4]):
+        # Two places APScheduler 3 silently disagrees with crontab. It counts
+        # weekdays from Monday=0, not Sunday=0, so "0 4 * * 0" (and the */2
+        # step) land on different days; names mean the same in both. And it
+        # ANDs day-of-month with day-of-week where crontab ORs them.
+        if re.search(r"\d", fields[4]):
             return None, "Use day names (mon-sun) in the cron day-of-week field"
+        if fields[2] != "*" and fields[4] != "*":
+            return None, "Restrict day of month or day of week in a cron expression, not both"
         return {"type": "cron", "expression": " ".join(fields)}, None
 
     return None, "trigger.type must be interval, daily or cron"
@@ -223,7 +226,7 @@ def create_schedule(server_id: str, clean: Dict[str, Any]) -> Dict[str, Any]:
         schedules = _schedules_of(server_id)
         schedules.append(schedule)
         storage.update_server(server_id, {"schedules": schedules})
-    register_job(server_id, schedule)
+        register_job(server_id, schedule)
     return _annotate(schedule)
 
 
@@ -238,7 +241,7 @@ def update_schedule(
             return None
         schedules[index] = schedule
         storage.update_server(server_id, {"schedules": schedules})
-    register_job(server_id, schedule)
+        register_job(server_id, schedule)
     return _annotate(schedule)
 
 
@@ -249,7 +252,7 @@ def delete_schedule(server_id: str, schedule_id: str) -> bool:
         if len(kept) == len(schedules):
             return False
         storage.update_server(server_id, {"schedules": kept})
-    remove_job(schedule_id)
+        remove_job(schedule_id)
     _last_runs.pop(schedule_id, None)
     return True
 
@@ -379,18 +382,30 @@ def _run_steps(server_id: str, steps: List[Dict[str, Any]]) -> Tuple[str, str]:
 
 
 def _power(registry, server: Dict[str, Any], action: str) -> Tuple[bool, str]:
+    """Start/stop/restart, mirroring the routes' guards and status writes."""
     server_id = server["id"]
-    if action == "start":
-        _start_one(server)  # resolves the Java requirement and persists status
-        ok = registry.get_status(server_id).get("status") == "running"
-        return ok, "Server did not start"
+    if server.get("status") in ("pending", "installing"):
+        return False, f"Server is {server['status']}"
+
     if action == "stop":
         result = registry.stop_server(server_id)
         status = result.get("status", "stopped")
         storage.update_server_status(server_id, status)
         return status == "stopped", result.get("message") or "Server did not stop"
-    result = registry.restart_server(server)  # raises RuntimeError if the stop half fails
-    status = result["start"].get("status")
+
+    if action == "start":
+        compat = resolve_required_java(str(server.get("version") or ""))
+        required = compat.required_java if compat.enforceable else None
+        result = registry.start_server(
+            server, required_java_major=None if skip_java_enforcement() else required
+        )
+    else:
+        result = registry.restart_server(server)["start"]  # raises if the stop half fails
+
+    # A stop still draining: leave the persisted 'stopping' alone, as the start route does.
+    if result.get("stopping"):
+        return False, result.get("message") or "Server is still stopping"
+    status = result.get("status")
     if status:
         storage.update_server_status(server_id, status)
-    return status == "running", result["start"].get("message") or "Server did not restart"
+    return status == "running", result.get("message") or f"Server did not {action}"

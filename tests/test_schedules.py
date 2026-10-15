@@ -2,10 +2,11 @@
 
 Pins:
 - Validation rejects multi-line commands, unknown actions, out-of-range
-  delays and numeric cron weekdays (APScheduler 3 counts Monday as 0).
+  delays, numeric cron weekdays (APScheduler 3 counts Monday as 0) and cron
+  expressions restricting both day fields (APScheduler ANDs them).
 - A daily trigger fires on the chosen weekdays in the schedule's zone.
-- The runner executes steps in order, skips a stopped server, and stops at
-  the first failing step.
+- The runner executes steps in order, skips a stopped server, stops at the
+  first failing step, and never starts a server that is still installing.
 - Jobs follow the ``enabled`` flag; CRUD round-trips over HTTP.
 """
 from __future__ import annotations
@@ -36,11 +37,11 @@ def _body(**overrides):
     return body
 
 
-def _seed_server(tmp_root: Path, schedules=None):
+def _seed_server(tmp_root: Path, schedules=None, status="running"):
     (tmp_root / "servers.json").write_text(
         json.dumps([{
             "id": SERVER_ID, "name": "X", "version": "1.20.1", "loader": "fabric",
-            "port": 25565, "installPath": SERVER_ID, "status": "running",
+            "port": 25565, "installPath": SERVER_ID, "status": status,
             "schedules": schedules or [],
         }]),
         encoding="utf-8",
@@ -55,6 +56,8 @@ def _seed_server(tmp_root: Path, schedules=None):
     {"steps": []},
     {"trigger": {"type": "cron", "expression": "0 4 * * 0"}},
     {"trigger": {"type": "cron", "expression": "0 4 * * 1-5"}},
+    {"trigger": {"type": "cron", "expression": "0 4 * * */2"}},
+    {"trigger": {"type": "cron", "expression": "0 4 1 * mon"}},
     {"trigger": {"type": "cron", "expression": "99 4 * * *"}},
     {"trigger": {"type": "interval", "minutes": 0}},
     {"trigger": {"type": "daily", "time": "4pm", "days": []}},
@@ -66,7 +69,7 @@ def test_validate_rejects(overrides):
 
 
 @pytest.mark.parametrize("expression", [
-    "0 4 * * sun", "*/15 * * * *", "0 4 * * mon-fri", "0 */6 * * *",
+    "0 4 * * sun", "*/15 * * * *", "0 4 * * mon-fri", "0 */6 * * *", "0 4 1 * *",
 ])
 def test_validate_accepts_cron(expression):
     clean, error = service.validate(_body(trigger={"type": "cron", "expression": expression}))
@@ -95,6 +98,10 @@ class _FakeRegistry:
         self.calls.append(command)
         return {"success": not self.fail, "message": "boom"}
 
+    def start_server(self, server, required_java_major=None):
+        self.calls.append("<start>")
+        return {"status": "running"}
+
     def restart_server(self, server):
         self.calls.append("<restart>")
         return {"stop": {"status": "stopped"}, "start": {"status": "running"}}
@@ -103,10 +110,10 @@ class _FakeRegistry:
 @pytest.fixture
 def run_with(tmp_servers_root, monkeypatch):
     """Seed one schedule with ``steps`` and run it against a fake registry."""
-    def run(steps, **registry_kwargs):
+    def run(steps, status="running", **registry_kwargs):
         clean, error = service.validate(_body(steps=steps))
         assert error is None, error
-        _seed_server(Path(tmp_servers_root), [{"id": "sch_1", **clean}])
+        _seed_server(Path(tmp_servers_root), [{"id": "sch_1", **clean}], status)
         fake = _FakeRegistry(**registry_kwargs)
         monkeypatch.setattr(service, "get_server_process_registry", lambda: fake)
         monkeypatch.setattr(
@@ -140,6 +147,24 @@ def test_runner_stops_at_failed_command(run_with):
         {"action": "command", "command": "b", "delaySeconds": 0},
     ], fail=True)
     assert "b" not in calls
+    assert last["status"] == "error"
+
+
+def test_runner_starts_a_stopped_server_and_persists_status(run_with, tmp_servers_root):
+    calls, last = run_with(
+        [{"action": "start", "delaySeconds": 0}], status="stopped", running=False
+    )
+    assert calls == ["<sleep 0>", "<start>"]
+    assert last["status"] == "ok"
+    saved = json.loads((Path(tmp_servers_root) / "servers.json").read_text())
+    assert saved[0]["status"] == "running"
+
+
+def test_runner_never_starts_an_installing_server(run_with):
+    calls, last = run_with(
+        [{"action": "start", "delaySeconds": 0}], status="installing", running=False
+    )
+    assert "<start>" not in calls
     assert last["status"] == "error"
 
 
