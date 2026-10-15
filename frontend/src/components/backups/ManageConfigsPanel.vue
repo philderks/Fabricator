@@ -5,6 +5,7 @@ import FormField from '../ui/FormField.vue'
 import ToggleRow from '../ui/ToggleRow.vue'
 import { formatFileSize } from '../../utils/format'
 import { useBackupsStore } from '../../stores/backups'
+import { t } from '../../i18n'
 
 const props = defineProps({
   show: {
@@ -18,7 +19,7 @@ const emit = defineEmits(['close', 'request-delete-config'])
 const store = useBackupsStore()
 
 const isEditing = computed(() => Boolean(store.editingConfigId))
-const heading = computed(() => (isEditing.value ? 'Edit schedule' : 'New schedule'))
+const heading = computed(() => (isEditing.value ? t('backups.config.editTitle') : t('backups.config.newTitle')))
 
 const sortedConfigs = computed(() => store.sortedConfigs)
 const draft = computed(() => store.draft)
@@ -27,8 +28,7 @@ const draft = computed(() => store.draft)
 // fires timeOfDay in this zone, not the server's.
 const timeOfDayHint = computed(() => {
   const tz = draft.value?.schedule?.timezone
-  const base = 'Anchor for daily runs and start time for intervals.'
-  return tz ? `${base} Fires in your time zone (${tz}).` : base
+  return tz ? t('backups.config.timeOfDayHintTz', { tz }) : t('backups.config.timeOfDayHint')
 })
 
 function statsForConfig(configId) {
@@ -63,14 +63,14 @@ function onClose() {
 <template>
   <Transition name="manage-panel">
     <div v-if="props.show" class="manage-panel__overlay" @click.self="onClose">
-      <aside class="manage-panel" role="dialog" aria-label="Manage backup configs">
+      <aside class="manage-panel" role="dialog" :aria-label="$t('backups.config.panelLabel')">
         <header class="manage-panel__header">
-          <h2 class="manage-panel__title">Backup schedules</h2>
+          <h2 class="manage-panel__title">{{ $t('backups.config.panelTitle') }}</h2>
           <button
             type="button"
             class="manage-panel__close"
             :disabled="store.savingConfig"
-            aria-label="Close"
+            :aria-label="$t('common.close')"
             @click="onClose"
           >
             <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
@@ -80,7 +80,7 @@ function onClose() {
         </header>
 
         <div class="manage-panel__body">
-          <aside class="manage-panel__list" aria-label="Backup configs">
+          <aside class="manage-panel__list" :aria-label="$t('backups.config.listLabel')">
             <button
               type="button"
               class="manage-panel__list-create"
@@ -90,7 +90,7 @@ function onClose() {
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
                 <path d="M6 1v10M1 6h10"/>
               </svg>
-              <span>New config</span>
+              <span>{{ $t('backups.config.newConfig') }}</span>
             </button>
             <ul v-if="sortedConfigs.length" class="manage-panel__list-items">
               <li v-for="config in sortedConfigs" :key="config.id">
@@ -100,22 +100,22 @@ function onClose() {
                   :class="{ 'is-active': store.editingConfigId === config.id }"
                   @click="selectConfig(config)"
                 >
-                  <div class="manage-panel__list-name">{{ config.name || '(unnamed)' }}</div>
+                  <div class="manage-panel__list-name">{{ config.name || $t('backups.config.unnamed') }}</div>
                   <div class="manage-panel__list-meta">
                     <span
                       class="manage-panel__list-dot"
                       :class="config.schedule?.enabled ? 'is-on' : 'is-off'"
-                      :title="config.schedule?.enabled ? 'Scheduled' : 'Manual only'"
+                      :title="config.schedule?.enabled ? $t('backups.config.scheduled') : $t('backups.config.manualOnly')"
                       aria-hidden="true"
                     ></span>
-                    <span>{{ statsForConfig(config.id).count }} snapshot{{ statsForConfig(config.id).count === 1 ? '' : 's' }}</span>
+                    <span>{{ $t('backups.config.snapshotCount', statsForConfig(config.id).count) }}</span>
                     <span>·</span>
                     <span>{{ formatFileSize(statsForConfig(config.id).bytes) }}</span>
                   </div>
                 </button>
               </li>
             </ul>
-            <p v-else class="manage-panel__list-empty">No configs yet. Create one to schedule backups.</p>
+            <p v-else class="manage-panel__list-empty">{{ $t('backups.config.empty') }}</p>
           </aside>
 
           <section class="manage-panel__editor">
@@ -128,7 +128,7 @@ function onClose() {
                   :disabled="store.activeJob?.active || !!store.runningConfigId || store.savingConfig || store.deletingConfig"
                   @click="store.runBackup(store.editingConfigId)"
                 >
-                  Run now
+                  {{ $t('backups.config.runNow') }}
                 </AppButton>
                 <AppButton
                   variant="ghost"
@@ -136,38 +136,38 @@ function onClose() {
                   :disabled="store.savingConfig || store.deletingConfig"
                   @click="onDelete"
                 >
-                  Delete
+                  {{ $t('common.delete') }}
                 </AppButton>
               </div>
             </header>
 
             <form class="manage-panel__form" @submit.prevent="onSave">
-              <FormField label="Name" hint="Shown in the snapshot list and toasts.">
+              <FormField :label="$t('backups.config.name')" :hint="$t('backups.config.nameHint')">
                 <template #default="{ id, describedBy }">
                   <input
                     :id="id"
                     v-model="draft.name"
                     type="text"
-                    placeholder="Daily backup"
+                    :placeholder="$t('backups.config.namePlaceholder')"
                     :aria-describedby="describedBy"
                   />
                 </template>
               </FormField>
 
-              <FormField label="Storage path (optional)" hint="Leave empty to use the server's default backup folder.">
+              <FormField :label="$t('common.storagePathOptional')" :hint="$t('common.storagePathHint')">
                 <template #default="{ id, describedBy }">
                   <input
                     :id="id"
                     v-model="draft.storagePath"
                     type="text"
-                    placeholder="/absolute/path/to/backups"
+                    :placeholder="$t('common.storagePathPlaceholder')"
                     :aria-describedby="describedBy"
                   />
                 </template>
               </FormField>
 
               <div class="manage-panel__form-row">
-                <FormField label="Max snapshots" hint="Older snapshots are pruned after each run. 0 disables retention.">
+                <FormField :label="$t('backups.config.maxSnapshots')" :hint="$t('backups.config.maxSnapshotsHint')">
                   <template #default="{ id, describedBy }">
                     <input
                       :id="id"
@@ -180,7 +180,7 @@ function onClose() {
                   </template>
                 </FormField>
 
-                <FormField label="Exclusions" hint="One glob per line, relative to the server dir (e.g. logs/**).">
+                <FormField :label="$t('backups.config.exclusions')" :hint="$t('backups.config.exclusionsHint')">
                   <template #default="{ id, describedBy }">
                     <textarea
                       :id="id"
@@ -195,15 +195,15 @@ function onClose() {
               </div>
 
               <div class="manage-panel__toggles">
-                <ToggleRow v-model="draft.flush" label="Flush before backup (save-all flush, wait for confirmation)" />
-                <ToggleRow v-model="draft.shutdown" label="Stop server before backup (slowest, safest)" />
-                <ToggleRow v-model="draft.compress" label="Compress archives (gzip everything except worlds)" />
+                <ToggleRow v-model="draft.flush" :label="$t('backups.config.flush')" />
+                <ToggleRow v-model="draft.shutdown" :label="$t('backups.config.shutdown')" />
+                <ToggleRow v-model="draft.compress" :label="$t('backups.config.compress')" />
               </div>
 
               <fieldset class="manage-panel__schedule">
-                <legend>Schedule</legend>
+                <legend>{{ $t('backups.config.schedule') }}</legend>
                 <div class="manage-panel__form-row">
-                  <FormField label="Frequency">
+                  <FormField :label="$t('backups.config.frequency')">
                     <template #default="{ id, describedBy }">
                       <select
                         :id="id"
@@ -211,13 +211,13 @@ function onClose() {
                         :aria-describedby="describedBy"
                       >
                         <option v-for="hours in store.frequencyPresets" :key="hours" :value="hours">
-                          {{ hours === 1 ? 'Every hour' : hours === 24 ? 'Daily' : hours === 168 ? 'Weekly' : `Every ${hours}h` }}
+                          {{ hours === 1 ? $t('backups.config.everyHour') : hours === 24 ? $t('backups.config.daily') : hours === 168 ? $t('backups.config.weekly') : $t('backups.config.everyHours', { hours }) }}
                         </option>
                       </select>
                     </template>
                   </FormField>
 
-                  <FormField label="Time of day" :hint="timeOfDayHint">
+                  <FormField :label="$t('backups.config.timeOfDay')" :hint="timeOfDayHint">
                     <template #default="{ id, describedBy }">
                       <input
                         :id="id"
@@ -239,7 +239,7 @@ function onClose() {
                   :disabled="store.savingConfig"
                   @click="onClose"
                 >
-                  Close
+                  {{ $t('common.close') }}
                 </AppButton>
                 <AppButton
                   variant="primary"
@@ -249,7 +249,7 @@ function onClose() {
                   type="submit"
                   @click.prevent="onSave"
                 >
-                  {{ isEditing ? 'Save changes' : 'Create config' }}
+                  {{ isEditing ? $t('common.saveChanges') : $t('backups.config.create') }}
                 </AppButton>
               </footer>
             </form>

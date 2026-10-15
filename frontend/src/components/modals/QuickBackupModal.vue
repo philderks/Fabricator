@@ -55,45 +55,43 @@ function onCancel() {
 <template>
   <BaseModal
     :show="props.show"
-    title="Quick backup"
+    :title="$t('backups.quickBackup')"
     size="small"
     :close-on-escape="!jobActive"
     @close="onCancel"
   >
     <div class="quick-backup-modal">
-      <p class="quick-backup-modal__intro">
-        Run a one-off backup without creating a config. The archive is written to the path you specify.
-      </p>
+      <p class="quick-backup-modal__intro">{{ $t('backups.quick.intro') }}</p>
 
       <div class="quick-backup-modal__field">
-        <label class="quick-backup-modal__label" for="qb-storage-path">Storage path (optional)</label>
+        <label class="quick-backup-modal__label" for="qb-storage-path">{{ $t('common.storagePathOptional') }}</label>
         <input
           id="qb-storage-path"
           v-model="storagePath"
           type="text"
           class="quick-backup-modal__input"
-          placeholder="/absolute/path/to/backups"
+          :placeholder="$t('common.storagePathPlaceholder')"
           :disabled="jobActive"
           @keydown.enter="onConfirm"
         />
-        <span class="quick-backup-modal__hint">Leave empty to use the server's default backup folder.</span>
+        <span class="quick-backup-modal__hint">{{ $t('common.storagePathHint') }}</span>
       </div>
 
       <div class="quick-backup-modal__toggles">
         <label class="quick-backup-modal__toggle">
           <input v-model="compress" type="checkbox" :disabled="jobActive" />
-          <span class="quick-backup-modal__toggle-label">Compress</span>
-          <span class="quick-backup-modal__toggle-hint">Gzip world-data and config files (recommended).</span>
+          <span class="quick-backup-modal__toggle-label">{{ $t('backups.quick.compress') }}</span>
+          <span class="quick-backup-modal__toggle-hint">{{ $t('backups.quick.compressHint') }}</span>
         </label>
         <label class="quick-backup-modal__toggle">
           <input v-model="flush" type="checkbox" :disabled="jobActive" />
-          <span class="quick-backup-modal__toggle-label">Flush before backup</span>
-          <span class="quick-backup-modal__toggle-hint">Send save-all to the server before copying files.</span>
+          <span class="quick-backup-modal__toggle-label">{{ $t('backups.quick.flush') }}</span>
+          <span class="quick-backup-modal__toggle-hint">{{ $t('backups.quick.flushHint') }}</span>
         </label>
         <label class="quick-backup-modal__toggle">
           <input v-model="shutdown" type="checkbox" :disabled="jobActive" />
-          <span class="quick-backup-modal__toggle-label">Shut down server</span>
-          <span class="quick-backup-modal__toggle-hint">Stop the server for the copy, then restart it.</span>
+          <span class="quick-backup-modal__toggle-label">{{ $t('backups.quick.shutdown') }}</span>
+          <span class="quick-backup-modal__toggle-hint">{{ $t('backups.quick.shutdownHint') }}</span>
         </label>
       </div>
 
@@ -102,7 +100,7 @@ function onCancel() {
 
     <template #footer>
       <AppButton variant="ghost" size="md" :disabled="jobActive" @click="onCancel">
-        Cancel
+        {{ $t('common.cancel') }}
       </AppButton>
       <AppButton
         variant="primary"
@@ -111,7 +109,7 @@ function onCancel() {
         :loading="jobActive"
         @click="onConfirm"
       >
-        {{ jobActive ? 'Backing up…' : 'Start quick backup' }}
+        {{ jobActive ? $t('backups.quick.backingUp') : $t('backups.quick.start') }}
       </AppButton>
     </template>
   </BaseModal>

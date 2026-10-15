@@ -1,3 +1,5 @@
+import { t } from '../i18n'
+
 /** Settings sub-pages.
  *
  * Settings is an index of these plus About, which stays on the index itself
@@ -6,38 +8,38 @@
  *
  * Shared by the page (which renders the index and the active section) and
  * AppTopbar (which needs the label for the breadcrumb), so the two can't drift.
- * `key` is the :section route param.
+ * `key` is the :section route param; `label` and `description` are i18n keys.
  */
 export const SETTINGS_SECTIONS = [
   {
     key: 'autostart',
-    label: 'Auto-start',
-    description: 'What happens to this server when Fabricator starts up.',
+    label: 'settings.sections.autostart',
+    description: 'settings.sections.autostartDescription',
     // Per-server: there is nothing to auto-start on the server-less route.
     serverOnly: true,
     hiddenWhenManaged: true
   },
   {
     key: 'display',
-    label: 'Display',
-    description: 'Units and readouts used across the interface.'
+    label: 'settings.sections.display',
+    description: 'settings.sections.displayDescription'
   },
   {
     key: 'java',
-    label: 'Java',
-    description: 'Installed runtimes, and installing new ones.',
+    label: 'settings.sections.java',
+    description: 'settings.sections.javaDescription',
     hiddenWhenManaged: true
   },
   {
     key: 'mcp',
-    label: 'MCP',
-    description: 'Model Context Protocol access for AI assistants.',
+    label: 'settings.sections.mcp',
+    description: 'settings.sections.mcpDescription',
     hiddenWhenManaged: true
   },
   {
     key: 'security',
-    label: 'Security',
-    description: 'The password used to unlock Fabricator, and whether one is required.',
+    label: 'settings.sections.security',
+    description: 'settings.sections.securityDescription',
     // Deliberately NOT gated on auth being enabled: this section is the only
     // way back once the password is turned off, so hiding it in that state
     // would make disabling a one-way door.
@@ -57,5 +59,6 @@ export function availableSettingsSections({ hasServer = false, managed = false, 
 
 /** Display name for a section key; '' when the key is unknown. */
 export function settingsSectionLabel(key) {
-  return SETTINGS_SECTIONS.find((section) => section.key === key)?.label || ''
+  const label = SETTINGS_SECTIONS.find((section) => section.key === key)?.label
+  return label ? t(label) : ''
 }

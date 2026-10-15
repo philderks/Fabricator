@@ -9,8 +9,8 @@
       <!-- checking -->
       <template v-if="state === 'checking'">
         <div class="java-spinner"></div>
-        <p class="java-heading">Checking Java...</p>
-        <p class="java-subtext">Looking for a compatible Java runtime.</p>
+        <p class="java-heading">{{ $t('javaInstall.checking') }}</p>
+        <p class="java-subtext">{{ $t('javaInstall.checkingHint') }}</p>
       </template>
 
       <!-- needs_java -->
@@ -22,33 +22,28 @@
             <circle cx="12" cy="17.5" r="0.75" fill="currentColor"/>
           </svg>
         </div>
-        <p class="java-heading">Java {{ requiredJava }} is required</p>
-        <p class="java-subtext">
-          <template v-if="mcVersion">
-            Minecraft <strong>{{ mcVersion }}</strong> requires <strong>Java {{ requiredJava }}</strong>.
-          </template>
-          <template v-else>
-            This server requires <strong>Java {{ requiredJava }}</strong>.
-          </template>
-          Fabricator can download and install it automatically.
-        </p>
+        <p class="java-heading">{{ $t('javaInstall.required', { major: requiredJava }) }}</p>
+        <i18n-t :keypath="mcVersion ? 'javaInstall.requiresMc' : 'javaInstall.requires'" tag="p" class="java-subtext">
+          <template #version><strong>{{ mcVersion }}</strong></template>
+          <template #java><strong>{{ $t('java.version', { major: requiredJava }) }}</strong></template>
+        </i18n-t>
 
         <div v-if="substitutionNotice" class="java-notice">
           {{ substitutionNotice }}
         </div>
 
         <div class="java-platform">
-          <span class="platform-label">Detected Java:</span>
+          <span class="platform-label">{{ $t('javaInstall.detected') }}</span>
           <span class="platform-value">{{ detectedJavaLabel }}</span>
         </div>
 
         <div v-if="asset" class="java-platform">
-          <span class="platform-label">Download:</span>
+          <span class="platform-label">{{ $t('javaInstall.download') }}</span>
           <span class="platform-value" :title="asset.filename">{{ assetFilename }} ({{ formatMb(asset.size_bytes) }})</span>
         </div>
 
         <div v-if="assetError" class="java-error">
-          Could not look up download asset: {{ assetError }}
+          {{ $t('javaInstall.assetError', { error: assetError }) }}
         </div>
       </template>
 
@@ -60,8 +55,8 @@
             <path d="M3 20h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
           </svg>
         </div>
-        <p class="java-heading">Downloading Java {{ effectiveMajor }}</p>
-        <p class="java-subtext">{{ downloadedLabel }} of {{ totalLabel }} ({{ progressPercent }}%)</p>
+        <p class="java-heading">{{ $t('javaInstall.downloading', { major: effectiveMajor }) }}</p>
+        <p class="java-subtext">{{ $t('javaInstall.progress', { done: downloadedLabel, total: totalLabel, pct: progressPercent }) }}</p>
         <div class="install-progress">
           <div class="install-progress__track">
             <div class="install-progress__fill" :style="{ width: progressPercent + '%' }"></div>
@@ -76,17 +71,18 @@
             <path d="M5 12l5 5L20 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </div>
-        <p class="java-heading">Download complete</p>
-        <p class="java-subtext">
-          Java {{ effectiveMajor }} is ready to install. Click <strong>Install</strong> to extract it to Fabricator's managed location.
-        </p>
+        <p class="java-heading">{{ $t('javaInstall.downloadComplete') }}</p>
+        <i18n-t keypath="javaInstall.readyToInstall" tag="p" class="java-subtext">
+          <template #major>{{ effectiveMajor }}</template>
+          <template #install><strong>{{ $t('common.install') }}</strong></template>
+        </i18n-t>
       </template>
 
       <!-- installing -->
       <template v-else-if="state === 'installing'">
         <div class="java-spinner"></div>
-        <p class="java-heading">Installing Java {{ effectiveMajor }}...</p>
-        <p class="java-subtext">Extracting and finalising the runtime. This only takes a few seconds.</p>
+        <p class="java-heading">{{ $t('javaInstall.installing', { major: effectiveMajor }) }}</p>
+        <p class="java-subtext">{{ $t('javaInstall.installingHint') }}</p>
       </template>
 
       <!-- done -->
@@ -97,12 +93,10 @@
             <path d="M7 12.5l3 3 7-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </div>
-        <p class="java-heading">Java {{ effectiveMajor }} installed</p>
-        <p class="java-subtext">
-          The managed Java runtime is ready. You can start your server now.
-        </p>
+        <p class="java-heading">{{ $t('javaInstall.installed', { major: effectiveMajor }) }}</p>
+        <p class="java-subtext">{{ $t('javaInstall.installedHint') }}</p>
         <div v-if="javaPath" class="java-platform">
-          <span class="platform-label">Installed at:</span>
+          <span class="platform-label">{{ $t('javaInstall.installedAt') }}</span>
           <span class="platform-value" :title="javaPath">{{ javaPath }}</span>
         </div>
       </template>
@@ -116,43 +110,43 @@
             <circle cx="12" cy="16.5" r="0.75" fill="currentColor"/>
           </svg>
         </div>
-        <p class="java-heading">Something went wrong</p>
+        <p class="java-heading">{{ $t('javaInstall.somethingWrong') }}</p>
         <p class="java-subtext java-error-message">{{ errorMessage }}</p>
       </template>
     </div>
 
     <template #footer>
       <template v-if="state === 'checking'">
-        <AppButton variant="ghost" size="md" @click="handleClose">Cancel</AppButton>
+        <AppButton variant="ghost" size="md" @click="handleClose">{{ $t('common.cancel') }}</AppButton>
       </template>
 
       <template v-else-if="state === 'needs_java'">
-        <AppButton variant="ghost" size="md" @click="handleClose">Cancel</AppButton>
+        <AppButton variant="ghost" size="md" @click="handleClose">{{ $t('common.cancel') }}</AppButton>
         <AppButton
           variant="primary"
           size="md"
           :disabled="!canDownload"
           @click="startDownload"
-        >Download Java {{ effectiveMajor }}</AppButton>
+        >{{ $t('javaInstall.downloadButton', { major: effectiveMajor }) }}</AppButton>
       </template>
 
       <template v-else-if="state === 'downloading' || state === 'installing'">
-        <AppButton variant="ghost" size="md" :loading="true">Working...</AppButton>
+        <AppButton variant="ghost" size="md" :loading="true">{{ $t('common.working') }}</AppButton>
       </template>
 
       <template v-else-if="state === 'confirming_install'">
-        <AppButton variant="ghost" size="md" @click="handleClose">Cancel</AppButton>
-        <AppButton variant="primary" size="md" @click="confirmInstall">Install</AppButton>
+        <AppButton variant="ghost" size="md" @click="handleClose">{{ $t('common.cancel') }}</AppButton>
+        <AppButton variant="primary" size="md" @click="confirmInstall">{{ $t('common.install') }}</AppButton>
       </template>
 
       <template v-else-if="state === 'done'">
-        <AppButton variant="ghost" size="md" @click="handleClose">Close</AppButton>
-        <AppButton variant="primary" size="md" @click="finishAndStart">Start Server</AppButton>
+        <AppButton variant="ghost" size="md" @click="handleClose">{{ $t('common.close') }}</AppButton>
+        <AppButton variant="primary" size="md" @click="finishAndStart">{{ $t('javaInstall.startServer') }}</AppButton>
       </template>
 
       <template v-else-if="state === 'error'">
-        <AppButton variant="ghost" size="md" @click="handleClose">Close</AppButton>
-        <AppButton variant="primary" size="md" @click="resetToNeedsJava">Try Again</AppButton>
+        <AppButton variant="ghost" size="md" @click="handleClose">{{ $t('common.close') }}</AppButton>
+        <AppButton variant="primary" size="md" @click="resetToNeedsJava">{{ $t('javaInstall.tryAgain') }}</AppButton>
       </template>
     </template>
   </BaseModal>
@@ -163,6 +157,7 @@ import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import BaseModal from './BaseModal.vue'
 import AppButton from '../ui/AppButton.vue'
 import { getJavaStatus, installJava, getJavaInstallProgress } from '../../api/servers'
+import { t } from '../../i18n'
 
 const props = defineProps({
   show: { type: Boolean, required: true },
@@ -214,24 +209,24 @@ const downloadedLabel = computed(() => formatMb(downloaded.value))
 const totalLabel = computed(() => formatMb(total.value))
 
 const detectedJavaLabel = computed(() => {
-  if (!systemJava.value) return 'None'
-  if (systemJava.value.version == null) return 'Not installed'
-  return `Java ${systemJava.value.version}`
+  if (!systemJava.value) return t('javaInstall.none')
+  if (systemJava.value.version == null) return t('javaInstall.notInstalled')
+  return t('java.version', { major: systemJava.value.version })
 })
 
 const substitutionNotice = computed(() => {
   if (!substituted.value) return ''
-  return `Java ${requiredJava.value} is not distributed by Adoptium; installing Java ${installMajor.value} instead (fully compatible).`
+  return t('javaInstall.substituted', { required: requiredJava.value, major: installMajor.value })
 })
 
 const modalTitle = computed(() => {
   switch (state.value) {
-    case 'downloading': return 'Downloading Java'
-    case 'installing': return 'Installing Java'
-    case 'confirming_install': return 'Ready to install'
-    case 'done': return 'Java installed'
-    case 'error': return 'Java install failed'
-    default: return 'Java Required'
+    case 'downloading': return t('javaInstall.titles.downloading')
+    case 'installing': return t('javaInstall.titles.installing')
+    case 'confirming_install': return t('javaInstall.titles.confirming')
+    case 'done': return t('javaInstall.titles.done')
+    case 'error': return t('javaInstall.titles.error')
+    default: return t('javaInstall.titles.default')
   }
 })
 
@@ -284,7 +279,7 @@ const loadStatus = async () => {
     const status = await getJavaStatus({ mcVersion: props.mcVersion })
     applyStatus(status)
     if (!requiredJava.value) {
-      errorMessage.value = 'Could not determine the Java version this server needs.'
+      errorMessage.value = t('javaInstall.unknownRequirement')
       state.value = 'error'
       return
     }
@@ -295,7 +290,7 @@ const loadStatus = async () => {
     }
     state.value = 'needs_java'
   } catch (err) {
-    errorMessage.value = err?.message || 'Failed to check Java status.'
+    errorMessage.value = err?.message || t('javaInstall.checkFailed')
     state.value = 'error'
   }
 }
@@ -312,7 +307,7 @@ const startDownload = async () => {
     if (res.substituted) substituted.value = true
     pollHandle = setInterval(pollProgress, 750)
   } catch (err) {
-    errorMessage.value = err?.message || 'Failed to start Java install.'
+    errorMessage.value = err?.message || t('java.startFailed')
     state.value = 'error'
   }
 }
@@ -329,7 +324,7 @@ const pollProgress = async () => {
     total.value = task.total || total.value
     if (task.status === 'error') {
       clearPoll()
-      errorMessage.value = task.error || 'The install task failed.'
+      errorMessage.value = task.error || t('javaInstall.taskFailed')
       state.value = 'error'
       return
     }
@@ -350,7 +345,7 @@ const pollProgress = async () => {
   } catch (err) {
     if (taskId.value !== localTaskId) return
     clearPoll()
-    errorMessage.value = err?.message || 'Lost contact with the install task.'
+    errorMessage.value = err?.message || t('java.lostContact')
     state.value = 'error'
   }
 }

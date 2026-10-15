@@ -6,6 +6,7 @@ import { useAuthStore } from '../../stores/auth'
 import { useSidebarCollapsed } from '../../composables/useSidebarCollapsed'
 import { useMobileNav } from '../../composables/useMobileNav'
 import { getEffectiveStatus as statusOf } from '../../utils/getEffectiveStatus'
+import { t, te } from '../../i18n'
 
 const route = useRoute()
 const router = useRouter()
@@ -23,7 +24,7 @@ const currentServer = computed(() => {
     return found
   }
   // Fallback when backend hasn't loaded yet or server not in list
-  return { id: currentId.value, name: currentId.value || 'Unknown', loader: '', version: '', status: 'unknown' }
+  return { id: currentId.value, name: currentId.value || t('common.unknown'), loader: '', version: '', status: 'unknown' }
 })
 
 // Saved order, not current-first: the order shown is the order being edited,
@@ -95,7 +96,8 @@ const dotColor = (s) => {
 const metaText = (s) => {
   const loader = s?.loader ? s.loader.charAt(0).toUpperCase() + s.loader.slice(1) : ''
   const version = s?.version || ''
-  const status = statusOf(s)
+  const raw = statusOf(s)
+  const status = te(`switcher.status.${raw}`) ? t(`switcher.status.${raw}`) : raw
   const parts = [loader && version ? `${loader} ${version}` : loader || version, status].filter(Boolean)
   return parts.join(' · ')
 }
@@ -203,8 +205,8 @@ onBeforeUnmount(() => {
           class="server-switcher__grip"
           role="button"
           tabindex="0"
-          :aria-label="`Reorder ${s.name}. Drag, or use arrow keys. The top server opens by default.`"
-          title="Drag to reorder — the top server opens by default"
+          :aria-label="$t('switcher.reorderLabel', { name: s.name })"
+          :title="$t('switcher.reorderTitle')"
           @pointerdown="onDragStart($event, s.id)"
           @pointermove="onDragMove"
           @pointerup="onDragEnd"
@@ -231,7 +233,7 @@ onBeforeUnmount(() => {
         <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
           <path d="M5.5 1v9M1 5.5h9"/>
         </svg>
-        Add server
+        {{ $t('switcher.addServer') }}
       </button>
     </div>
   </div>

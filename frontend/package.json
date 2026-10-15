@@ -18,6 +18,7 @@
     "codemirror": "^6.0.2",
     "pinia": "^3.0.4",
     "vue": "^3.5.11",
+    "vue-i18n": "^11.4.14",
     "vue-router": "^4.6.3"
   },
   "devDependencies": {

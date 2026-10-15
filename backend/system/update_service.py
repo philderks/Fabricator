@@ -1,6 +1,6 @@
 """Fabricator self-update status and execution service.
 
-Two execution modes:
+Three execution modes:
 
 * ``systemd`` (packaged Linux installs): the panel runs as an unprivileged,
   heavily-sandboxed systemd service (``NoNewPrivileges=true``,
@@ -11,18 +11,25 @@ Two execution modes:
   decoupled from it so the installer's restart of the panel does not kill the
   update mid-flight. Status/logs are read back from files the oneshot writes.
 
+* ``exe`` (the portable Windows build, picked automatically when frozen on
+  Windows): download the release ``.exe`` next to the running one, verify it
+  against GitHub's sha256, and hand off to a detached PowerShell helper that
+  swaps it in once this process has exited and relaunches it.
+
 * ``dev`` (everything else): fall back to running the installer in-process via
   ``curl | bash``. Requires the caller to already have sufficient privileges.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import subprocess
+import sys
 import threading
 import time
 from collections import deque
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 from pathlib import Path
 from urllib import error, request
 import json
@@ -41,22 +48,41 @@ _VERSION_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 # never fired (misconfigured host) does not wedge the UI in "Updating…".
 _REQUEST_STALE_AFTER = 60 * 60  # seconds
 
+# Runs detached after the panel exits. The exe stays locked until both
+# PyInstaller onefile processes (bootloader + app) are gone, which includes the
+# graceful server stop, so the move is retried. Whichever exe ends up in place
+# is started, so a failed swap still brings the panel back on the old version;
+# FABRICATOR_UPDATE_RESULT tells the relaunched process which one happened.
+_EXE_SWAP_SCRIPT = (
+    "$env:FABRICATOR_UPDATE_RESULT = '1';"
+    " for ($i = 0; $i -lt 300; $i++) {"
+    " try { Move-Item -LiteralPath $env:FAB_NEW -Destination $env:FAB_EXE -Force -ErrorAction Stop;"
+    " $env:FABRICATOR_UPDATE_RESULT = '0'; break }"
+    " catch { Start-Sleep -Seconds 1 } };"
+    " Start-Process -FilePath $env:FAB_EXE"
+)
+
 
 def _fetch_latest_tag(repo: str) -> Optional[str]:
     with _tag_cache_lock:
         if time.time() - _tag_cache["fetched_at"] < _TAG_CACHE_TTL:
             return _tag_cache["tag"]
 
-    url = f"https://api.github.com/repos/{repo}/releases/latest"
+    # Same filter as install.sh's get_latest_tag: GitHub's /releases/latest can
+    # be an mcp-v* release, which has no panel assets.
+    url = f"https://api.github.com/repos/{repo}/releases?per_page=100"
     req = request.Request(url, headers={"Accept": "application/vnd.github+json"})
     tag: Optional[str] = None
     try:
         with request.urlopen(req, timeout=10) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-            value = payload.get("tag_name")
-            if isinstance(value, str) and value:
-                tag = value
-    except (error.URLError, error.HTTPError, TimeoutError, OSError, json.JSONDecodeError):
+            releases = json.loads(response.read().decode("utf-8"))
+        tag = next((
+            r["tag_name"] for r in releases
+            if isinstance(r, dict) and isinstance(r.get("tag_name"), str)
+            and r["tag_name"].startswith("v")
+            and not r.get("draft") and not r.get("prerelease")
+        ), None)
+    except (error.URLError, error.HTTPError, TimeoutError, OSError, ValueError, TypeError):
         pass
 
     with _tag_cache_lock:
@@ -64,6 +90,36 @@ def _fetch_latest_tag(repo: str) -> Optional[str]:
         _tag_cache["fetched_at"] = time.time()
 
     return tag
+
+
+def _download_release_exe(repo: str, tag: str, dest: Path) -> None:
+    """Download ``Fabricator-<tag>.exe`` to ``dest``, verified against GitHub's sha256."""
+    meta = request.Request(
+        f"https://api.github.com/repos/{repo}/releases/tags/{tag}",
+        headers={"Accept": "application/vnd.github+json"},
+    )
+    with request.urlopen(meta, timeout=15) as response:
+        assets = json.loads(response.read().decode("utf-8")).get("assets") or []
+    name = f"Fabricator-{tag}.exe"
+    asset = next((a for a in assets if a.get("name") == name), None)
+    if asset is None:
+        raise RuntimeError(f"Release {tag} has no {name}.")
+    algo, _, expected = str(asset.get("digest") or "").partition(":")
+    if algo != "sha256" or not expected:
+        raise RuntimeError(f"{name} has no sha256 digest to verify against.")
+
+    sha = hashlib.sha256()
+    try:
+        with request.urlopen(asset["browser_download_url"], timeout=30) as response, \
+                dest.open("wb") as fh:
+            for chunk in iter(lambda: response.read(1 << 16), b""):
+                sha.update(chunk)
+                fh.write(chunk)
+        if sha.hexdigest() != expected:
+            raise RuntimeError(f"{name} failed checksum verification.")
+    except Exception:
+        dest.unlink(missing_ok=True)
+        raise
 
 
 def _normalize_version(version: Optional[str]) -> Optional[str]:
@@ -75,13 +131,18 @@ def _normalize_version(version: Optional[str]) -> Optional[str]:
 
 
 class UpdateService:
-    """Update coordinator. Picks systemd trigger-file mode or in-process dev mode."""
+    """Update coordinator. Picks systemd trigger-file, Windows exe, or dev mode."""
 
     def __init__(self) -> None:
         self._state_lock = threading.Lock()
         self._repo = os.environ.get("FABRICATOR_REPO", "philderks/Fabricator")
 
         self._mode = os.environ.get("FABRICATOR_UPDATE_MODE", "").strip().lower()
+        if not self._mode and getattr(sys, "frozen", False) and sys.platform == "win32":
+            self._mode = "exe"
+        # run.py installs its graceful shutdown here; the exe updater exits
+        # through it so running servers save their worlds before the swap.
+        self.shutdown: Optional[Callable[[], None]] = None
         update_dir = os.environ.get(
             "FABRICATOR_UPDATE_DIR", "/var/lib/fabricator/update"
         )
@@ -99,6 +160,17 @@ class UpdateService:
         self._last_exit_code: Optional[int] = None
         self._last_error: Optional[str] = None
         self._last_triggered_version: Optional[str] = None
+
+        # Set by the exe swap helper on the relaunched process, so a UI that
+        # polled through the restart learns how the update ended.
+        swap_result = os.environ.get("FABRICATOR_UPDATE_RESULT")
+        if swap_result is not None:
+            self._last_finished_at = time.time()
+            self._last_exit_code = 0 if swap_result == "0" else 1
+            if self._last_exit_code:
+                self._last_error = (
+                    "Could not replace the executable; still running the previous version."
+                )
 
     # ------------------------------------------------------------------ #
     # Status                                                             #
@@ -205,9 +277,21 @@ class UpdateService:
         if not self._lock.acquire(blocking=False):
             return {"started": False, "error": "Updater lock is currently held."}
 
+        with self._state_lock:
+            self._in_progress = True
+            self._last_started_at = time.time()
+            self._last_finished_at = None
+            self._last_exit_code = None
+            self._last_error = None
+            self._last_triggered_version = version
+            self._logs.clear()
+            self._logs.append(f"Starting update (target: {version})")
+
+        run = self._run_update_exe if self._mode == "exe" else self._run_update_dev
+
         def _runner() -> None:
             try:
-                self._run_update_dev(version)
+                run(version)
             finally:
                 self._lock.release()
 
@@ -223,16 +307,6 @@ class UpdateService:
         cmd = ["/usr/bin/env", "bash", "-lc", curl_updater]
         env = os.environ.copy()
         env["FABRICATOR_VERSION"] = version
-
-        with self._state_lock:
-            self._in_progress = True
-            self._last_started_at = time.time()
-            self._last_finished_at = None
-            self._last_exit_code = None
-            self._last_error = None
-            self._last_triggered_version = version
-            self._logs.clear()
-            self._logs.append(f"Starting update (target: {version})")
 
         try:
             completed = subprocess.run(  # noqa: S603
@@ -261,6 +335,49 @@ class UpdateService:
             with self._state_lock:
                 self._in_progress = False
                 self._last_finished_at = time.time()
+
+    def _run_update_exe(self, version: str) -> None:
+        # A running exe can't be overwritten, so download beside it and let the
+        # swap helper move it into place after we exit.
+        try:
+            if self.shutdown is None:
+                raise RuntimeError("No shutdown hook installed; cannot restart.")
+            tag = _fetch_latest_tag(self._repo) if version == "latest" else version
+            if not tag:
+                raise RuntimeError("Could not determine the latest release.")
+            exe = Path(sys.executable)
+            new_exe = exe.with_name(exe.name + ".new")
+            with self._state_lock:
+                self._logs.append(f"Downloading Fabricator-{tag}.exe")
+            _download_release_exe(self._repo, tag, new_exe)
+            env = {
+                **os.environ,
+                "FAB_NEW": str(new_exe),
+                "FAB_EXE": str(exe),
+                # Relaunch as an independent instance, not a worker reusing
+                # this process's onefile temp dir (deleted when we exit).
+                "PYINSTALLER_RESET_ENVIRONMENT": "1",
+            }
+            subprocess.Popen(  # noqa: S603
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", _EXE_SWAP_SCRIPT],
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+            )
+        except Exception as exc:
+            with self._state_lock:
+                self._last_error = f"Update failed: {exc}"
+                self._last_exit_code = 1
+                self._logs.append(self._last_error)
+                self._in_progress = False
+                self._last_finished_at = time.time()
+            return
+        with self._state_lock:
+            self._logs.append("Download verified; restarting into the new version")
+        self.shutdown()
 
     # ------------------------------------------------------------------ #
     # File helpers (systemd mode)                                        #

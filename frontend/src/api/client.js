@@ -3,6 +3,8 @@
  * Provides common utilities for API requests with error handling
  */
 
+import { t } from '../i18n'
+
 const API_BASE = '' // Use relative path since Vite proxy is configured
 
 /**
@@ -93,7 +95,7 @@ export async function apiRequest(endpoint, options = {}) {
       }
       const bodyMessage = extractErrorMessageFromBody(rawBody)
       throw new ApiError(
-        data.error || data.message || bodyMessage || `Request failed with status ${response.status}`,
+        data.error || data.message || bodyMessage || t('errors.requestFailed', { status: response.status }),
         response.status,
         data && Object.keys(data).length ? data : null
       )
@@ -114,7 +116,7 @@ export async function apiRequest(endpoint, options = {}) {
 
     // Network or other errors
     throw new ApiError(
-      error.message || 'Network error occurred',
+      error.message || t('errors.network'),
       0,
       null
     )

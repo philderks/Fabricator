@@ -4,6 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import AppButton from '../components/ui/AppButton.vue'
 import FormField from '../components/ui/FormField.vue'
+import { t } from '../i18n'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -31,8 +32,8 @@ async function onSubmit() {
   } else {
     error.value =
       res.error?.status === 401
-        ? 'Incorrect password.'
-        : res.error?.message || 'Login failed. Please try again.'
+        ? t('auth.login.incorrectPassword')
+        : res.error?.message || t('auth.login.failed')
     password.value = ''
   }
 }
@@ -43,9 +44,9 @@ async function onSubmit() {
     <form class="login-card" @submit.prevent="onSubmit">
       <img class="login-card__logo" src="/favicon.svg" alt="" />
       <h1 class="login-card__title">Fabricator</h1>
-      <p class="login-card__subtitle">Enter the operator password to continue.</p>
+      <p class="login-card__subtitle">{{ $t('auth.login.subtitle') }}</p>
 
-      <FormField label="Password" v-slot="{ id, describedBy }">
+      <FormField :label="$t('auth.password')" v-slot="{ id, describedBy }">
         <input
           :id="id"
           v-model="password"
@@ -60,7 +61,7 @@ async function onSubmit() {
       <p v-if="error" class="login-card__error" role="alert">{{ error }}</p>
 
       <AppButton type="submit" variant="primary" size="md" :loading="submitting">
-        Log in
+        {{ $t('auth.login.submit') }}
       </AppButton>
     </form>
   </div>

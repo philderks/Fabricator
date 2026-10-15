@@ -16,6 +16,7 @@ import { yaml } from '@codemirror/lang-yaml'
 import { properties } from '@codemirror/legacy-modes/mode/properties'
 import { toml } from '@codemirror/legacy-modes/mode/toml'
 import { tags as t } from '@lezer/highlight'
+import { i18n } from '../../i18n'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
@@ -130,7 +131,7 @@ function syntaxTreeLinter(vw) {
         from: node.from,
         to,
         severity: 'error',
-        message: 'Syntax error',
+        message: i18n.global.t('editor.syntaxError'),
       })
     }
   })

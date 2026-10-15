@@ -12,17 +12,19 @@ import ConfirmModal from '../../components/modals/ConfirmModal.vue'
 import { useBackupsStore } from '../../stores/backups'
 import { useAuthStore } from '../../stores/auth'
 import { useServerStore } from '../../stores/server'
+import { t } from '../../i18n'
 
 const store = useBackupsStore()
 const auth = useAuthStore()
 const serverStore = useServerStore()
 
+// `label` is an i18n key.
 const TYPE_FILTERS = [
-  { value: 'all',     label: 'All'      },
-  { value: 'backup',  label: 'Backups'  },
-  { value: 'safety',  label: 'Safety'   },
-  { value: 'restore', label: 'Restores' },
-  { value: 'import',  label: 'Imports'  }
+  { value: 'all',     label: 'backups.filters.all'     },
+  { value: 'backup',  label: 'backups.filters.backup'  },
+  { value: 'safety',  label: 'backups.filters.safety'  },
+  { value: 'restore', label: 'backups.filters.restore' },
+  { value: 'import',  label: 'backups.filters.import'  }
 ]
 
 const configsById = computed(() => {
@@ -43,10 +45,10 @@ const activeJobLabel = computed(() => {
   if (!job?.active) return ''
   const phase = job.phase || 'starting'
   const kind = job.kind === 'restore'
-    ? 'Restore'
+    ? t('backups.job.restore')
     : job.kind === 'world_import'
-      ? 'World import'
-      : 'Backup'
+      ? t('backups.job.import')
+      : t('backups.job.backup')
   return `${kind} · ${phase.replace(/_/g, ' ')}`
 })
 
@@ -94,20 +96,18 @@ onUnmounted(() => {
     <!-- Top toolbar -->
     <header class="backups-page__toolbar">
       <div class="backups-page__title-block">
-        <h2 class="backups-page__title">Backups</h2>
-        <p class="backups-page__sub">
-          Snapshots, schedules and restore points for this server.
-        </p>
+        <h2 class="backups-page__title">{{ $t('nav.backups') }}</h2>
+        <p class="backups-page__sub">{{ $t('backups.subtitle') }}</p>
       </div>
       <div class="backups-page__top-actions">
-        <AppButton variant="ghost" size="md" @click="store.openCreateConfig()">Schedules</AppButton>
+        <AppButton variant="ghost" size="md" @click="store.openCreateConfig()">{{ $t('backups.schedules') }}</AppButton>
         <AppButton
           variant="ghost"
           size="md"
           :disabled="store.activeJob?.active || store.importUploading"
           @click="store.openImportWorldModal()"
         >
-          Import world
+          {{ $t('backups.importWorld') }}
         </AppButton>
         <AppButton
           variant="primary"
@@ -115,7 +115,7 @@ onUnmounted(() => {
           :disabled="store.activeJob?.active"
           @click="store.openQuickBackupModal()"
         >
-          Quick backup
+          {{ $t('backups.quickBackup') }}
         </AppButton>
       </div>
     </header>
@@ -127,25 +127,29 @@ onUnmounted(() => {
     <div v-if="store.activeJob?.active" class="backups-page__job">
       <span class="backups-page__job-dot" aria-hidden="true"></span>
       <span class="backups-page__job-label">{{ activeJobLabel }}</span>
-      <span class="backups-page__job-hint">polling…</span>
+      <span class="backups-page__job-hint">{{ $t('backups.polling') }}</span>
     </div>
 
     <!-- Retained files banner (after non-purge delete) -->
     <div v-if="store.retainedFilesBanner" class="backups-page__retained">
       <div class="backups-page__retained-header">
-        <strong>Archive files retained on disk</strong>
+        <strong>{{ $t('backups.retainedTitle') }}</strong>
         <button
           type="button"
           class="backups-page__retained-dismiss"
           @click="store.dismissRetainedFilesBanner()"
         >
-          Dismiss
+          {{ $t('common.dismiss') }}
         </button>
       </div>
-      <p class="backups-page__retained-text">
-        Deleted <code>{{ store.retainedFilesBanner.configName }}</code> kept
-        {{ store.retainedFilesBanner.retainedFiles }} archive file{{ store.retainedFilesBanner.retainedFiles === 1 ? '' : 's' }} on disk:
-      </p>
+      <i18n-t
+        keypath="backups.retainedText"
+        tag="p"
+        class="backups-page__retained-text"
+        :plural="store.retainedFilesBanner.retainedFiles"
+      >
+        <template #name><code>{{ store.retainedFilesBanner.configName }}</code></template>
+      </i18n-t>
       <ul class="backups-page__retained-paths">
         <li v-for="(path, i) in store.retainedFilesBanner.retainedPaths" :key="i">
           <code>{{ path }}</code>
@@ -155,7 +159,7 @@ onUnmounted(() => {
 
     <!-- Filters + search -->
     <div class="backups-page__filters">
-      <div class="backups-page__type-pills" role="tablist" aria-label="Filter by type">
+      <div class="backups-page__type-pills" role="tablist" :aria-label="$t('backups.filterByType')">
         <button
           v-for="opt in TYPE_FILTERS"
           :key="opt.value"
@@ -164,17 +168,17 @@ onUnmounted(() => {
           :class="{ 'is-active': store.typeFilter === opt.value }"
           @click="store.typeFilter = opt.value"
         >
-          {{ opt.label }}
+          {{ $t(opt.label) }}
         </button>
       </div>
 
       <select
         v-model="store.configFilter"
         class="backups-page__config-select"
-        aria-label="Filter by config"
+        :aria-label="$t('backups.filterByConfig')"
       >
-        <option value="all">All configs</option>
-        <option value="__manual__">Manual (no config)</option>
+        <option value="all">{{ $t('backups.allConfigs') }}</option>
+        <option value="__manual__">{{ $t('backups.manualNoConfig') }}</option>
         <option v-for="c in store.sortedConfigs" :key="c.id" :value="c.id">{{ c.name }}</option>
       </select>
 
@@ -186,8 +190,8 @@ onUnmounted(() => {
         <input
           v-model="store.search"
           type="search"
-          placeholder="Search snapshots…"
-          aria-label="Search snapshots"
+          :placeholder="$t('backups.searchPlaceholder')"
+          :aria-label="$t('backups.searchLabel')"
         />
       </div>
     </div>
@@ -251,12 +255,11 @@ onUnmounted(() => {
     <!-- Snapshot delete confirmation (simple) -->
     <ConfirmModal
       :show="store.showDeleteSnapshotModal"
-      title="Delete snapshot"
-      :message="store.snapshotToDelete ? `Delete ${store.snapshotToDelete.fileName || store.snapshotToDelete.id}?` : ''"
-      description="The archive file and its history record will be removed. This cannot be undone."
+      :title="$t('backups.deleteSnapshot.title')"
+      :message="store.snapshotToDelete ? $t('backups.deleteSnapshot.message', { name: store.snapshotToDelete.fileName || store.snapshotToDelete.id }) : ''"
+      :description="$t('backups.deleteSnapshot.description')"
       type="danger"
-      confirm-text="Delete"
-      cancel-text="Cancel"
+      :confirm-text="$t('common.delete')"
       :loading="store.deletingSnapshot"
       @confirm="store.confirmDeleteSnapshot()"
       @cancel="store.cancelDeleteSnapshot()"

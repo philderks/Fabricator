@@ -60,21 +60,22 @@ const ISSUES_URL = 'https://github.com/philderks/Fabricator/issues'
 
 // Boot auto-start mode — saves instantly via its own endpoint, so it stays
 // editable even while the server is running (unlike server.properties).
+// `label` and `hint` are i18n keys.
 const autoStartOptions = [
   {
     value: 'always',
-    label: 'Always start',
-    hint: 'Start this server every time Fabricator starts.',
+    label: 'settings.autostart.always',
+    hint: 'settings.autostart.alwaysHint',
   },
   {
     value: 'last',
-    label: 'Restore last state',
-    hint: 'Start only if it was running when Fabricator last stopped — survives crashes and host reboots.',
+    label: 'settings.autostart.last',
+    hint: 'settings.autostart.lastHint',
   },
   {
     value: 'never',
-    label: 'Never',
-    hint: 'Do not start automatically. Start it manually when you need it.',
+    label: 'settings.autostart.never',
+    hint: 'settings.autostart.neverHint',
   },
 ]
 
@@ -101,15 +102,15 @@ onMounted(async () => {
   <div class="general-settings" :class="{ 'general-settings--standalone': !hasServer }">
     <!-- The server route gets its breadcrumb from AppTopbar; RootLayout has no
          topbar, so the server-less route carries its own. -->
-    <nav v-if="!hasServer" class="general-settings__heading" aria-label="Breadcrumb">
+    <nav v-if="!hasServer" class="general-settings__heading" :aria-label="$t('common.breadcrumb')">
       <template v-if="activeSection">
-        <router-link :to="indexTo" class="general-settings__crumb-link">Settings</router-link>
+        <router-link :to="indexTo" class="general-settings__crumb-link">{{ $t('nav.settings') }}</router-link>
         <span class="general-settings__crumb-sep" aria-hidden="true">/</span>
         <!-- The h1 tracks the deepest crumb, so the page keeps a real heading
              rather than trading it for breadcrumb markup. -->
         <h1 class="general-settings__title" aria-current="page">{{ activeSectionLabel }}</h1>
       </template>
-      <h1 v-else class="general-settings__title">Settings</h1>
+      <h1 v-else class="general-settings__title">{{ $t('nav.settings') }}</h1>
     </nav>
 
     <!-- Keyed on the section so navigating swaps the element rather than
@@ -119,7 +120,7 @@ onMounted(async () => {
     <!-- Index: the sub-pages, then About inline. -->
     <template v-if="!activeSection">
       <Panel :padded="false">
-        <nav class="general-settings__menu" aria-label="Settings sections">
+        <nav class="general-settings__menu" :aria-label="$t('settings.sectionsLabel')">
           <router-link
             v-for="section in sections"
             :key="section.key"
@@ -127,8 +128,8 @@ onMounted(async () => {
             class="general-settings__menu-item"
           >
             <span class="general-settings__menu-text">
-              <span class="general-settings__menu-label">{{ section.label }}</span>
-              <span class="general-settings__menu-desc">{{ section.description }}</span>
+              <span class="general-settings__menu-label">{{ $t(section.label) }}</span>
+              <span class="general-settings__menu-desc">{{ $t(section.description) }}</span>
             </span>
             <svg class="general-settings__menu-chevron" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M5.5 3l4 4-4 4" />
@@ -137,7 +138,7 @@ onMounted(async () => {
         </nav>
       </Panel>
 
-      <Panel title="Help" :padded="false">
+      <Panel :title="$t('settings.help')" :padded="false">
         <div class="general-settings__menu">
           <a
             class="general-settings__menu-item"
@@ -146,8 +147,8 @@ onMounted(async () => {
             rel="noopener noreferrer"
           >
             <span class="general-settings__menu-text">
-              <span class="general-settings__menu-label">Documentation</span>
-              <span class="general-settings__menu-desc">Guides and reference at docs.fabricator.site.</span>
+              <span class="general-settings__menu-label">{{ $t('settings.docs') }}</span>
+              <span class="general-settings__menu-desc">{{ $t('settings.docsDescription') }}</span>
             </span>
             <svg class="general-settings__menu-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M4.5 1.5H10.5V7.5" />
@@ -162,8 +163,8 @@ onMounted(async () => {
             rel="noopener noreferrer"
           >
             <span class="general-settings__menu-text">
-              <span class="general-settings__menu-label">Report a bug or request a feature</span>
-              <span class="general-settings__menu-desc">Opens the issue tracker on GitHub.</span>
+              <span class="general-settings__menu-label">{{ $t('settings.issues') }}</span>
+              <span class="general-settings__menu-desc">{{ $t('settings.issuesDescription') }}</span>
             </span>
             <svg class="general-settings__menu-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M4.5 1.5H10.5V7.5" />
@@ -174,25 +175,23 @@ onMounted(async () => {
         </div>
       </Panel>
 
-      <Panel title="About">
+      <Panel :title="$t('settings.about')">
         <dl class="general-settings__about">
           <div class="general-settings__about-row">
-            <dt>Version</dt>
+            <dt>{{ $t('settings.version') }}</dt>
             <dd>{{ displayVersion }}</dd>
           </div>
           <div class="general-settings__about-row">
-            <dt>Application</dt>
+            <dt>{{ $t('settings.application') }}</dt>
             <dd>Fabricator</dd>
           </div>
         </dl>
       </Panel>
     </template>
 
-    <Panel v-if="activeSection === 'autostart'" title="Auto-start">
-      <p class="general-settings__autostart-intro">
-        What should happen to this server when Fabricator starts up?
-      </p>
-      <div class="general-settings__autostart" role="radiogroup" aria-label="Auto-start mode">
+    <Panel v-if="activeSection === 'autostart'" :title="$t('settings.sections.autostart')">
+      <p class="general-settings__autostart-intro">{{ $t('settings.autostart.intro') }}</p>
+      <div class="general-settings__autostart" role="radiogroup" :aria-label="$t('settings.autostart.modeLabel')">
         <label
           v-for="opt in autoStartOptions"
           :key="opt.value"
@@ -207,30 +206,30 @@ onMounted(async () => {
             @change="store.setAutoStartMode(opt.value)"
           />
           <span class="general-settings__autostart-text">
-            <span class="general-settings__autostart-label">{{ opt.label }}</span>
-            <span class="general-settings__autostart-hint">{{ opt.hint }}</span>
+            <span class="general-settings__autostart-label">{{ $t(opt.label) }}</span>
+            <span class="general-settings__autostart-hint">{{ $t(opt.hint) }}</span>
           </span>
         </label>
       </div>
     </Panel>
 
-    <Panel v-if="activeSection === 'display'" title="Display">
+    <Panel v-if="activeSection === 'display'" :title="$t('settings.sections.display')">
       <ToggleRow
         :model-value="prefs.memoryUnit === 'MB'"
-        label="Show RAM in MB on the Overview"
-        hint="Off shows the Overview RAM readout in gigabytes; on shows megabytes. Display only — it does not change how much memory the server is allocated."
+        :label="$t('settings.display.ramMb')"
+        :hint="$t('settings.display.ramMbHint')"
         @update:model-value="prefs.memoryUnit = $event ? 'MB' : 'GB'"
       />
       <ToggleRow
         :model-value="prefs.cpuDisplayMode === 'total'"
-        label="Show total CPU across all cores"
-        hint="Off shows average system load (0–100%, like Task Manager). On shows the raw process usage, which can exceed 100% on multi-core hosts."
+        :label="$t('settings.display.cpuTotal')"
+        :hint="$t('settings.display.cpuTotalHint')"
         @update:model-value="prefs.cpuDisplayMode = $event ? 'total' : 'average'"
       />
       <ToggleRow
         v-model="prefs.showHeapStats"
-        label="Show JVM heap details on the Overview"
-        hint="Replaces the RAM readout with Java heap usage, committed heap and total process memory. Reads them from the running server via jcmd every few seconds, so leave it off if you don't need it."
+        :label="$t('settings.display.heapStats')"
+        :hint="$t('settings.display.heapStatsHint')"
       />
     </Panel>
 

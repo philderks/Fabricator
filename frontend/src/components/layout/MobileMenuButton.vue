@@ -11,7 +11,7 @@ const { drawerOpen, toggle } = useMobileNav()
   <button
     type="button"
     class="mobile-menu-btn"
-    aria-label="Open navigation menu"
+    :aria-label="$t('sidebar.openMenu')"
     aria-controls="app-sidebar"
     :aria-expanded="drawerOpen"
     @click="toggle"

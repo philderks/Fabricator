@@ -34,10 +34,10 @@ const nextRunLabel = computed(() => {
 
 <template>
   <section class="stats-strip">
-    <StatCard label="Snapshots" :value="totalCount" :accent="totalCount > 0 ? 'primary' : 'default'" />
-    <StatCard label="Total size" :value="totalBytes" />
-    <StatCard label="Last snapshot" :value="lastSnapshotLabel" />
-    <StatCard label="Next scheduled" :value="nextRunLabel" :accent="props.summary?.next_run ? 'success' : 'default'" />
+    <StatCard :label="$t('backups.stats.snapshots')" :value="totalCount" :accent="totalCount > 0 ? 'primary' : 'default'" />
+    <StatCard :label="$t('backups.stats.totalSize')" :value="totalBytes" />
+    <StatCard :label="$t('backups.stats.lastSnapshot')" :value="lastSnapshotLabel" />
+    <StatCard :label="$t('backups.stats.nextScheduled')" :value="nextRunLabel" :accent="props.summary?.next_run ? 'success' : 'default'" />
   </section>
 </template>
 

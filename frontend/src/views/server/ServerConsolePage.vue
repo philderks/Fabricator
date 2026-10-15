@@ -285,7 +285,7 @@ const onHistoryNext = () => {
 <template>
   <div class="console-page">
     <div class="console-page__bar">
-      <div class="console-page__filters" role="group" aria-label="Log level filter">
+      <div class="console-page__filters" role="group" :aria-label="$t('console.levelFilter')">
         <button
           v-for="level in ['ALL','INFO','WARN','ERROR','DEBUG']"
           :key="level"
@@ -294,7 +294,7 @@ const onHistoryNext = () => {
           :class="[`console-page__filter--${level.toLowerCase()}`, { 'is-active': activeFilter === level }]"
           :aria-pressed="activeFilter === level"
           @click="setFilter(level)"
-        >{{ level }}</button>
+        >{{ level === 'ALL' ? $t('console.filterAll') : level }}</button>
       </div>
       <div class="console-page__bar-actions">
         <button
@@ -302,7 +302,7 @@ const onHistoryNext = () => {
           class="console-page__icon-btn"
           :class="{ 'is-active': autoScroll }"
           :aria-pressed="autoScroll"
-          :title="autoScroll ? 'Auto-scroll on' : 'Auto-scroll off — click, or scroll to the bottom, to resume'"
+          :title="autoScroll ? $t('console.autoScrollOn') : $t('console.autoScrollOff')"
           @click="toggleAutoScroll"
         >
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
@@ -311,15 +311,15 @@ const onHistoryNext = () => {
         </button>
         <!-- Wrapped, not passed by reference: @click would hand loadLogs the
              MouseEvent as its `limit` argument. -->
-        <AppButton variant="ghost" size="sm" :loading="store.logsLoading" @click="() => store.loadLogs()">Refresh</AppButton>
+        <AppButton variant="ghost" size="sm" :loading="store.logsLoading" @click="() => store.loadLogs()">{{ $t('common.refresh') }}</AppButton>
       </div>
     </div>
 
     <div ref="terminalRef" class="console-page__terminal" @scroll.passive="onTerminalScroll">
       <div v-if="!filteredLines.length" class="console-page__empty">
-        <template v-if="store.logsLoading">Loading logs…</template>
-        <template v-else-if="activeFilter === 'ALL'">No logs yet.</template>
-        <template v-else>No {{ activeFilter }} entries.</template>
+        <template v-if="store.logsLoading">{{ $t('console.loadingLogs') }}</template>
+        <template v-else-if="activeFilter === 'ALL'">{{ $t('console.noLogs') }}</template>
+        <template v-else>{{ $t('console.noLevelEntries', { level: activeFilter }) }}</template>
       </div>
       <template v-for="line in filteredLines" :key="line.id">
         <div v-if="line.boundary" class="console-page__boundary" role="separator">
@@ -348,7 +348,7 @@ const onHistoryNext = () => {
         @keydown.up.exact.prevent="onHistoryPrev"
         @keydown.down.exact.prevent="onHistoryNext"
         :disabled="!store.canSendCommand"
-        :placeholder="store.canSendCommand ? 'Type a command and press Enter…' : 'Server not running'"
+        :placeholder="store.canSendCommand ? $t('console.commandPlaceholder') : $t('console.serverNotRunning')"
       />
       <AppButton
         type="submit"
@@ -356,7 +356,7 @@ const onHistoryNext = () => {
         size="sm"
         :disabled="!store.canSendCommand || !store.consoleCommand.trim()"
         :loading="store.commandSending"
-      >Send</AppButton>
+      >{{ $t('console.send') }}</AppButton>
     </form>
   </div>
 </template>

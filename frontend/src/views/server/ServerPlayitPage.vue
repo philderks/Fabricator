@@ -7,6 +7,7 @@ import { useServerStore } from '../../stores/server'
 import { usePlayitStore } from '../../stores/playit'
 import { useAuthStore } from '../../stores/auth'
 import { copyToClipboard } from '../../utils/clipboard'
+import { t } from '../../i18n'
 
 const store = useServerStore()
 const playit = usePlayitStore()
@@ -36,8 +37,8 @@ const showBinaryNote    = computed(() => playit.binarySystem)
 // first-run download is slow enough to be worth naming.
 const busyText = computed(() =>
   playit.isProvisioning
-    ? 'Downloading the playit.gg agent…'
-    : 'Connecting tunnel agent…'
+    ? t('playit.downloadingAgent')
+    : t('playit.connectingAgent')
 )
 
 // ─── Destructive-action confirms (running state only) ───────────────────────
@@ -65,11 +66,10 @@ function handleConfirmCancel() {
 async function disableTunnel() {
   const ok = await requestConfirm({
     type: 'warning',
-    title: 'Disable the playit.gg tunnel?',
-    message: 'This stops the shared agent for all servers, not just this one — '
-      + 'their public addresses go offline until you re-enable it.',
-    confirmText: 'Disable',
-    cancelText: 'Keep running',
+    title: t('playit.disable.title'),
+    message: t('playit.disable.message'),
+    confirmText: t('playit.disable.confirm'),
+    cancelText: t('playit.disable.cancel'),
   })
   if (ok) playit.stop()
 }
@@ -77,11 +77,9 @@ async function disableTunnel() {
 async function resetTunnel() {
   const ok = await requestConfirm({
     type: 'danger',
-    title: 'Reset playit.gg?',
-    message: 'This stops the shared agent for all servers and deletes the saved '
-      + "account secret — you'll have to re-claim from scratch.",
-    confirmText: 'Reset',
-    cancelText: 'Cancel',
+    title: t('playit.reset.title'),
+    message: t('playit.reset.message'),
+    confirmText: t('playit.reset.confirm'),
   })
   if (ok) playit.reset()
 }
@@ -97,11 +95,11 @@ const tunnel = computed(() => (port.value === null ? null : playit.tunnelForPort
 // Muted deferral hint shown in Section B while the agent isn't running yet.
 const deferralHint = computed(() => {
   switch (playit.status) {
-    case 'provisioning': return 'Downloading the tunnel agent…'
-    case 'starting': return 'Agent is connecting…'
-    case 'claiming': return 'Finish the playit.gg sign-in above.'
-    case 'error':    return 'Resolve the tunnel agent error above.'
-    default:         return 'Enable the tunnel agent above to expose this server.'
+    case 'provisioning': return t('playit.deferral.provisioning')
+    case 'starting': return t('playit.deferral.starting')
+    case 'claiming': return t('playit.deferral.claiming')
+    case 'error':    return t('playit.deferral.error')
+    default:         return t('playit.deferral.default')
   }
 })
 
@@ -137,7 +135,7 @@ onUnmounted(() => {
 <template>
   <div v-if="!auth.managed" class="playit-page">
     <!-- ─── Section A: tunnel agent (global) ─────────────────────────────── -->
-    <Panel title="playit.gg tunnel agent">
+    <Panel :title="$t('playit.agentTitle')">
       <!-- Persistent dashboard link: visible in every agent state, so managing
            tunnels never depends on reaching a particular branch below. -->
       <template v-if="!playit.isUnsupported" #action>
@@ -146,9 +144,9 @@ onUnmounted(() => {
           target="_blank"
           rel="noopener noreferrer"
           class="pa-dashlink"
-          aria-label="Open the playit.gg dashboard (opens in a new tab)"
+          :aria-label="$t('playit.openDashboard')"
         >
-          Dashboard
+          {{ $t('playit.dashboard') }}
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
             <polyline points="15 3 21 3 21 9"/>
@@ -158,30 +156,24 @@ onUnmounted(() => {
       </template>
 
       <!-- unsupported short-circuits everything (Windows) -->
-      <p v-if="playit.isUnsupported" class="pa-note">
-        playit.gg isn't available on this platform.
-      </p>
+      <p v-if="playit.isUnsupported" class="pa-note">{{ $t('playit.unsupported') }}</p>
 
       <template v-else>
-        <p class="pa-scope">
-          These controls manage the <strong>shared</strong> playit.gg agent for
-          <strong>all</strong> servers, not just this one.
-        </p>
+        <i18n-t keypath="playit.scope" tag="p" class="pa-scope">
+          <template #shared><strong>{{ $t('playit.scopeShared') }}</strong></template>
+          <template #all><strong>{{ $t('playit.scopeAll') }}</strong></template>
+        </i18n-t>
 
-        <div v-if="showBinaryWarning" class="pa-warn" role="status">
-          The installed playit binary doesn't match the release Fabricator pins — see install logs.
-        </div>
-        <div v-else-if="showBinaryNote" class="pa-note-inline" role="status">
-          Using the playit binary already installed on this system — Fabricator didn't verify it.
-        </div>
+        <div v-if="showBinaryWarning" class="pa-warn" role="status">{{ $t('playit.binaryWarning') }}</div>
+        <div v-else-if="showBinaryNote" class="pa-note-inline" role="status">{{ $t('playit.binaryNote') }}</div>
 
         <!-- stopped → benefit-framed CTA -->
         <div v-if="playit.isStopped" class="pa-onboarding">
           <div class="pa-onboarding__text">
-            <p class="pa-lead">Make your servers reachable for friends without router setup.</p>
-            <p class="pa-sub">playit.gg creates public tunnels — no port forwarding, no firewall changes.</p>
+            <p class="pa-lead">{{ $t('playit.lead') }}</p>
+            <p class="pa-sub">{{ $t('playit.sub') }}</p>
           </div>
-          <AppButton variant="primary" @click="playit.start">Enable playit.gg</AppButton>
+          <AppButton variant="primary" @click="playit.start">{{ $t('playit.enable') }}</AppButton>
         </div>
 
         <!-- error → danger banner + two actions (no confirm: nothing live) -->
@@ -193,13 +185,13 @@ onUnmounted(() => {
               <line x1="12" y1="16" x2="12.01" y2="16"/>
             </svg>
             <div class="pa-error-banner__text">
-              <p class="pa-error-banner__title">playit.gg tunnel agent failed</p>
-              <p class="pa-error-banner__reason">{{ playit.errorReason || 'No further details — check the playit.gg dashboard.' }}</p>
+              <p class="pa-error-banner__title">{{ $t('playit.failedTitle') }}</p>
+              <p class="pa-error-banner__reason">{{ playit.errorReason || $t('playit.noDetails') }}</p>
             </div>
           </div>
           <div class="pa-actions">
-            <AppButton variant="ghost" @click="playit.start">Try again</AppButton>
-            <AppButton variant="primary" @click="playit.reset">Use different account</AppButton>
+            <AppButton variant="ghost" @click="playit.start">{{ $t('playit.tryAgain') }}</AppButton>
+            <AppButton variant="primary" @click="playit.reset">{{ $t('playit.differentAccount') }}</AppButton>
           </div>
         </div>
 
@@ -207,7 +199,7 @@ onUnmounted(() => {
         <div v-else-if="playit.isClaiming && playit.claimUrl" class="pa-claiming">
           <div class="pa-claiming__step">
             <span class="pa-claiming__num">1</span>
-            <span>Open the link below and sign in to (or sign up for) playit.gg</span>
+            <span>{{ $t('playit.claimStep1') }}</span>
           </div>
           <a :href="playit.claimUrl" target="_blank" rel="noopener noreferrer" class="pa-claiming__link">
             {{ playit.claimUrl }}
@@ -219,21 +211,21 @@ onUnmounted(() => {
           </a>
           <div class="pa-claiming__step">
             <span class="pa-claiming__num">2</span>
-            <span>Approve this agent on the playit.gg page — the tunnel activates automatically.</span>
+            <span>{{ $t('playit.claimStep2') }}</span>
           </div>
           <div class="pa-claiming__actions">
-            <button type="button" class="pa-textbtn" @click="playit.stop">Cancel setup</button>
-            <button type="button" class="pa-textbtn" @click="playit.reset">Use different account</button>
+            <button type="button" class="pa-textbtn" @click="playit.stop">{{ $t('playit.cancelSetup') }}</button>
+            <button type="button" class="pa-textbtn" @click="playit.reset">{{ $t('playit.differentAccount') }}</button>
           </div>
         </div>
 
         <!-- running → active + destructive controls (both confirmed) -->
         <div v-else-if="playit.isRunning" class="pa-active">
           <span class="pa-active__dot" aria-hidden="true"></span>
-          <span class="pa-active__text">Tunnel agent active.</span>
+          <span class="pa-active__text">{{ $t('playit.active') }}</span>
           <div class="pa-active__actions">
-            <button type="button" class="pa-pillbtn" @click="disableTunnel">Disable</button>
-            <button type="button" class="pa-pillbtn" @click="resetTunnel">Reset</button>
+            <button type="button" class="pa-pillbtn" @click="disableTunnel">{{ $t('playit.disable.confirm') }}</button>
+            <button type="button" class="pa-pillbtn" @click="resetTunnel">{{ $t('playit.reset.confirm') }}</button>
           </div>
         </div>
 
@@ -241,36 +233,33 @@ onUnmounted(() => {
         <div v-else class="pa-starting">
           <span class="pa-starting__dot" aria-hidden="true"></span>
           <span class="pa-starting__text">{{ busyText }}</span>
-          <button type="button" class="pa-pillbtn" @click="playit.stop">Cancel</button>
+          <button type="button" class="pa-pillbtn" @click="playit.stop">{{ $t('common.cancel') }}</button>
         </div>
       </template>
     </Panel>
 
     <!-- ─── Section B: this server's public address ──────────────────────── -->
-    <Panel v-if="!playit.isUnsupported && port !== null" title="This server's public address">
+    <Panel v-if="!playit.isUnsupported && port !== null" :title="$t('playit.addressTitle')">
       <!-- agent not running yet → defer to Section A -->
       <p v-if="!playit.isRunning" class="pb-hint">{{ deferralHint }}</p>
 
       <!-- running but tunnel list not yet authoritative → neutral, NOT a CTA -->
-      <p v-else-if="!playit.tunnelsKnown" class="pb-hint">
-        Can't confirm this server's tunnel right now — the playit.gg API isn't
-        reachable. This updates automatically.
-      </p>
+      <p v-else-if="!playit.tunnelsKnown" class="pb-hint">{{ $t('playit.apiUnreachable') }}</p>
 
       <!-- running + authoritative + no matching tunnel → actionable -->
       <div v-else-if="!tunnel" class="pb-create">
-        <p class="pb-create__text">
-          No tunnel forwards to port <code>{{ port }}</code> yet. Create one in your
-          playit.gg dashboard with <strong>local port → {{ port }}</strong>.
-        </p>
+        <i18n-t keypath="playit.noTunnel" tag="p" class="pb-create__text">
+          <template #port><code>{{ port }}</code></template>
+          <template #mapping><strong>{{ $t('playit.localPortMapping', { port }) }}</strong></template>
+        </i18n-t>
         <a :href="PLAYIT_DASHBOARD_URL" target="_blank" rel="noopener noreferrer" class="pb-link">
-          Open playit.gg dashboard ↗
+          {{ $t('playit.openDashboardLink') }}
         </a>
       </div>
 
       <!-- matched tunnel disabled → error for THIS server -->
       <div v-else-if="tunnel.disabled_reason" class="pb-error" role="alert">
-        <p class="pb-error__title">This server's tunnel is disabled</p>
+        <p class="pb-error__title">{{ $t('playit.tunnelDisabled') }}</p>
         <p class="pb-error__reason">{{ tunnel.disabled_reason }}</p>
       </div>
 
@@ -282,7 +271,7 @@ onUnmounted(() => {
           class="pb-copy"
           :class="{ 'pb-copy--confirmed': copied }"
           type="button"
-          :aria-label="copied ? 'Copied!' : 'Copy address'"
+          :aria-label="copied ? $t('playit.copied') : $t('playit.copyAddress')"
           @click="copyAddress"
         >
           <svg v-if="!copied" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -296,9 +285,7 @@ onUnmounted(() => {
       </div>
 
       <!-- matched but no address yet (pending setup on playit's side) -->
-      <p v-else class="pb-hint">
-        Found a tunnel for port {{ port }} — waiting for its public address…
-      </p>
+      <p v-else class="pb-hint">{{ $t('playit.waitingForAddress', { port }) }}</p>
     </Panel>
 
     <ConfirmModal
@@ -306,8 +293,8 @@ onUnmounted(() => {
       :title="confirmConfig?.title || ''"
       :message="confirmConfig?.message || ''"
       :type="confirmConfig?.type || 'warning'"
-      :confirm-text="confirmConfig?.confirmText || 'Confirm'"
-      :cancel-text="confirmConfig?.cancelText || 'Cancel'"
+      :confirm-text="confirmConfig?.confirmText"
+      :cancel-text="confirmConfig?.cancelText"
       @confirm="handleConfirm"
       @cancel="handleConfirmCancel"
     />

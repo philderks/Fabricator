@@ -7,7 +7,8 @@ import { formatFileSize } from '../../utils/format'
 import { installedModDisplayName } from '../../utils/installedModDisplay'
 import { modrinthProjectUrl } from '../../utils/modrinthUrl'
 import { useServerStore } from '../../stores/server'
-import { contentLabel, isPluginLoader } from '../../utils/loaderKind'
+import { isPluginLoader } from '../../utils/loaderKind'
+import { t } from '../../i18n'
 
 const store = useServerStore()
 
@@ -17,10 +18,10 @@ const onSearch = (event) => { store.modSearch = event.target.value }
  *  Modrinth release when the install manifest knows it, else 'local'. */
 const modMeta = (mod) => {
   const parts = []
-  if (mod.disabled) parts.push('disabled')
+  if (mod.disabled) parts.push(t('mods.meta.disabled'))
   if (mod.version) parts.push(mod.version)
   const update = store.modUpdates[mod.filename]
-  if (update) parts.push(`update: ${update.versionNumber}`)
+  if (update) parts.push(t('mods.meta.update', { version: update.versionNumber }))
   if (mod.size) parts.push(formatFileSize(mod.size))
   return parts.join(' · ')
 }
@@ -29,11 +30,11 @@ const updateCount = computed(() => Object.keys(store.modUpdates).length)
 
 const showEmpty = computed(() => !store.modsLoading && store.filteredMods.length === 0)
 
-// Add-on vocabulary (Mods vs Plugins) driven by the server's loader.
+// Add-on vocabulary (Mods vs Plugins) driven by the server's loader. Each
+// wording is its own message rather than a noun spliced into one sentence, so
+// a translation can inflect the sentence around it.
 const isPlugin = computed(() => isPluginLoader(store.server?.loader))
-const noun = computed(() => contentLabel(store.server?.loader, true))
-const nounSingular = computed(() => contentLabel(store.server?.loader, false))
-const nounLower = computed(() => noun.value.toLowerCase())
+const tk = (modKey, pluginKey, ...args) => t(isPlugin.value ? pluginKey : modKey, ...args)
 
 // The bar is permanent now, so its label has to carry the idle state too —
 // previously "select all" only existed as a footer that appeared when nothing
@@ -44,10 +45,9 @@ const nounLower = computed(() => noun.value.toLowerCase())
 const hasInstallTotal = computed(() => store.backgroundModpack?.determinate === true)
 
 const selectAllLabel = computed(() => {
-  if (store.allFilteredSelected) return 'Deselect all'
-  if (store.selectedCount > 0) return `${store.selectedCount} selected`
-  const count = store.filteredMods.length
-  return `Select all ${count} ${count === 1 ? nounSingular.value.toLowerCase() : nounLower.value}`
+  if (store.allFilteredSelected) return t('mods.deselectAll')
+  if (store.selectedCount > 0) return t('mods.selected', { n: store.selectedCount })
+  return tk('mods.selectAllMods', 'mods.selectAllPlugins', store.filteredMods.length)
 })
 </script>
 
@@ -57,7 +57,7 @@ const selectAllLabel = computed(() => {
       <input
         type="search"
         class="mods-page__search"
-        :placeholder="`Search installed ${nounLower}…`"
+        :placeholder="tk('mods.searchMods', 'mods.searchPlugins')"
         :value="store.modSearch"
         @input="onSearch"
       />
@@ -68,22 +68,22 @@ const selectAllLabel = computed(() => {
           :loading="store.updatingMods"
           @click="store.updateAllMods"
         >
-          Update {{ updateCount }} {{ updateCount === 1 ? nounSingular.toLowerCase() : nounLower }}
+          {{ tk('mods.updateMods', 'mods.updatePlugins', updateCount) }}
         </AppButton>
-        <AppButton v-if="!isPlugin" variant="ghost" @click="store.openModpackBrowser">Browse modpacks</AppButton>
+        <AppButton v-if="!isPlugin" variant="ghost" @click="store.openModpackBrowser">{{ $t('mods.browseModpacks') }}</AppButton>
         <AppButton
           variant="primary"
           :loading="store.isInstalling"
           @click="store.openModBrowser"
         >
-          Browse {{ nounLower }}
+          {{ tk('mods.browseMods', 'mods.browsePlugins') }}
         </AppButton>
       </div>
     </div>
 
     <!-- A pack installed from the create modal keeps downloading after the
          modal is gone, so this is the only place that install is visible. -->
-    <Panel v-if="store.backgroundModpackInstalling" :title="`Installing ${nounLower}`">
+    <Panel v-if="store.backgroundModpackInstalling" :title="tk('mods.installingMods', 'mods.installingPlugins')">
       <div class="mods-page__install">
         <div class="mods-page__install-head">
           <span class="mods-page__install-label">{{ store.backgroundModpackLabel }}</span>
@@ -107,7 +107,7 @@ const selectAllLabel = computed(() => {
       </div>
     </Panel>
 
-    <Panel v-if="store.activeModpack" title="Active modpack">
+    <Panel v-if="store.activeModpack" :title="$t('modpacks.active')">
       <div class="mods-page__modpack">
         <span class="mods-page__modpack-name">{{ store.activeModpack.name || store.activeModpack.projectId }}</span>
         <span class="mods-page__modpack-version">{{ store.activeModpack.version }}</span>
@@ -117,7 +117,7 @@ const selectAllLabel = computed(() => {
           :href="modrinthProjectUrl(store.activeModpack)"
           target="_blank"
           rel="noopener noreferrer"
-          aria-label="Open this modpack on Modrinth (opens in a new tab)"
+          :aria-label="$t('modpacks.openOnModrinth')"
         >
           Modrinth
           <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
@@ -129,7 +129,7 @@ const selectAllLabel = computed(() => {
       </div>
     </Panel>
 
-    <Panel :title="`Installed ${noun}`" :padded="false">
+    <Panel :title="tk('mods.installedMods', 'mods.installedPlugins')" :padded="false">
       <!-- Selection toolbar. Present whenever there is a list to act on, so the
            checkbox is somewhere predictable instead of appearing only once a
            selection exists; it picks up the accent treatment when one does. -->
@@ -154,7 +154,7 @@ const selectAllLabel = computed(() => {
             class="mods-page__bulk-clear"
             @click="store.clearModSelection"
           >
-            Clear
+            {{ $t('common.clear') }}
           </button>
           <AppButton
             v-if="store.selectedDisabledCount > 0"
@@ -162,7 +162,7 @@ const selectAllLabel = computed(() => {
             :loading="store.togglingMods"
             @click="store.setSelectedModsEnabled(true)"
           >
-            Enable {{ store.selectedDisabledCount }}
+            {{ $t('mods.enableCount', { n: store.selectedDisabledCount }) }}
           </AppButton>
           <AppButton
             v-if="store.selectedEnabledCount > 0"
@@ -170,22 +170,22 @@ const selectAllLabel = computed(() => {
             :loading="store.togglingMods"
             @click="store.setSelectedModsEnabled(false)"
           >
-            Disable {{ store.selectedEnabledCount }}
+            {{ $t('mods.disableCount', { n: store.selectedEnabledCount }) }}
           </AppButton>
           <AppButton
             variant="danger"
             :loading="store.bulkDeleting"
             @click="store.handleBulkRemoveMods"
           >
-            Delete {{ store.selectedCount }} {{ store.selectedCount === 1 ? nounSingular.toLowerCase() : nounLower }}
+            {{ tk('mods.deleteMods', 'mods.deletePlugins', store.selectedCount) }}
           </AppButton>
         </div>
       </div>
 
-      <div v-if="store.modsLoading" class="mods-page__state">Loading {{ nounLower }}…</div>
+      <div v-if="store.modsLoading" class="mods-page__state">{{ tk('mods.loadingMods', 'mods.loadingPlugins') }}</div>
       <div v-else-if="showEmpty" class="mods-page__state">
-        <template v-if="store.modSearch">No {{ nounLower }} match "{{ store.modSearch }}".</template>
-        <template v-else>No {{ nounLower }} installed yet. Use "Browse {{ nounLower }}" to add one.</template>
+        <template v-if="store.modSearch">{{ tk('mods.noMatchMods', 'mods.noMatchPlugins', { query: store.modSearch }) }}</template>
+        <template v-else>{{ tk('mods.emptyMods', 'mods.emptyPlugins') }}</template>
       </div>
       <div v-else class="mods-page__grid">
         <SearchResultCard
@@ -201,7 +201,7 @@ const selectAllLabel = computed(() => {
           <template #lead>
             <label
               class="mods-page__item-checkbox-label"
-              :aria-label="`Select ${installedModDisplayName(mod)}`"
+              :aria-label="$t('mods.select', { name: installedModDisplayName(mod) })"
             >
               <input
                 type="checkbox"
@@ -218,8 +218,8 @@ const selectAllLabel = computed(() => {
               :href="modrinthProjectUrl(mod)"
               target="_blank"
               rel="noopener noreferrer"
-              :title="`Open ${installedModDisplayName(mod)} on Modrinth`"
-              :aria-label="`Open ${installedModDisplayName(mod)} on Modrinth (opens in a new tab)`"
+              :title="$t('mods.openOnModrinth', { name: installedModDisplayName(mod) })"
+              :aria-label="$t('mods.openOnModrinthLabel', { name: installedModDisplayName(mod) })"
             >
               Modrinth
               <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
@@ -232,12 +232,12 @@ const selectAllLabel = computed(() => {
               v-if="modrinthProjectUrl(mod) && !mod.disabled"
               type="button"
               class="mods-page__version-btn"
-              :title="`Change the installed version of ${installedModDisplayName(mod)}`"
+              :title="$t('mods.changeVersion', { name: installedModDisplayName(mod) })"
               @click="store.openVersionPicker(mod)"
             >
-              Version
+              {{ $t('mods.version') }}
             </button>
-            <button type="button" class="mods-page__remove" @click="store.handleRemoveMod(mod)">Remove</button>
+            <button type="button" class="mods-page__remove" @click="store.handleRemoveMod(mod)">{{ $t('common.remove') }}</button>
           </div>
         </SearchResultCard>
       </div>

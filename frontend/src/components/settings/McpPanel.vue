@@ -9,6 +9,7 @@ import AppButton from '../ui/AppButton.vue'
 import ConfirmModal from '../modals/ConfirmModal.vue'
 import { getMcp, setMcpEnabled, createMcpToken, deleteMcpToken } from '../../api/mcp'
 import { buildMcpClientConfig } from '../../config/mcpClientConfig'
+import { i18n, t } from '../../i18n'
 
 // Managed mode hides this panel entirely; the parent gates on auth.managed
 // (same as JavaManagerPanel), so nothing here needs to re-check it.
@@ -46,7 +47,7 @@ async function load() {
     enabled.value = Boolean(data.enabled)
     tokens.value = Array.isArray(data.tokens) ? data.tokens : []
   } catch (err) {
-    toast.error(err?.message || 'Could not load MCP settings', 'MCP')
+    toast.error(err?.message || t('mcp.loadFailed'), t('mcp.title'))
   }
 }
 
@@ -56,7 +57,7 @@ async function onToggle(next) {
     await setMcpEnabled(next)
     enabled.value = next
   } catch (err) {
-    toast.error(err?.message || 'Could not change the switch', 'MCP')
+    toast.error(err?.message || t('mcp.toggleFailed'), t('mcp.title'))
     // enabled is left unchanged; the toggle reflects :model-value.
   } finally {
     toggling.value = false
@@ -73,7 +74,7 @@ async function onCreate() {
     form.value = { name: '', scope: 'read' }
     await load()
   } catch (err) {
-    createError.value = err?.message || 'Could not create the token'
+    createError.value = err?.message || t('mcp.createFailed')
   } finally {
     creating.value = false
   }
@@ -82,7 +83,7 @@ async function onCreate() {
 async function copySecret() {
   if (!(await copyToClipboard(newToken.value))) return
   copied.value = true
-  toast.success('Token copied', 'MCP')
+  toast.success(t('mcp.copiedToast'), t('mcp.title'))
   if (copyTimer) clearTimeout(copyTimer)
   copyTimer = setTimeout(() => {
     copied.value = false
@@ -102,7 +103,7 @@ async function confirmRevoke() {
     revokeTarget.value = null
     await load()
   } catch (err) {
-    toast.error(err?.message || 'Could not revoke the token', 'MCP')
+    toast.error(err?.message || t('mcp.revokeFailed'), t('mcp.title'))
   } finally {
     revoking.value = false
   }
@@ -114,26 +115,26 @@ function cancelRevoke() {
 }
 
 function scopeLabel(scope) {
-  return scope === 'manage' ? 'Read and manage' : 'Read only'
+  return scope === 'manage' ? t('mcp.scopeManage') : t('mcp.scopeRead')
 }
 
 function shortDate(iso) {
   if (!iso) return '—'
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return '—'
-  // Locale pinned to English: the panel is otherwise English, and its relative
-  // times (ServerPlayersPage) are hand-rolled English, so both are fixed here.
-  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+  // The UI locale, not the browser's, so the date reads in the same language as
+  // the text around it.
+  return d.toLocaleDateString(i18n.global.locale.value, { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
 function relativeTime(iso) {
-  if (!iso) return 'Never used'
+  if (!iso) return t('mcp.neverUsed')
   const then = new Date(iso).getTime()
-  if (Number.isNaN(then)) return 'Never used'
+  if (Number.isNaN(then)) return t('mcp.neverUsed')
   const diffMs = then - Date.now()
   const mins = Math.round(diffMs / 60000)
-  if (Math.abs(mins) < 1) return 'Just now'
-  const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' }) // pinned English
+  if (Math.abs(mins) < 1) return t('mcp.justNow')
+  const rtf = new Intl.RelativeTimeFormat(i18n.global.locale.value, { numeric: 'auto' })
 
   if (Math.abs(mins) < 60) return rtf.format(mins, 'minute')
   const hours = Math.round(diffMs / 3600000)
@@ -149,42 +150,33 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <Panel title="Model Context Protocol">
+  <Panel :title="$t('mcp.panelTitle')">
     <template #action>
-      <span class="mcp-beta">Beta</span>
+      <span class="mcp-beta">{{ $t('mcp.beta') }}</span>
     </template>
 
-    <p class="mcp-intro">
-      Connect an AI assistant to this panel. It can read your server's status,
-      logs and installed mods — and, with a manage token, start and stop the
-      server or change mods.
-    </p>
+    <p class="mcp-intro">{{ $t('mcp.intro') }}</p>
 
-    <p class="mcp-beta-note">
-      <strong>Beta.</strong> The machine running your AI client needs
-      <code>uv</code> installed — without it the client reports the server as
-      failing to launch rather than naming the missing prerequisite. How the
-      client is configured may still change between releases.
-    </p>
+    <i18n-t keypath="mcp.betaNote" tag="p" class="mcp-beta-note">
+      <template #beta><strong>{{ $t('mcp.betaLabel') }}</strong></template>
+      <template #uv><code>uv</code></template>
+    </i18n-t>
 
     <ToggleRow
       :model-value="enabled"
-      label="Enable MCP access"
+      :label="$t('mcp.enable')"
       :disabled="toggling"
       @update:model-value="onToggle"
     />
-    <p v-if="!enabled" class="mcp-note">
-      MCP access is off. Existing tokens stay saved but are rejected until you
-      turn this back on.
-    </p>
+    <p v-if="!enabled" class="mcp-note">{{ $t('mcp.offNote') }}</p>
 
     <!-- Tokens stay listed while MCP is off so they can still be revoked;
          only minting new ones is gated on the switch. -->
     <section v-if="enabled || tokens.length" class="mcp-section">
-      <h4 class="mcp-section__title">Tokens</h4>
+      <h4 class="mcp-section__title">{{ $t('mcp.tokens') }}</h4>
 
       <form v-if="enabled" class="mcp-create" @submit.prevent="onCreate">
-        <FormField label="Name" hint="So you can tell your tokens apart later." v-slot="{ id, describedBy }">
+        <FormField :label="$t('mcp.name')" :hint="$t('mcp.nameHint')" v-slot="{ id, describedBy }">
           <input
             :id="id"
             :aria-describedby="describedBy"
@@ -196,50 +188,45 @@ onBeforeUnmount(() => {
         </FormField>
 
         <fieldset class="mcp-scope">
-          <legend class="mcp-scope__legend">Access</legend>
+          <legend class="mcp-scope__legend">{{ $t('mcp.access') }}</legend>
           <label class="mcp-scope__option" :class="{ 'is-active': form.scope === 'read' }">
             <input type="radio" value="read" v-model="form.scope" />
-            <span>Read only — server status, logs, installed mods.</span>
+            <span>{{ $t('mcp.readOption') }}</span>
           </label>
           <label class="mcp-scope__option" :class="{ 'is-active': form.scope === 'manage' }">
             <input type="radio" value="manage" v-model="form.scope" />
-            <span>Read and manage — also start, stop and restart the server, install it, and add or remove mods.</span>
+            <span>{{ $t('mcp.manageOption') }}</span>
           </label>
         </fieldset>
 
-        <p class="mcp-warn">
-          Logs contain text written by mods and players. An assistant with a
-          manage token can act on what it reads there.
-        </p>
+        <p class="mcp-warn">{{ $t('mcp.logsWarning') }}</p>
 
         <div class="mcp-create__actions">
-          <AppButton type="submit" :loading="creating">Create token</AppButton>
+          <AppButton type="submit" :loading="creating">{{ $t('mcp.createToken') }}</AppButton>
         </div>
         <p v-if="createError" class="mcp-error">{{ createError }}</p>
       </form>
 
       <div v-if="newToken" class="mcp-secret">
-        <h5 class="mcp-secret__title">Your new token</h5>
-        <p class="mcp-secret__body">
-          Copy it now. It is not stored in readable form and cannot be shown again.
-        </p>
+        <h5 class="mcp-secret__title">{{ $t('mcp.newTokenTitle') }}</h5>
+        <p class="mcp-secret__body">{{ $t('mcp.newTokenBody') }}</p>
         <div class="mcp-secret__row">
           <code class="mcp-code">{{ newToken }}</code>
           <AppButton size="sm" variant="ghost" @click="copySecret">
-            {{ copied ? 'Copied' : 'Copy' }}
+            {{ copied ? $t('common.copied') : $t('common.copy') }}
           </AppButton>
         </div>
       </div>
 
-      <p v-if="!tokens.length" class="mcp-note">No tokens yet. Create one to connect a client.</p>
+      <p v-if="!tokens.length" class="mcp-note">{{ $t('mcp.noTokens') }}</p>
       <div v-else class="mcp-table-wrap">
         <table class="mcp-table">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Access</th>
-              <th>Created</th>
-              <th>Last used</th>
+              <th>{{ $t('mcp.name') }}</th>
+              <th>{{ $t('mcp.access') }}</th>
+              <th>{{ $t('mcp.created') }}</th>
+              <th>{{ $t('mcp.lastUsed') }}</th>
               <th class="mcp-table__actions"></th>
             </tr>
           </thead>
@@ -250,7 +237,7 @@ onBeforeUnmount(() => {
               <td>{{ shortDate(t.created_at) }}</td>
               <td>{{ relativeTime(t.last_used_at) }}</td>
               <td class="mcp-table__actions">
-                <AppButton size="sm" variant="danger" @click="askRevoke(t)">Revoke</AppButton>
+                <AppButton size="sm" variant="danger" @click="askRevoke(t)">{{ $t('mcp.revoke') }}</AppButton>
               </td>
             </tr>
           </tbody>
@@ -259,30 +246,27 @@ onBeforeUnmount(() => {
     </section>
 
     <section v-if="enabled" class="mcp-section">
-      <h4 class="mcp-section__title">Connect a client</h4>
+      <h4 class="mcp-section__title">{{ $t('mcp.connectClient') }}</h4>
 
       <FormField
-        label="Panel URL"
-        hint="The address your client can reach this panel at. Change it if the client runs on a different machine."
+        :label="$t('mcp.panelUrl')"
+        :hint="$t('mcp.panelUrlHint')"
         v-slot="{ id, describedBy }"
       >
         <input :id="id" :aria-describedby="describedBy" v-model="panelUrl" type="text" class="mcp-input" />
       </FormField>
 
-      <p class="mcp-config-intro">Add this to your MCP client's configuration.</p>
+      <p class="mcp-config-intro">{{ $t('mcp.configIntro') }}</p>
       <pre class="mcp-config">{{ configJson }}</pre>
-      <p class="mcp-warn">
-        The token is stored in plain text in that file — treat it like a password.
-      </p>
+      <p class="mcp-warn">{{ $t('mcp.plainTextWarning') }}</p>
     </section>
 
     <ConfirmModal
       :show="Boolean(revokeTarget)"
-      title="Revoke token"
-      message="Revoke this token? Any client using it stops working immediately."
+      :title="$t('mcp.revokeTitle')"
+      :message="$t('mcp.revokeMessage')"
       type="danger"
-      confirm-text="Revoke"
-      cancel-text="Cancel"
+      :confirm-text="$t('mcp.revoke')"
       :loading="revoking"
       @confirm="confirmRevoke"
       @cancel="cancelRevoke"

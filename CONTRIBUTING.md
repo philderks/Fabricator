@@ -67,7 +67,7 @@ run.py        Process entrypoint
 
 ## Development setup
 
-Requires Python 3.11+ and Node.js 20.x.
+Requires Python 3.11+ and Node.js 22.x.
 
 Backend:
 

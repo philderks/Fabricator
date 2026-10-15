@@ -184,8 +184,8 @@ onUnmounted(() => {
         @install="store.handleInstall"
       />
       <main class="server-layout__content">
-        <div v-if="store.serverLoading && !store.server" class="server-layout__loading">Loading server data…</div>
-        <div v-else-if="!store.server" class="server-layout__loading">Unable to find this server.</div>
+        <div v-if="store.serverLoading && !store.server" class="server-layout__loading">{{ $t('servers.loadingServer') }}</div>
+        <div v-else-if="!store.server" class="server-layout__loading">{{ $t('servers.notFound') }}</div>
         <router-view v-else />
       </main>
     </div>
@@ -222,19 +222,16 @@ onUnmounted(() => {
 
     <ConfirmModal
       :show="store.showModpackInstallConfirmModal"
-      :title="store.modpackInstalling ? 'Installing Modpack...' : 'Confirm Modpack Replace'"
+      :title="store.modpackInstalling ? $t('modpacks.installingTitle') : $t('modpacks.confirmReplaceTitle')"
       :message="store.pendingModpackInstall
         ? (store.modpackInstalling
-            ? (store.modpackProgressLabel || 'Preparing...')
-            : `Install ${store.pendingModpackInstall.title} on this server?`)
+            ? (store.modpackProgressLabel || $t('modpacks.preparing'))
+            : $t('modpacks.confirmInstall', { title: store.pendingModpackInstall.title }))
         : ''"
-      :description="store.modpackInstalling
-        ? ''
-        : 'Pack-managed folders (mods, config, defaultconfigs, kubejs, scripts) will be replaced. World data, logs and backups stay intact. Server settings may be overwritten if the pack includes them. If some files are unavailable you will be asked whether to continue.'"
+      :description="store.modpackInstalling ? '' : $t('modpacks.replaceDescription')"
       :type="store.modpackInstalling ? 'info' : 'warning'"
-      confirm-text="Install"
-      cancel-text="Cancel"
-      loading-text="Installing..."
+      :confirm-text="$t('common.install')"
+      :loading-text="$t('common.installing')"
       :loading="store.modpackInstalling"
       @confirm="store.confirmModpackInstall"
       @cancel="store.cancelModpackInstallConfirmation"
@@ -248,19 +245,18 @@ onUnmounted(() => {
         </div>
         <label v-else class="confirm-checkbox">
           <input type="checkbox" v-model="store.modpackCreateBackup">
-          <span>Create backup before installing</span>
+          <span>{{ $t('modpacks.createBackup') }}</span>
         </label>
       </template>
     </ConfirmModal>
 
     <ConfirmModal
       :show="store.showMissingModsConfirmModal"
-      title="Missing Modpack Files"
-      :message="store.missingModsReport.length ? `${store.missingModsReport.length} files could not be downloaded.` : ''"
+      :title="$t('modpacks.missingFilesTitle')"
+      :message="store.missingModsReport.length ? $t('modpacks.missingFiles', store.missingModsReport.length) : ''"
       :description="store.missingModsDescriptionText"
       type="warning"
-      confirm-text="Install Anyway"
-      cancel-text="Cancel"
+      :confirm-text="$t('modpacks.installAnyway')"
       :loading="store.modpackInstalling"
       @confirm="store.confirmInstallWithMissingMods"
       @cancel="store.cancelMissingModsConfirmation"
@@ -297,12 +293,11 @@ onUnmounted(() => {
 
     <ConfirmModal
       :show="store.showDeleteServerModal"
-      title="Delete Server"
-      message="Delete this server permanently?"
-      description="All server files and backups will be deleted. This cannot be undone."
+      :title="$t('servers.delete.title')"
+      :message="$t('servers.delete.message')"
+      :description="$t('servers.delete.description')"
       type="danger"
-      confirm-text="Delete"
-      cancel-text="Cancel"
+      :confirm-text="$t('common.delete')"
       :loading="store.deletingServer"
       @confirm="store.confirmDeleteServer"
       @cancel="store.cancelDeleteServer"

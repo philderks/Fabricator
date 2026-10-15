@@ -53,6 +53,9 @@ _READ = [
     ("GET", "/api/modrinth/servers/<server_id>/resolve-installed"),
     # Same folder hashing, asking for newer releases instead (#80). Read-only.
     ("GET", "/api/modrinth/servers/<server_id>/updates"),
+    # Same folder hashing, against one project's dependency chain. Read-only;
+    # project_id only reaches the fixed upstream host, as in resolve-version.
+    ("GET", "/api/modrinth/servers/<server_id>/project/<project_id>/missing-dependencies"),
     ("GET", "/api/servers/<server_id>/snapshots"),
     ("GET", "/api/servers/<server_id>/backup-summary"),
     ("GET", "/api/servers/<server_id>/backup-configs"),
@@ -121,6 +124,13 @@ _NEVER = [
     ("DELETE", "/api/servers/<server_id>/backup-configs/<config_id>"),
     ("POST", "/api/servers/<server_id>/backup-configs/<config_id>/run"),
     ("POST", "/api/servers/<server_id>/backup-quick"),
+    # scheduled commands: steps are raw console commands + power actions, and
+    # the list is UI-only until an MCP tool exists for it (reads included).
+    ("GET", "/api/servers/<server_id>/schedules"),
+    ("POST", "/api/servers/<server_id>/schedules"),
+    ("PUT", "/api/servers/<server_id>/schedules/<schedule_id>"),
+    ("DELETE", "/api/servers/<server_id>/schedules/<schedule_id>"),
+    ("POST", "/api/servers/<server_id>/schedules/<schedule_id>/run"),
     # full-server migration is intentionally UI-only until a dedicated MCP tool
     # can present its backup and rollback contract.
     ("POST", "/api/servers/<server_id>/upgrade"),

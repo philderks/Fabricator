@@ -5,6 +5,7 @@ import AppButton from '../components/ui/AppButton.vue'
 import { useToast } from '../composables/useToast'
 import { useServerStore } from '../stores/server'
 import { useAuthStore } from '../stores/auth'
+import { t } from '../i18n'
 
 const router = useRouter()
 const toast = useToast()
@@ -24,8 +25,8 @@ const loadServers = async () => {
   const result = await store.loadServers()
   if (!result.ok) {
     console.error('Failed to load servers:', result.error)
-    errorMessage.value = result.error?.message || 'Failed to load servers'
-    toast.error('Failed to load servers', 'Error')
+    errorMessage.value = result.error?.message || t('servers.loadFailed')
+    toast.error(t('servers.loadFailed'), t('common.error'))
     loading.value = false
     return
   }
@@ -50,7 +51,7 @@ onMounted(() => {
   <div class="servers-page">
     <div v-if="loading" class="servers-page__state">
       <div class="servers-page__spinner" aria-hidden="true"></div>
-      <p>Loading servers…</p>
+      <p>{{ $t('servers.loading') }}</p>
     </div>
 
     <div v-else-if="errorMessage" class="servers-page__state servers-page__state--error">
@@ -59,9 +60,9 @@ onMounted(() => {
         <path d="M12 8V13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
         <circle cx="12" cy="16" r="0.9" fill="currentColor"/>
       </svg>
-      <h3>Couldn't load servers</h3>
+      <h3>{{ $t('servers.loadFailedTitle') }}</h3>
       <p>{{ errorMessage }}</p>
-      <AppButton variant="ghost" size="md" @click="loadServers">Retry</AppButton>
+      <AppButton variant="ghost" size="md" @click="loadServers">{{ $t('common.retry') }}</AppButton>
     </div>
 
     <div v-else class="servers-page__empty">
@@ -73,13 +74,13 @@ onMounted(() => {
         height="48"
         aria-hidden="true"
       />
-      <h2 class="servers-page__title">No servers yet</h2>
-      <p class="servers-page__subtitle">Create your first Minecraft server to get started.</p>
+      <h2 class="servers-page__title">{{ $t('servers.emptyTitle') }}</h2>
+      <p class="servers-page__subtitle">{{ $t('servers.emptySubtitle') }}</p>
       <AppButton v-if="!auth.managed" variant="primary" size="md" @click="showCreateModal = true">
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <path d="M6 1v10M1 6h10"/>
         </svg>
-        Create server
+        {{ $t('servers.create') }}
       </AppButton>
     </div>
   </div>

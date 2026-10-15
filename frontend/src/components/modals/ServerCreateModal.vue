@@ -1,12 +1,12 @@
 <template>
   <BaseModal 
     :show="show" 
-    title="Create New Server" 
+    :title="$t('createServer.title')" 
     size="large"
     @close="handleClose"
   >
     <div v-if="installState === 'installing'" class="install-progress-pane">
-      <h3>Installing {{ formData.name }}…</h3>
+      <h3>{{ $t('createServer.installingName', { name: formData.name }) }}</h3>
       <p class="install-progress-phase">{{ phaseLabel(installProgress?.phase) }}</p>
 
       <div
@@ -22,7 +22,7 @@
           / {{ Math.round(installProgress.bytes_total / 1024) }} KB
         </span>
       </div>
-      <div v-else class="install-progress-spinner" aria-label="Working…"></div>
+      <div v-else class="install-progress-spinner" :aria-label="$t('common.working')"></div>
 
       <p
         class="install-progress-hint"
@@ -32,23 +32,22 @@
       </p>
 
       <p class="install-progress-hint" v-if="installProgress?.phase === 'running_installer'">
-        Forge / NeoForge installers download libraries and patch the vanilla server jar.
-        This step can take several minutes for modern Minecraft versions.
+        {{ $t('createServer.installerHint') }}
       </p>
 
       <div class="install-progress-actions">
         <AppButton variant="ghost" size="md" @click="handleInstallClose">
-          Close (continues in background)
+          {{ $t('createServer.closeInBackground') }}
         </AppButton>
       </div>
     </div>
 
     <div v-else-if="installState === 'failed'" class="install-failed-pane">
-      <h3>Installation failed</h3>
-      <p class="install-failed-error">{{ installProgress?.error || 'Unknown error.' }}</p>
+      <h3>{{ $t('createServer.installFailed') }}</h3>
+      <p class="install-failed-error">{{ installProgress?.error || $t('createServer.unknownError') }}</p>
       <div class="install-failed-actions">
-        <AppButton variant="primary" size="md" @click="handleInstallRetry">Retry</AppButton>
-        <AppButton variant="ghost" size="md" @click="handleInstallClose">Close</AppButton>
+        <AppButton variant="primary" size="md" @click="handleInstallRetry">{{ $t('common.retry') }}</AppButton>
+        <AppButton variant="ghost" size="md" @click="handleInstallClose">{{ $t('common.close') }}</AppButton>
       </div>
     </div>
 
@@ -56,10 +55,10 @@
          the backend worker is most likely still installing into it, so this
          deliberately does NOT offer Retry: that creates a second server. -->
     <div v-else-if="installState === 'unknown'" class="install-failed-pane">
-      <h3>Lost contact with the panel</h3>
+      <h3>{{ $t('createServer.lostContactTitle') }}</h3>
       <p class="install-failed-error">{{ installProgress?.error || lostContactMessage }}</p>
       <div class="install-failed-actions">
-        <AppButton variant="primary" size="md" @click="handleInstallClose">Close</AppButton>
+        <AppButton variant="primary" size="md" @click="handleInstallClose">{{ $t('common.close') }}</AppButton>
       </div>
     </div>
 
@@ -68,7 +67,7 @@
            Minecraft version and loader, so when one is being imported it is the
            pack that decides those — picking them first and discovering the pack
            wanted something else is the wrong way round. -->
-      <div class="mode-toggle" role="tablist" aria-label="Server setup mode">
+      <div class="mode-toggle" role="tablist" :aria-label="$t('createServer.setupMode')">
         <button
           type="button"
           role="tab"
@@ -77,7 +76,7 @@
           :aria-selected="formData.setupMode === 'custom'"
           @click="formData.setupMode = 'custom'"
         >
-          Custom Server
+          {{ $t('createServer.customServer') }}
         </button>
         <button
           type="button"
@@ -87,42 +86,38 @@
           :aria-selected="formData.setupMode === 'modpack'"
           @click="formData.setupMode = 'modpack'"
         >
-          Import Modpack
+          {{ $t('createServer.importModpack') }}
         </button>
       </div>
 
       <!-- Above Basic Settings on purpose: the pack decides the Minecraft
            version and loader shown there, so it has to be chosen first. -->
-      <Panel v-if="showModpackPanel" title="Modpack Setup">
+      <Panel v-if="showModpackPanel" :title="$t('createServer.modpackSetup')">
 
-        <p class="form-hint">
-          Choose a Modrinth pack by link, by search, or by uploading a .mrpack
-          file you exported yourself. The Minecraft version and loader in Basic
-          Settings are filled in from the pack.
-        </p>
+        <p class="form-hint">{{ $t('createServer.modpackHint') }}</p>
 
         <div class="modpack-panel">
           <div class="form-group">
-            <label>Import Method</label>
+            <label>{{ $t('createServer.importMethod') }}</label>
             <div class="inline-choice">
               <label class="choice-pill">
                 <input type="radio" v-model="formData.modpackImportMethod" value="link">
-                <span>Link</span>
+                <span>{{ $t('modpacks.methodLink') }}</span>
               </label>
               <label class="choice-pill">
                 <input type="radio" v-model="formData.modpackImportMethod" value="search">
-                <span>Search</span>
+                <span>{{ $t('modpacks.methodSearch') }}</span>
               </label>
               <label class="choice-pill">
                 <input type="radio" v-model="formData.modpackImportMethod" value="file">
-                <span>Upload .mrpack</span>
+                <span>{{ $t('modpacks.methodUpload') }}</span>
               </label>
             </div>
           </div>
 
           <div v-if="formData.modpackImportMethod === 'link'" class="form-row modpack-input-row">
             <div class="form-group modpack-grow">
-              <FormField label="Modpack URL or Slug" hint="Supports Modrinth links, slugs, or project IDs.">
+              <FormField :label="$t('createServer.modpackUrl')" :hint="$t('createServer.modpackUrlHint')">
                 <template #default="{ id, describedBy }">
                   <input
                     :id="id"
@@ -144,7 +139,7 @@
                 :loading="modpackLookupLoading"
                 @click="resolveModpackByLink"
               >
-                {{ modpackLookupLoading ? 'Resolving' : 'Resolve' }}
+                {{ modpackLookupLoading ? $t('createServer.resolving') : $t('modpacks.resolve') }}
               </AppButton>
             </div>
           </div>
@@ -152,7 +147,7 @@
           <div v-else-if="formData.modpackImportMethod === 'search'" class="modpack-search-branch">
             <div class="form-row modpack-input-row">
               <div class="form-group modpack-grow">
-                <FormField label="Search Modpacks">
+                <FormField :label="$t('createServer.searchModpacks')">
                   <template #default="{ id, describedBy }">
                     <input
                       :id="id"
@@ -174,7 +169,7 @@
                   :loading="modpackSearchLoading"
                   @click="searchForModpacks"
                 >
-                  {{ modpackSearchLoading ? 'Searching' : 'Search' }}
+                  {{ modpackSearchLoading ? $t('common.searching') : $t('common.search') }}
                 </AppButton>
               </div>
             </div>
@@ -187,7 +182,7 @@
                 v-if="modpackShowingPopular && !modpackSearchLoading"
                 class="modpack-results-heading"
               >
-                Popular on Modrinth — or search above
+                {{ $t('createServer.popular') }}
               </p>
 
               <div class="modpack-results">
@@ -208,17 +203,17 @@
                     >
                     <div>
                       <strong>{{ pack.title }}</strong>
-                      <p>{{ pack.description || 'No description provided.' }}</p>
+                      <p>{{ pack.description || $t('common.noDescription') }}</p>
                     </div>
                   </div>
-                  <span class="modpack-meta">{{ formatNumber(pack.downloads || 0) }} downloads</span>
+                  <span class="modpack-meta">{{ $t('browse.downloads', { count: formatNumber(pack.downloads || 0) }, pack.downloads || 0) }}</span>
                 </button>
               </div>
             </div>
 
             <p v-if="modpackSearchDone && !modpackSearchLoading && !modpackSearchResults.length" class="form-hint">
-              <template v-if="modpackShowingPopular">Could not load modpacks right now. Try searching by name.</template>
-              <template v-else>No matching modpacks found for this search.</template>
+              <template v-if="modpackShowingPopular">{{ $t('createServer.popularFailed') }}</template>
+              <template v-else>{{ $t('createServer.noMatches') }}</template>
             </p>
           </div>
 
@@ -228,8 +223,8 @@
                they end up disagreeing with the pack. -->
           <div v-else class="mrpack-upload">
             <FormField
-              label="Modpack File"
-              hint="A .mrpack exported by the Modrinth app. Mods are fetched from Modrinth; config and other extras come from the pack's overrides."
+              :label="$t('createServer.modpackFile')"
+              :hint="$t('createServer.modpackFileHint')"
             >
               <template #default="{ id, describedBy }">
                 <input
@@ -252,7 +247,7 @@
                   :style="packUploadPercent >= 0 ? { width: `${packUploadPercent}%` } : null"
                 ></div>
               </div>
-              <span>{{ packUploadPercent >= 0 ? `Uploading ${packUploadPercent}%` : 'Uploading…' }}</span>
+              <span>{{ packUploadPercent >= 0 ? $t('common.uploadingPct', { pct: packUploadPercent }) : $t('common.uploading') }}</span>
             </div>
 
             <p v-if="packUploadError" class="modpack-error">{{ packUploadError }}</p>
@@ -268,23 +263,23 @@
               class="modpack-icon"
             >
             <div class="modpack-selected__text">
-              <p class="selected-label">Selected Modpack</p>
+              <p class="selected-label">{{ $t('createServer.selectedModpack') }}</p>
               <strong>{{ selectedModpack.title }}</strong>
-              <p>{{ selectedModpack.description || 'No description provided.' }}</p>
+              <p>{{ selectedModpack.description || $t('common.noDescription') }}</p>
             </div>
             <AppButton variant="ghost" size="sm" @click="clearSelectedModpack">
-              Clear
+              {{ $t('common.clear') }}
             </AppButton>
           </div>
 
           <div v-if="uploadedPack" class="modpack-selected">
             <div>
-              <p class="selected-label">Uploaded Modpack</p>
+              <p class="selected-label">{{ $t('createServer.uploadedModpack') }}</p>
               <strong>{{ uploadedPackTitle }}</strong>
               <p>{{ uploadedPackDetail }}</p>
             </div>
             <AppButton variant="ghost" size="sm" :disabled="creating" @click="clearUploadedPack">
-              Clear
+              {{ $t('common.clear') }}
             </AppButton>
           </div>
 
@@ -294,14 +289,14 @@
       </Panel>
 
       <!-- Basic Settings -->
-      <Panel title="Basic Settings">
-        <FormField label="Server Name">
+      <Panel :title="$t('createServer.basicSettings')">
+        <FormField :label="$t('properties.identity.name')">
           <template #default="{ id, describedBy }">
             <input
               :id="id"
               v-model="formData.name"
               type="text"
-              placeholder="My Minecraft Server"
+              :placeholder="$t('properties.identity.namePlaceholder')"
               :aria-describedby="describedBy"
               required
             >
@@ -311,10 +306,10 @@
         <div class="form-row">
           <div class="form-group">
             <div class="version-label-row">
-              <label for="minecraft-version">Minecraft Version</label>
+              <label for="minecraft-version">{{ $t('createServer.minecraftVersion') }}</label>
               <label class="snapshot-toggle">
                 <input type="checkbox" v-model="showSnapshots">
-                <span>Show snapshots</span>
+                <span>{{ $t('createServer.showSnapshots') }}</span>
               </label>
             </div>
             <select
@@ -324,9 +319,9 @@
               :disabled="versionsLoading || !filteredGameVersions.length"
               required
             >
-              <option v-if="versionsLoading" disabled value="">Loading versions...</option>
+              <option v-if="versionsLoading" disabled value="">{{ $t('createServer.loadingVersions') }}</option>
               <option v-else-if="!versionsLoading && !filteredGameVersions.length" disabled value="">
-                No versions available
+                {{ $t('createServer.noVersions') }}
               </option>
               <option
                 v-for="version in filteredGameVersions"
@@ -340,7 +335,7 @@
             <span v-if="javaRequirementWarning" class="form-hint warning-hint">{{ javaRequirementWarning }}</span>
           </div>
 
-          <FormField label="Mod Loader">
+          <FormField :label="$t('properties.identity.modLoader')">
             <template #default="{ id, describedBy }">
               <select
                 :id="id"
@@ -350,7 +345,7 @@
               >
                 <!-- Default: no loader preselected, so the choice is always
                      deliberate. Disabled so it can't be picked back. -->
-                <option value="" disabled>None</option>
+                <option value="" disabled>{{ $t('createServer.loaderNone') }}</option>
                 <option
                   v-for="loaderOption in availableLoaderOptions"
                   :key="loaderOption.value"
@@ -364,7 +359,7 @@
         </div>
 
         <div class="form-row">
-          <FormField label="Server Port" hint="Default: 25565">
+          <FormField :label="$t('properties.identity.port')" :hint="$t('createServer.portHint')">
             <template #default="{ id, describedBy }">
               <input
                 :id="id"
@@ -378,13 +373,13 @@
             </template>
           </FormField>
 
-          <FormField label="Installation Path" hint="Where server files will be stored">
+          <FormField :label="$t('createServer.installPath')" :hint="$t('createServer.installPathHint')">
             <template #default="{ id, describedBy }">
               <input
                 :id="id"
                 v-model="formData.installPath"
                 type="text"
-                placeholder="Leave empty for auto-generated path"
+                :placeholder="$t('createServer.installPathPlaceholder')"
                 :aria-describedby="describedBy"
               >
             </template>
@@ -395,10 +390,10 @@
 
 
       <!-- Gameplay Settings -->
-      <Panel title="Gameplay">
+      <Panel :title="$t('properties.gameplay.title')">
 
         <div class="form-row">
-          <FormField label="Max Players">
+          <FormField :label="$t('properties.identity.maxPlayers')">
             <template #default="{ id, describedBy }">
               <input
                 :id="id"
@@ -412,31 +407,31 @@
             </template>
           </FormField>
 
-          <FormField label="Difficulty">
+          <FormField :label="$t('properties.gameplay.difficulty')">
             <template #default="{ id, describedBy }">
               <select :id="id" v-model="formData.difficulty" :aria-describedby="describedBy">
-                <option value="peaceful">Peaceful</option>
-                <option value="easy">Easy</option>
-                <option value="normal">Normal</option>
-                <option value="hard">Hard</option>
+                <option value="peaceful">{{ $t('properties.gameplay.difficulties.peaceful') }}</option>
+                <option value="easy">{{ $t('properties.gameplay.difficulties.easy') }}</option>
+                <option value="normal">{{ $t('properties.gameplay.difficulties.normal') }}</option>
+                <option value="hard">{{ $t('properties.gameplay.difficulties.hard') }}</option>
               </select>
             </template>
           </FormField>
         </div>
 
         <div class="form-row">
-          <FormField label="Default Gamemode">
+          <FormField :label="$t('properties.gameplay.gamemode')">
             <template #default="{ id, describedBy }">
               <select :id="id" v-model="formData.gamemode" :aria-describedby="describedBy">
-                <option value="survival">Survival</option>
-                <option value="creative">Creative</option>
-                <option value="adventure">Adventure</option>
-                <option value="spectator">Spectator</option>
+                <option value="survival">{{ $t('properties.gameplay.gamemodes.survival') }}</option>
+                <option value="creative">{{ $t('properties.gameplay.gamemodes.creative') }}</option>
+                <option value="adventure">{{ $t('properties.gameplay.gamemodes.adventure') }}</option>
+                <option value="spectator">{{ $t('properties.gameplay.gamemodes.spectator') }}</option>
               </select>
             </template>
           </FormField>
 
-          <FormField label="View Distance" hint="3-32 chunks">
+          <FormField :label="$t('createServer.viewDistance')" :hint="$t('createServer.viewDistanceHint')">
             <template #default="{ id, describedBy }">
               <input
                 :id="id"
@@ -453,9 +448,9 @@
       </Panel>
 
       <!-- World Settings -->
-      <Panel title="World">
+      <Panel :title="$t('createServer.world')">
 
-        <FormField label="World Name" hint="Folder name for world files">
+        <FormField :label="$t('createServer.worldName')" :hint="$t('createServer.worldNameHint')">
           <template #default="{ id, describedBy }">
             <input
               :id="id"
@@ -468,38 +463,38 @@
         </FormField>
 
         <div class="form-row">
-          <FormField label="World Type">
+          <FormField :label="$t('properties.world.levelType')">
             <template #default="{ id, describedBy }">
               <select :id="id" v-model="formData.levelType" :aria-describedby="describedBy">
-                <option value="default">Default</option>
-                <option value="flat">Flat</option>
-                <option value="large_biomes">Large Biomes</option>
-                <option value="amplified">Amplified</option>
+                <option value="default">{{ $t('properties.world.levelTypes.default') }}</option>
+                <option value="flat">{{ $t('properties.world.levelTypes.flat') }}</option>
+                <option value="large_biomes">{{ $t('properties.world.levelTypes.largeBiomes') }}</option>
+                <option value="amplified">{{ $t('properties.world.levelTypes.amplified') }}</option>
               </select>
             </template>
           </FormField>
 
-          <FormField label="Seed">
+          <FormField :label="$t('properties.world.seed')">
             <template #default="{ id, describedBy }">
               <input
                 :id="id"
                 v-model="formData.seed"
                 type="text"
-                placeholder="Leave empty for random"
+                :placeholder="$t('properties.world.seedPlaceholder')"
                 :aria-describedby="describedBy"
               >
             </template>
           </FormField>
         </div>
 
-        <FormField label="Java Executable Path (Optional)" hint="Use a specific Java runtime for this server.">
+        <FormField :label="$t('createServer.javaPath')" :hint="$t('createServer.javaPathHint')">
           <template #default="{ id, describedBy }">
             <input
               :id="id"
               v-model.trim="formData.javaPath"
               @blur="refreshJavaRequirement"
               type="text"
-              placeholder="java or /path/to/java"
+              :placeholder="$t('createServer.javaPathPlaceholder')"
               :aria-describedby="describedBy"
             >
           </template>
@@ -508,28 +503,28 @@
         <div class="form-checkboxes">
           <label class="checkbox-label">
             <input type="checkbox" v-model="formData.generateStructures">
-            <span>Generate Structures</span>
+            <span>{{ $t('properties.world.generateStructures') }}</span>
           </label>
           <label class="checkbox-label">
             <input type="checkbox" v-model="formData.spawnAnimals">
-            <span>Spawn Animals</span>
+            <span>{{ $t('properties.world.spawnAnimals') }}</span>
           </label>
           <label class="checkbox-label">
             <input type="checkbox" v-model="formData.spawnMonsters">
-            <span>Spawn Monsters</span>
+            <span>{{ $t('properties.world.spawnMonsters') }}</span>
           </label>
           <label class="checkbox-label">
             <input type="checkbox" v-model="formData.spawnNpcs">
-            <span>Spawn NPCs</span>
+            <span>{{ $t('properties.world.spawnNpcs') }}</span>
           </label>
         </div>
       </Panel>
 
       <!-- Advanced Settings -->
-      <Panel title="Advanced">
+      <Panel :title="$t('createServer.advanced')">
 
         <div class="form-row">
-          <FormField label="Minimum Memory (GB)">
+          <FormField :label="$t('createServer.memoryMin')">
             <template #default="{ id, describedBy }">
               <input
                 :id="id"
@@ -544,7 +539,7 @@
             </template>
           </FormField>
 
-          <FormField label="Maximum Memory (GB)">
+          <FormField :label="$t('createServer.memoryMax')">
             <template #default="{ id, describedBy }">
               <input
                 :id="id"
@@ -559,7 +554,7 @@
             </template>
           </FormField>
 
-          <FormField label="Simulation Distance">
+          <FormField :label="$t('createServer.simulationDistance')">
             <template #default="{ id, describedBy }">
               <input
                 :id="id"
@@ -577,29 +572,29 @@
         <div class="form-checkboxes">
           <label class="checkbox-label">
             <input type="checkbox" v-model="formData.onlineMode">
-            <span>Online Mode (Authentication)</span>
+            <span>{{ $t('createServer.onlineMode') }}</span>
           </label>
           <label class="checkbox-label">
             <input type="checkbox" v-model="formData.whitelist">
-            <span>Enable Whitelist</span>
+            <span>{{ $t('properties.gameplay.whitelist') }}</span>
           </label>
           <label class="checkbox-label">
             <input type="checkbox" v-model="formData.pvp">
-            <span>Enable PvP</span>
+            <span>{{ $t('properties.gameplay.pvp') }}</span>
           </label>
           <label class="checkbox-label">
             <input type="checkbox" v-model="formData.commandBlocks">
-            <span>Enable Command Blocks</span>
+            <span>{{ $t('properties.gameplay.commandBlocks') }}</span>
           </label>
         </div>
 
-        <FormField label="MOTD (Message of the Day)" :hint="`${formData.motd.length}/59 characters`">
+        <FormField :label="$t('createServer.motd')" :hint="$t('properties.identity.motdHint', { count: formData.motd.length, max: 59 })">
           <template #default="{ id, describedBy }">
             <textarea
               :id="id"
               v-model="formData.motd"
               rows="2"
-              placeholder="A Minecraft Server"
+              :placeholder="$t('createServer.motdPlaceholder')"
               maxlength="59"
               :aria-describedby="describedBy"
             ></textarea>
@@ -608,19 +603,16 @@
       </Panel>
 
       <!-- EULA Agreement -->
-      <Panel title="Minecraft EULA">
+      <Panel :title="$t('createServer.eulaTitle')">
         <label class="create-eula">
           <input type="checkbox" v-model="formData.acceptEula" required>
           <div class="create-eula__body">
-            <span class="create-eula__primary">
-              I agree to the
-              <a href="https://www.minecraft.net/en-us/eula" target="_blank" rel="noopener noreferrer">
-                Minecraft EULA
-              </a>
-            </span>
-            <p class="create-eula__notice">
-              By creating a server, you must accept Mojang's End User License Agreement. This is required to run a Minecraft server.
-            </p>
+            <i18n-t keypath="createServer.eulaAgree" tag="span" class="create-eula__primary">
+              <template #eula>
+                <a href="https://www.minecraft.net/en-us/eula" target="_blank" rel="noopener noreferrer">{{ $t('createServer.eulaLink') }}</a>
+              </template>
+            </i18n-t>
+            <p class="create-eula__notice">{{ $t('createServer.eulaNotice') }}</p>
           </div>
         </label>
       </Panel>
@@ -629,7 +621,7 @@
     <template #footer>
       <template v-if="!installState">
         <AppButton variant="ghost" size="md" :disabled="creating" @click="handleClose">
-          Cancel
+          {{ $t('common.cancel') }}
         </AppButton>
         <AppButton
           variant="primary"
@@ -638,7 +630,7 @@
           :loading="creating"
           @click="handleCreate"
         >
-          {{ creating ? 'Creating' : 'Create Server' }}
+          {{ creating ? $t('createServer.creating') : $t('createServer.create') }}
         </AppButton>
       </template>
     </template>
@@ -663,7 +655,7 @@ import FormField from '../ui/FormField.vue'
 import { createServer, installServer, getLoaderGameVersions, getJavaStatus, getServerInstallProgress } from '../../api/servers'
 import {
   createProgressPoller,
-  LOST_CONTACT_MESSAGE,
+  lostContactMessage,
   POLL_INTERVAL_MS
 } from '../../utils/pollProgress'
 import {
@@ -675,6 +667,7 @@ import { useToast } from '../../composables/useToast'
 import { useModpackImport } from '../../composables/useModpackImport'
 import { formatNumber } from '../../utils/format'
 import { loaderContentKind } from '../../utils/loaderKind'
+import { formatList } from '../../i18n'
 
 export default {
   name: 'ServerCreateModal',
@@ -745,38 +738,7 @@ export default {
         { value: 'pufferfish', label: 'Pufferfish' },
         { value: 'vanilla',    label: 'Vanilla'    }
       ],
-      formData: {
-        setupMode: 'custom',
-        // Search first: browsing by name is how most people arrive at a
-        // pack. A link or slug assumes you already have one in hand.
-        modpackImportMethod: 'search',
-        name: '',
-        version: '',
-        loader: '',
-        port: 25565,
-        installPath: '',
-        maxPlayers: 20,
-        difficulty: 'normal',
-        gamemode: 'survival',
-        viewDistance: 10,
-        levelName: 'world',
-        levelType: 'default',
-        seed: '',
-        generateStructures: true,
-        spawnAnimals: true,
-        spawnMonsters: true,
-        spawnNpcs: true,
-        memoryMin: 2,
-        memory: 4,
-        javaPath: '',
-        simulationDistance: 10,
-        onlineMode: true,
-        whitelist: false,
-        pvp: true,
-        commandBlocks: true,
-        motd: 'A Minecraft Server managed by Fabricator',
-        acceptEula: false
-      }
+      formData: this.defaultFormData()
     };
   },
   created() {
@@ -793,7 +755,7 @@ export default {
     // Module-scope imports are not visible to an Options API template, so the
     // shared copy is surfaced here rather than duplicated as a literal.
     lostContactMessage() {
-      return LOST_CONTACT_MESSAGE
+      return lostContactMessage()
     },
 
     showModpackPanel() {
@@ -871,18 +833,18 @@ export default {
       set(v) { if (this.imp) this.imp.errorMessage = v }
     },
     uploadedPackTitle() {
-      return this.uploadedPack?.name || this.uploadedPack?.filename || 'Uploaded modpack'
+      return this.uploadedPack?.name || this.uploadedPack?.filename || this.$t('modpacks.uploadedFallback')
     },
     uploadedPackDetail() {
       if (!this.uploadedPack) {
         return ''
       }
       const parts = []
-      if (this.uploadedPack.version) parts.push(`Version ${this.uploadedPack.version}`)
-      if (this.uploadedPack.minecraft_version) parts.push(`Minecraft ${this.uploadedPack.minecraft_version}`)
+      if (this.uploadedPack.version) parts.push(this.$t('modpacks.pack.version', { version: this.uploadedPack.version }))
+      if (this.uploadedPack.minecraft_version) parts.push(this.$t('modpacks.pack.minecraft', { version: this.uploadedPack.minecraft_version }))
       if (this.uploadedPack.loader) parts.push(this.loaderLabelFor(this.uploadedPack.loader))
       const fileCount = this.uploadedPack.file_count || 0
-      if (fileCount) parts.push(`${fileCount} file${fileCount === 1 ? '' : 's'}`)
+      if (fileCount) parts.push(this.$t('modpacks.pack.files', fileCount))
       return parts.join(' · ')
     },
     packMismatchWarning() {
@@ -901,7 +863,7 @@ export default {
         const packMc = this.uploadedPack.minecraft_version || ''
         const packLoader = (this.uploadedPack.loader || '').toLowerCase()
         if (packMc && this.formData.version && packMc !== this.formData.version) {
-          differences.push(`Minecraft ${packMc}`)
+          differences.push(this.$t('modpacks.pack.minecraft', { version: packMc }))
         }
         if (packLoader && this.formData.loader && packLoader !== this.formData.loader) {
           differences.push(this.loaderLabelFor(packLoader))
@@ -912,17 +874,17 @@ export default {
         // An empty list means Modrinth told us nothing, which is not the same
         // as "incompatible" — stay quiet rather than warn on missing data.
         if (versions.length && this.formData.version && !versions.includes(this.formData.version)) {
-          differences.push(`Minecraft ${this.packSupportSummary(versions)}`)
+          differences.push(this.$t('modpacks.pack.minecraft', { version: this.packSupportSummary(versions) }))
         }
         if (loaders.length && this.formData.loader && !loaders.includes(this.formData.loader)) {
-          differences.push(loaders.map((value) => this.loaderLabelFor(value)).join(' or '))
+          differences.push(formatList(loaders.map((value) => this.loaderLabelFor(value)), 'disjunction'))
         }
       }
 
       if (!differences.length) {
         return ''
       }
-      return `This pack was built for ${differences.join(' and ')}. You can create the server anyway, but the pack may not run on this setup.`
+      return this.$t('createServer.packMismatch', { targets: formatList(differences) })
     },
     requiredJavaText() {
       const required = this.javaStatus?.required_java
@@ -931,9 +893,9 @@ export default {
       }
       const detected = this.javaStatus?.detected_major
       if (detected && detected < required) {
-        return `Requires Java ${required}+ (detected Java ${detected}).`
+        return this.$t('createServer.requiresJavaDetected', { required, detected })
       }
-      return `Requires Java ${required}+`
+      return this.$t('createServer.requiresJava', { required })
     }
   },
   watch: {
@@ -1118,8 +1080,8 @@ export default {
 
       if (!supportedLoaders.length) {
         this.toast.warning(
-          `This pack's loader isn't one Fabricator can install. Pick a loader yourself.`,
-          'Unsupported Loader',
+          this.$t('createServer.packLoaderUnsupported'),
+          this.$t('createServer.unsupportedLoaderTitle'),
         )
         // Still worth trying a compatible version against whatever loader is
         // already set, rather than leaving the version untouched too.
@@ -1157,7 +1119,7 @@ export default {
       const named = versions.slice(0, 3).join(', ')
       const rest = versions.length - 3
       if (rest <= 0) return named
-      return `${named} or ${rest} other${rest === 1 ? '' : 's'}`
+      return this.$t('createServer.versionsAndOthers', { versions: named }, rest)
     },
 
     loaderLabelFor(loader) {
@@ -1190,11 +1152,11 @@ export default {
         // Cancelling is something the user just did (closed the dialog); only
         // a real failure is news. The message is the one api/modrinth.js
         // raises on xhr.onabort.
-        if (error?.message === 'Upload cancelled') {
+        if (error?.message === this.$t('errors.uploadCancelled')) {
           return
         }
-        this.packUploadError = error?.message || 'Could not read that .mrpack file.'
-        this.toast.error(this.packUploadError, 'Modpack Upload Failed')
+        this.packUploadError = error?.message || this.$t('modpacks.readFailed')
+        this.toast.error(this.packUploadError, this.$t('modpacks.uploadFailedTitle'))
       } finally {
         this.packUploading = false
         this.packUploadAbort = null
@@ -1222,8 +1184,8 @@ export default {
       const supported = this.loaderOptions.some(option => option.value === packLoader)
       if (packLoader && !supported) {
         this.toast.warning(
-          `This pack targets ${packLoader}, which Fabricator cannot install. Pick a loader yourself.`,
-          'Unsupported Loader',
+          this.$t('createServer.packTargetsUnsupported', { loader: packLoader }),
+          this.$t('createServer.unsupportedLoaderTitle'),
         )
       }
 
@@ -1252,8 +1214,8 @@ export default {
         const match = candidates.find(v => v.stable) || candidates[0]
         if (!match) {
           this.toast.warning(
-            `This pack has no build for the Minecraft versions this loader supports. Pick a version yourself.`,
-            'Version Unavailable',
+            this.$t('createServer.noBuildForVersions'),
+            this.$t('createServer.versionUnavailableTitle'),
           )
           return
         }
@@ -1273,8 +1235,8 @@ export default {
       const match = this.gameVersions.find(v => v.version === wanted)
       if (!match) {
         this.toast.warning(
-          `This pack targets Minecraft ${wanted}, which this loader has no build for. Pick a version yourself.`,
-          'Version Unavailable',
+          this.$t('createServer.noBuildForVersion', { version: wanted }),
+          this.$t('createServer.versionUnavailableTitle'),
         )
         return
       }
@@ -1350,9 +1312,9 @@ export default {
         })
         return true
       } catch (error) {
-        const message = error?.message || 'No compatible modpack version found for the selected Minecraft version.'
+        const message = error?.message || this.$t('createServer.incompatible')
         this.modpackError = message
-        this.toast.error(message, 'Modpack Incompatible')
+        this.toast.error(message, this.$t('createServer.incompatibleTitle'))
         return false
       }
     },
@@ -1412,8 +1374,12 @@ export default {
           // reports its own mismatch.
           if (previousVersion && previousVersion !== preferred.version && !this.pendingPackVersion && !this.pendingPackVersions.length) {
             this.toast.info(
-              `${this.loaderLabelFor(loader)} has no build for Minecraft ${previousVersion} — switched to ${preferred.version}.`,
-              'Version Changed',
+              this.$t('createServer.versionSwitched', {
+                loader: this.loaderLabelFor(loader),
+                previous: previousVersion,
+                version: preferred.version
+              }),
+              this.$t('createServer.versionChangedTitle'),
             )
           }
         }
@@ -1424,7 +1390,7 @@ export default {
         await this.refreshJavaRequirement()
       } catch (error) {
         console.error('Failed to load game versions:', error)
-        this.toast.error('Could not load Minecraft versions.', 'Version Fetch Failed')
+        this.toast.error(this.$t('createServer.versionsLoadFailed'), this.$t('createServer.versionsLoadFailedTitle'))
       } finally {
         this.versionsLoading = false
       }
@@ -1445,7 +1411,7 @@ export default {
         this.javaRequirementWarning = this.javaStatus?.compatibility?.warning || ''
       } catch (error) {
         console.error('Failed to resolve Java requirement:', error)
-        this.javaRequirementWarning = 'Could not verify Java requirement right now.'
+        this.javaRequirementWarning = this.$t('createServer.javaCheckFailed')
       }
     },
 
@@ -1480,25 +1446,25 @@ export default {
           if (finalProgress.phase === 'aborted') {
             // User cancelled the retry mid-install via Close.
           } else if (finalProgress.phase === 'done') {
-            this.toast.success('Server installed successfully.', 'Server Installation')
+            this.toast.success(this.$t('install.success'), this.$t('install.title'))
             this.installState = null
             this.installProgress = null
           } else if (finalProgress.phase === 'unknown') {
             this.installState = 'unknown'
             this.installProgress = finalProgress
-            this.toast.warning(finalProgress.error, 'Server Installation')
+            this.toast.warning(finalProgress.error, this.$t('install.title'))
           } else {
             this.installState = 'failed'
             this.installProgress = finalProgress
             this.toast.error(
-              finalProgress.error || 'Installation failed',
-              'Server Installation Failed',
+              finalProgress.error || this.$t('install.failed'),
+              this.$t('install.failedTitle'),
             )
           }
         } catch (error) {
           this.installState = 'failed'
-          this.installProgress = { phase: 'failed', error: error?.message || 'Installation failed' }
-          this.toast.error(error?.message || 'Installation failed', 'Server Installation Failed')
+          this.installProgress = { phase: 'failed', error: error?.message || this.$t('install.failed') }
+          this.toast.error(error?.message || this.$t('install.failed'), this.$t('install.failedTitle'))
         }
       } else {
         // Pre-check path: retry the full create flow now that Java exists.
@@ -1507,38 +1473,21 @@ export default {
     },
 
     phaseLabel(phase) {
-      const labels = {
-        starting:               'Preparing install…',
-        resolving_versions:     'Resolving versions…',
-        downloading_installer:  'Downloading installer…',
-        downloading_server_jar: 'Downloading server jar…',
-        verifying:              'Verifying download…',
-        running_installer:      'Running installer (this can take 2–15 minutes)…',
-        detecting_artifacts:    'Verifying artefacts…',
-        writing_eula:           'Finalising…',
-        installing_modpack:     'Installing modpack…',
-        done:                   'Done',
-        failed:                 'Failed',
-      }
-      return labels[phase] || 'Installing…'
+      const key = `createServer.phases.${phase}`
+      return phase && this.$te(key) ? this.$t(key) : this.$t('createServer.phases.fallback')
     },
 
     /** Sub-stage detail while the worker is installing the modpack. */
     modpackStageLabel(progress) {
-      const labels = {
-        starting:              'Preparing…',
-        resolving:             'Resolving modpack version…',
-        downloading_pack:      'Downloading modpack archive…',
-        checking_availability: 'Checking file availability…',
-        installing_files:      'Downloading mods…',
-        extracting_overrides:  'Extracting override files…',
-        verifying_mod_sides:   'Checking mods for server compatibility…',
-        done:                  'Finishing up…',
-      }
-      const label = labels[progress?.modpack_stage]
-      if (!label) return ''
+      const key = `createServer.modpackStages.${progress?.modpack_stage}`
+      if (!progress?.modpack_stage || !this.$te(key)) return ''
+      const label = this.$t(key)
       if (progress.modpack_total > 0) {
-        return `${label} (${progress.modpack_current}/${progress.modpack_total})`
+        return this.$t('install.stageProgress', {
+          label,
+          current: progress.modpack_current,
+          total: progress.modpack_total
+        })
       }
       return label
     },
@@ -1585,7 +1534,7 @@ export default {
           }
           if (result.status === 'giveup') {
             console.error('Install-progress poll gave up:', result.error)
-            finish({ phase: 'unknown', error: LOST_CONTACT_MESSAGE })
+            finish({ phase: 'unknown', error: lostContactMessage() })
             return
           }
           const progress = result.progress
@@ -1626,8 +1575,8 @@ export default {
       }
       if (this.installState === 'installing') {
         this.toast.info(
-          'Installation continues in the background. The server appears in your list when it\'s ready.',
-          'Install Running',
+          this.$t('createServer.continuesInBackground'),
+          this.$t('createServer.installRunningTitle'),
         )
       }
       this.$emit('close')
@@ -1638,12 +1587,12 @@ export default {
       if (this.creating) return
 
       if (!this.formData.name.trim()) {
-        this.toast.warning('Please enter a server name.', 'Name Required')
+        this.toast.warning(this.$t('createServer.nameRequired'), this.$t('createServer.nameRequiredTitle'))
         return
       }
 
       if (!this.formData.version) {
-        this.toast.warning('Please select a Minecraft version.', 'Version Required')
+        this.toast.warning(this.$t('createServer.versionRequired'), this.$t('createServer.versionRequiredTitle'))
         return
       }
 
@@ -1651,25 +1600,25 @@ export default {
       // a real path, not a defensive check. Native `required` can't cover it:
       // the Create button lives in the modal footer, outside the <form>.
       if (!this.formData.loader) {
-        this.toast.warning('Please choose a mod loader.', 'Loader Required')
+        this.toast.warning(this.$t('createServer.loaderRequired'), this.$t('createServer.loaderRequiredTitle'))
         return
       }
 
       if (!this.formData.acceptEula) {
-        this.toast.warning('You must accept the Minecraft EULA to create a server.', 'EULA Required')
+        this.toast.warning(this.$t('createServer.eulaRequired'), this.$t('createServer.eulaRequiredTitle'))
         return
       }
 
       if (this.formData.setupMode === 'modpack' && !this.selectedModpack && !this.uploadedPack) {
         this.toast.warning(
-          'Choose a modpack by link or search, or upload a .mrpack, before creating the server.',
-          'Modpack Required',
+          this.$t('createServer.modpackRequired'),
+          this.$t('createServer.modpackRequiredTitle'),
         )
         return
       }
 
       if (this.packUploading) {
-        this.toast.warning('Wait for the modpack upload to finish.', 'Upload In Progress')
+        this.toast.warning(this.$t('createServer.uploadInProgress'), this.$t('createServer.uploadInProgressTitle'))
         return
       }
 
@@ -1734,13 +1683,13 @@ export default {
             this.uploadedPack = null
             if (finalProgress.modpack_error) {
               modpackInstallError = finalProgress.modpack_error
-              this.toast.error(modpackInstallError, 'Modpack Failed')
+              this.toast.error(modpackInstallError, this.$t('modpacks.failedTitle'))
             } else {
-              this.toast.success(`${modpackTitle} installed successfully!`, 'Modpack Installed')
+              this.toast.success(this.$t('createServer.modpackInstalled', { title: modpackTitle }), this.$t('modpacks.installedTitle'))
               if (finalProgress.modpack_uncertain > 0) {
                 this.toast.info(
-                  `${finalProgress.modpack_uncertain} mods could not be confirmed as server-safe. Review them on the server's mods page.`,
-                  'Modpack Warnings',
+                  this.$t('createServer.uncertainMods', finalProgress.modpack_uncertain),
+                  this.$t('modpacks.warningsTitle'),
                 )
               }
             }
@@ -1767,7 +1716,7 @@ export default {
         if (isJavaIssue) {
           this.openJavaModal({ createdServerId: this.installCreatedServerId })
         } else {
-          this.toast.error(error.message || 'Server creation failed', 'Server Creation Failed')
+          this.toast.error(error.message || this.$t('createServer.failed'), this.$t('createServer.failedTitle'))
         }
         if (this.installCreatedServerId) {
           this.$emit('create', { id: this.installCreatedServerId, name: this.formData.name })
@@ -1781,15 +1730,14 @@ export default {
       }
     },
     
-    resetForm({ keepJavaModal = false } = {}) {
-      const preservedVersion = this.formData.version
-      // Nothing to restore into a form that is being rebuilt from scratch.
-      this.prePackSelection = null
-      this.formData = {
+    defaultFormData(version = '') {
+      return {
         setupMode: 'custom',
+        // Search first: browsing by name is how most people arrive at a
+        // pack. A link or slug assumes you already have one in hand.
         modpackImportMethod: 'search',
         name: '',
-        version: preservedVersion || (this.gameVersions[0]?.version || ''),
+        version,
         loader: '',
         port: 25565,
         installPath: '',
@@ -1812,9 +1760,16 @@ export default {
         whitelist: false,
         pvp: true,
         commandBlocks: true,
-        motd: 'A Minecraft Server',
+        motd: this.$t('createServer.defaultMotd'),
         acceptEula: false
       }
+    },
+
+    resetForm({ keepJavaModal = false } = {}) {
+      const preservedVersion = this.formData.version
+      // Nothing to restore into a form that is being rebuilt from scratch.
+      this.prePackSelection = null
+      this.formData = this.defaultFormData(preservedVersion || (this.gameVersions[0]?.version || ''))
       this.javaStatus = null
       this.javaRequirementWarning = ''
       if (!keepJavaModal) {

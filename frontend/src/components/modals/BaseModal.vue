@@ -4,7 +4,7 @@
       <div class="modal-container" :class="sizeClass">
         <div class="modal-header">
           <h2>{{ title }}</h2>
-          <button class="modal-close" @click="closeModal" aria-label="Close">
+          <button class="modal-close" @click="closeModal" :aria-label="$t('common.close')">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
               <path d="M15 5L5 15M5 5L15 15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
             </svg>

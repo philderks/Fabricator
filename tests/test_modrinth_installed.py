@@ -431,9 +431,78 @@ def test_updates_route_reports_missing_required_dependencies(client, tmp_servers
          patch("backend.modrinth.routes.modrinth_client") as mc:
         mc.get_latest_versions_by_hashes.return_value = {_sha1(b"old"): newer, _sha1(b"lib"): lib}
         mc.get_projects.return_value = [{"id": "NEW", "slug": "new-lib", "title": "New Lib"}]
+        mc.resolve_project_version.return_value = None
         resp = client.get(f"/api/modrinth/servers/{server['id']}/updates")
 
     assert resp.get_json()["dependencies"] == [
         {"projectId": "NEW", "slug": "new-lib", "title": "New Lib"}
     ]
     mc.get_projects.assert_called_once_with(["NEW"])
+
+
+def _dependency_chain_resolver(builds):
+    """resolve_project_version stand-in: project id -> the build it resolves to."""
+    def resolve(pid, **_):
+        return {"version": builds[pid]} if pid in builds else None
+    return resolve
+
+
+def _required(*pids):
+    return [{"project_id": pid, "dependency_type": "required"} for pid in pids]
+
+
+def test_updates_route_follows_dependencies_of_dependencies(client, tmp_servers_root, tmp_path):
+    """P now needs B, B needs C (and LIB, installed), C needs B back: B and C
+    are offered once each, LIB is not."""
+    server = _make_server(tmp_servers_root, name="S7", port=25617)
+    mods_dir = tmp_path / "mods"
+    _write_jar(mods_dir, "old.jar", b"old")
+    _write_jar(mods_dir, "lib.jar", b"lib")
+
+    newer = {"id": "v2", "project_id": "P", "files": [{"hashes": {"sha1": "f" * 40}}],
+             "dependencies": _required("B")}
+    lib = {"id": "l1", "project_id": "LIB", "files": [{"hashes": {"sha1": _sha1(b"lib")}}]}
+    builds = {
+        "B": {"project_id": "B", "dependencies": _required("C", "LIB")},
+        "C": {"project_id": "C", "dependencies": _required("B")},
+    }
+
+    with patch("backend.modrinth.routes._resolve_mods_folder",
+               return_value=(str(mods_dir), None)), \
+         patch("backend.modrinth.routes.modrinth_client") as mc:
+        mc.get_latest_versions_by_hashes.return_value = {_sha1(b"old"): newer, _sha1(b"lib"): lib}
+        mc.resolve_project_version.side_effect = _dependency_chain_resolver(builds)
+        mc.get_projects.return_value = [{"id": "B", "title": "Bee"}, {"id": "C", "title": "Sea"}]
+        resp = client.get(f"/api/modrinth/servers/{server['id']}/updates")
+
+    assert [d["projectId"] for d in resp.get_json()["dependencies"]] == ["B", "C"]
+    assert mc.resolve_project_version.call_args.kwargs["mc_version"] == "1.20.1"
+
+
+def test_missing_dependencies_route_follows_the_chain(client, tmp_servers_root, tmp_path):
+    """Installing A (needs B, B needs C and A): B and C, never A itself."""
+    server = _make_server(tmp_servers_root, name="S8", port=25618)
+    mods_dir = tmp_path / "mods"
+    mods_dir.mkdir()
+    builds = {
+        "A": {"project_id": "A", "dependencies": _required("B")},
+        "B": {"project_id": "B", "dependencies": _required("C", "A")},
+        "C": {"project_id": "C", "dependencies": []},
+    }
+
+    with patch("backend.modrinth.routes._resolve_mods_folder",
+               return_value=(str(mods_dir), None)), \
+         patch("backend.modrinth.routes.modrinth_client") as mc:
+        mc.resolve_project_version.side_effect = _dependency_chain_resolver(builds)
+        mc.get_projects.return_value = []
+        resp = client.get(
+            f"/api/modrinth/servers/{server['id']}/project/A/missing-dependencies",
+            query_string={"mc_version": "1.21.1"},
+        )
+
+    assert resp.status_code == 200
+    assert resp.get_json()["dependencies"] == [
+        {"projectId": "B", "slug": None, "title": "B"},
+        {"projectId": "C", "slug": None, "title": "C"},
+    ]
+    assert mc.resolve_project_version.call_args.kwargs["mc_version"] == "1.21.1"

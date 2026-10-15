@@ -8,6 +8,7 @@
  */
 
 import { apiRequest, get, post, put, patch, del, ApiError } from './client'
+import { t } from '../i18n'
 
 export async function getServers() {
   return get('/api/servers')
@@ -117,15 +118,15 @@ export function uploadServerFile(serverId, dirPath, file, { overwrite = false, o
         resolve(data)
       } else {
         reject(new ApiError(
-          data.error || data.message || `Upload failed with status ${xhr.status}`,
+          data.error || data.message || t('errors.uploadFailed', { status: xhr.status }),
           xhr.status,
           data && Object.keys(data).length ? data : null
         ))
       }
     }
 
-    xhr.onerror = () => reject(new ApiError('Network error during upload', 0, null))
-    xhr.onabort = () => reject(new ApiError('Upload cancelled', 0, null))
+    xhr.onerror = () => reject(new ApiError(t('errors.uploadNetwork'), 0, null))
+    xhr.onabort = () => reject(new ApiError(t('errors.uploadCancelled'), 0, null))
 
     xhr.send(file)
   })

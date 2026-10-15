@@ -5,6 +5,7 @@ import ToastContainer from './components/common/ToastContainer.vue'
 import ServerCreateModal from './components/modals/ServerCreateModal.vue'
 import { useToast } from './composables/useToast'
 import { useAuthStore } from './stores/auth'
+import { t } from './i18n'
 
 const router = useRouter()
 const toast = useToast()
@@ -23,14 +24,14 @@ const handleCreateServer = (createdServer) => {
   const modpackInstallError = createdServer.modpackInstallError
   if (modpackInstallError) {
     toast.warning(
-      `Server "${createdServer.name}" was created, but modpack install failed: ${modpackInstallError}`,
-      'Modpack Install Failed'
+      t('createServer.createdModpackFailed', { name: createdServer.name, error: modpackInstallError }),
+      t('createServer.modpackFailedTitle')
     )
   } else {
     const message = modpackTitle
-      ? `Server "${createdServer.name}" created. Selected modpack: ${modpackTitle}.`
-      : `Server "${createdServer.name}" created successfully!`
-    toast.success(message, 'Server Created')
+      ? t('createServer.createdWithModpack', { name: createdServer.name, modpack: modpackTitle })
+      : t('createServer.created', { name: createdServer.name })
+    toast.success(message, t('createServer.createdTitle'))
   }
 
   // Always navigate to the new server's overview — works from "/" (where
@@ -45,7 +46,7 @@ const handleCreateServer = (createdServer) => {
 <template>
   <router-view />
   <ServerCreateModal
-    v-if="!auth.managed"
+    v-if="!auth.managed && (auth.isAuthenticated || !auth.enabled)"
     :show="showCreateModal"
     @close="showCreateModal = false"
     @create="handleCreateServer"

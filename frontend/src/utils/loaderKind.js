@@ -1,3 +1,5 @@
+import { t } from '../i18n'
+
 /**
  * Loader → add-on-content classification (frontend mirror of the backend
  * installer `content_kind`).
@@ -85,7 +87,7 @@ export function loaderProjectType(loader) {
  * @param {boolean} plural
  */
 export function contentLabel(loader, plural = true) {
-  const kind = loaderContentKind(loader)
-  if (kind === 'plugin') return plural ? 'Plugins' : 'Plugin'
-  return plural ? 'Mods' : 'Mod'
+  const count = plural ? 2 : 1
+  if (loaderContentKind(loader) === 'plugin') return t('content.plugin', count)
+  return t('content.mod', count)
 }

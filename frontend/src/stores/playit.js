@@ -21,6 +21,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { getPlayitStatus, startPlayit, stopPlayit, resetPlayit } from '../api/playit'
+import { t } from '../i18n'
 
 const POLL_MS = 3000
 
@@ -104,7 +105,7 @@ export const usePlayitStore = defineStore('playit', () => {
     } catch (err) {
       // True transport failure — surface a generic error so the UI can react.
       status.value = 'error'
-      errorReason.value = err?.message || 'Network error'
+      errorReason.value = err?.message || t('errors.networkShort')
     }
   }
 
@@ -113,7 +114,7 @@ export const usePlayitStore = defineStore('playit', () => {
       _applySnapshot(await stopPlayit())
     } catch (err) {
       status.value = 'error'
-      errorReason.value = err?.message || 'Network error'
+      errorReason.value = err?.message || t('errors.networkShort')
     }
   }
 
@@ -122,7 +123,7 @@ export const usePlayitStore = defineStore('playit', () => {
       _applySnapshot(await resetPlayit())
     } catch (err) {
       status.value = 'error'
-      errorReason.value = err?.message || 'Network error'
+      errorReason.value = err?.message || t('errors.networkShort')
     }
   }
 

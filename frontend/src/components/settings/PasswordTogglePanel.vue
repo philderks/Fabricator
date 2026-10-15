@@ -6,6 +6,7 @@ import FormField from '../ui/FormField.vue'
 import ConfirmModal from '../modals/ConfirmModal.vue'
 import { useAuthStore } from '../../stores/auth'
 import { useToast } from '../../composables/useToast'
+import { t } from '../../i18n'
 
 const MIN_LENGTH = 8
 
@@ -24,7 +25,7 @@ const showConfirm = ref(false)
 function requestDisable() {
   error.value = ''
   if (!current.value) {
-    error.value = 'Enter your current password to turn the password off.'
+    error.value = t('auth.toggle.enterCurrent')
     return
   }
   showConfirm.value = true
@@ -38,10 +39,10 @@ async function onDisableConfirmed() {
   submitting.value = false
   if (res.ok) {
     current.value = ''
-    toast.success('Password turned off. Fabricator no longer asks for one.', 'Authentication')
+    toast.success(t('auth.toggle.offSuccess'), t('auth.toastTitle'))
   } else {
     error.value =
-      res.error?.data?.error || res.error?.message || 'Could not turn the password off.'
+      res.error?.data?.error || res.error?.message || t('auth.toggle.offFailed')
   }
 }
 
@@ -49,7 +50,7 @@ async function onEnable() {
   if (submitting.value) return
   error.value = ''
   if (next.value.length < MIN_LENGTH) {
-    error.value = `Password must be at least ${MIN_LENGTH} characters.`
+    error.value = t('auth.tooShort', { min: MIN_LENGTH })
     return
   }
   submitting.value = true
@@ -57,25 +58,22 @@ async function onEnable() {
   submitting.value = false
   if (res.ok) {
     next.value = ''
-    toast.success('Password turned on.', 'Authentication')
+    toast.success(t('auth.toggle.onSuccess'), t('auth.toastTitle'))
   } else {
     error.value =
-      res.error?.data?.error || res.error?.message || 'Could not turn the password on.'
+      res.error?.data?.error || res.error?.message || t('auth.toggle.onFailed')
   }
 }
 </script>
 
 <template>
-  <Panel :title="auth.enabled ? 'Turn off password' : 'Password'">
+  <Panel :title="auth.enabled ? $t('auth.toggle.titleOn') : $t('auth.password')">
     <!-- ON: offer to turn it off, current password required. -->
     <form v-if="auth.enabled" class="pw-toggle" @submit.prevent="requestDisable">
-      <p class="pw-toggle__intro">
-        Fabricator asks for a password before anyone can manage your servers.
-        Turning it off removes that check for everyone who can reach this page.
-      </p>
+      <p class="pw-toggle__intro">{{ $t('auth.toggle.introOn') }}</p>
       <FormField
-        label="Current password"
-        hint="Required — this confirms it is you turning the password off."
+        :label="$t('auth.currentPassword')"
+        :hint="$t('auth.toggle.currentHint')"
         v-slot="{ id, describedBy }"
       >
         <input
@@ -90,18 +88,19 @@ async function onEnable() {
       <p v-if="error" class="pw-toggle__error" role="alert">{{ error }}</p>
       <div class="pw-toggle__actions">
         <AppButton type="submit" variant="danger" :loading="submitting" :disabled="submitting">
-          Turn off password
+          {{ $t('auth.toggle.turnOff') }}
         </AppButton>
       </div>
     </form>
 
     <!-- OFF: the way back. Setting a password is what turns auth on again. -->
     <form v-else class="pw-toggle" @submit.prevent="onEnable">
-      <p class="pw-toggle__intro pw-toggle__intro--warning">
-        Fabricator is not asking for a password. Anyone who can reach this page
-        can manage your servers.
-      </p>
-      <FormField label="New password" hint="At least 8 characters." v-slot="{ id, describedBy }">
+      <p class="pw-toggle__intro pw-toggle__intro--warning">{{ $t('auth.toggle.introOff') }}</p>
+      <FormField
+        :label="$t('auth.newPassword')"
+        :hint="$t('auth.minLengthHint', { min: MIN_LENGTH })"
+        v-slot="{ id, describedBy }"
+      >
         <input
           :id="id"
           v-model="next"
@@ -114,19 +113,19 @@ async function onEnable() {
       <p v-if="error" class="pw-toggle__error" role="alert">{{ error }}</p>
       <div class="pw-toggle__actions">
         <AppButton type="submit" variant="primary" :loading="submitting" :disabled="submitting">
-          Turn on password
+          {{ $t('auth.toggle.turnOn') }}
         </AppButton>
       </div>
     </form>
 
     <ConfirmModal
       :show="showConfirm"
-      title="Turn off the password?"
-      message="Fabricator will stop asking for a password."
-      description="Anyone who can reach this address will be able to manage your servers, read the console, and edit files. Only do this on a network you trust. You can set a password again from this page."
+      :title="$t('auth.toggle.confirmTitle')"
+      :message="$t('auth.toggle.confirmMessage')"
+      :description="$t('auth.toggle.confirmDescription')"
       type="warning"
-      confirm-text="Turn off password"
-      cancel-text="Keep password"
+      :confirm-text="$t('auth.toggle.turnOff')"
+      :cancel-text="$t('auth.toggle.keep')"
       @confirm="onDisableConfirmed"
       @cancel="showConfirm = false"
     />

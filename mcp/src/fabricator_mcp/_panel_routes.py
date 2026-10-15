@@ -17,7 +17,7 @@ Bump ``PANEL_TABLE_REVISION`` only after a human has re-audited the difference.
 from __future__ import annotations
 
 #: Date of the last human re-audit of this snapshot.
-PANEL_TABLE_REVISION = "2026-10-12"
+PANEL_TABLE_REVISION = "2026-10-15"
 
 PANEL_READ: frozenset[tuple[str, str]] = frozenset({
     ("GET", "/api/auth/status"),
@@ -41,6 +41,10 @@ PANEL_READ: frozenset[tuple[str, str]] = frozenset({
     ("GET", "/api/modrinth/project/<project_id>/resolve-version"),
     ("GET", "/api/modrinth/project/<project_id>/versions"),
     ("GET", "/api/modrinth/search"),
+    # 2026-10-15: same mods-folder hashing as updates; project_id/mc_version/
+    # loader only reach the fixed Modrinth host, as in resolve-version. Returns
+    # public catalog data only (projectId, slug, title), no filenames.
+    ("GET", "/api/modrinth/servers/<server_id>/project/<project_id>/missing-dependencies"),
     ("GET", "/api/modrinth/servers/<server_id>/resolve-installed"),
     # 2026-10-12: same folder hashing as resolve-installed; filenames + public
     # catalog data only (#80).

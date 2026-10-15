@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from 'vue'
+import { t } from '../../i18n'
 
 const props = defineProps({
   status: {
@@ -18,16 +19,16 @@ const props = defineProps({
 })
 
 const STATUS_META = {
-  running:    { dot: 'var(--success)', label: 'Running' },
-  stopped:    { dot: 'var(--text-disabled)', label: 'Stopped' },
-  pending:    { dot: 'var(--warning)', label: 'Install Required' },
-  installing: { dot: 'var(--primary)', label: 'Installing' },
-  failed:     { dot: 'var(--danger)', label: 'Failed' },
-  unknown:    { dot: 'var(--text-disabled)', label: 'Unknown' }
+  running:    { dot: 'var(--success)', label: 'status.running' },
+  stopped:    { dot: 'var(--text-disabled)', label: 'status.stopped' },
+  pending:    { dot: 'var(--warning)', label: 'status.pending' },
+  installing: { dot: 'var(--primary)', label: 'status.installing' },
+  failed:     { dot: 'var(--danger)', label: 'status.failed' },
+  unknown:    { dot: 'var(--text-disabled)', label: 'status.unknown' }
 }
 
 const meta = computed(() => STATUS_META[props.status] || STATUS_META.unknown)
-const displayLabel = computed(() => props.label || meta.value.label)
+const displayLabel = computed(() => props.label || t(meta.value.label))
 </script>
 
 <template>

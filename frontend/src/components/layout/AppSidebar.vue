@@ -11,6 +11,7 @@ import { useServerStore } from '../../stores/server'
 import { useSidebarCollapsed } from '../../composables/useSidebarCollapsed'
 import { useMobileNav } from '../../composables/useMobileNav'
 import { loaderContentKind, contentLabel } from '../../utils/loaderKind'
+import { t } from '../../i18n'
 
 const { collapsed, toggle: toggleCollapsed } = useSidebarCollapsed()
 const { isMobile, drawerOpen, close: closeDrawer } = useMobileNav()
@@ -70,15 +71,17 @@ const settingsTarget = computed(() =>
     : { name: 'GlobalSettings' }
 )
 
+// `label` is an i18n key, resolved in navItems so a locale switch re-renders it.
 const ALL_NAV_ITEMS = [
-  { name: 'ServerOverview', label: 'Overview', icon: 'overview' },
-  { name: 'ServerConsole',  label: 'Console',  icon: 'console'  },
-  { name: 'ServerPlayers',  label: 'Players',  icon: 'players'  },
-  { name: 'ServerMods',     label: 'Mods',     icon: 'mods'     },
-  { name: 'ServerFiles',    label: 'Files',    icon: 'files'    },
-  { name: 'ServerBackups',  label: 'Backups',  icon: 'backups'  },
-  { name: 'ServerPlayit',   label: 'playit.gg', icon: 'network' },
-  { name: 'ServerSettings', label: 'Properties', icon: 'properties' }
+  { name: 'ServerOverview', label: 'nav.overview',   icon: 'overview' },
+  { name: 'ServerConsole',  label: 'nav.console',    icon: 'console'  },
+  { name: 'ServerPlayers',  label: 'nav.players',    icon: 'players'  },
+  { name: 'ServerMods',     label: null,             icon: 'mods'     },
+  { name: 'ServerFiles',    label: 'nav.files',      icon: 'files'    },
+  { name: 'ServerBackups',  label: 'nav.backups',    icon: 'backups'  },
+  { name: 'ServerSchedules', label: 'nav.schedules', icon: 'schedules' },
+  { name: 'ServerPlayit',   label: 'nav.playit',     icon: 'network'  },
+  { name: 'ServerSettings', label: 'nav.properties', icon: 'properties' }
 ]
 
 // Nav entries hidden under managed mode (surfaces the fleet gate denies).
@@ -96,11 +99,10 @@ const navItems = computed(() => {
   if (kind === 'none') {
     return base.filter(item => item.name !== 'ServerMods')
   }
-  return base.map(item =>
-    item.name === 'ServerMods'
-      ? { ...item, label: contentLabel(loader) }
-      : item
-  )
+  return base.map(item => ({
+    ...item,
+    label: item.name === 'ServerMods' ? contentLabel(loader) : t(item.label)
+  }))
 })
 
 // ---------- Update polling (relocated from Servers.vue) ----------
@@ -135,14 +137,11 @@ watch(
       updateOutcomeWatch.value = 0
       const { lastExitCode, lastError } = updateState.value
       if (lastExitCode === 0) {
-        toast.success(
-          'Update finished. Refresh the page if it does not reload automatically.',
-          'Fabricator Update'
-        )
+        toast.success(t('update.finished'), t('update.title'))
       } else {
         const detail =
-          lastError || (lastExitCode != null ? `Exit code ${lastExitCode}` : 'Update failed')
-        toast.error(detail, 'Fabricator Update')
+          lastError || (lastExitCode != null ? t('update.exitCode', { code: lastExitCode }) : t('update.failed'))
+        toast.error(detail, t('update.title'))
       }
     }
   }
@@ -181,10 +180,10 @@ const updateAvailable = computed(() =>
 )
 
 const updateLabel = computed(() => {
-  if (updateState.value.selfUpdateDisabled) return 'Managed by image'
-  if (updateState.value.inProgress || updateTriggering.value) return 'Updating…'
-  if (updateAvailable.value) return 'Update available'
-  return 'Up to date'
+  if (updateState.value.selfUpdateDisabled) return t('update.managedByImage')
+  if (updateState.value.inProgress || updateTriggering.value) return t('update.updating')
+  if (updateAvailable.value) return t('update.available')
+  return t('update.upToDate')
 })
 
 const updateVersionLabel = computed(() => {
@@ -230,15 +229,15 @@ const runUpdate = async () => {
     const result = await triggerUpdate()
     if (result.started) {
       updateOutcomeWatch.value = 1
-      toast.success('Update started in background', 'Fabricator Update')
+      toast.success(t('update.started'), t('update.title'))
       await loadUpdateState()
       scheduleNextPoll()
     } else {
-      toast.error(result.error || 'Unable to start update', 'Fabricator Update')
+      toast.error(result.error || t('update.startFailed'), t('update.title'))
     }
   } catch (error) {
     console.error('Failed to trigger update:', error)
-    toast.error(error.message || 'Failed to trigger update', 'Fabricator Update')
+    toast.error(error.message || t('update.triggerFailed'), t('update.title'))
   } finally {
     updateTriggering.value = false
   }
@@ -285,9 +284,9 @@ onUnmounted(() => {
     <button
       type="button"
       class="app-sidebar__collapse-btn"
-      :aria-label="isMobile ? 'Close navigation menu' : (collapsed ? 'Expand sidebar' : 'Collapse sidebar')"
+      :aria-label="isMobile ? $t('sidebar.closeMenu') : (collapsed ? $t('sidebar.expand') : $t('sidebar.collapse'))"
       :aria-expanded="isMobile ? drawerOpen : !collapsed"
-      :title="isMobile ? 'Close menu' : (collapsed ? 'Expand sidebar' : 'Collapse sidebar')"
+      :title="isMobile ? $t('sidebar.closeMenuTitle') : (collapsed ? $t('sidebar.expand') : $t('sidebar.collapse'))"
       @click="onCollapseClick"
     >
       <svg
@@ -306,7 +305,7 @@ onUnmounted(() => {
     <router-link
       :to="{ name: 'Servers' }"
       class="app-sidebar__logo"
-      :title="railTitle('Fabricator — all servers')"
+      :title="railTitle($t('sidebar.allServers'))"
     >
       <img
         class="app-sidebar__logo-img"
@@ -324,16 +323,16 @@ onUnmounted(() => {
       v-else-if="!auth.managed"
       type="button"
       class="app-sidebar__no-server-chip"
-      :title="railTitle('No servers yet — create one')"
+      :title="railTitle($t('sidebar.noServersTitle'))"
       @click="openCreateModal"
     >
       <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
         <path d="M5.5 1v9M1 5.5h9"/>
       </svg>
-      <span class="app-sidebar__label">No servers yet</span>
+      <span class="app-sidebar__label">{{ $t('sidebar.noServers') }}</span>
     </button>
 
-    <nav class="app-sidebar__nav" aria-label="Server navigation">
+    <nav class="app-sidebar__nav" :aria-label="$t('sidebar.navLabel')">
       <component
         :is="hasServerContext ? 'router-link' : 'div'"
         v-for="item in navItems"
@@ -373,6 +372,10 @@ onUnmounted(() => {
             <path d="M2.5 6v6.5A1 1 0 003.5 13.5h8A1 1 0 0012.5 12.5V6"/>
             <path d="M6 8.5h3"/>
           </template>
+          <template v-else-if="item.icon === 'schedules'">
+            <circle cx="7.5" cy="7.5" r="6"/>
+            <path d="M7.5 4v3.5l2.5 1.5"/>
+          </template>
           <template v-else-if="item.icon === 'network'">
             <circle cx="7.5" cy="7.5" r="6"/>
             <path d="M1.5 7.5h12"/>
@@ -399,27 +402,27 @@ onUnmounted(() => {
         :to="settingsTarget"
         active-class="is-active"
         class="app-sidebar__nav-item"
-        :title="railTitle('Settings')"
+        :title="railTitle($t('nav.settings'))"
       >
         <svg class="app-sidebar__nav-icon" width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
           <path d="M11.5 8.9L13.4 8.9L13.4 6.2L11.5 6.1L10.7 4.8L11.6 3.1L9.3 1.8L8.2 3.4L6.8 3.4L5.8 1.8L3.4 3.1L4.3 4.8L3.6 6.1L1.7 6.2L1.7 8.9L3.6 8.9L4.3 10.2L3.4 11.9L5.8 13.2L6.8 11.6L8.2 11.6L9.3 13.2L11.6 11.9L10.7 10.2Z"/>
           <circle cx="7.5" cy="7.5" r="2.2"/>
         </svg>
-        <span class="app-sidebar__label">Settings</span>
+        <span class="app-sidebar__label">{{ $t('nav.settings') }}</span>
       </router-link>
 
       <button
         v-if="auth.enabled"
         type="button"
         class="app-sidebar__nav-item app-sidebar__account-btn"
-        :title="railTitle('Lock')"
+        :title="railTitle($t('sidebar.lock'))"
         @click="onLock"
       >
         <svg class="app-sidebar__nav-icon" width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
           <rect x="3.5" y="6.8" width="8" height="6" rx="1"/>
           <path d="M5.3 6.8V4.8a2.2 2.2 0 014.4 0v2"/>
         </svg>
-        <span class="app-sidebar__label">Lock</span>
+        <span class="app-sidebar__label">{{ $t('sidebar.lock') }}</span>
       </button>
 
       <component
@@ -444,12 +447,11 @@ onUnmounted(() => {
 
     <ConfirmModal
       :show="showUpdateConfirm"
-      title="Run Fabricator update?"
-      message="Run Fabricator update now?"
-      description="The service may restart briefly while preserving server data and config."
+      :title="$t('update.confirmTitle')"
+      :message="$t('update.confirmMessage')"
+      :description="$t('update.confirmDescription')"
       type="warning"
-      confirm-text="Run update"
-      cancel-text="Cancel"
+      :confirm-text="$t('update.confirmButton')"
       @confirm="handleUpdateConfirm"
       @cancel="handleUpdateCancel"
     />

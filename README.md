@@ -170,7 +170,7 @@ Environment variables are documented in `.env.example`. For production-like path
 | Docker | Any OS with Docker Engine or Docker Desktop (recommended path) |
 | OS | Linux (Debian/Ubuntu, Arch, or Fedora/RHEL, systemd) for the native installer |
 | Python | 3.11+ (manual/native install) |
-| Node.js | 20.x (frontend build only) |
+| Node.js | 22.x (frontend build only) |
 
 > The native installer targets Linux. On macOS and Windows, run Fabricator via Docker.
 

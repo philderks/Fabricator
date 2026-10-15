@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import AppButton from '../components/ui/AppButton.vue'
 import FormField from '../components/ui/FormField.vue'
+import { t } from '../i18n'
 
 const MIN_LENGTH = 8
 
@@ -22,11 +23,11 @@ async function onSubmit() {
   if (submitting.value) return
   error.value = ''
   if (password.value.length < MIN_LENGTH) {
-    error.value = `Password must be at least ${MIN_LENGTH} characters.`
+    error.value = t('auth.tooShort', { min: MIN_LENGTH })
     return
   }
   if (password.value !== confirm.value) {
-    error.value = 'Passwords do not match.'
+    error.value = t('auth.setup.mismatch')
     return
   }
   submitting.value = true
@@ -36,7 +37,7 @@ async function onSubmit() {
     router.replace('/')
   } else {
     error.value =
-      res.error?.data?.error || res.error?.message || 'Setup failed. Please try again.'
+      res.error?.data?.error || res.error?.message || t('auth.setup.failed')
     password.value = ''
     confirm.value = ''
   }
@@ -47,10 +48,14 @@ async function onSubmit() {
   <div class="login-page">
     <form class="login-card" @submit.prevent="onSubmit">
       <img class="login-card__logo" src="/favicon.svg" alt="" />
-      <h1 class="login-card__title">Welcome to Fabricator</h1>
-      <p class="login-card__subtitle">Set an operator password to secure the panel.</p>
+      <h1 class="login-card__title">{{ $t('auth.setup.title') }}</h1>
+      <p class="login-card__subtitle">{{ $t('auth.setup.subtitle') }}</p>
 
-      <FormField label="Password" hint="At least 8 characters." v-slot="{ id, describedBy }">
+      <FormField
+        :label="$t('auth.password')"
+        :hint="$t('auth.minLengthHint', { min: MIN_LENGTH })"
+        v-slot="{ id, describedBy }"
+      >
         <input
           :id="id"
           v-model="password"
@@ -62,7 +67,7 @@ async function onSubmit() {
         />
       </FormField>
 
-      <FormField label="Confirm password" v-slot="{ id, describedBy }">
+      <FormField :label="$t('auth.setup.confirmPassword')" v-slot="{ id, describedBy }">
         <input
           :id="id"
           v-model="confirm"
@@ -76,7 +81,7 @@ async function onSubmit() {
       <p v-if="error" class="login-card__error" role="alert">{{ error }}</p>
 
       <AppButton type="submit" variant="primary" size="md" :loading="submitting">
-        Create password
+        {{ $t('auth.setup.submit') }}
       </AppButton>
     </form>
   </div>

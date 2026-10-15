@@ -7,6 +7,7 @@
  */
 
 import { get, post, put, del, ApiError } from './client'
+import { t } from '../i18n'
 
 /** List all backup configs for a server. */
 export async function listBackupConfigs(serverId) {
@@ -138,15 +139,15 @@ export function uploadWorld(serverId, file, { onProgress, registerAbort } = {}) 
         resolve(data)
       } else {
         reject(new ApiError(
-          data.error || data.message || `Upload failed with status ${xhr.status}`,
+          data.error || data.message || t('errors.uploadFailed', { status: xhr.status }),
           xhr.status,
           data && Object.keys(data).length ? data : null
         ))
       }
     }
 
-    xhr.onerror = () => reject(new ApiError('Network error during upload', 0, null))
-    xhr.onabort = () => reject(new ApiError('Upload cancelled', 0, null))
+    xhr.onerror = () => reject(new ApiError(t('errors.uploadNetwork'), 0, null))
+    xhr.onabort = () => reject(new ApiError(t('errors.uploadCancelled'), 0, null))
 
     xhr.send(file)
   })

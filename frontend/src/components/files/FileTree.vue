@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { browseServerFiles } from '../../api/servers'
 import { useServerStore } from '../../stores/server'
+import { t } from '../../i18n'
 
 const props = defineProps({
   // Relative path of the file currently open in the editor. Its ancestors are
@@ -60,7 +61,7 @@ async function ensureChildren(path, { force = false } = {}) {
     cache.loadedAt = Date.now()
     error.value = ''
   } catch (e) {
-    error.value = e.message || 'Unable to load this folder'
+    error.value = e.message || t('files.tree.loadFolderFailed')
   } finally {
     loadingPaths.value.delete(path)
   }
@@ -158,11 +159,11 @@ defineExpose({ refresh })
 <template>
   <div class="file-tree">
     <div class="file-tree__head">
-      <span class="file-tree__title">Explorer</span>
+      <span class="file-tree__title">{{ $t('files.tree.title') }}</span>
       <button
         type="button"
         class="file-tree__refresh"
-        title="Refresh tree"
+        :title="$t('files.tree.refresh')"
         @click="refresh"
       >
         <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true">
@@ -174,8 +175,8 @@ defineExpose({ refresh })
 
     <div class="file-tree__body">
       <p v-if="error" class="file-tree__error">{{ error }}</p>
-      <p v-else-if="!nodes.length && loadingPaths.size" class="file-tree__state">Loading…</p>
-      <p v-else-if="!nodes.length" class="file-tree__state">This server has no files.</p>
+      <p v-else-if="!nodes.length && loadingPaths.size" class="file-tree__state">{{ $t('common.loading') }}</p>
+      <p v-else-if="!nodes.length" class="file-tree__state">{{ $t('files.tree.empty') }}</p>
 
       <button
         v-for="node in nodes"

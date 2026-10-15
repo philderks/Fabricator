@@ -9,6 +9,7 @@ import { formatFileSize } from '../../utils/format'
 import { copyToClipboard } from '../../utils/clipboard'
 import { useServerStore } from '../../stores/server'
 import { useToast } from '../../composables/useToast'
+import { t } from '../../i18n'
 
 // Async-loaded so CodeMirror lands in its own chunk instead of the main bundle
 // (the Files route is imported statically by the router).
@@ -197,7 +198,7 @@ const onCloseEditor = async () => {
 const breadcrumbs = computed(() => {
   const path = store.fileBrowser.currentPath || ''
   const parts = path.split('/').filter(Boolean)
-  const crumbs = [{ label: 'server', path: '' }]
+  const crumbs = [{ label: t('files.root'), path: '' }]
   let acc = ''
   for (const p of parts) {
     acc = acc ? `${acc}/${p}` : p
@@ -250,8 +251,8 @@ const showReplaceConfirm = ref(false)
 
 const replaceMessage = computed(() => {
   const count = pendingReplace.value.length
-  if (count === 1) return `${pendingReplace.value[0].name} already exists here.`
-  return `${count} files already exist here.`
+  if (count === 1) return t('files.replace.existsOne', { name: pendingReplace.value[0].name })
+  return t('files.replace.existsMany', count)
 })
 
 const runUpload = async (files) => {
@@ -276,10 +277,7 @@ const handleReplaceCancel = () => {
   // The rows for these were dropped with the prompt, so say what happened or
   // the files would just silently not be there.
   if (skipped) {
-    toast.info(
-      skipped === 1 ? 'Upload skipped — the file was left as it is' : `${skipped} uploads skipped`,
-      'Files'
-    )
+    toast.info(t('files.uploadSkipped', skipped), t('nav.files'))
   }
 }
 
@@ -320,7 +318,7 @@ const onDrop = (event) => {
   const files = dropped.filter((_, i) => !items[i]?.webkitGetAsEntry?.()?.isDirectory)
 
   if (files.length < dropped.length) {
-    toast.error("Folders can't be uploaded yet — drop the files inside instead", 'Files')
+    toast.error(t('files.foldersUnsupported'), t('nav.files'))
   }
   if (files.length) runUpload(files)
 }
@@ -336,7 +334,7 @@ const deleting = ref(false)
 
 const deleteMessage = computed(() => {
   const entry = pendingDelete.value[0]
-  return entry ? `Delete ${entry.name}?` : 'Delete this item?'
+  return entry ? t('files.delete.message', { name: entry.name }) : t('files.delete.messageFallback')
 })
 
 const deleteDescription = computed(() => {
@@ -345,9 +343,7 @@ const deleteDescription = computed(() => {
   // Nothing about contents here — a folder with anything in it comes back from
   // the backend for a second, explicit confirm, and promising the recursive
   // delete up front would make that escalation read as a stutter.
-  return entry.isDir
-    ? 'Empty folders are removed straight away. This cannot be undone.'
-    : 'This removes the file from disk and cannot be undone.'
+  return entry.isDir ? t('files.delete.folderDescription') : t('files.delete.fileDescription')
 })
 
 const onDeleteClick = (entry) => {
@@ -377,8 +373,8 @@ const handleDeleteCancel = () => {
 const recursiveMessage = computed(() => {
   const targets = recursiveTargets.value
   return targets.length === 1
-    ? `${targets[0]} is not empty.`
-    : `${targets.length} folders are not empty.`
+    ? t('files.delete.notEmptyOne', { name: targets[0] })
+    : t('files.delete.notEmptyMany', targets.length)
 })
 
 const handleRecursiveConfirm = async () => {
@@ -455,7 +451,9 @@ const onCopyPath = async () => {
         <path d="M4 16v2.5A1.5 1.5 0 005.5 20h13a1.5 1.5 0 001.5-1.5V16" stroke-linecap="round" />
       </svg>
       <p class="files-page__dropzone-text">
-        Drop to upload into <strong>{{ store.fileBrowser.currentPath || 'server' }}</strong>
+        <i18n-t keypath="files.dropToUpload">
+          <template #path><strong>{{ store.fileBrowser.currentPath || $t('files.root') }}</strong></template>
+        </i18n-t>
       </p>
     </div>
     <div v-if="store.fileBrowser.absolutePath" class="files-page__location">
@@ -467,17 +465,17 @@ const onCopyPath = async () => {
         type="button"
         class="files-page__location-copy"
         :class="{ 'is-copied': copyState === 'copied', 'is-error': copyState === 'error' }"
-        :title="copyState === 'copied' ? 'Copied!' : 'Copy path'"
+        :title="copyState === 'copied' ? $t('files.copiedPath') : $t('files.copyPath')"
         @click="onCopyPath"
       >
-        <span v-if="copyState === 'copied'">Copied</span>
-        <span v-else-if="copyState === 'error'">Failed</span>
-        <span v-else>Copy</span>
+        <span v-if="copyState === 'copied'">{{ $t('common.copied') }}</span>
+        <span v-else-if="copyState === 'error'">{{ $t('common.failed') }}</span>
+        <span v-else>{{ $t('common.copy') }}</span>
       </button>
     </div>
     <div class="files-page__toolbar">
-      <AppButton variant="ghost" size="sm" :disabled="!canGoUp" @click="store.goUpDirectory">↑ Up</AppButton>
-      <nav class="files-page__crumbs" aria-label="Path">
+      <AppButton variant="ghost" size="sm" :disabled="!canGoUp" @click="store.goUpDirectory">{{ $t('files.up') }}</AppButton>
+      <nav class="files-page__crumbs" :aria-label="$t('files.pathLabel')">
         <template v-for="(crumb, i) in breadcrumbs" :key="i">
           <button
             type="button"
@@ -498,8 +496,8 @@ const onCopyPath = async () => {
           v-model="searchInput"
           type="search"
           class="files-page__search-input"
-          placeholder="Search all files…"
-          aria-label="Search files by name"
+          :placeholder="$t('files.search.placeholder')"
+          :aria-label="$t('files.search.label')"
           @keydown.enter.prevent="onSearchSubmit"
           @keydown.esc.prevent="onClearSearch"
         />
@@ -507,13 +505,13 @@ const onCopyPath = async () => {
           v-if="searchInput"
           type="button"
           class="files-page__search-clear"
-          title="Clear search"
+          :title="$t('files.search.clear')"
           @click="onClearSearch"
         >×</button>
       </div>
-      <AppButton variant="ghost" size="sm" :loading="store.fileBrowser.loading" @click="onRefresh">Refresh</AppButton>
-      <AppButton variant="ghost" size="sm" @click="openNewFolder">New folder</AppButton>
-      <AppButton variant="primary" size="sm" @click="openFilePicker">Upload</AppButton>
+      <AppButton variant="ghost" size="sm" :loading="store.fileBrowser.loading" @click="onRefresh">{{ $t('common.refresh') }}</AppButton>
+      <AppButton variant="ghost" size="sm" @click="openNewFolder">{{ $t('files.newFolder') }}</AppButton>
+      <AppButton variant="primary" size="sm" @click="openFilePicker">{{ $t('files.upload') }}</AppButton>
       <input
         ref="fileInputRef"
         type="file"
@@ -544,34 +542,35 @@ const onCopyPath = async () => {
             />
           </span>
           <span class="files-page__upload-pct">{{ row.pct < 0 ? '…' : `${row.pct}%` }}</span>
-          <button type="button" class="files-page__upload-action" @click="store.cancelUpload(row.id)">Cancel</button>
+          <button type="button" class="files-page__upload-action" @click="store.cancelUpload(row.id)">{{ $t('common.cancel') }}</button>
         </template>
         <template v-else>
           <span class="files-page__upload-error">{{ row.error }}</span>
-          <button type="button" class="files-page__upload-action" @click="store.clearFinishedUploads()">Dismiss</button>
+          <button type="button" class="files-page__upload-action" @click="store.clearFinishedUploads()">{{ $t('common.dismiss') }}</button>
         </template>
       </li>
     </ul>
 
     <Panel v-if="store.fileSearch.active" :padded="false">
-      <div v-if="store.fileSearch.loading" class="files-page__state">Searching…</div>
+      <div v-if="store.fileSearch.loading" class="files-page__state">{{ $t('files.search.searching') }}</div>
       <div v-else-if="store.fileSearch.error" class="files-page__state files-page__state--error">{{ store.fileSearch.error }}</div>
       <div v-else-if="!store.fileSearch.results.length" class="files-page__state">
-        No files match “{{ store.fileSearch.query }}”.
+        {{ $t('files.search.noMatches', { query: store.fileSearch.query }) }}
       </div>
       <template v-else>
         <p class="files-page__search-summary">
-          {{ store.fileSearch.results.length }}
-          {{ store.fileSearch.results.length === 1 ? 'match' : 'matches' }}
-          for “{{ store.fileSearch.query }}”
-          <span v-if="store.fileSearch.truncated"> — showing the first results only, refine your search.</span>
+          {{ $t(
+            store.fileSearch.truncated ? 'files.search.summaryTruncated' : 'files.search.summary',
+            { query: store.fileSearch.query },
+            store.fileSearch.results.length
+          ) }}
         </p>
         <table class="files-page__table">
           <thead>
             <tr>
-              <th class="files-page__th-name">Name</th>
-              <th class="files-page__th-size">Size</th>
-              <th class="files-page__th-modified">Modified</th>
+              <th class="files-page__th-name">{{ $t('files.columns.name') }}</th>
+              <th class="files-page__th-size">{{ $t('files.columns.size') }}</th>
+              <th class="files-page__th-modified">{{ $t('files.columns.modified') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -592,7 +591,7 @@ const onCopyPath = async () => {
                   </svg>
                   <span class="files-page__hit">
                     <span class="files-page__hit-name">{{ entry.name }}</span>
-                    <span class="files-page__hit-path">{{ entry.parentPath || 'server' }}</span>
+                    <span class="files-page__hit-path">{{ entry.parentPath || $t('files.root') }}</span>
                   </span>
                 </button>
               </td>
@@ -605,16 +604,16 @@ const onCopyPath = async () => {
     </Panel>
 
     <Panel v-else :padded="false">
-      <div v-if="store.fileBrowser.loading" class="files-page__state">Loading…</div>
+      <div v-if="store.fileBrowser.loading" class="files-page__state">{{ $t('common.loading') }}</div>
       <div v-else-if="store.fileBrowser.error" class="files-page__state files-page__state--error">{{ store.fileBrowser.error }}</div>
-      <div v-else-if="!store.fileBrowser.entries.length" class="files-page__state">This folder is empty.</div>
+      <div v-else-if="!store.fileBrowser.entries.length" class="files-page__state">{{ $t('files.empty') }}</div>
       <table v-else class="files-page__table">
         <thead>
           <tr>
-            <th class="files-page__th-name">Name</th>
-            <th class="files-page__th-size">Size</th>
-            <th class="files-page__th-modified">Modified</th>
-            <th class="files-page__th-actions"><span class="files-page__visually-hidden">Actions</span></th>
+            <th class="files-page__th-name">{{ $t('files.columns.name') }}</th>
+            <th class="files-page__th-size">{{ $t('files.columns.size') }}</th>
+            <th class="files-page__th-modified">{{ $t('files.columns.modified') }}</th>
+            <th class="files-page__th-actions"><span class="files-page__visually-hidden">{{ $t('files.columns.actions') }}</span></th>
           </tr>
         </thead>
         <tbody>
@@ -656,8 +655,8 @@ const onCopyPath = async () => {
               <button
                 type="button"
                 class="files-page__delete"
-                :title="`Delete ${entry.name}`"
-                :aria-label="`Delete ${entry.name}`"
+                :title="$t('files.delete.entry', { name: entry.name })"
+                :aria-label="$t('files.delete.entry', { name: entry.name })"
                 @click.stop="onDeleteClick(entry)"
               >
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
@@ -682,7 +681,7 @@ const onCopyPath = async () => {
       <Panel
         ref="editorRef"
         class="files-page__editor-pane"
-        :title="(store.fileEditor.path || 'Loading…') + (store.hasFileChanges ? ' •' : '')"
+        :title="(store.fileEditor.path || $t('common.loading')) + (store.hasFileChanges ? ' •' : '')"
       >
       <template #action>
         <div class="files-page__editor-actions">
@@ -691,18 +690,18 @@ const onCopyPath = async () => {
             size="sm"
             :disabled="store.fileEditor.saving"
             @click="onCloseEditor"
-          >Close</AppButton>
+          >{{ $t('common.close') }}</AppButton>
           <AppButton
             variant="primary"
             size="sm"
             :loading="store.fileEditor.saving"
             :disabled="store.fileEditor.loading || !store.hasFileChanges"
             @click="onSave"
-          >Save</AppButton>
+          >{{ $t('common.save') }}</AppButton>
         </div>
       </template>
 
-        <div v-if="store.fileEditor.loading" class="files-page__state">Loading file…</div>
+        <div v-if="store.fileEditor.loading" class="files-page__state">{{ $t('files.loadingFile') }}</div>
         <div v-else class="files-page__editor-body">
           <CodeEditor
             ref="codeEditorRef"
@@ -719,37 +718,37 @@ const onCopyPath = async () => {
 
     <ConfirmModal
       :show="showDiscardConfirm"
-      title="Discard unsaved changes?"
-      message="You have unsaved changes."
-      description="Continuing will discard your edits. This cannot be undone."
+      :title="$t('files.discard.title')"
+      :message="$t('files.discard.message')"
+      :description="$t('files.discard.description')"
       type="warning"
-      confirm-text="Discard changes"
-      cancel-text="Keep editing"
+      :confirm-text="$t('files.discard.confirm')"
+      :cancel-text="$t('common.keepEditing')"
       @confirm="handleDiscardConfirm"
       @cancel="handleDiscardCancel"
     />
 
     <ConfirmModal
       :show="showInvalidSaveConfirm"
-      title="Save file with syntax errors?"
-      message="This file has syntax errors."
-      description="Saving an invalid config may prevent the server from starting. Save anyway?"
+      :title="$t('files.invalidSave.title')"
+      :message="$t('files.invalidSave.message')"
+      :description="$t('files.invalidSave.description')"
       type="warning"
-      confirm-text="Save anyway"
-      cancel-text="Keep editing"
+      :confirm-text="$t('files.invalidSave.confirm')"
+      :cancel-text="$t('common.keepEditing')"
       @confirm="handleInvalidSaveConfirm"
       @cancel="handleInvalidSaveCancel"
     />
 
     <ConfirmModal
       :show="showDeleteConfirm"
-      title="Delete?"
+      :title="$t('files.delete.title')"
       :message="deleteMessage"
       :description="deleteDescription"
       type="danger"
-      confirm-text="Delete"
+      :confirm-text="$t('common.delete')"
       :loading="deleting"
-      loading-text="Deleting..."
+      :loading-text="$t('common.deleting')"
       @confirm="handleDeleteConfirm"
       @cancel="handleDeleteCancel"
     />
@@ -759,36 +758,36 @@ const onCopyPath = async () => {
          where it would cry wolf over every empty folder. -->
     <ConfirmModal
       :show="showRecursiveConfirm"
-      title="Delete folder and contents?"
+      :title="$t('files.delete.recursiveTitle')"
       :message="recursiveMessage"
-      description="Everything inside will be removed from disk. If this is a world, back it up first — this cannot be undone."
+      :description="$t('files.delete.recursiveDescription')"
       type="danger"
-      confirm-text="Delete everything"
+      :confirm-text="$t('files.delete.recursiveConfirm')"
       :loading="deleting"
-      loading-text="Deleting..."
+      :loading-text="$t('common.deleting')"
       @confirm="handleRecursiveConfirm"
       @cancel="handleRecursiveCancel"
     />
 
     <ConfirmModal
       :show="showReplaceConfirm"
-      title="Replace existing file?"
+      :title="$t('files.replace.title')"
       :message="replaceMessage"
-      description="Uploading will overwrite what is there now."
+      :description="$t('files.replace.description')"
       type="warning"
-      confirm-text="Replace"
+      :confirm-text="$t('files.replace.confirm')"
       @confirm="handleReplaceConfirm"
       @cancel="handleReplaceCancel"
     />
 
     <ConfirmModal
       :show="showNewFolder"
-      title="New folder"
-      :message="`Create a folder in ${store.fileBrowser.currentPath || 'server'}.`"
+      :title="$t('files.newFolder')"
+      :message="$t('files.folder.message', { path: store.fileBrowser.currentPath || $t('files.root') })"
       type="info"
-      confirm-text="Create"
+      :confirm-text="$t('common.create')"
       :loading="creatingFolder"
-      loading-text="Creating..."
+      :loading-text="$t('common.creating')"
       @confirm="handleNewFolderConfirm"
       @cancel="handleNewFolderCancel"
     >
@@ -797,8 +796,8 @@ const onCopyPath = async () => {
           v-model="newFolderName"
           type="text"
           class="files-page__folder-input"
-          placeholder="Folder name"
-          aria-label="Folder name"
+          :placeholder="$t('files.folder.name')"
+          :aria-label="$t('files.folder.name')"
           @keydown.enter.prevent="handleNewFolderConfirm"
         />
       </template>

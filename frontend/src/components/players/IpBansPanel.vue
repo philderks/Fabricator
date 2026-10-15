@@ -5,6 +5,7 @@ import AppButton from '../ui/AppButton.vue'
 import ConfirmModal from '../modals/ConfirmModal.vue'
 import { usePlayersStore } from '../../stores/players'
 import { useToast } from '../../composables/useToast'
+import { t } from '../../i18n'
 
 const store = usePlayersStore()
 const toast = useToast()
@@ -24,7 +25,7 @@ async function submitIpBan() {
     ipInput.value = ''
     ipReasonInput.value = ''
   } catch (e) {
-    toast.error(e.message || 'Failed to ban IP', 'IP Bans')
+    toast.error(e.message || t('players.ipBans.banFailed'), t('players.ipBans.toastTitle'))
   } finally {
     submitting.value = false
   }
@@ -35,7 +36,7 @@ async function confirmUnban() {
   try {
     await store.removeIpBan(removeTarget.value.ip)
   } catch (e) {
-    toast.error(e.message || 'Failed to unban IP', 'IP Bans')
+    toast.error(e.message || t('players.ipBans.unbanFailed'), t('players.ipBans.toastTitle'))
   } finally {
     removeTarget.value = null
   }
@@ -44,24 +45,24 @@ async function confirmUnban() {
 function subtitle(entry) {
   const parts = []
   if (entry.reason && entry.reason !== 'Banned by an operator.') parts.push(entry.reason)
-  if (entry.created) parts.push(`banned ${String(entry.created).split(' ')[0]}`)
+  if (entry.created) parts.push(t('players.ipBans.bannedOn', { date: String(entry.created).split(' ')[0] }))
   return parts.join(' · ')
 }
 </script>
 
 <template>
-  <Panel :title="`IP bans (${store.ipBans.length})`">
+  <Panel :title="$t('players.ipBans.title', { n: store.ipBans.length })">
     <template #action>
       <button class="ipban-toggle" type="button" @click="expanded = !expanded">
-        {{ expanded ? 'Collapse' : 'Manage' }}
+        {{ expanded ? $t('common.collapse') : $t('common.manage') }}
       </button>
     </template>
 
     <div v-if="expanded">
       <form class="ipban-add" @submit.prevent="submitIpBan">
-        <input v-model="ipInput" class="ipban-input" type="text" placeholder="IP or wildcard (e.g. 192.168.*)" :disabled="submitting" />
-        <input v-model="ipReasonInput" class="ipban-input ipban-input--reason" type="text" placeholder="Reason (optional)" :disabled="submitting" />
-        <AppButton type="submit" variant="danger" size="sm" :loading="submitting">+ Ban IP</AppButton>
+        <input v-model="ipInput" class="ipban-input" type="text" :placeholder="$t('players.ipBans.ipPlaceholder')" :disabled="submitting" />
+        <input v-model="ipReasonInput" class="ipban-input ipban-input--reason" type="text" :placeholder="$t('players.ipBans.reasonPlaceholder')" :disabled="submitting" />
+        <AppButton type="submit" variant="danger" size="sm" :loading="submitting">{{ $t('players.ipBans.banIp') }}</AppButton>
       </form>
 
       <ul v-if="store.ipBans.length" class="ipban-list">
@@ -70,19 +71,18 @@ function subtitle(entry) {
             <span class="ipban-row__ip">{{ entry.ip }}</span>
             <span v-if="subtitle(entry)" class="ipban-row__sub">{{ subtitle(entry) }}</span>
           </div>
-          <AppButton variant="ghost" size="sm" @click="removeTarget = entry">Unban</AppButton>
+          <AppButton variant="ghost" size="sm" @click="removeTarget = entry">{{ $t('players.unban') }}</AppButton>
         </li>
       </ul>
-      <div v-else class="ipban-empty">No banned IPs.</div>
+      <div v-else class="ipban-empty">{{ $t('players.ipBans.empty') }}</div>
     </div>
 
     <ConfirmModal
       :show="!!removeTarget"
-      title="Unban IP?"
-      :message="`Unban ${removeTarget?.ip}?`"
+      :title="$t('players.ipBans.unbanTitle')"
+      :message="$t('players.ipBans.unbanMessage', { ip: removeTarget?.ip })"
       type="warning"
-      confirm-text="Unban"
-      cancel-text="Cancel"
+      :confirm-text="$t('players.unban')"
       @confirm="confirmUnban"
       @cancel="removeTarget = null"
     />

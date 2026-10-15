@@ -8,6 +8,7 @@ import { useServerStore } from '../../stores/server'
 import { useAuthStore } from '../../stores/auth'
 import { deleteServerIcon, getInstalledJava, getJavaStatus, getLoaderGameVersions, getServerInstallProgress, setServerIcon, upgradeServer } from '../../api/servers'
 import { useToast } from '../../composables/useToast'
+import { t } from '../../i18n'
 
 const store = useServerStore()
 const auth = useAuthStore()
@@ -21,15 +22,15 @@ const iconVersion = ref(Date.now())
 const iconInput = ref(null)
 const iconUrl = computed(() => `/api/servers/${store.currentServerId}/icon?v=${iconVersion.value}`)
 
-async function changeIcon(action, successMessage) {
+async function changeIcon(action, successKey) {
   iconBusy.value = true
   try {
     await action()
     iconVersion.value = Date.now()
-    const restart = store.canEditSettings ? '' : ' Restart the server to show it.'
-    toast.success(`${successMessage}${restart}`, 'Server Icon')
+    const restart = store.canEditSettings ? '' : ` ${t('properties.icon.restartToShow')}`
+    toast.success(`${t(successKey)}${restart}`, t('properties.icon.toastTitle'))
   } catch (error) {
-    toast.error(error.message || 'Failed to update server icon', 'Error')
+    toast.error(error.message || t('properties.icon.updateFailed'), t('common.error'))
   } finally {
     iconBusy.value = false
   }
@@ -38,11 +39,11 @@ async function changeIcon(action, successMessage) {
 function onIconPicked(event) {
   const file = event.target.files?.[0]
   event.target.value = ''
-  if (file) changeIcon(() => setServerIcon(store.currentServerId, file), 'Icon updated.')
+  if (file) changeIcon(() => setServerIcon(store.currentServerId, file), 'properties.icon.updated')
 }
 
 function removeIcon() {
-  changeIcon(() => deleteServerIcon(store.currentServerId), 'Icon removed.')
+  changeIcon(() => deleteServerIcon(store.currentServerId), 'properties.icon.removed')
 }
 
 // First-stage migrations are deliberately limited to jar-only server types.
@@ -100,15 +101,14 @@ async function startUpgrade() {
   const target = targetUpgradeVersion.value
   if (!target || !store.server?.id) return
   const confirmed = window.confirm(
-    `Create a full backup and upgrade ${store.server.name} from ${store.server.version} to ${target}? ` +
-    'Downgrades are not supported; restore the new backup if you need to go back.'
+    t('properties.upgrade.confirm', { name: store.server.name, from: store.server.version, to: target })
   )
   if (!confirmed) return
   upgradeStarting.value = true
   upgradePhase.value = 'starting'
   try {
     await upgradeServer(store.server.id, target)
-    toast.info('Upgrade started. Fabricator is creating a full backup before replacing the server version.')
+    toast.info(t('properties.upgrade.started'))
     let progress
     do {
       progress = await getServerInstallProgress(store.server.id)
@@ -118,12 +118,12 @@ async function startUpgrade() {
 
     if (progress?.phase === 'done') {
       await store.loadServer({ silent: true })
-      toast.success(`Server upgraded to ${target}. Your pre-upgrade backup is ready to restore if needed.`)
+      toast.success(t('properties.upgrade.done', { version: target }))
     } else {
-      toast.error(progress?.error || 'The server upgrade failed. Your pre-upgrade backup is available for restore.')
+      toast.error(progress?.error || t('properties.upgrade.failed'))
     }
   } catch (error) {
-    toast.error(error?.message || 'Could not start the server upgrade.')
+    toast.error(error?.message || t('properties.upgrade.startFailed'))
   } finally {
     upgradeStarting.value = false
     upgradePhase.value = ''
@@ -246,21 +246,21 @@ const selectedJavaMajor = computed(() => {
 
 const javaWarning = computed(() => {
   if (customJavaProbe.value && customJavaProbe.value.available === false) {
-    return 'That path could not be run — check it points at a java executable.'
+    return t('properties.java.cannotRun')
   }
   const required = requiredJava.value
   const selected = selectedJavaMajor.value
   if (!required || selected === null) return ''
   if (selected < required) {
-    return `This server needs Java ${required} or newer; the selected runtime reports Java ${selected}.`
+    return t('properties.java.tooOld', { required, selected })
   }
   return ''
 })
 
 const javaAutoHint = computed(() =>
   requiredJava.value
-    ? `Picks an installed Java ${requiredJava.value}+ runtime automatically.`
-    : 'Picks a compatible installed runtime automatically.'
+    ? t('properties.java.autoHintVersion', { version: requiredJava.value })
+    : t('properties.java.autoHint')
 )
 
 onMounted(async () => {
@@ -287,14 +287,14 @@ watch(() => store.serverSettings, () => {
   customJavaOpen.value = false
 })
 
-const modeLabel = computed(() => (showAdvanced.value ? 'Expert mode' : 'Basic mode'))
+const modeLabel = computed(() => (showAdvanced.value ? t('properties.mode.expert') : t('properties.mode.basic')))
 const modeDescription = computed(() =>
   showAdvanced.value
-    ? 'All configuration options are visible. Handle with care.'
-    : 'Hides risky server.properties for quick edits.'
+    ? t('properties.mode.expertDescription')
+    : t('properties.mode.basicDescription')
 )
 const modeButtonLabel = computed(() =>
-  showAdvanced.value ? 'Switch to Basic' : 'Enable Expert Mode'
+  showAdvanced.value ? t('properties.mode.switchToBasic') : t('properties.mode.enableExpert')
 )
 
 const toggleMode = () => {
@@ -315,24 +315,22 @@ const onReset = () => {
 <template>
   <div class="settings-page" v-if="store.serverSettings">
     <div class="settings-page__guard" v-if="!store.canEditSettings">
-      Stop the server before editing configuration.
+      {{ $t('properties.guard') }}
     </div>
 
-    <Panel v-if="canUpgrade && !auth.managed" title="Minecraft version upgrade">
+    <Panel v-if="canUpgrade && !auth.managed" :title="$t('properties.upgrade.title')">
       <div class="settings-page__mode">
         <div>
-          <p class="settings-page__mode-label">Upgrade {{ store.server?.version }}</p>
-          <p class="settings-page__mode-description">
-            Fabricator creates a full backup, stops the server, and installs the selected Vanilla or Paper release. Downgrades are blocked.
-          </p>
-          <p v-if="upgradeStarting" class="settings-page__upgrade-progress">Working: {{ upgradePhase.replaceAll('_', ' ') }}</p>
+          <p class="settings-page__mode-label">{{ $t('properties.upgrade.current', { version: store.server?.version }) }}</p>
+          <p class="settings-page__mode-description">{{ $t('properties.upgrade.description') }}</p>
+          <p v-if="upgradeStarting" class="settings-page__upgrade-progress">{{ $t('properties.upgrade.working', { phase: upgradePhase.replaceAll('_', ' ') }) }}</p>
         </div>
         <div class="settings-page__upgrade-actions">
           <select
             v-model="targetUpgradeVersion"
             class="settings-page__input"
             :disabled="upgradeStarting || !upgradeVersions.length"
-            aria-label="Target Minecraft version"
+            :aria-label="$t('properties.upgrade.targetLabel')"
           >
             <option v-for="version in upgradeVersions" :key="version" :value="version">{{ version }}</option>
           </select>
@@ -342,13 +340,13 @@ const onReset = () => {
             :disabled="!targetUpgradeVersion"
             @click="startUpgrade"
           >
-            Upgrade server
+            {{ $t('properties.upgrade.submit') }}
           </AppButton>
         </div>
       </div>
     </Panel>
 
-    <Panel title="Mode">
+    <Panel :title="$t('properties.mode.title')">
       <div class="settings-page__mode">
         <div>
           <p class="settings-page__mode-label">{{ modeLabel }}</p>
@@ -365,12 +363,12 @@ const onReset = () => {
       </div>
     </Panel>
 
-    <Panel title="Server Identity">
-      <FormField class="settings-page__icon-field" label="Server Icon" hint="Any image — cropped and resized to 64×64. Shown in the multiplayer server list.">
+    <Panel :title="$t('properties.identity.title')">
+      <FormField class="settings-page__icon-field" :label="$t('properties.identity.icon')" :hint="$t('properties.identity.iconHint')">
         <template #default="{ id, describedBy }">
           <div class="settings-page__icon-row">
             <span class="settings-page__icon">
-              <img v-show="hasIcon" :src="iconUrl" alt="Current server icon" @load="hasIcon = true" @error="hasIcon = false" />
+              <img v-show="hasIcon" :src="iconUrl" :alt="$t('properties.identity.iconAlt')" @load="hasIcon = true" @error="hasIcon = false" />
               <span v-if="!hasIcon" aria-hidden="true">?</span>
             </span>
             <input
@@ -383,27 +381,27 @@ const onReset = () => {
               @change="onIconPicked"
             />
             <AppButton variant="ghost" size="sm" :loading="iconBusy" @click="iconInput.click()">
-              {{ hasIcon ? 'Change image' : 'Upload image' }}
+              {{ hasIcon ? $t('properties.icon.change') : $t('properties.icon.upload') }}
             </AppButton>
-            <AppButton v-if="hasIcon" variant="ghost" size="sm" :disabled="iconBusy" @click="removeIcon">Remove</AppButton>
+            <AppButton v-if="hasIcon" variant="ghost" size="sm" :disabled="iconBusy" @click="removeIcon">{{ $t('common.remove') }}</AppButton>
           </div>
         </template>
       </FormField>
       <div class="settings-page__grid">
-        <FormField label="Server Name">
+        <FormField :label="$t('properties.identity.name')">
           <template #default="{ id, describedBy }">
             <input
               :id="id"
               class="settings-page__input"
               type="text"
-              placeholder="My Minecraft Server"
+              :placeholder="$t('properties.identity.namePlaceholder')"
               v-model="store.serverSettings.name"
               :disabled="!store.canEditSettings"
               :aria-describedby="describedBy"
             />
           </template>
         </FormField>
-        <FormField label="Bug Report URL" hint="Shown in support commands">
+        <FormField :label="$t('properties.identity.bugReportUrl')" :hint="$t('properties.identity.bugReportUrlHint')">
           <template #default="{ id, describedBy }">
             <input
               :id="id"
@@ -417,21 +415,21 @@ const onReset = () => {
           </template>
         </FormField>
 
-        <FormField label="Message of the Day" :hint="`${motdCharacters}/59 characters`">
+        <FormField :label="$t('properties.identity.motd')" :hint="$t('properties.identity.motdHint', { count: motdCharacters, max: 59 })">
           <template #default="{ id, describedBy }">
             <input
               :id="id"
               class="settings-page__input"
               type="text"
               maxlength="59"
-              placeholder="Welcome to Fabricator"
+              :placeholder="$t('properties.identity.motdPlaceholder')"
               v-model="store.serverSettings.motd"
               :disabled="!store.canEditSettings"
               :aria-describedby="describedBy"
             />
           </template>
         </FormField>
-        <FormField label="Server Port" hint="Default 25565">
+        <FormField :label="$t('properties.identity.port')" :hint="$t('properties.identity.portHint')">
           <template #default="{ id, describedBy }">
             <input
               :id="id"
@@ -446,7 +444,7 @@ const onReset = () => {
           </template>
         </FormField>
 
-        <FormField label="Bind Address (optional)">
+        <FormField :label="$t('properties.identity.bindAddress')">
           <template #default="{ id, describedBy }">
             <input
               :id="id"
@@ -459,7 +457,7 @@ const onReset = () => {
             />
           </template>
         </FormField>
-        <FormField label="Max Players">
+        <FormField :label="$t('properties.identity.maxPlayers')">
           <template #default="{ id, describedBy }">
             <input
               :id="id"
@@ -474,7 +472,7 @@ const onReset = () => {
           </template>
         </FormField>
 
-        <FormField label="Running Version" hint="Version changes require reinstall">
+        <FormField :label="$t('properties.identity.runningVersion')" :hint="$t('properties.identity.runningVersionHint')">
           <template #default="{ id, describedBy }">
             <div class="settings-page__readonly">
               <input
@@ -485,11 +483,11 @@ const onReset = () => {
                 readonly
                 :aria-describedby="describedBy"
               />
-              <span class="settings-page__readonly-badge">Read-only</span>
+              <span class="settings-page__readonly-badge">{{ $t('properties.readOnly') }}</span>
             </div>
           </template>
         </FormField>
-        <FormField label="Mod Loader" hint="Loader changes require reinstall">
+        <FormField :label="$t('properties.identity.modLoader')" :hint="$t('properties.identity.modLoaderHint')">
           <template #default="{ id, describedBy }">
             <div class="settings-page__readonly">
               <input
@@ -500,16 +498,16 @@ const onReset = () => {
                 readonly
                 :aria-describedby="describedBy"
               />
-              <span class="settings-page__readonly-badge">Read-only</span>
+              <span class="settings-page__readonly-badge">{{ $t('properties.readOnly') }}</span>
             </div>
           </template>
         </FormField>
       </div>
     </Panel>
 
-    <Panel title="Gameplay">
+    <Panel :title="$t('properties.gameplay.title')">
       <div class="settings-page__grid">
-        <FormField label="Difficulty">
+        <FormField :label="$t('properties.gameplay.difficulty')">
           <template #default="{ id, describedBy }">
             <select
               :id="id"
@@ -518,14 +516,14 @@ const onReset = () => {
               :disabled="!store.canEditSettings"
               :aria-describedby="describedBy"
             >
-              <option value="peaceful">Peaceful</option>
-              <option value="easy">Easy</option>
-              <option value="normal">Normal</option>
-              <option value="hard">Hard</option>
+              <option value="peaceful">{{ $t('properties.gameplay.difficulties.peaceful') }}</option>
+              <option value="easy">{{ $t('properties.gameplay.difficulties.easy') }}</option>
+              <option value="normal">{{ $t('properties.gameplay.difficulties.normal') }}</option>
+              <option value="hard">{{ $t('properties.gameplay.difficulties.hard') }}</option>
             </select>
           </template>
         </FormField>
-        <FormField label="Default Gamemode">
+        <FormField :label="$t('properties.gameplay.gamemode')">
           <template #default="{ id, describedBy }">
             <select
               :id="id"
@@ -534,15 +532,15 @@ const onReset = () => {
               :disabled="!store.canEditSettings"
               :aria-describedby="describedBy"
             >
-              <option value="survival">Survival</option>
-              <option value="creative">Creative</option>
-              <option value="adventure">Adventure</option>
-              <option value="spectator">Spectator</option>
+              <option value="survival">{{ $t('properties.gameplay.gamemodes.survival') }}</option>
+              <option value="creative">{{ $t('properties.gameplay.gamemodes.creative') }}</option>
+              <option value="adventure">{{ $t('properties.gameplay.gamemodes.adventure') }}</option>
+              <option value="spectator">{{ $t('properties.gameplay.gamemodes.spectator') }}</option>
             </select>
           </template>
         </FormField>
 
-        <FormField label="Spawn Protection (blocks)">
+        <FormField :label="$t('properties.gameplay.spawnProtection')">
           <template #default="{ id, describedBy }">
             <input
               :id="id"
@@ -556,7 +554,7 @@ const onReset = () => {
             />
           </template>
         </FormField>
-        <FormField label="Idle Timeout (minutes)" hint="0 disables idle kick">
+        <FormField :label="$t('properties.gameplay.idleTimeout')" :hint="$t('properties.gameplay.idleTimeoutHint')">
           <template #default="{ id, describedBy }">
             <input
               :id="id"
@@ -572,7 +570,7 @@ const onReset = () => {
         </FormField>
 
         <template v-if="showAdvanced">
-          <FormField label="Pause When Empty (seconds)">
+          <FormField :label="$t('properties.gameplay.pauseWhenEmpty')">
             <template #default="{ id, describedBy }">
               <input
                 :id="id"
@@ -586,7 +584,7 @@ const onReset = () => {
               />
             </template>
           </FormField>
-          <FormField label="Function Permission Level">
+          <FormField :label="$t('properties.gameplay.functionPermissionLevel')">
             <template #default="{ id, describedBy }">
               <input
                 :id="id"
@@ -600,7 +598,7 @@ const onReset = () => {
               />
             </template>
           </FormField>
-          <FormField label="Operator Permission Level">
+          <FormField :label="$t('properties.gameplay.opPermissionLevel')">
             <template #default="{ id, describedBy }">
               <input
                 :id="id"
@@ -621,59 +619,59 @@ const onReset = () => {
         <ToggleRow
           v-if="showAdvanced"
           v-model="store.serverSettings.forceGamemode"
-          label="Force Gamemode"
+          :label="$t('properties.gameplay.forceGamemode')"
           :disabled="!store.canEditSettings"
         />
         <ToggleRow
           v-if="showAdvanced"
           v-model="store.serverSettings.hardcore"
-          label="Hardcore"
+          :label="$t('properties.gameplay.hardcore')"
           :disabled="!store.canEditSettings"
         />
         <ToggleRow
           v-if="showAdvanced"
           v-model="store.serverSettings.allowFlight"
-          label="Allow Flight"
+          :label="$t('properties.gameplay.allowFlight')"
           :disabled="!store.canEditSettings"
         />
         <ToggleRow
           v-model="store.serverSettings.pvp"
-          label="Enable PvP"
+          :label="$t('properties.gameplay.pvp')"
           :disabled="!store.canEditSettings"
         />
         <ToggleRow
           v-model="store.serverSettings.whitelist"
-          label="Enable Whitelist"
+          :label="$t('properties.gameplay.whitelist')"
           :disabled="!store.canEditSettings"
         />
         <ToggleRow
           v-if="showAdvanced"
           v-model="store.serverSettings.enforceWhitelist"
-          label="Enforce Whitelist"
+          :label="$t('properties.gameplay.enforceWhitelist')"
           :disabled="!store.canEditSettings"
         />
         <ToggleRow
           v-model="store.serverSettings.commandBlocks"
-          label="Enable Command Blocks"
+          :label="$t('properties.gameplay.commandBlocks')"
           :disabled="!store.canEditSettings"
         />
       </div>
     </Panel>
 
-    <Panel title="World Configuration">
+    <Panel :title="$t('properties.world.title')">
       <div class="settings-page__notice settings-page__notice--warning">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path d="M12 2L2 20H22L12 2Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round" />
           <path d="M12 10V14M12 18H12.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
         </svg>
         <div>
-          <strong>Warning:</strong>
-          Changing level type, seed, or generator settings requires a world reset. Back up first.
+          <strong>{{ $t('properties.world.warningLabel') }}</strong>
+          {{ $t('properties.world.warning') }}
         </div>
       </div>
 
       <div class="settings-page__grid">
-        <FormField label="World Folder Name">
+        <FormField :label="$t('properties.world.levelName')">
           <template #default="{ id, describedBy }">
             <input
               :id="id"
@@ -685,7 +683,7 @@ const onReset = () => {
             />
           </template>
         </FormField>
-        <FormField label="World Type">
+        <FormField :label="$t('properties.world.levelType')">
           <template #default="{ id, describedBy }">
             <select
               :id="id"
@@ -694,28 +692,28 @@ const onReset = () => {
               :disabled="!store.canEditSettings"
               :aria-describedby="describedBy"
             >
-              <option value="default">Default</option>
-              <option value="flat">Flat</option>
-              <option value="large_biomes">Large Biomes</option>
-              <option value="amplified">Amplified</option>
+              <option value="default">{{ $t('properties.world.levelTypes.default') }}</option>
+              <option value="flat">{{ $t('properties.world.levelTypes.flat') }}</option>
+              <option value="large_biomes">{{ $t('properties.world.levelTypes.largeBiomes') }}</option>
+              <option value="amplified">{{ $t('properties.world.levelTypes.amplified') }}</option>
             </select>
           </template>
         </FormField>
 
-        <FormField label="Seed">
+        <FormField :label="$t('properties.world.seed')">
           <template #default="{ id, describedBy }">
             <input
               :id="id"
               class="settings-page__input"
               type="text"
-              placeholder="Leave empty for random"
+              :placeholder="$t('properties.world.seedPlaceholder')"
               v-model="store.serverSettings.seed"
               :disabled="!store.canEditSettings"
               :aria-describedby="describedBy"
             />
           </template>
         </FormField>
-        <FormField v-if="showAdvanced" label="Generator Settings (JSON)">
+        <FormField v-if="showAdvanced" :label="$t('properties.world.generatorSettings')">
           <template #default="{ id, describedBy }">
             <textarea
               :id="id"
@@ -729,7 +727,7 @@ const onReset = () => {
         </FormField>
 
         <template v-if="showAdvanced">
-          <FormField label="Max World Size">
+          <FormField :label="$t('properties.world.maxWorldSize')">
             <template #default="{ id, describedBy }">
               <input
                 :id="id"
@@ -742,7 +740,7 @@ const onReset = () => {
               />
             </template>
           </FormField>
-          <FormField label="Entity Broadcast Range (%)">
+          <FormField :label="$t('properties.world.entityBroadcastRange')">
             <template #default="{ id, describedBy }">
               <input
                 :id="id"
@@ -756,7 +754,7 @@ const onReset = () => {
               />
             </template>
           </FormField>
-          <FormField label="Max Chained Neighbor Updates">
+          <FormField :label="$t('properties.world.maxChainedNeighborUpdates')">
             <template #default="{ id, describedBy }">
               <input
                 :id="id"
@@ -775,30 +773,30 @@ const onReset = () => {
       <div class="settings-page__toggles">
         <ToggleRow
           v-model="store.serverSettings.generateStructures"
-          label="Generate Structures"
+          :label="$t('properties.world.generateStructures')"
           :disabled="!store.canEditSettings"
         />
         <ToggleRow
           v-model="store.serverSettings.spawnAnimals"
-          label="Spawn Animals"
+          :label="$t('properties.world.spawnAnimals')"
           :disabled="!store.canEditSettings"
         />
         <ToggleRow
           v-model="store.serverSettings.spawnMonsters"
-          label="Spawn Monsters"
+          :label="$t('properties.world.spawnMonsters')"
           :disabled="!store.canEditSettings"
         />
         <ToggleRow
           v-model="store.serverSettings.spawnNpcs"
-          label="Spawn NPCs"
+          :label="$t('properties.world.spawnNpcs')"
           :disabled="!store.canEditSettings"
         />
       </div>
     </Panel>
 
-    <Panel v-if="showAdvanced" title="Resources & Packs">
+    <Panel v-if="showAdvanced" :title="$t('properties.resources.title')">
       <div class="settings-page__grid">
-        <FormField label="Resource Pack URL">
+        <FormField :label="$t('properties.resources.url')">
           <template #default="{ id, describedBy }">
             <input
               :id="id"
@@ -811,13 +809,13 @@ const onReset = () => {
             />
           </template>
         </FormField>
-        <FormField label="Resource Pack SHA-1">
+        <FormField :label="$t('properties.resources.sha1')">
           <template #default="{ id, describedBy }">
             <input
               :id="id"
               class="settings-page__input"
               type="text"
-              placeholder="40 character hash"
+              :placeholder="$t('properties.resources.sha1Placeholder')"
               v-model="store.serverSettings.resourcePackSha1"
               :disabled="!store.canEditSettings"
               :aria-describedby="describedBy"
@@ -825,7 +823,7 @@ const onReset = () => {
           </template>
         </FormField>
 
-        <FormField label="Resource Pack ID">
+        <FormField :label="$t('properties.resources.id')">
           <template #default="{ id, describedBy }">
             <input
               :id="id"
@@ -837,13 +835,13 @@ const onReset = () => {
             />
           </template>
         </FormField>
-        <FormField label="Resource Pack Prompt">
+        <FormField :label="$t('properties.resources.prompt')">
           <template #default="{ id, describedBy }">
             <input
               :id="id"
               class="settings-page__input"
               type="text"
-              placeholder="Displayed when joining"
+              :placeholder="$t('properties.resources.promptPlaceholder')"
               v-model="store.serverSettings.resourcePackPrompt"
               :disabled="!store.canEditSettings"
               :aria-describedby="describedBy"
@@ -855,13 +853,13 @@ const onReset = () => {
       <div class="settings-page__toggles">
         <ToggleRow
           v-model="store.serverSettings.requireResourcePack"
-          label="Require Players to Accept Pack"
+          :label="$t('properties.resources.require')"
           :disabled="!store.canEditSettings"
         />
       </div>
 
       <div class="settings-page__grid">
-        <FormField label="Enabled Data Packs" hint="Comma separated identifiers">
+        <FormField :label="$t('properties.resources.enabledPacks')" :hint="$t('properties.resources.enabledPacksHint')">
           <template #default="{ id, describedBy }">
             <textarea
               :id="id"
@@ -873,7 +871,7 @@ const onReset = () => {
             ></textarea>
           </template>
         </FormField>
-        <FormField label="Disabled Data Packs">
+        <FormField :label="$t('properties.resources.disabledPacks')">
           <template #default="{ id, describedBy }">
             <textarea
               :id="id"
@@ -887,10 +885,10 @@ const onReset = () => {
       </div>
     </Panel>
 
-    <Panel v-if="showAdvanced" title="Networking & Connectivity">
+    <Panel v-if="showAdvanced" :title="$t('properties.network.title')">
       <div class="settings-page__grid settings-page__grid--three">
         <div class="settings-page__field">
-          <span class="settings-page__label">Server Status Broadcast</span>
+          <span class="settings-page__label">{{ $t('properties.network.statusBroadcast') }}</span>
           <label
             class="settings-page__toggle settings-page__toggle--inline"
             :class="{ 'settings-page__toggle--disabled': !store.canEditSettings }"
@@ -900,7 +898,7 @@ const onReset = () => {
               v-model="store.serverSettings.enableStatus"
               :disabled="!store.canEditSettings"
             />
-            <span>Enable Status</span>
+            <span>{{ $t('properties.network.enableStatus') }}</span>
           </label>
           <input
             class="settings-page__input"
@@ -909,9 +907,9 @@ const onReset = () => {
             v-model.number="store.serverSettings.statusHeartbeatInterval"
             :disabled="statusIntervalDisabled"
           />
-          <span class="settings-page__hint">Seconds between status heartbeats</span>
+          <span class="settings-page__hint">{{ $t('properties.network.statusInterval') }}</span>
         </div>
-        <FormField label="Rate Limit (packets/second)">
+        <FormField :label="$t('properties.network.rateLimit')">
           <template #default="{ id, describedBy }">
             <input
               :id="id"
@@ -924,7 +922,7 @@ const onReset = () => {
             />
           </template>
         </FormField>
-        <FormField label="Compression Threshold (bytes)">
+        <FormField :label="$t('properties.network.compressionThreshold')">
           <template #default="{ id, describedBy }">
             <input
               :id="id"
@@ -939,7 +937,7 @@ const onReset = () => {
         </FormField>
 
         <div class="settings-page__field">
-          <span class="settings-page__label">Query Port</span>
+          <span class="settings-page__label">{{ $t('properties.network.queryPort') }}</span>
           <label
             class="settings-page__toggle settings-page__toggle--inline"
             :class="{ 'settings-page__toggle--disabled': !store.canEditSettings }"
@@ -949,7 +947,7 @@ const onReset = () => {
               v-model="store.serverSettings.enableQuery"
               :disabled="!store.canEditSettings"
             />
-            <span>Enable Query</span>
+            <span>{{ $t('properties.network.enableQuery') }}</span>
           </label>
           <input
             class="settings-page__input"
@@ -961,7 +959,7 @@ const onReset = () => {
           />
         </div>
         <div class="settings-page__field">
-          <span class="settings-page__label">RCON Port</span>
+          <span class="settings-page__label">{{ $t('properties.network.rconPort') }}</span>
           <label
             class="settings-page__toggle settings-page__toggle--inline"
             :class="{ 'settings-page__toggle--disabled': !store.canEditSettings }"
@@ -971,7 +969,7 @@ const onReset = () => {
               v-model="store.serverSettings.enableRcon"
               :disabled="!store.canEditSettings"
             />
-            <span>Enable RCON</span>
+            <span>{{ $t('properties.network.enableRcon') }}</span>
           </label>
           <input
             class="settings-page__input"
@@ -982,7 +980,7 @@ const onReset = () => {
             :disabled="rconDisabled"
           />
         </div>
-        <FormField label="RCON Password">
+        <FormField :label="$t('properties.network.rconPassword')">
           <template #default="{ id, describedBy }">
             <input
               :id="id"
@@ -999,42 +997,42 @@ const onReset = () => {
       <div class="settings-page__toggles">
         <ToggleRow
           v-model="store.serverSettings.onlineMode"
-          label="Online Mode (Mojang Auth)"
+          :label="$t('properties.network.onlineMode')"
           :disabled="!store.canEditSettings"
         />
         <ToggleRow
           v-model="store.serverSettings.enforceSecureProfile"
-          label="Enforce Secure Profiles"
+          :label="$t('properties.network.enforceSecureProfile')"
           :disabled="!store.canEditSettings"
         />
         <ToggleRow
           v-model="store.serverSettings.hideOnlinePlayers"
-          label="Hide Player Count"
+          :label="$t('properties.network.hideOnlinePlayers')"
           :disabled="!store.canEditSettings"
         />
         <ToggleRow
           v-model="store.serverSettings.preventProxyConnections"
-          label="Prevent Proxy Connections"
+          :label="$t('properties.network.preventProxyConnections')"
           :disabled="!store.canEditSettings"
         />
         <ToggleRow
           v-model="store.serverSettings.logIps"
-          label="Log Player IPs"
+          :label="$t('properties.network.logIps')"
           :disabled="!store.canEditSettings"
         />
         <ToggleRow
           v-model="store.serverSettings.acceptsTransfers"
-          label="Accept Transfers From Proxy"
+          :label="$t('properties.network.acceptsTransfers')"
           :disabled="!store.canEditSettings"
         />
         <ToggleRow
           v-model="store.serverSettings.useNativeTransport"
-          label="Use Native Transport"
+          :label="$t('properties.network.useNativeTransport')"
           :disabled="!store.canEditSettings"
         />
         <ToggleRow
           v-model="store.serverSettings.syncChunkWrites"
-          label="Sync Chunk Writes"
+          :label="$t('properties.network.syncChunkWrites')"
           :disabled="!store.canEditSettings"
         />
       </div>
@@ -1042,19 +1040,19 @@ const onReset = () => {
 
     <!-- Launch tuning. Hidden in managed mode, where the deployment owns the
          JVM and the settings API rejects both fields outright. -->
-    <Panel v-if="!auth.managed" title="Java Runtime">
+    <Panel v-if="!auth.managed" :title="$t('properties.java.title')">
       <div class="settings-page__notice settings-page__notice--info">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" />
           <path d="M12 8V12M12 16H12.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
         </svg>
         <div>
-          <strong>Heads up:</strong> These change how the server process is launched and take effect on the next start.
+          <strong>{{ $t('properties.headsUp') }}</strong> {{ $t('properties.java.notice') }}
         </div>
       </div>
 
       <div class="settings-page__grid">
-        <FormField label="Java Runtime" :hint="javaSelection === 'auto' ? javaAutoHint : ''">
+        <FormField :label="$t('properties.java.title')" :hint="javaSelection === 'auto' ? javaAutoHint : ''">
           <template #default="{ id, describedBy }">
             <select
               :id="id"
@@ -1064,23 +1062,23 @@ const onReset = () => {
               :aria-describedby="describedBy"
               @change="onJavaSelectionChange($event.target.value)"
             >
-              <option value="auto">Automatic (recommended)</option>
+              <option value="auto">{{ $t('properties.java.auto') }}</option>
               <option
                 v-for="entry in installedJava"
                 :key="entry.path"
                 :value="`managed:${entry.major}`"
               >
-                Java {{ entry.major }} (managed)
+                {{ $t('properties.java.managedOption', { major: entry.major }) }}
               </option>
-              <option value="custom">Custom path…</option>
+              <option value="custom">{{ $t('properties.java.customPath') }}</option>
             </select>
           </template>
         </FormField>
 
         <FormField
           v-if="javaSelection === 'custom'"
-          label="Java Executable Path"
-          :hint="customJavaProbe?.major ? `Detected Java ${customJavaProbe.major}.` : 'Full path to a java executable, or a command on PATH.'"
+          :label="$t('properties.java.path')"
+          :hint="customJavaProbe?.major ? $t('properties.java.detected', { major: customJavaProbe.major }) : $t('properties.java.pathHint')"
         >
           <template #default="{ id, describedBy }">
             <input
@@ -1105,8 +1103,8 @@ const onReset = () => {
       </div>
 
       <FormField
-        label="JVM Arguments"
-        hint="Extra flags passed to the JVM, e.g. -XX:+UseZGC -XX:+ZGenerational. Set the heap with Memory Allocation below, not with -Xmx."
+        :label="$t('properties.java.jvmArgs')"
+        :hint="$t('properties.java.jvmArgsHint')"
       >
         <template #default="{ id, describedBy }">
           <textarea
@@ -1123,19 +1121,19 @@ const onReset = () => {
       </FormField>
     </Panel>
 
-    <Panel title="Performance">
+    <Panel :title="$t('properties.performance.title')">
       <div class="settings-page__notice settings-page__notice--info">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" />
           <path d="M12 8V12M12 16H12.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
         </svg>
         <div>
-          <strong>Heads up:</strong> Memory, distance, or compression changes require a server restart.
+          <strong>{{ $t('properties.headsUp') }}</strong> {{ $t('properties.performance.notice') }}
         </div>
       </div>
 
       <div class="settings-page__grid settings-page__grid--three">
-        <FormField v-if="!auth.managed" label="Minimum Memory" hint="Initial JVM heap size (-Xms).">
+        <FormField v-if="!auth.managed" :label="$t('properties.performance.memoryMin')" :hint="$t('properties.performance.memoryMinHint')">
           <template #default="{ id, describedBy }">
             <div class="settings-page__memory">
               <input
@@ -1155,7 +1153,7 @@ const onReset = () => {
             </div>
           </template>
         </FormField>
-        <FormField v-if="!auth.managed" label="Maximum Memory" hint="Maximum JVM heap size (-Xmx).">
+        <FormField v-if="!auth.managed" :label="$t('properties.performance.memoryMax')" :hint="$t('properties.performance.memoryMaxHint')">
           <template #default="{ id, describedBy }">
             <div class="settings-page__memory">
               <input
@@ -1173,7 +1171,7 @@ const onReset = () => {
                 class="settings-page__select settings-page__memory-unit"
                 :value="store.serverSettings.memoryUnit"
                 :disabled="!store.canEditSettings"
-                aria-label="Memory unit"
+                :aria-label="$t('properties.performance.memoryUnit')"
                 @change="onMemoryUnitChange($event.target.value)"
               >
                 <option value="GB">GB</option>
@@ -1182,7 +1180,7 @@ const onReset = () => {
             </div>
           </template>
         </FormField>
-        <FormField label="View Distance (chunks)">
+        <FormField :label="$t('properties.performance.viewDistance')">
           <template #default="{ id, describedBy }">
             <input
               :id="id"
@@ -1196,7 +1194,7 @@ const onReset = () => {
             />
           </template>
         </FormField>
-        <FormField label="Simulation Distance (chunks)">
+        <FormField :label="$t('properties.performance.simulationDistance')">
           <template #default="{ id, describedBy }">
             <input
               :id="id"
@@ -1212,7 +1210,7 @@ const onReset = () => {
         </FormField>
 
         <template v-if="showAdvanced">
-          <FormField label="Max Tick Time (ms)">
+          <FormField :label="$t('properties.performance.maxTickTime')">
             <template #default="{ id, describedBy }">
               <input
                 :id="id"
@@ -1225,7 +1223,7 @@ const onReset = () => {
               />
             </template>
           </FormField>
-          <FormField label="Region File Compression">
+          <FormField :label="$t('properties.performance.regionFileCompression')">
             <template #default="{ id, describedBy }">
               <select
                 :id="id"
@@ -1245,10 +1243,10 @@ const onReset = () => {
       </div>
     </Panel>
 
-    <Panel v-if="showAdvanced" title="Security & Automation">
+    <Panel v-if="showAdvanced" :title="$t('properties.security.title')">
       <div class="settings-page__grid">
         <div class="settings-page__field">
-          <span class="settings-page__label">Broadcast Console to Ops</span>
+          <span class="settings-page__label">{{ $t('properties.security.broadcastConsole') }}</span>
           <label
             class="settings-page__toggle settings-page__toggle--inline"
             :class="{ 'settings-page__toggle--disabled': !store.canEditSettings }"
@@ -1258,11 +1256,11 @@ const onReset = () => {
               v-model="store.serverSettings.broadcastConsoleToOps"
               :disabled="!store.canEditSettings"
             />
-            <span>Enabled</span>
+            <span>{{ $t('properties.enabled') }}</span>
           </label>
         </div>
         <div class="settings-page__field">
-          <span class="settings-page__label">Broadcast RCON to Ops</span>
+          <span class="settings-page__label">{{ $t('properties.security.broadcastRcon') }}</span>
           <label
             class="settings-page__toggle settings-page__toggle--inline"
             :class="{ 'settings-page__toggle--disabled': !store.canEditSettings }"
@@ -1272,11 +1270,11 @@ const onReset = () => {
               v-model="store.serverSettings.broadcastRconToOps"
               :disabled="!store.canEditSettings"
             />
-            <span>Enabled</span>
+            <span>{{ $t('properties.enabled') }}</span>
           </label>
         </div>
 
-        <FormField label="Text Filtering Config">
+        <FormField :label="$t('properties.security.textFilteringConfig')">
           <template #default="{ id, describedBy }">
             <textarea
               :id="id"
@@ -1288,7 +1286,7 @@ const onReset = () => {
             ></textarea>
           </template>
         </FormField>
-        <FormField label="Text Filtering Version">
+        <FormField :label="$t('properties.security.textFilteringVersion')">
           <template #default="{ id, describedBy }">
             <input
               :id="id"
@@ -1306,46 +1304,46 @@ const onReset = () => {
       <div class="settings-page__toggles">
         <ToggleRow
           v-model="store.serverSettings.enableCodeOfConduct"
-          label="Enable Code of Conduct"
+          :label="$t('properties.security.codeOfConduct')"
           :disabled="!store.canEditSettings"
         />
         <ToggleRow
           v-model="store.serverSettings.enableJmxMonitoring"
-          label="Enable JMX Monitoring"
+          :label="$t('properties.security.jmxMonitoring')"
           :disabled="!store.canEditSettings"
         />
       </div>
     </Panel>
 
-    <Panel v-if="!auth.managed" title="Danger zone">
+    <Panel v-if="!auth.managed" :title="$t('properties.danger.title')">
       <div class="settings-page__danger">
-        <p class="settings-page__danger-text">Deleting a server removes its files and backups. This cannot be undone.</p>
+        <p class="settings-page__danger-text">{{ $t('properties.danger.text') }}</p>
         <AppButton variant="danger" :loading="store.deletingServer" @click="store.openDeleteServerModal">
-          {{ store.deletingServer ? 'Deleting…' : 'Delete server' }}
+          {{ store.deletingServer ? $t('common.deletingEllipsis') : $t('properties.danger.deleteServer') }}
         </AppButton>
       </div>
     </Panel>
 
-    <footer class="settings-page__footer" aria-label="Settings actions">
+    <footer class="settings-page__footer" :aria-label="$t('properties.footerLabel')">
       <div class="settings-page__footer-inner">
         <AppButton
           variant="ghost"
           :disabled="!isDirty || !store.canEditSettings"
           @click="onReset"
         >
-          Reset
+          {{ $t('properties.reset') }}
         </AppButton>
         <AppButton
           variant="primary"
           :disabled="!isDirty || !store.canEditSettings"
           @click="onSave"
         >
-          Save Changes
+          {{ $t('properties.saveChanges') }}
         </AppButton>
       </div>
     </footer>
   </div>
-  <div v-else class="settings-page__loading">Loading settings…</div>
+  <div v-else class="settings-page__loading">{{ $t('properties.loading') }}</div>
 </template>
 
 <style scoped>

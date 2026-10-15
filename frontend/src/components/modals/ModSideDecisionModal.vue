@@ -1,20 +1,20 @@
 <template>
   <BaseModal
     :show="show"
-    title="Classify Uncertain Mods"
+    :title="$t('sideDecision.title')"
     size="large"
     @close="handleCancel"
   >
     <div class="intro">
-      <p class="intro-title">Some mods could not be classified automatically.</p>
-      <p class="intro-text">
-        Choose for each mod whether it should be treated as <strong>Server</strong> (keep/install)
-        or <strong>Client</strong> (skip for dedicated server).
-      </p>
+      <p class="intro-title">{{ $t('sideDecision.introTitle') }}</p>
+      <i18n-t keypath="sideDecision.intro" tag="p" class="intro-text">
+        <template #server><strong>{{ $t('sideDecision.server') }}</strong></template>
+        <template #client><strong>{{ $t('sideDecision.client') }}</strong></template>
+      </i18n-t>
     </div>
 
     <div class="summary">
-      <span>{{ mods.length }} mods require a decision</span>
+      <span>{{ $t('sideDecision.needDecision', mods.length) }}</span>
       <div class="summary-actions">
         <AppButton
           variant="ghost"
@@ -22,10 +22,10 @@
           :disabled="!mods.length || checkingAll"
           @click="checkAllViaApi"
         >
-          {{ checkingAll ? `Checking ${checkedCount}/${mods.length}...` : 'Check All via API' }}
+          {{ checkingAll ? $t('sideDecision.checkingProgress', { done: checkedCount, total: mods.length }) : $t('sideDecision.checkAll') }}
         </AppButton>
-        <span v-if="unresolvedCount > 0" class="summary-warning">{{ unresolvedCount }} unresolved</span>
-        <span v-else class="summary-ok">All resolved</span>
+        <span v-if="unresolvedCount > 0" class="summary-warning">{{ $t('sideDecision.unresolved', { n: unresolvedCount }) }}</span>
+        <span v-else class="summary-ok">{{ $t('sideDecision.allResolved') }}</span>
       </div>
     </div>
 
@@ -42,16 +42,16 @@
               :disabled="rowChecking(mod.path)"
               @click="checkSingleViaApi(mod)"
             >
-              {{ rowChecking(mod.path) ? 'Checking...' : 'Check via API' }}
+              {{ rowChecking(mod.path) ? $t('sideDecision.checking') : $t('sideDecision.check') }}
             </AppButton>
-            <div class="toggle" role="group" :aria-label="`Side selection for ${mod.path}`">
+            <div class="toggle" role="group" :aria-label="$t('sideDecision.sideSelection', { path: mod.path })">
               <button
                 type="button"
                 class="toggle-btn"
                 :class="{ active: selections[mod.path] === 'server' }"
                 @click="setSide(mod.path, 'server')"
               >
-                Server
+                {{ $t('sideDecision.server') }}
               </button>
               <button
                 type="button"
@@ -59,19 +59,19 @@
                 :class="{ active: selections[mod.path] === 'client' }"
                 @click="setSide(mod.path, 'client')"
               >
-                Client
+                {{ $t('sideDecision.client') }}
               </button>
             </div>
           </div>
         </div>
-        <p class="mod-reason">{{ mod.reason || 'No metadata available.' }}</p>
+        <p class="mod-reason">{{ mod.reason || $t('sideDecision.noMetadata') }}</p>
         <p v-if="apiCheckSummary(mod.path)" class="mod-api-result">{{ apiCheckSummary(mod.path) }}</p>
       </article>
     </div>
 
     <template #footer>
       <AppButton variant="ghost" size="md" :disabled="loading" @click="handleCancel">
-        Cancel
+        {{ $t('common.cancel') }}
       </AppButton>
       <AppButton
         variant="primary"
@@ -80,7 +80,7 @@
         :loading="loading"
         @click="handleConfirm"
       >
-        Apply Decisions
+        {{ $t('sideDecision.apply') }}
       </AppButton>
     </template>
   </BaseModal>
@@ -92,6 +92,7 @@ import BaseModal from './BaseModal.vue'
 import AppButton from '../ui/AppButton.vue'
 import { getModDetails, searchMods } from '../../api/modrinth'
 import { pLimit, withBackoff } from '../../api/throttle'
+import { t } from '../../i18n'
 
 const props = defineProps({
   show: { type: Boolean, required: true },
@@ -127,15 +128,16 @@ function apiCheckSummary(path) {
     return ''
   }
   if (check.state === 'checking') {
-    return 'Checking Modrinth API...'
+    return t('sideDecision.checkingApi')
   }
   if (check.state === 'error') {
-    return check.message || 'API check failed.'
+    return check.message || t('sideDecision.checkFailed')
   }
-  const recommendation = check.recommendation ? `Recommendation: ${check.recommendation.toUpperCase()}. ` : ''
-  const serverSide = check.serverSide ? `server_side=${check.serverSide}. ` : ''
-  const project = check.projectTitle ? `Match: ${check.projectTitle}.` : 'No exact match found.'
-  return `${recommendation}${serverSide}${project}`
+  const side = check.recommendation === 'server' ? t('sideDecision.server') : t('sideDecision.client')
+  const recommendation = check.recommendation ? t('sideDecision.recommendation', { side: side.toUpperCase() }) : ''
+  const serverSide = check.serverSide ? `server_side=${check.serverSide}.` : ''
+  const project = check.projectTitle ? t('sideDecision.match', { title: check.projectTitle }) : t('sideDecision.noExactMatch')
+  return [recommendation, serverSide, project].filter(Boolean).join(' ')
 }
 
 function setSide(path, side) {
@@ -177,7 +179,7 @@ async function checkModViaApi(mod, { signal } = {}) {
     if (!hits.length) {
       checks.value = {
         ...checks.value,
-        [path]: { state: 'done', message: 'No Modrinth search result found.', recommendation: '', serverSide: '', projectTitle: '' }
+        [path]: { state: 'done', message: t('sideDecision.noSearchResult'), recommendation: '', serverSide: '', projectTitle: '' }
       }
       return
     }
@@ -215,7 +217,7 @@ async function checkModViaApi(mod, { signal } = {}) {
     }
     checks.value = {
       ...checks.value,
-      [path]: { state: 'error', message: error?.message || 'API check failed.', recommendation: '', serverSide: '', projectTitle: '' }
+      [path]: { state: 'error', message: error?.message || t('sideDecision.checkFailed'), recommendation: '', serverSide: '', projectTitle: '' }
     }
     // Re-throw so a caller that wraps this in withBackoff (checkAllViaApi) can
     // actually retry transient failures (429/503). Previously this was
@@ -245,7 +247,7 @@ async function checkAllViaApi() {
   apiError.value = ''
   const maxSafe = 120
   if (props.mods.length > maxSafe) {
-    apiError.value = `Too many mods to check in one run (${props.mods.length}). Please keep it below ${maxSafe} or check individually.`
+    apiError.value = t('sideDecision.tooMany', { count: props.mods.length, max: maxSafe })
     return
   }
 

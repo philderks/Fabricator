@@ -1,7 +1,7 @@
 <template>
   <BaseModal
     :show="show"
-    :title="title"
+    :title="title || $t('common.confirmAction')"
     size="small"
     @close="handleCancel"
   >
@@ -30,7 +30,7 @@
 
     <template #footer>
       <AppButton variant="ghost" size="md" :disabled="loading" @click="handleCancel">
-        {{ cancelText }}
+        {{ cancelText || $t('common.cancel') }}
       </AppButton>
       <AppButton
         :variant="confirmButtonVariant"
@@ -39,7 +39,7 @@
         :loading="loading"
         @click="handleConfirm"
       >
-        {{ loading ? loadingText : confirmText }}
+        {{ loading ? (loadingText || $t('common.processing')) : (confirmText || $t('common.confirm')) }}
       </AppButton>
     </template>
   </BaseModal>
@@ -62,7 +62,7 @@ export default {
     },
     title: {
       type: String,
-      default: 'Confirm Action'
+      default: ''
     },
     message: {
       type: String,
@@ -79,15 +79,15 @@ export default {
     },
     confirmText: {
       type: String,
-      default: 'Confirm'
+      default: ''
     },
     cancelText: {
       type: String,
-      default: 'Cancel'
+      default: ''
     },
     loadingText: {
       type: String,
-      default: 'Processing...'
+      default: ''
     },
     icon: {
       type: Boolean,

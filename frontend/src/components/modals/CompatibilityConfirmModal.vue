@@ -1,7 +1,7 @@
 <template>
   <BaseModal
     :show="show"
-    title="Compatibility Warning"
+    :title="$t('compat.title')"
     size="medium"
     @close="$emit('close')"
   >
@@ -18,14 +18,13 @@
     </div>
 
     <div class="modal-content">
-      <p class="modal-text">
-        <strong>{{ modTitle }}</strong> wurde nicht ausdrücklich für
-        <strong>{{ serverVersion }}</strong> veröffentlicht.
-        Prüfe die unterstützten Versionen, bevor du fortfährst.
-      </p>
+      <i18n-t keypath="compat.notReleasedFor" tag="p" class="modal-text">
+        <template #mod><strong>{{ modTitle }}</strong></template>
+        <template #version><strong>{{ serverVersion }}</strong></template>
+      </i18n-t>
 
       <div v-if="versionsToShow.length" class="version-list">
-        <p class="version-list__label">Wähle die Version, die installiert werden soll:</p>
+        <p class="version-list__label">{{ $t('compat.chooseVersion') }}</p>
         <div class="version-chips">
           <button
             v-for="version in versionsToShow"
@@ -46,7 +45,7 @@
 
     <template #footer>
       <AppButton variant="ghost" size="md" @click="$emit('cancel')">
-        Abbrechen
+        {{ $t('common.cancel') }}
       </AppButton>
       <AppButton
         :variant="installButtonVariant"
@@ -54,7 +53,7 @@
         :disabled="!selectedVersion && !serverVersion && !versionsToShow.length"
         @click="confirmSelection"
       >
-        Version installieren
+        {{ $t('compat.installVersion') }}
       </AppButton>
     </template>
   </BaseModal>
@@ -64,30 +63,31 @@
 import BaseModal from './BaseModal.vue'
 import AppButton from '../ui/AppButton.vue'
 
+// `title` and `description` are i18n keys; the description takes {mod} and {version}.
 const STATUS_META = {
   full: {
     bannerClass: 'status-banner--full',
     buttonVariant: 'primary',
-    title: 'Vollständig kompatibel',
-    describe: (t /* , v */) => `${t} unterstützt deine Server-Version ausdrücklich.`
+    title: 'compat.full',
+    description: 'compat.fullDescription'
   },
   likely: {
     bannerClass: 'status-banner--likely',
     buttonVariant: 'warning',
-    title: 'Wahrscheinlich kompatibel',
-    describe: (t, v) => `${t} ist nicht offiziell für ${v} freigegeben, sollte aber funktionieren.`
+    title: 'compat.likely',
+    description: 'compat.likelyDescription'
   },
   unlikely: {
     bannerClass: 'status-banner--danger',
     buttonVariant: 'danger',
-    title: 'Möglicherweise inkompatibel',
-    describe: (t, v) => `${t} scheint nicht für ${v} geeignet zu sein.`
+    title: 'compat.unlikely',
+    description: 'compat.unlikelyDescription'
   },
   unknown: {
     bannerClass: 'status-banner--danger',
     buttonVariant: 'danger',
-    title: 'Kompatibilität unbekannt',
-    describe: (/* t, v */) => 'Wir konnten keine kompatiblen Versionen finden.'
+    title: 'compat.unknown',
+    description: 'compat.unknownDescription'
   }
 }
 
@@ -139,10 +139,10 @@ export default {
       return this.statusMeta.buttonVariant
     },
     statusTitle() {
-      return this.statusMeta.title
+      return this.$t(this.statusMeta.title)
     },
     statusDescription() {
-      return this.statusMeta.describe(this.modTitle, this.serverVersion)
+      return this.$t(this.statusMeta.description, { mod: this.modTitle, version: this.serverVersion })
     },
     versionsToShow() {
       return this.versions

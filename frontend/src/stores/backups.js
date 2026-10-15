@@ -30,6 +30,7 @@ import {
 } from '../api/backups'
 import { useServerStore } from './server'
 import { useToast } from '../composables/useToast'
+import { t } from '../i18n'
 
 const JOB_POLL_INTERVAL_MS = 1000
 
@@ -42,7 +43,7 @@ const FREQUENCY_PRESETS = [1, 6, 12, 24, 168]
  * string if the browser can't report one — the backend then falls back to
  * the host zone.
  */
-function browserTimeZone() {
+export function browserTimeZone() {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || ''
   } catch (_) {
@@ -220,7 +221,7 @@ export const useBackupsStore = defineStore('backups', () => {
       configs.value = Array.isArray(list) ? list : []
     } catch (err) {
       console.error('Failed to load backup configs:', err)
-      error.value = err?.message || 'Failed to load backup configs'
+      error.value = err?.message || t('backups.config.loadFailed')
     } finally {
       configsLoading.value = false
     }
@@ -234,7 +235,7 @@ export const useBackupsStore = defineStore('backups', () => {
       snapshots.value = Array.isArray(list) ? list : []
     } catch (err) {
       console.error('Failed to load snapshots:', err)
-      error.value = err?.message || 'Failed to load snapshots'
+      error.value = err?.message || t('backups.snapshotsLoadFailed')
     } finally {
       snapshotsLoading.value = false
     }
@@ -294,7 +295,7 @@ export const useBackupsStore = defineStore('backups', () => {
     if (!serverId.value || savingConfig.value) return
     const payload = draftToPayload(draft.value)
     if (!payload.name) {
-      draftError.value = 'Name is required.'
+      draftError.value = t('backups.config.nameRequired')
       return
     }
     savingConfig.value = true
@@ -302,10 +303,10 @@ export const useBackupsStore = defineStore('backups', () => {
     try {
       if (editingConfigId.value) {
         await updateBackupConfig(serverId.value, editingConfigId.value, payload)
-        toast.success('Backup config updated', 'Backups')
+        toast.success(t('backups.config.updated'), t('nav.backups'))
       } else {
         await createBackupConfig(serverId.value, payload)
-        toast.success('Backup config created', 'Backups')
+        toast.success(t('backups.config.created'), t('nav.backups'))
       }
       showManagePanel.value = false
       editingConfigId.value = null
@@ -313,7 +314,7 @@ export const useBackupsStore = defineStore('backups', () => {
       await Promise.all([loadConfigs(), loadSummary()])
     } catch (err) {
       console.error('Failed to save backup config:', err)
-      draftError.value = err?.message || 'Failed to save backup config'
+      draftError.value = err?.message || t('backups.config.saveFailed')
     } finally {
       savingConfig.value = false
     }
@@ -351,24 +352,18 @@ export const useBackupsStore = defineStore('backups', () => {
       const banner = retainedFiles > 0 ? { configName: config.name, retainedFiles, retainedPaths } : null
       retainedFilesBanner.value = banner
       if (retainedFiles > 0) {
-        toast.info(
-          `${retainedFiles} archive file${retainedFiles === 1 ? '' : 's'} kept on disk for "${config.name}".`,
-          'Backups'
-        )
+        toast.info(t('backups.config.filesKept', { name: config.name }, retainedFiles), t('nav.backups'))
       } else if (deletedFiles > 0) {
-        toast.success(
-          `Config deleted. Removed ${deletedFiles} archive file${deletedFiles === 1 ? '' : 's'} on disk.`,
-          'Backups'
-        )
+        toast.success(t('backups.config.deletedWithFiles', deletedFiles), t('nav.backups'))
       } else {
-        toast.success('Backup config deleted', 'Backups')
+        toast.success(t('backups.config.deleted'), t('nav.backups'))
       }
       showDeleteConfigModal.value = false
       configToDelete.value = null
       await Promise.all([loadConfigs(), loadSnapshots(), loadSummary()])
     } catch (err) {
       console.error('Failed to delete backup config:', err)
-      toast.error(err?.message || 'Failed to delete backup config', 'Backups')
+      toast.error(err?.message || t('backups.config.deleteFailed'), t('nav.backups'))
     } finally {
       deletingConfig.value = false
     }
@@ -388,7 +383,7 @@ export const useBackupsStore = defineStore('backups', () => {
       const res = await runBackupConfig(serverId.value, configId)
       const jobId = res?.job_id
       if (!jobId) {
-        toast.error('Backup did not return a job id', 'Backups')
+        toast.error(t('backups.job.noJobId'), t('nav.backups'))
         return
       }
       activeJob.value = {
@@ -400,10 +395,10 @@ export const useBackupsStore = defineStore('backups', () => {
         phase: 'starting'
       }
       startJobPolling()
-      toast.info('Backup started', 'Backups')
+      toast.info(t('backups.job.started'), t('nav.backups'))
     } catch (err) {
       console.error('Failed to start backup:', err)
-      toast.error(err?.message || 'Failed to start backup', 'Backups')
+      toast.error(err?.message || t('backups.job.startFailed'), t('nav.backups'))
     } finally {
       // runningConfigId is cleared when polling finalises; the disable
       // happens during the active poll loop, not just the initial POST.
@@ -428,7 +423,7 @@ export const useBackupsStore = defineStore('backups', () => {
       const res = await runQuickBackupApi(serverId.value, { storagePath, compress, flush, shutdown })
       const jobId = res?.job_id
       if (!jobId) {
-        toast.error('Quick backup did not return a job id', 'Backups')
+        toast.error(t('backups.job.quickNoJobId'), t('nav.backups'))
         return
       }
       activeJob.value = {
@@ -441,10 +436,10 @@ export const useBackupsStore = defineStore('backups', () => {
       }
       showQuickBackupModal.value = false
       startJobPolling()
-      toast.info('Quick backup started', 'Backups')
+      toast.info(t('backups.job.quickStarted'), t('nav.backups'))
     } catch (err) {
       console.error('Failed to start quick backup:', err)
-      toast.error(err?.message || 'Failed to start quick backup', 'Backups')
+      toast.error(err?.message || t('backups.job.quickStartFailed'), t('nav.backups'))
     }
   }
 
@@ -482,7 +477,7 @@ export const useBackupsStore = defineStore('backups', () => {
       })
       const jobId = res?.job_id
       if (!jobId) {
-        toast.error('World import did not return a job id', 'Backups')
+        toast.error(t('backups.job.importNoJobId'), t('nav.backups'))
         return
       }
       activeJob.value = {
@@ -495,14 +490,14 @@ export const useBackupsStore = defineStore('backups', () => {
       }
       showImportWorldModal.value = false
       startJobPolling()
-      toast.info('World import started', 'Backups')
+      toast.info(t('backups.job.importStarted'), t('nav.backups'))
     } catch (err) {
       // A user-initiated cancel surfaces as status 0 / "Upload cancelled".
-      if (err?.message === 'Upload cancelled') {
-        toast.info('Upload cancelled', 'Backups')
+      if (err?.message === t('errors.uploadCancelled')) {
+        toast.info(t('errors.uploadCancelled'), t('nav.backups'))
       } else {
         console.error('Failed to import world:', err)
-        toast.error(err?.message || 'Failed to import world', 'Backups')
+        toast.error(err?.message || t('backups.job.importFailed'), t('nav.backups'))
       }
     } finally {
       importUploading.value = false
@@ -531,7 +526,7 @@ export const useBackupsStore = defineStore('backups', () => {
       const res = await restoreSnapshot(serverId.value, snap.id, mode)
       const jobId = res?.job_id
       if (!jobId) {
-        toast.error('Restore did not return a job id', 'Backups')
+        toast.error(t('backups.job.restoreNoJobId'), t('nav.backups'))
         return
       }
       activeJob.value = {
@@ -546,10 +541,10 @@ export const useBackupsStore = defineStore('backups', () => {
       startJobPolling()
       showRestoreModal.value = false
       snapshotToRestore.value = null
-      toast.info(mode === 'reset' ? 'Restore (reset) started' : 'Restore started', 'Backups')
+      toast.info(mode === 'reset' ? t('backups.job.restoreResetStarted') : t('backups.job.restoreStarted'), t('nav.backups'))
     } catch (err) {
       console.error('Failed to start restore:', err)
-      toast.error(err?.message || 'Failed to start restore', 'Backups')
+      toast.error(err?.message || t('backups.job.restoreStartFailed'), t('nav.backups'))
     }
   }
 
@@ -572,13 +567,13 @@ export const useBackupsStore = defineStore('backups', () => {
     deletingSnapshot.value = true
     try {
       await deleteSnapshot(serverId.value, snap.id)
-      toast.success('Snapshot deleted', 'Backups')
+      toast.success(t('backups.snapshotDeleted'), t('nav.backups'))
       showDeleteSnapshotModal.value = false
       snapshotToDelete.value = null
       await Promise.all([loadSnapshots(), loadSummary()])
     } catch (err) {
       console.error('Failed to delete snapshot:', err)
-      toast.error(err?.message || 'Failed to delete snapshot', 'Backups')
+      toast.error(err?.message || t('backups.snapshotDeleteFailed'), t('nav.backups'))
     } finally {
       deletingSnapshot.value = false
     }
@@ -616,16 +611,16 @@ export const useBackupsStore = defineStore('backups', () => {
       if (!status?.active) {
         stopJobPolling()
         runningConfigId.value = null
-        const kind = job.kind === 'restore'
-          ? 'Restore'
+        const [failedKey, completedKey] = job.kind === 'restore'
+          ? ['backups.job.restoreFinishedFailed', 'backups.job.restoreCompleted']
           : job.kind === 'world_import'
-            ? 'World import'
-            : 'Backup'
+            ? ['backups.job.importFinishedFailed', 'backups.job.importCompleted']
+            : ['backups.job.backupFinishedFailed', 'backups.job.backupCompleted']
         const phase = status?.phase || 'done'
         if (phase === 'failed' || status?.error) {
-          toast.error(status?.error || `${kind} failed`, 'Backups')
+          toast.error(status?.error || t(failedKey), t('nav.backups'))
         } else {
-          toast.success(`${kind} completed`, 'Backups')
+          toast.success(t(completedKey), t('nav.backups'))
         }
         // Refresh data once the job lands.
         await Promise.all([loadSnapshots(), loadSummary(), loadConfigs()])

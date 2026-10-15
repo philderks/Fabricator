@@ -1,27 +1,27 @@
 <template>
   <BaseModal
     :show="show"
-    title="Browse Modpacks"
+    :title="$t('modpackBrowser.title')"
     size="xlarge"
     @close="$emit('close')"
   >
     <div class="search-section">
       <div class="filter-chip">
-        Filtered to Minecraft {{ mcVersion }} ({{ loaderLabel }})
+        {{ $t('modpackBrowser.filteredTo', { version: mcVersion, loader: loaderLabel }) }}
       </div>
 
       <div class="import-method">
         <label class="choice-pill">
           <input type="radio" v-model="importMethod" value="search">
-          <span>Search</span>
+          <span>{{ $t('modpacks.methodSearch') }}</span>
         </label>
         <label class="choice-pill">
           <input type="radio" v-model="importMethod" value="link">
-          <span>Link</span>
+          <span>{{ $t('modpacks.methodLink') }}</span>
         </label>
         <label class="choice-pill">
           <input type="radio" v-model="importMethod" value="file">
-          <span>Upload .mrpack</span>
+          <span>{{ $t('modpacks.methodUpload') }}</span>
         </label>
       </div>
 
@@ -34,14 +34,14 @@
           @change="handleFileChange"
         >
         <p v-if="uploading" class="upload-status">
-          {{ uploadPercent >= 0 ? `Uploading ${uploadPercent}%` : 'Uploading…' }}
+          {{ uploadPercent >= 0 ? $t('common.uploadingPct', { pct: uploadPercent }) : $t('common.uploading') }}
         </p>
         <div v-else-if="uploadedPack" class="uploaded-pack">
           <div>
             <strong>{{ uploadedPackTitle }}</strong>
             <p>{{ uploadedPackDetail }}</p>
           </div>
-          <AppButton variant="ghost" size="sm" @click="clearUploadedPack">Clear</AppButton>
+          <AppButton variant="ghost" size="sm" @click="clearUploadedPack">{{ $t('common.clear') }}</AppButton>
         </div>
         <p v-if="mismatchWarning" class="warning-text">{{ mismatchWarning }}</p>
         <p v-if="uploadError" class="error-text">{{ uploadError }}</p>
@@ -52,7 +52,7 @@
           <input
             v-model="imp.searchQuery.value"
             type="text"
-            placeholder="Search modpacks..."
+            :placeholder="$t('modpackBrowser.searchPlaceholder')"
             @keyup.enter="imp.performSearch()"
           >
         </div>
@@ -62,7 +62,7 @@
           :disabled="imp.loading.value || !imp.searchQuery.value.trim()"
           @click="imp.performSearch()"
         >
-          {{ imp.loading.value ? 'Searching...' : 'Search' }}
+          {{ imp.loading.value ? $t('modpackBrowser.searching') : $t('common.search') }}
         </AppButton>
       </div>
 
@@ -71,7 +71,7 @@
           <input
             v-model="imp.modpackLink.value"
             type="text"
-            placeholder="https://modrinth.com/modpack/... or slug"
+            :placeholder="$t('modpackBrowser.linkPlaceholder')"
             @keyup.enter="imp.resolveByLink()"
           >
         </div>
@@ -81,7 +81,7 @@
           :disabled="imp.resolving.value || !imp.modpackLink.value.trim()"
           @click="imp.resolveByLink()"
         >
-          {{ imp.resolving.value ? 'Resolving...' : 'Resolve' }}
+          {{ imp.resolving.value ? $t('modpackBrowser.resolving') : $t('modpacks.resolve') }}
         </AppButton>
       </div>
 
@@ -90,14 +90,14 @@
 
     <div v-if="imp.loading.value" class="loading-state">
       <div class="spinner"></div>
-      <p>{{ imp.showingPopular.value ? 'Loading modpacks…' : 'Searching modpacks...' }}</p>
+      <p>{{ imp.showingPopular.value ? $t('modpackBrowser.loadingPopular') : $t('modpackBrowser.searchingModpacks') }}</p>
     </div>
 
     <!-- One branch for "there are results", so the heading rides with the grid
          and the empty state below stays on the same if/else chain. -->
     <template v-else-if="imp.searchResults.value.length">
       <p v-if="imp.showingPopular.value" class="results-heading">
-        Popular on Modrinth for {{ loaderLabel }} {{ mcVersion }}
+        {{ $t('modpackBrowser.popularFor', { loader: loaderLabel, version: mcVersion }) }}
       </p>
 
       <div class="results-grid">
@@ -116,7 +116,7 @@
           size="sm"
           @click.stop="handleInstallPack(pack)"
         >
-          Install
+          {{ $t('common.install') }}
         </AppButton>
         </SearchResultCard>
       </div>
@@ -127,36 +127,36 @@
         <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="2"/>
         <path d="M9 9H15M9 13H13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
       </svg>
-      <h3 class="modpack-browser-empty__heading" v-if="importMethod === 'file'">Upload a modpack file</h3>
-      <h3 class="modpack-browser-empty__heading" v-else-if="importMethod === 'search' && imp.searchDone.value">No modpacks found</h3>
-      <h3 class="modpack-browser-empty__heading" v-else-if="importMethod === 'search'">Search for modpacks</h3>
-      <h3 class="modpack-browser-empty__heading" v-else>Resolve a modpack link</h3>
+      <h3 class="modpack-browser-empty__heading" v-if="importMethod === 'file'">{{ $t('modpackBrowser.emptyUpload') }}</h3>
+      <h3 class="modpack-browser-empty__heading" v-else-if="importMethod === 'search' && imp.searchDone.value">{{ $t('modpackBrowser.emptyNoResults') }}</h3>
+      <h3 class="modpack-browser-empty__heading" v-else-if="importMethod === 'search'">{{ $t('modpackBrowser.emptySearch') }}</h3>
+      <h3 class="modpack-browser-empty__heading" v-else>{{ $t('modpackBrowser.emptyLink') }}</h3>
       <p class="modpack-browser-empty__body" v-if="importMethod === 'file'">
-        Pick a .mrpack exported from the Modrinth app. Its mods are fetched from Modrinth; config and other extras come from the pack's overrides.
+        {{ $t('modpackBrowser.uploadHint') }}
       </p>
       <p class="modpack-browser-empty__body" v-else-if="importMethod === 'search' && imp.showingPopular.value">
-        No modpacks are listed for {{ loaderLabel }} {{ mcVersion }}. Try searching by name, or check that this Minecraft version has compatible packs.
+        {{ $t('modpackBrowser.noPopular', { loader: loaderLabel, version: mcVersion }) }}
       </p>
       <p class="modpack-browser-empty__body" v-else-if="importMethod === 'search' && imp.searchDone.value">
-        No modpacks found for "{{ imp.searchQuery.value }}" on {{ loaderLabel }} {{ mcVersion }}. Try different keywords or check that your server's MC version has compatible modpacks.
+        {{ $t('modpackBrowser.noResults', { query: imp.searchQuery.value, loader: loaderLabel, version: mcVersion }) }}
       </p>
       <p class="modpack-browser-empty__body" v-else-if="importMethod === 'search'">
-        Search for modpacks compatible with {{ mcVersion }}.
+        {{ $t('modpackBrowser.searchHint', { version: mcVersion }) }}
       </p>
       <p class="modpack-browser-empty__body" v-else>
-        Paste a Modrinth modpack link or slug to resolve it.
+        {{ $t('modpackBrowser.linkHint') }}
       </p>
     </div>
 
     <template #footer>
-      <AppButton variant="ghost" size="md" @click="$emit('close')">Close</AppButton>
+      <AppButton variant="ghost" size="md" @click="$emit('close')">{{ $t('common.close') }}</AppButton>
       <AppButton
         variant="primary"
         size="md"
         :disabled="!canInstall"
         @click="confirmInstall"
       >
-        Install Selected Modpack
+        {{ $t('modpackBrowser.installSelected') }}
       </AppButton>
     </template>
   </BaseModal>
@@ -175,6 +175,7 @@ import AppButton from '../ui/AppButton.vue'
 import { useModpackImport } from '../../composables/useModpackImport'
 import { uploadModpackArchive, discardModpackUpload } from '../../api/modrinth'
 import { formatNumber, truncate } from '../../utils/format'
+import { formatList, t } from '../../i18n'
 
 const props = defineProps({
   show: { type: Boolean, required: true },
@@ -204,17 +205,17 @@ const imp = useModpackImport({
 })
 
 const uploadedPackTitle = computed(
-  () => uploadedPack.value?.name || uploadedPack.value?.filename || 'Uploaded modpack'
+  () => uploadedPack.value?.name || uploadedPack.value?.filename || t('modpacks.uploadedFallback')
 )
 
 const uploadedPackDetail = computed(() => {
   const pack = uploadedPack.value
   if (!pack) return ''
   const parts = []
-  if (pack.version) parts.push(`Version ${pack.version}`)
-  if (pack.minecraft_version) parts.push(`Minecraft ${pack.minecraft_version}`)
+  if (pack.version) parts.push(t('modpacks.pack.version', { version: pack.version }))
+  if (pack.minecraft_version) parts.push(t('modpacks.pack.minecraft', { version: pack.minecraft_version }))
   if (pack.loader) parts.push(pack.loader)
-  if (pack.file_count) parts.push(`${pack.file_count} file${pack.file_count === 1 ? '' : 's'}`)
+  if (pack.file_count) parts.push(t('modpacks.pack.files', pack.file_count))
   return parts.join(' · ')
 })
 
@@ -229,13 +230,17 @@ const mismatchWarning = computed(() => {
   const serverLoader = (props.loader || '').toLowerCase()
   const packLoader = (pack.loader || '').toLowerCase()
   if (pack.minecraft_version && props.mcVersion && pack.minecraft_version !== props.mcVersion) {
-    differences.push(`Minecraft ${pack.minecraft_version}`)
+    differences.push(t('modpacks.pack.minecraft', { version: pack.minecraft_version }))
   }
   if (packLoader && serverLoader && packLoader !== serverLoader) {
     differences.push(packLoader)
   }
   if (!differences.length) return ''
-  return `This pack was built for ${differences.join(' and ')}, but this server runs ${loaderLabel.value} ${props.mcVersion}. Installing it anyway may leave the server unable to start.`
+  return t('modpackBrowser.mismatch', {
+    targets: formatList(differences),
+    loader: loaderLabel.value,
+    version: props.mcVersion
+  })
 })
 
 const canInstall = computed(() =>
@@ -282,8 +287,8 @@ async function handleFileChange(event) {
     if (fileInput.value) fileInput.value.value = ''
     // Cancelling is something the user just did (closed the modal, picked a
     // different file); only a real failure is worth reporting.
-    if (error?.message !== 'Upload cancelled') {
-      uploadError.value = error?.message || 'Could not read that .mrpack file.'
+    if (error?.message !== t('errors.uploadCancelled')) {
+      uploadError.value = error?.message || t('modpacks.readFailed')
     }
   } finally {
     uploading.value = false
@@ -364,7 +369,7 @@ const LOADER_TAGS = new Set(['fabric', 'forge', 'neoforge', 'quilt'])
 
 function formatModpackMeta(pack) {
   const parts = []
-  if (pack.downloads) parts.push(`${formatNumber(pack.downloads)} downloads`)
+  if (pack.downloads) parts.push(t('browse.downloads', { count: formatNumber(pack.downloads) }, pack.downloads))
   if (pack.categories && pack.categories.length) {
     const nonLoader = pack.categories.filter((c) => !LOADER_TAGS.has(String(c).toLowerCase()))
     if (nonLoader.length) {

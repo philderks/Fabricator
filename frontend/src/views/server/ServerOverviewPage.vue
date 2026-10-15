@@ -8,7 +8,8 @@ import { usePlayitStore } from '../../stores/playit'
 import { useAuthStore } from '../../stores/auth'
 import { usePreferencesStore } from '../../stores/preferences'
 import { copyToClipboard } from '../../utils/clipboard'
-import { contentLabel } from '../../utils/loaderKind'
+import { isPluginLoader } from '../../utils/loaderKind'
+import { t } from '../../i18n'
 
 const store = useServerStore()
 const playit = usePlayitStore()
@@ -16,8 +17,7 @@ const prefs = usePreferencesStore()
 const auth = useAuthStore()
 
 // "Mods" vs "Plugins" for the installed-content panel, per loader.
-const contentNoun = computed(() => contentLabel(store.server?.loader, true))
-const contentNounLower = computed(() => contentNoun.value.toLowerCase())
+const isPlugins = computed(() => isPluginLoader(store.server?.loader))
 
 const RECENT_LOG_PREVIEW_LINES = 16
 
@@ -40,7 +40,7 @@ const ramUsed = computed(() => {
   return Math.min(m.rss ?? 0, m.heapMax ?? Infinity)
 })
 const ramLabel = computed(() =>
-  typeof store.ramMetrics.heapUsed === 'number' ? 'Heap Usage' : 'RAM'
+  typeof store.ramMetrics.heapUsed === 'number' ? t('overview.heapUsage') : t('overview.ram')
 )
 
 const heapUsedDisplay = computed(() => formatRam(ramUsed.value))
@@ -116,7 +116,7 @@ const tpsDisplay = computed(() => {
   // Old vanilla/Fabric/Quilt have no tick-rate command at all, so no amount of
   // waiting will fill this in — say so instead of showing a dash that reads as
   // "still loading".
-  return store.serverStatus.tpsSupported ? '—' : 'n/a'
+  return store.serverStatus.tpsSupported ? '—' : t('common.notAvailable')
 })
 
 // Minecraft counts 20 ticks a second, so anything at or near 20 is healthy and
@@ -177,16 +177,16 @@ onUnmounted(() => {
 <template>
   <div class="overview-page">
     <section class="overview-page__stats">
-      <StatCard label="Players" :value="store.serverStatus.players.online" :unit="store.serverStatus.players.max ? `/${store.serverStatus.players.max}` : ''" />
-      <StatCard label="Uptime" :value="store.serverStatus.uptime" />
-      <StatCard label="TPS" :value="tpsDisplay" :accent="tpsAccent" />
-      <StatCard label="Mods" :value="store.installedMods.length" :accent="store.installedMods.length > 0 ? 'primary' : 'default'" />
+      <StatCard :label="$t('overview.stats.players')" :value="store.serverStatus.players.online" :unit="store.serverStatus.players.max ? `/${store.serverStatus.players.max}` : ''" />
+      <StatCard :label="$t('overview.stats.uptime')" :value="store.serverStatus.uptime" />
+      <StatCard :label="$t('overview.stats.tps')" :value="tpsDisplay" :accent="tpsAccent" />
+      <StatCard :label="$t('overview.stats.mods')" :value="store.installedMods.length" :accent="store.installedMods.length > 0 ? 'primary' : 'default'" />
     </section>
 
     <!-- Forge/NeoForge run a subprocess installer that can take minutes, during
          which every panel below has nothing real to say. Lead with the install
          rather than leaving a page of zeroes and "no logs yet". -->
-    <Panel v-if="store.serverInstalling" title="Installing server">
+    <Panel v-if="store.serverInstalling" :title="$t('overview.installingServer')">
       <div class="overview-page__install">
         <div class="overview-page__install-head">
           <span class="overview-page__install-label">{{ store.installDisplay.label }}</span>
@@ -204,12 +204,12 @@ onUnmounted(() => {
           ></div>
         </div>
         <p class="overview-page__install-note">
-          {{ store.installDisplay.detail || 'This can take a few minutes. You can leave this page — the install keeps running.' }}
+          {{ store.installDisplay.detail || $t('overview.installNote') }}
         </p>
       </div>
     </Panel>
 
-    <Panel v-if="store.activeModpack" title="Active modpack">
+    <Panel v-if="store.activeModpack" :title="$t('modpacks.active')">
       <div class="overview-page__modpack">
         <span class="overview-page__modpack-name">{{ store.activeModpack.name || store.activeModpack.projectId }}</span>
         <span class="overview-page__modpack-version">{{ store.activeModpack.version }}</span>
@@ -218,7 +218,7 @@ onUnmounted(() => {
 
     <section class="overview-page__row">
       <div class="overview-page__col">
-        <Panel title="Performance">
+        <Panel :title="$t('overview.performance')">
           <div class="overview-page__perf">
             <div class="overview-page__perf-row">
               <span class="overview-page__perf-label">{{ ramLabel }}</span>
@@ -229,15 +229,15 @@ onUnmounted(() => {
               <div class="overview-page__bar-fill" :style="{ width: heapPercent + '%' }"></div>
             </div>
             <div v-if="prefs.showHeapStats" class="overview-page__perf-row">
-              <span class="overview-page__perf-label">Committed Memory</span>
+              <span class="overview-page__perf-label">{{ $t('overview.committedMemory') }}</span>
               <span class="overview-page__perf-value">{{ heapCommittedDisplay }} {{ ramUnitLabel }}</span>
             </div>
             <div v-if="prefs.showHeapStats" class="overview-page__perf-row">
-              <span class="overview-page__perf-label">Total Process Memory</span>
+              <span class="overview-page__perf-label">{{ $t('overview.totalProcessMemory') }}</span>
               <span class="overview-page__perf-value">{{ rssDisplay }} {{ ramUnitLabel }}</span>
             </div>
             <div class="overview-page__perf-row">
-              <span class="overview-page__perf-label">CPU</span>
+              <span class="overview-page__perf-label">{{ $t('overview.cpu') }}</span>
               <span class="overview-page__perf-value">{{ cpuUsedDisplay }}% / {{ cpuTotalDisplay }}%</span>
               <span class="overview-page__perf-pct">{{ cpuPercent }}%</span>
             </div>
@@ -247,17 +247,17 @@ onUnmounted(() => {
           </div>
         </Panel>
 
-        <Panel title="Recent logs">
+        <Panel :title="$t('overview.recentLogs')">
           <template #action>
             <a class="overview-page__panel-link" @click.prevent="store.goToConsole">
-              Console
+              {{ $t('nav.console') }}
               <svg class="icon-arrow-right" width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 6H7.5M7.5 3.25l3.25 2.75L7.5 8.75" /></svg>
             </a>
           </template>
           <div class="overview-page__logs">
             <div v-if="!recentLogLines.length" class="overview-page__empty">
-              <template v-if="store.serverInstalling">Installing — the server has not started yet.</template>
-              <template v-else>No logs yet.</template>
+              <template v-if="store.serverInstalling">{{ $t('overview.logsInstalling') }}</template>
+              <template v-else>{{ $t('overview.noLogs') }}</template>
             </div>
             <div v-else v-for="(line, i) in recentLogLines" :key="i" class="overview-page__log-line">
               {{ line }}
@@ -267,17 +267,17 @@ onUnmounted(() => {
       </div>
 
       <div class="overview-page__col">
-        <Panel :title="`Installed ${contentNoun}`">
+        <Panel :title="isPlugins ? $t('mods.installedPlugins') : $t('mods.installedMods')">
           <template #action>
             <a class="overview-page__panel-link" @click.prevent="store.goToMods">
-              Manage
+              {{ $t('common.manage') }}
               <svg class="icon-arrow-right" width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 6H7.5M7.5 3.25l3.25 2.75L7.5 8.75" /></svg>
             </a>
           </template>
           <div v-if="!modPreview.length" class="overview-page__empty">
             <template v-if="store.backgroundModpackInstalling">{{ store.backgroundModpackLabel }}</template>
-            <template v-else-if="store.serverInstalling">Waiting for the install to finish.</template>
-            <template v-else>No {{ contentNounLower }} installed.</template>
+            <template v-else-if="store.serverInstalling">{{ $t('overview.waitingForInstall') }}</template>
+            <template v-else>{{ isPlugins ? $t('overview.noPlugins') : $t('overview.noMods') }}</template>
           </div>
           <ul v-else class="overview-page__mods">
             <li v-for="mod in modPreview" :key="mod.path" class="overview-page__mod">
@@ -301,38 +301,38 @@ onUnmounted(() => {
         <!-- Replaces the old Quick actions grid, whose four tiles all led to
              pages already one click away in the sidebar (two of them to the
              same page). The address is the thing this page could not answer. -->
-        <Panel title="Connection">
+        <Panel :title="$t('overview.connection')">
           <dl class="overview-page__conn">
             <div v-if="localAddress" class="overview-page__conn-row">
-              <dt class="overview-page__conn-label">{{ playitLive ? 'Local' : 'Address' }}</dt>
+              <dt class="overview-page__conn-label">{{ playitLive ? $t('overview.local') : $t('overview.address') }}</dt>
               <dd class="overview-page__conn-value">
                 <code>{{ localAddress }}</code>
                 <button
                   type="button"
                   class="overview-page__conn-copy"
                   :class="{ 'is-confirmed': copiedKey === 'local' }"
-                  :aria-label="copiedKey === 'local' ? 'Copied' : 'Copy address'"
+                  :aria-label="copiedKey === 'local' ? $t('common.copied') : $t('overview.copyAddress')"
                   @click="copyValue('local', localAddress)"
-                >{{ copiedKey === 'local' ? 'Copied' : 'Copy' }}</button>
+                >{{ copiedKey === 'local' ? $t('common.copied') : $t('common.copy') }}</button>
               </dd>
             </div>
 
             <div v-if="playitLive" class="overview-page__conn-row">
-              <dt class="overview-page__conn-label">Public</dt>
+              <dt class="overview-page__conn-label">{{ $t('overview.public') }}</dt>
               <dd class="overview-page__conn-value">
                 <code :title="playitTunnel.address">{{ playitTunnel.address }}</code>
                 <button
                   type="button"
                   class="overview-page__conn-copy"
                   :class="{ 'is-confirmed': copiedKey === 'public' }"
-                  :aria-label="copiedKey === 'public' ? 'Copied' : 'Copy public address'"
+                  :aria-label="copiedKey === 'public' ? $t('common.copied') : $t('overview.copyPublicAddress')"
                   @click="copyValue('public', playitTunnel.address)"
-                >{{ copiedKey === 'public' ? 'Copied' : 'Copy' }}</button>
+                >{{ copiedKey === 'public' ? $t('common.copied') : $t('common.copy') }}</button>
               </dd>
             </div>
 
             <div class="overview-page__conn-row">
-              <dt class="overview-page__conn-label">Port</dt>
+              <dt class="overview-page__conn-label">{{ $t('overview.port') }}</dt>
               <dd class="overview-page__conn-value">
                 <code>{{ store.server?.port ?? '—' }}</code>
               </dd>
@@ -340,13 +340,8 @@ onUnmounted(() => {
           </dl>
 
           <p class="overview-page__conn-note">
-            <template v-if="playitLive">
-              Local works on your own network; public works from anywhere.
-            </template>
-            <template v-else>
-              Reachable on your network. For access from outside it, set up a
-              tunnel on the playit.gg tab or forward the port on your router.
-            </template>
+            <template v-if="playitLive">{{ $t('overview.noteWithTunnel') }}</template>
+            <template v-else>{{ $t('overview.noteLocalOnly') }}</template>
           </p>
         </Panel>
       </div>

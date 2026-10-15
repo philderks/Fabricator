@@ -18,6 +18,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { useServerStore } from './server'
+import { t } from '../i18n'
 import * as api from '../api/players'
 
 const ONLINE_POLL_MS = 5000
@@ -103,7 +104,7 @@ export const usePlayersStore = defineStore('players', () => {
       onlineMode.value = state.onlineMode !== false
       if (isRunning.value) await loadOnline()
     } catch (e) {
-      error.value = e.message || 'Failed to load player state'
+      error.value = e.message || t('players.loadFailed')
     } finally {
       loading.value = false
     }

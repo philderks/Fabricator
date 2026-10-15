@@ -293,6 +293,97 @@ def resolve_installed_mods(server_id, server):
     return jsonify({'resolved': resolved})
 
 
+def _required_project_ids(version) -> list:
+    return [
+        dep.get('project_id') for dep in (version or {}).get('dependencies') or []
+        if dep.get('dependency_type') == 'required' and dep.get('project_id')
+    ]
+
+
+def _manifest_project_ids(manifest: dict) -> set:
+    return {e.get('projectId') for e in manifest.values() if isinstance(e, dict)}
+
+
+def _missing_dependencies(versions, present, loader_facets, game_version) -> list:
+    """Projects ``versions`` require that ``present`` lacks, followed all the way down.
+
+    Each missing dependency is resolved to the build that would be installed
+    for it, and that build's own requirements are walked too. Stopping at the
+    first level offered B for A -> B -> C and left the server refusing to start
+    over C. A dependency with no compatible build is still listed (its install
+    reports why) but has nothing to walk. Returns ``[{projectId, slug, title}]``.
+    """
+    seen = set(present)
+    queue = [pid for version in versions for pid in _required_project_ids(version)]
+    missing = []
+    while queue:
+        pid = queue.pop(0)
+        if pid in seen:
+            continue
+        seen.add(pid)
+        missing.append(pid)
+        resolved = modrinth_client.resolve_project_version(
+            pid, mc_version=game_version, loaders=loader_facets
+        )
+        if isinstance(resolved, dict):
+            queue.extend(_required_project_ids(resolved.get('version')))
+
+    if not missing:
+        return []
+    try:
+        projects = {p.get('id'): p for p in modrinth_client.get_projects(missing)}
+    except ModrinthApiError:
+        projects = {}  # Titles are cosmetic; ids still install.
+    dependencies = []
+    for pid in missing:
+        project = projects.get(pid) or {}
+        dependencies.append({
+            'projectId': pid,
+            'slug': project.get('slug'),
+            'title': project.get('title') or project.get('slug') or pid,
+        })
+    return dependencies
+
+
+@modrinth_bp.route('/servers/<server_id>/project/<project_id>/missing-dependencies', methods=['GET'])
+@require_server
+def missing_project_dependencies(server_id, server, project_id):
+    """What installing ``project_id`` on this server would also need.
+
+    Resolves the build an install would pick (``mc_version`` defaults to the
+    server's) and walks its required dependencies against the jars already in
+    the mods folder. Returns ``{dependencies: [{projectId, slug, title}]}``.
+    """
+    mc_version = request.args.get('mc_version') or server.get('version')
+    loader_facets = _server_loader_facets(server, request.args.get('loader'))
+    mods_folder, error = _resolve_mods_folder(server)
+    if error:
+        payload, status = error
+        return jsonify(payload), status
+
+    mods_path = Path(mods_folder)
+    jars = [
+        path for path in mods_path.iterdir()
+        if path.is_file() and path.suffix.lower() == '.jar'
+    ] if mods_path.is_dir() else []
+
+    try:
+        resolved = modrinth_client.resolve_project_version(
+            project_id, mc_version=mc_version, loaders=loader_facets
+        )
+        if not resolved:
+            return jsonify({'dependencies': []})
+        version = resolved['version']
+        present = {meta.get('projectId') for meta in installed.resolve_jar_files(modrinth_client, jars).values()}
+        present.update(_manifest_project_ids(storage.get_content_manifest(server_id)))
+        # A dependency cycle back to the mod being installed is not missing.
+        present.add(version.get('project_id'))
+        dependencies = _missing_dependencies([version], present, loader_facets, mc_version)
+    except ModrinthApiError as exc:
+        return _modrinth_error_response(exc)
+    return jsonify({'dependencies': dependencies})
+
+
 @modrinth_bp.route('/servers/<server_id>/updates', methods=['GET'])
 @require_server
 def check_mod_updates(server_id, server):
@@ -337,7 +428,7 @@ def check_mod_updates(server_id, server):
         return _modrinth_error_response(exc)
 
     updates = {}
-    required = set()
+    newer_versions = []
     for digest, filenames in by_hash.items():
         version = latest.get(digest)
         if not isinstance(version, dict):
@@ -351,30 +442,19 @@ def check_mod_updates(server_id, server):
                 'versionId': version.get('id'),
                 'versionNumber': version.get('version_number'),
             }
-        required.update(
-            dep.get('project_id') for dep in version.get('dependencies') or []
-            if dep.get('dependency_type') == 'required' and dep.get('project_id')
-        )
+        newer_versions.append(version)
 
     # Installed = every jar Modrinth just answered for, plus the manifest
     # (which also covers pinned jars, skipped above).
     present = {v.get('project_id') for v in latest.values() if isinstance(v, dict)}
-    present.update(e.get('projectId') for e in manifest.values() if isinstance(e, dict))
-    missing = sorted(required - present)
+    present.update(_manifest_project_ids(manifest))
 
-    dependencies = []
-    if missing:
-        try:
-            projects = {p.get('id'): p for p in modrinth_client.get_projects(missing)}
-        except ModrinthApiError:
-            projects = {}  # Titles are cosmetic; ids still install.
-        for pid in missing:
-            project = projects.get(pid) or {}
-            dependencies.append({
-                'projectId': pid,
-                'slug': project.get('slug'),
-                'title': project.get('title') or project.get('slug') or pid,
-            })
+    try:
+        dependencies = _missing_dependencies(
+            newer_versions, present, _server_loader_facets(server, server.get('loader')), server['version']
+        )
+    except ModrinthApiError as exc:
+        return _modrinth_error_response(exc)
     return jsonify({'updates': updates, 'dependencies': dependencies})
 
 

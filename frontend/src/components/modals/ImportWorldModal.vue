@@ -2,6 +2,7 @@
 import { ref, watch, computed } from 'vue'
 import BaseModal from './BaseModal.vue'
 import AppButton from '../ui/AppButton.vue'
+import { t } from '../../i18n'
 
 const props = defineProps({
   show: {
@@ -62,7 +63,7 @@ function looksLikeArchive(name) {
 function onFileChange(event) {
   const picked = event.target.files?.[0] || null
   if (picked && !looksLikeArchive(picked.name)) {
-    localError.value = 'Please choose a .zip, .tar, .tar.gz or .tgz archive.'
+    localError.value = t('backups.import.badType')
     file.value = null
     return
   }
@@ -72,7 +73,7 @@ function onFileChange(event) {
 
 function onConfirm() {
   if (!file.value) {
-    localError.value = 'Choose a world archive to import.'
+    localError.value = t('backups.import.chooseFile')
     return
   }
   localError.value = null
@@ -88,29 +89,26 @@ function onCancel() {
 <template>
   <BaseModal
     :show="props.show"
-    title="Import world"
+    :title="$t('backups.importWorld')"
     size="small"
     :close-on-escape="!busy"
     @close="onCancel"
   >
     <div class="import-world-modal">
-      <p class="import-world-modal__intro">
-        Upload a world archive (<code>.zip</code>, <code>.tar</code>,
-        <code>.tar.gz</code>) to replace this server's active world. Both
-        multiplayer worlds and singleplayer saves are accepted — singleplayer
-        saves are converted to the server layout automatically.
-      </p>
+      <i18n-t keypath="backups.import.intro" tag="p" class="import-world-modal__intro">
+        <template #zip><code>.zip</code></template>
+        <template #tar><code>.tar</code></template>
+        <template #targz><code>.tar.gz</code></template>
+      </i18n-t>
 
       <!-- Warning: destructive + stops the server -->
-      <div class="import-world-modal__warning" role="note">
-        <strong>Heads up.</strong> The server is stopped for the import and its
-        current world is <strong>replaced</strong>. A safety snapshot of the
-        existing world is taken first, so you can restore it from the snapshots
-        list if needed.
-      </div>
+      <i18n-t keypath="backups.import.warning" tag="div" class="import-world-modal__warning" role="note">
+        <template #headsUp><strong>{{ $t('backups.import.headsUp') }}</strong></template>
+        <template #replaced><strong>{{ $t('backups.import.replaced') }}</strong></template>
+      </i18n-t>
 
       <div class="import-world-modal__field">
-        <label class="import-world-modal__label" for="iw-file">World archive</label>
+        <label class="import-world-modal__label" for="iw-file">{{ $t('backups.import.archive') }}</label>
         <input
           id="iw-file"
           ref="fileInput"
@@ -135,7 +133,7 @@ function onCancel() {
           ></div>
         </div>
         <span class="import-world-modal__progress-label">
-          {{ indeterminate ? 'Uploading…' : `Uploading… ${uploadPct}%` }}
+          {{ indeterminate ? $t('common.uploading') : $t('backups.import.uploadingPct', { pct: uploadPct }) }}
         </span>
       </div>
 
@@ -149,10 +147,10 @@ function onCancel() {
         size="md"
         @click="emit('cancel-upload')"
       >
-        Cancel upload
+        {{ $t('backups.import.cancelUpload') }}
       </AppButton>
       <AppButton v-else variant="ghost" size="md" :disabled="busy" @click="onCancel">
-        Cancel
+        {{ $t('common.cancel') }}
       </AppButton>
       <AppButton
         variant="primary"
@@ -161,7 +159,7 @@ function onCancel() {
         :loading="busy"
         @click="onConfirm"
       >
-        {{ uploading ? 'Uploading…' : jobActive ? 'Importing…' : 'Import & replace world' }}
+        {{ uploading ? $t('common.uploading') : jobActive ? $t('backups.import.importing') : $t('backups.import.confirm') }}
       </AppButton>
     </template>
   </BaseModal>

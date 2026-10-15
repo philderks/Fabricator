@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { getProjectDetails, searchModpacks } from '../api/modrinth'
 import { isLoaderCategory } from '../utils/loaderKind'
+import { t } from '../i18n'
 
 /**
  * Extract a Modrinth project slug or ID from a URL, slug, or raw ID.
@@ -34,7 +35,7 @@ export function normalizeModpack(project) {
   return {
     id: project.project_id || project.id,
     slug: project.slug || '',
-    title: project.title || project.name || project.slug || 'Unknown Modpack',
+    title: project.title || project.name || project.slug || t('modpacks.unknownTitle'),
     description: project.description || '',
     downloads: project.downloads || 0,
     iconUrl: project.icon_url || '',
@@ -153,7 +154,7 @@ export function useModpackImport({ mcVersion, loader } = {}) {
       searchResults.value = Array.isArray(response.hits) ? response.hits : []
     } catch (error) {
       searchResults.value = []
-      errorMessage.value = error.message || 'Failed to search modpacks.'
+      errorMessage.value = error.message || t('modpacks.searchFailed')
     } finally {
       loading.value = false
       searchDone.value = true
@@ -163,7 +164,7 @@ export function useModpackImport({ mcVersion, loader } = {}) {
   async function resolveByLink() {
     const projectRef = parseProjectRef(modpackLink.value)
     if (!projectRef) {
-      errorMessage.value = 'Enter a valid Modrinth modpack link, slug, or project ID.'
+      errorMessage.value = t('modpacks.invalidLink')
       return
     }
 
@@ -172,18 +173,18 @@ export function useModpackImport({ mcVersion, loader } = {}) {
     try {
       const project = await getProjectDetails(projectRef)
       if (project.project_type !== 'modpack') {
-        errorMessage.value = 'This project exists but is not a modpack.'
+        errorMessage.value = t('modpacks.notAModpack')
         return
       }
       searchResults.value = [project]
       selectPack(project)
     } catch (error) {
       if (isNotFoundError(error)) {
-        errorMessage.value = `No exact modpack found for "${projectRef}". Showing search results instead.`
+        errorMessage.value = t('modpacks.noExactMatch', { ref: projectRef })
         searchQuery.value = projectRef
         await performSearch(projectRef)
       } else {
-        errorMessage.value = error.message || 'Could not resolve modpack from link.'
+        errorMessage.value = error.message || t('modpacks.resolveFailed')
       }
     } finally {
       resolving.value = false

@@ -3,7 +3,7 @@
   "image": "mcr.microsoft.com/devcontainers/python:3.11",
   "features": {
     "ghcr.io/devcontainers/features/node:2.1.0": {
-      "version": "20"
+      "version": "22"
     }
   },
   "customizations": {

@@ -231,6 +231,9 @@ def main() -> None:
         _graceful_stop()
         os._exit(0)  # noqa: SCS2 - immediate exit once worlds are saved
 
+    from backend.system.update_service import update_service
+    update_service.shutdown = shutdown
+
     def run_server() -> None:
         from werkzeug.serving import make_server
 
@@ -249,7 +252,9 @@ def main() -> None:
     if _has_tray_support():
         # Browser auto-open only makes sense in a desktop session; in a headless
         # container (FABRICATOR_NO_TRAY=1) there is no browser, so skip it.
-        open_browser_delayed(config.HOST, config.PORT)
+        # After a self-update relaunch the panel is already open in a tab.
+        if 'FABRICATOR_UPDATE_RESULT' not in os.environ:
+            open_browser_delayed(config.HOST, config.PORT)
         try:
             tray_icon = create_tray_icon(config.PORT, shutdown)
             tray_icon.run()

@@ -7,6 +7,7 @@
  */
 
 import { get, post, del, ApiError } from './client'
+import { t } from '../i18n'
 
 
 export async function searchMods({
@@ -117,6 +118,17 @@ export async function checkModUpdates(serverId) {
 }
 
 /**
+ * Required dependencies an install of `projectId` would still need on this
+ * server, followed transitively: `{ dependencies: [{ projectId, slug, title }] }`.
+ */
+export async function getMissingDependencies(serverId, projectId, { mc_version, loader }) {
+  return get(
+    `/api/modrinth/servers/${encodeURIComponent(serverId)}/project/${encodeURIComponent(projectId)}/missing-dependencies`,
+    { mc_version, loader }
+  )
+}
+
+/**
  * Resolve a project version compatible with the requested game version/loader.
  *
  * @param {string[]} [options.loaders] - Accepted loader facet chain (plugin
@@ -197,15 +209,15 @@ export function uploadModpackArchive(file, { onProgress, registerAbort } = {}) {
         resolve(data)
       } else {
         reject(new ApiError(
-          data.error || data.message || `Upload failed with status ${xhr.status}`,
+          data.error || data.message || t('errors.uploadFailed', { status: xhr.status }),
           xhr.status,
           data && Object.keys(data).length ? data : null
         ))
       }
     }
 
-    xhr.onerror = () => reject(new ApiError('Network error during upload', 0, null))
-    xhr.onabort = () => reject(new ApiError('Upload cancelled', 0, null))
+    xhr.onerror = () => reject(new ApiError(t('errors.uploadNetwork'), 0, null))
+    xhr.onabort = () => reject(new ApiError(t('errors.uploadCancelled'), 0, null))
 
     xhr.send(file)
   })

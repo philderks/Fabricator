@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import BaseModal from './BaseModal.vue'
 import AppButton from '../ui/AppButton.vue'
+import { t, te } from '../../i18n'
 
 const props = defineProps({
   show: {
@@ -38,20 +39,9 @@ const restoreActive = computed(
 
 const phaseLabel = computed(() => {
   const phase = props.activeJob?.phase
-  if (!phase) return 'Working…'
-  switch (phase) {
-    case 'starting':       return 'Starting restore…'
-    case 'stopping_server':return 'Stopping server…'
-    case 'safety_snapshot':return 'Creating safety snapshot…'
-    case 'extracting':     return 'Extracting archive…'
-    case 'overlaying':     return 'Overlaying files…'
-    case 'swapping':       return 'Swapping server directory…'
-    case 'finalizing':     return 'Finalizing…'
-    case 'restarting':     return 'Restarting server…'
-    case 'done':           return 'Done.'
-    case 'failed':         return 'Failed.'
-    default:               return phase
-  }
+  if (!phase) return t('common.working')
+  const key = `backups.restore.phase.${phase}`
+  return te(key) ? t(key) : phase
 })
 
 const confirmDisabled = computed(() => !mode.value || restoreActive.value)
@@ -75,7 +65,7 @@ function onCancel() {
 <template>
   <BaseModal
     :show="props.show"
-    title="Restore snapshot"
+    :title="$t('backups.restore.title')"
     size="medium"
     :close-on-escape="!restoreActive"
     @close="onCancel"
@@ -84,22 +74,17 @@ function onCancel() {
       <div v-if="restoreActive" class="restore-modal__progress">
         <div class="restore-modal__progress-spinner" aria-hidden="true"></div>
         <p class="restore-modal__progress-label">{{ phaseLabel }}</p>
-        <p class="restore-modal__progress-hint">
-          Restore is running in the background. A safety snapshot was created before any files were overwritten.
-        </p>
+        <p class="restore-modal__progress-hint">{{ $t('backups.restore.runningHint') }}</p>
       </div>
 
       <template v-else>
-        <p v-if="props.snapshot" class="restore-modal__intro">
-          Restore <code>{{ props.snapshot.fileName || props.snapshot.id }}</code>?
-        </p>
-        <p class="restore-modal__sub">
-          A safety snapshot is always created first, so you can roll back if the restored
-          state is unusable.
-        </p>
+        <i18n-t v-if="props.snapshot" keypath="backups.restore.confirmMessage" tag="p" class="restore-modal__intro">
+          <template #name><code>{{ props.snapshot.fileName || props.snapshot.id }}</code></template>
+        </i18n-t>
+        <p class="restore-modal__sub">{{ $t('backups.restore.safetyHint') }}</p>
 
         <fieldset class="restore-modal__options">
-          <legend class="restore-modal__legend">Choose restore mode</legend>
+          <legend class="restore-modal__legend">{{ $t('backups.restore.chooseMode') }}</legend>
 
           <label
             class="restore-modal__option"
@@ -113,12 +98,8 @@ function onCancel() {
               @change="selectMode('in_place')"
             />
             <div class="restore-modal__option-body">
-              <div class="restore-modal__option-title">In-place overlay</div>
-              <div class="restore-modal__option-desc">
-                Files in the archive overwrite the live server. Files that exist only on
-                the live server are kept. Lower risk; new files added since the snapshot
-                survive.
-              </div>
+              <div class="restore-modal__option-title">{{ $t('backups.restore.inPlace') }}</div>
+              <div class="restore-modal__option-desc">{{ $t('backups.restore.inPlaceDescription') }}</div>
             </div>
           </label>
 
@@ -134,12 +115,10 @@ function onCancel() {
               @change="selectMode('reset')"
             />
             <div class="restore-modal__option-body">
-              <div class="restore-modal__option-title">Reset to snapshot</div>
-              <div class="restore-modal__option-desc">
-                Atomically swap the server directory with the snapshot contents.
-                <strong>Anything added since the snapshot will be permanently removed</strong>
-                — only the safety snapshot can bring it back.
-              </div>
+              <div class="restore-modal__option-title">{{ $t('backups.restore.reset') }}</div>
+              <i18n-t keypath="backups.restore.resetDescription" tag="div" class="restore-modal__option-desc">
+                <template #warning><strong>{{ $t('backups.restore.resetWarning') }}</strong></template>
+              </i18n-t>
             </div>
           </label>
         </fieldset>
@@ -153,7 +132,7 @@ function onCancel() {
         :disabled="restoreActive"
         @click="onCancel"
       >
-        {{ restoreActive ? 'Restore in progress' : 'Cancel' }}
+        {{ restoreActive ? $t('backups.restore.inProgress') : $t('common.cancel') }}
       </AppButton>
       <AppButton
         :variant="mode === 'reset' ? 'danger' : 'primary'"
@@ -162,7 +141,7 @@ function onCancel() {
         :loading="restoreActive"
         @click="onConfirm"
       >
-        {{ restoreActive ? 'Restoring…' : (mode === 'reset' ? 'Reset to snapshot' : 'Restore') }}
+        {{ restoreActive ? $t('backups.restore.restoring') : (mode === 'reset' ? $t('backups.restore.reset') : $t('backups.restore.restore')) }}
       </AppButton>
     </template>
   </BaseModal>

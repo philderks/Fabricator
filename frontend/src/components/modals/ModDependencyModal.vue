@@ -1,7 +1,7 @@
 <template>
   <BaseModal
     :show="show"
-    title="Missing dependencies"
+    :title="$t('dependencies.title')"
     size="medium"
     @close="$emit('cancel')"
   >
@@ -11,11 +11,10 @@
         <path d="M12 10V14M12 18H12.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
       </svg>
       <div>
-        <p class="dep-banner__title">This mod lists required dependencies you do not have installed</p>
-        <p class="dep-banner__text">
-          <strong>{{ mainModTitle }}</strong> requires the following. You can install them automatically or
-          continue with only the main mod (the server may not run correctly).
-        </p>
+        <p class="dep-banner__title">{{ $t('dependencies.banner') }}</p>
+        <i18n-t keypath="dependencies.text" tag="p" class="dep-banner__text">
+          <template #mod><strong>{{ mainModTitle }}</strong></template>
+        </i18n-t>
       </div>
     </div>
 
@@ -27,13 +26,13 @@
 
     <template #footer>
       <AppButton variant="ghost" size="md" @click="$emit('cancel')">
-        Cancel
+        {{ $t('common.cancel') }}
       </AppButton>
       <AppButton variant="ghost" size="md" @click="$emit('install-main-only')">
-        Install mod only
+        {{ $t('dependencies.installModOnly') }}
       </AppButton>
       <AppButton variant="primary" size="md" @click="$emit('install-with-deps')">
-        Install with dependencies
+        {{ $t('dependencies.installWithDependencies') }}
       </AppButton>
     </template>
   </BaseModal>

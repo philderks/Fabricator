@@ -1,7 +1,7 @@
 <template>
   <BaseModal
     :show="show"
-    :title="`Browse ${nounPlural}`"
+    :title="tk('modBrowser.titleMods', 'modBrowser.titlePlugins')"
     size="xlarge"
     @close="$emit('close')"
   >
@@ -15,7 +15,7 @@
         <input
           v-model="searchQuery"
           type="text"
-          :placeholder="`Search ${nounLower}...`"
+          :placeholder="tk('modBrowser.searchMods', 'modBrowser.searchPlugins')"
           @input="debouncedSearch"
         >
       </div>
@@ -26,10 +26,10 @@
         </select>
 
         <select v-model="sortBy" @change="performSearch">
-          <option value="relevance">Relevance</option>
-          <option value="downloads">Downloads</option>
-          <option value="updated">Updated</option>
-          <option value="newest">Newest</option>
+          <option value="relevance">{{ $t('browse.sort.relevance') }}</option>
+          <option value="downloads">{{ $t('browse.sort.downloads') }}</option>
+          <option value="updated">{{ $t('browse.sort.updated') }}</option>
+          <option value="newest">{{ $t('browse.sort.newest') }}</option>
         </select>
 
         <button
@@ -37,14 +37,14 @@
           class="filter-version-toggle"
           @click="toggleVersionFilter"
         >
-          {{ versionFilterExpanded ? 'Hide version filter' : 'Version filter' }}
+          {{ versionFilterExpanded ? $t('browse.hideVersionFilter') : $t('browse.showVersionFilter') }}
         </button>
       </div>
 
       <div v-if="versionFilterExpanded" class="filters filters--extra">
         <select v-model="selectedVersion" class="filters__version-select" @change="performSearch">
-          <option value="">All Versions</option>
-          <option :value="mcVersion" v-if="mcVersion">{{ mcVersion }} (Server)</option>
+          <option value="">{{ $t('browse.allVersions') }}</option>
+          <option :value="mcVersion" v-if="mcVersion">{{ $t('browse.serverVersion', { version: mcVersion }) }}</option>
           <option
             v-for="version in availableVersionOptions"
             :key="version"
@@ -60,17 +60,17 @@
           <path d="M12 2L2 20H22L12 2Z" stroke="currentColor" stroke-width="2" />
           <path d="M12 10V14M12 18H12.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
         </svg>
-        <span>
-          Search filters target <strong>{{ selectedVersion }}</strong>, but your server runs <strong>{{ mcVersion }}</strong>.
-          Installs use the server version unless it is unavailable, in which case you can choose another version during installation.
-        </span>
+        <i18n-t keypath="browse.versionMismatch" tag="span">
+          <template #selected><strong>{{ selectedVersion }}</strong></template>
+          <template #server><strong>{{ mcVersion }}</strong></template>
+        </i18n-t>
       </div>
     </div>
 
     <!-- Loading State -->
     <div v-if="loading" class="loading-state">
       <div class="spinner"></div>
-      <p>Searching {{ nounLower }}...</p>
+      <p>{{ tk('modBrowser.searchingMods', 'modBrowser.searchingPlugins') }}</p>
     </div>
 
     <!-- Results -->
@@ -88,10 +88,10 @@
           :variant="isModInstalled(mod) ? 'ghost' : getInstallButtonVariant(mod)"
           size="sm"
           :disabled="isModInstalled(mod)"
-          :title="isModInstalled(mod) ? `This ${nounLower.slice(0, -1)} is already in your ${folderLabel} folder` : getInstallButtonTitle(mod)"
+          :title="isModInstalled(mod) ? tk('modBrowser.alreadyInstalledMod', 'modBrowser.alreadyInstalledPlugin') : getInstallButtonTitle(mod)"
           @click.stop="installMod(mod)"
         >
-          {{ isModInstalled(mod) ? 'Installed' : 'Install' }}
+          {{ isModInstalled(mod) ? $t('common.installed') : $t('common.install') }}
         </AppButton>
       </SearchResultCard>
     </div>
@@ -103,8 +103,8 @@
         <path d="M21 21L16.5 16.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
         <path d="M11 8V14M8 11H14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
       </svg>
-      <h3 class="mod-browser-empty__heading">No {{ nounLower }} found</h3>
-      <p class="mod-browser-empty__body">Try adjusting your search or filters</p>
+      <h3 class="mod-browser-empty__heading">{{ tk('modBrowser.noResultsMods', 'modBrowser.noResultsPlugins') }}</h3>
+      <p class="mod-browser-empty__body">{{ $t('browse.tryAdjusting') }}</p>
     </div>
 
     <!-- Initial State -->
@@ -113,12 +113,12 @@
         <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="2"/>
         <path d="M9 9H15M9 13H13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
       </svg>
-      <h3 class="mod-browser-empty__heading">Search for {{ nounLower }}</h3>
-      <p class="mod-browser-empty__body">Start typing to find {{ nounLower }} for your server</p>
+      <h3 class="mod-browser-empty__heading">{{ tk('modBrowser.searchForMods', 'modBrowser.searchForPlugins') }}</h3>
+      <p class="mod-browser-empty__body">{{ tk('modBrowser.startTypingMods', 'modBrowser.startTypingPlugins') }}</p>
     </div>
 
     <template #footer>
-      <AppButton variant="ghost" size="md" @click="$emit('close')">Close</AppButton>
+      <AppButton variant="ghost" size="md" @click="$emit('close')">{{ $t('common.close') }}</AppButton>
     </template>
   </BaseModal>
 
@@ -154,13 +154,12 @@ import {
   searchMods,
   getGameVersions,
   getModVersions,
-  resolveProjectVersion,
-  getModDetails
+  getMissingDependencies
 } from '../../api/modrinth'
 import { useServerStore } from '../../stores/server'
-import { installedEntryMatchesBrowseHit, installedEntryMatchesProjectRef } from '../../utils/modrinthJarMatch'
+import { installedEntryMatchesBrowseHit } from '../../utils/modrinthJarMatch'
 import { formatNumber, truncate } from '../../utils/format'
-import { contentLabel, loaderProjectType, loaderModrinthFacets } from '../../utils/loaderKind'
+import { loaderProjectType, loaderModrinthFacets } from '../../utils/loaderKind'
 
 export default {
   name: 'ModBrowserModal',
@@ -215,15 +214,6 @@ export default {
     isPlugin() {
       return this.projectType === 'plugin'
     },
-    nounPlural() {
-      return contentLabel(this.loader, true)
-    },
-    nounLower() {
-      return this.nounPlural.toLowerCase()
-    },
-    folderLabel() {
-      return this.isPlugin ? 'plugins' : 'mods'
-    },
     // Modrinth loader facets to match against — the platform's compat chain
     // for plugin servers, or the single loader for mod servers.
     loaderFacets() {
@@ -268,12 +258,17 @@ export default {
     },
     loaderLabel() {
       if (!this.selectedLoader) {
-        return 'Any Loader'
+        return this.$t('browse.anyLoader')
       }
       return this.selectedLoader.charAt(0).toUpperCase() + this.selectedLoader.slice(1)
     }
   },
   methods: {
+    // Mod and plugin wording are separate messages rather than a spliced-in
+    // noun, so a translation can inflect the sentence around it.
+    tk(modKey, pluginKey, ...args) {
+      return this.$t(this.isPlugin ? pluginKey : modKey, ...args)
+    },
     isModInstalled(mod) {
       const store = useServerStore()
       return store.installedMods.some((file) => installedEntryMatchesBrowseHit(file, mod))
@@ -460,55 +455,15 @@ export default {
       await this.prepareInstall(mod)
     },
 
-    /** Resolves the Modrinth version used for install and warns when required dependencies are missing. */
+    /** Warns before installing when required dependencies, at any depth, are missing. */
     async prepareInstall(mod, versionOverride = null) {
       const preferredVersion = versionOverride || this.mcVersion
-      const loader = (this.loader || 'fabric').toLowerCase()
       try {
-        const resolved = await resolveProjectVersion(mod.project_id, {
+        const { dependencies } = await getMissingDependencies(useServerStore().currentServerId, mod.project_id, {
           mc_version: preferredVersion,
-          loader,
-          // Plugin servers resolve against the full facet chain so a
-          // spigot/bukkit-only plugin's dependencies are still detected.
-          loaders: this.isPlugin ? this.loaderFacets : undefined
+          loader: (this.loader || 'fabric').toLowerCase()
         })
-        const version = resolved?.version
-        if (!version || !Array.isArray(version.dependencies)) {
-          this.performInstall(mod, versionOverride)
-          return
-        }
-
-        const required = version.dependencies.filter(
-          (d) => d && d.dependency_type === 'required' && d.project_id
-        )
-        const store = useServerStore()
-        const missingMap = new Map()
-        for (const dep of required) {
-          const pid = dep.project_id
-          let details
-          try {
-            details = await getModDetails(pid)
-          } catch {
-            details = { id: pid, slug: pid, title: pid }
-          }
-          const ref = {
-            id: details.id || pid,
-            slug: details.slug
-          }
-          const installed = store.installedMods.some((file) =>
-            installedEntryMatchesProjectRef(file, ref)
-          )
-          if (!installed) {
-            const key = details.id || pid
-            if (!missingMap.has(key)) {
-              missingMap.set(key, {
-                modId: details.id || pid,
-                modTitle: details.title || details.slug || String(pid)
-              })
-            }
-          }
-        }
-        const missing = [...missingMap.values()]
+        const missing = (dependencies || []).map((dep) => ({ modId: dep.projectId, modTitle: dep.title }))
         if (missing.length > 0) {
           this.pendingDependencyContext = { mod, mcVersion: preferredVersion, missing }
           this.showDependencyModal = true
@@ -584,7 +539,7 @@ export default {
 
     formatModMeta(mod) {
       const parts = []
-      if (mod.downloads) parts.push(`${formatNumber(mod.downloads)} downloads`)
+      if (mod.downloads) parts.push(this.$t('browse.downloads', { count: formatNumber(mod.downloads) }, mod.downloads))
       if (mod.categories && mod.categories.length) {
         parts.push(mod.categories[0])
       } else if (mod.loaders && mod.loaders.length) {
@@ -620,13 +575,13 @@ export default {
       const status = this.getCompatibilityStatus(mod)
       switch (status) {
         case 'full':
-          return 'Fully compatible'
+          return this.$t('compat.full')
         case 'likely':
-          return 'Likely compatible (similar version)'
+          return this.$t('compat.likelySimilar')
         case 'unlikely':
-          return 'Possibly incompatible'
+          return this.$t('compat.unlikely')
         default:
-          return 'Compatibility unknown'
+          return this.$t('compat.unknown')
       }
     },
 

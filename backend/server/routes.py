@@ -786,6 +786,9 @@ def create_server():
     if error:
         return jsonify({'error': error}), 400
 
+    # Schedules are only written through the /schedules routes, which validate them.
+    data.pop('schedules', None)
+
     try:
         data['status'] = 'pending'
         compatibility = _java_compat_payload(data.get('version', ''))
@@ -1547,6 +1550,11 @@ def delete_server_route(server_id, server):
     except Exception:
         # Backup cleanup is best-effort — never block server deletion.
         pass
+
+    # Scheduled-command jobs; their records go with the server record below.
+    from backend.schedules.service import remove_job as remove_schedule_job
+    for schedule in server.get('schedules') or []:
+        remove_schedule_job(schedule.get('id'))
 
     storage.delete_server(server_id)
     discard_lock(server_id)

@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import Panel from '../ui/Panel.vue'
 import { formatFileSize, formatTimestamp } from '../../utils/format'
 import { snapshotDownloadUrl } from '../../api/backups'
+import { t } from '../../i18n'
 
 const props = defineProps({
   snapshots: {
@@ -33,31 +34,31 @@ const emit = defineEmits(['restore', 'delete'])
 const hasRows = computed(() => props.snapshots.length > 0)
 
 function configName(configId) {
-  if (configId === null || configId === undefined) return 'Manual'
+  if (configId === null || configId === undefined) return t('backups.table.manual')
   return props.configsById[configId]?.name || '—'
 }
 
 function formatDuration(seconds) {
   if (typeof seconds !== 'number' || !Number.isFinite(seconds)) return '—'
-  if (seconds < 1) return '<1s'
-  if (seconds < 60) return `${Math.round(seconds)}s`
+  if (seconds < 1) return t('backups.table.durationUnderSecond')
+  if (seconds < 60) return t('backups.table.durationSeconds', { s: Math.round(seconds) })
   const m = Math.floor(seconds / 60)
   const s = Math.round(seconds % 60)
-  return s > 0 ? `${m}m ${s}s` : `${m}m`
+  return s > 0 ? t('backups.table.durationMinutesSeconds', { m, s }) : t('backups.table.durationMinutes', { m })
 }
 
 function statusMeta(snap) {
   // Backend marks status as success | warning | error
-  if (snap.status === 'error') return { dot: 'var(--danger)', label: 'Failed' }
-  if (snap.status === 'warning') return { dot: 'var(--warning)', label: 'Warning' }
-  return { dot: 'var(--success)', label: 'OK' }
+  if (snap.status === 'error') return { dot: 'var(--danger)', label: t('backups.table.statusFailed') }
+  if (snap.status === 'warning') return { dot: 'var(--warning)', label: t('backups.table.statusWarning') }
+  return { dot: 'var(--success)', label: t('backups.table.statusOk') }
 }
 
 function typeLabel(type) {
-  if (type === 'safety') return 'Safety'
-  if (type === 'restore') return 'Restore'
-  if (type === 'import') return 'Import'
-  return 'Backup'
+  if (type === 'safety') return t('backups.table.typeSafety')
+  if (type === 'restore') return t('backups.table.typeRestore')
+  if (type === 'import') return t('backups.table.typeImport')
+  return t('backups.table.typeBackup')
 }
 
 function downloadHref(snap, format = 'tar') {
@@ -68,19 +69,19 @@ function downloadHref(snap, format = 'tar') {
 
 <template>
   <Panel :padded="false">
-    <div v-if="props.loading && !hasRows" class="snapshots-table__state">Loading snapshots…</div>
-    <div v-else-if="!hasRows" class="snapshots-table__state">No snapshots yet.</div>
+    <div v-if="props.loading && !hasRows" class="snapshots-table__state">{{ $t('backups.table.loading') }}</div>
+    <div v-else-if="!hasRows" class="snapshots-table__state">{{ $t('backups.table.empty') }}</div>
     <div v-else class="snapshots-table__scroll">
     <table class="snapshots-table">
       <thead>
         <tr>
-          <th class="snapshots-table__th-status">Status</th>
-          <th class="snapshots-table__th-name">Snapshot</th>
-          <th class="snapshots-table__th-config">Config</th>
-          <th class="snapshots-table__th-type">Type</th>
-          <th class="snapshots-table__th-created">Created</th>
-          <th class="snapshots-table__th-size">Size</th>
-          <th class="snapshots-table__th-duration">Duration</th>
+          <th class="snapshots-table__th-status">{{ $t('backups.table.status') }}</th>
+          <th class="snapshots-table__th-name">{{ $t('backups.table.snapshot') }}</th>
+          <th class="snapshots-table__th-config">{{ $t('backups.table.config') }}</th>
+          <th class="snapshots-table__th-type">{{ $t('backups.table.type') }}</th>
+          <th class="snapshots-table__th-created">{{ $t('backups.table.created') }}</th>
+          <th class="snapshots-table__th-size">{{ $t('backups.table.size') }}</th>
+          <th class="snapshots-table__th-duration">{{ $t('backups.table.duration') }}</th>
           <th class="snapshots-table__th-actions"></th>
         </tr>
       </thead>
@@ -118,19 +119,19 @@ function downloadHref(snap, format = 'tar') {
                 type="button"
                 class="snapshots-table__action"
                 :disabled="props.busySnapshotId === snap.id"
-                title="Restore"
+                :title="$t('backups.table.restore')"
                 @click="emit('restore', snap)"
               >
                 <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
                   <path d="M2.5 7a4.5 4.5 0 109 0 4.5 4.5 0 00-7.5-3.5"/>
                   <path d="M2.5 1.5v2.5H5"/>
                 </svg>
-                <span>Restore</span>
+                <span>{{ $t('backups.table.restore') }}</span>
               </button>
               <a
                 class="snapshots-table__action"
                 :href="downloadHref(snap, 'tar')"
-                :title="'Download ' + (snap.fileName || snap.id)"
+                :title="$t('backups.table.download', { name: snap.fileName || snap.id })"
                 download
               >
                 <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
@@ -142,7 +143,7 @@ function downloadHref(snap, format = 'tar') {
               <a
                 class="snapshots-table__action snapshots-table__action--secondary"
                 :href="downloadHref(snap, 'zip')"
-                title="Download as .zip (Windows-friendly)"
+                :title="$t('backups.table.downloadZip')"
                 download
               >
                 <span>.zip</span>
@@ -151,13 +152,13 @@ function downloadHref(snap, format = 'tar') {
                 type="button"
                 class="snapshots-table__action snapshots-table__action--danger"
                 :disabled="props.busySnapshotId === snap.id"
-                title="Delete"
+                :title="$t('common.delete')"
                 @click="emit('delete', snap)"
               >
                 <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
                   <path d="M3 4h8M5.5 4V2.5h3V4M4 4l.5 8h5L10 4"/>
                 </svg>
-                <span>Delete</span>
+                <span>{{ $t('common.delete') }}</span>
               </button>
             </div>
           </td>

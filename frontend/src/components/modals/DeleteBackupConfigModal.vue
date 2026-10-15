@@ -61,7 +61,7 @@ function onCancel() {
 <template>
   <BaseModal
     :show="props.show"
-    title="Delete backup config"
+    :title="$t('backups.deleteConfig.title')"
     size="small"
     :close-on-escape="!props.loading"
     @close="onCancel"
@@ -73,13 +73,10 @@ function onCancel() {
           <path d="M12 8V12M12 16H12.01" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
         </svg>
       </div>
-      <p class="delete-config__message">
-        Delete <strong>{{ props.config?.name || 'this config' }}</strong>?
-      </p>
-      <p class="delete-config__description">
-        The config and its snapshot history records will be removed. Any
-        scheduled run is unregistered immediately.
-      </p>
+      <i18n-t keypath="backups.deleteConfig.message" tag="p" class="delete-config__message">
+        <template #name><strong>{{ props.config?.name || $t('backups.deleteConfig.thisConfig') }}</strong></template>
+      </i18n-t>
+      <p class="delete-config__description">{{ $t('backups.deleteConfig.description') }}</p>
 
       <label class="delete-config__purge">
         <input
@@ -89,17 +86,12 @@ function onCancel() {
         />
         <span class="delete-config__purge-body">
           <span class="delete-config__purge-title">
-            Also delete {{ fileCount }} archive file{{ fileCount === 1 ? '' : 's' }} on disk
+            {{ $t('backups.deleteConfig.purge', fileCount) }}
             <span v-if="fileCount > 0" class="delete-config__purge-size">({{ totalLabel }})</span>
           </span>
           <span class="delete-config__purge-sub">
-            <template v-if="fileCount === 0">
-              No archive files are tracked for this config — nothing to purge.
-            </template>
-            <template v-else>
-              Unchecked: archive files are retained on disk and a paths list is shown
-              on the Backups page so you can clean up later.
-            </template>
+            <template v-if="fileCount === 0">{{ $t('backups.deleteConfig.nothingToPurge') }}</template>
+            <template v-else>{{ $t('backups.deleteConfig.retainHint') }}</template>
           </span>
         </span>
       </label>
@@ -112,7 +104,7 @@ function onCancel() {
         :disabled="props.loading"
         @click="onCancel"
       >
-        Cancel
+        {{ $t('common.cancel') }}
       </AppButton>
       <AppButton
         variant="danger"
@@ -121,7 +113,7 @@ function onCancel() {
         :disabled="props.loading"
         @click="onConfirm"
       >
-        {{ props.loading ? 'Deleting…' : (purge ? 'Delete config + files' : 'Delete config') }}
+        {{ props.loading ? $t('common.deletingEllipsis') : (purge ? $t('backups.deleteConfig.confirmWithFiles') : $t('backups.deleteConfig.confirm')) }}
       </AppButton>
     </template>
   </BaseModal>

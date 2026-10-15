@@ -6,6 +6,7 @@ import AppButton from '../ui/AppButton.vue'
 import MobileMenuButton from './MobileMenuButton.vue'
 import { contentLabel } from '../../utils/loaderKind'
 import { settingsSectionLabel } from '../../utils/settingsSections'
+import { t } from '../../i18n'
 
 const props = defineProps({
   serverStatus: {
@@ -34,16 +35,17 @@ defineEmits(['start', 'stop', 'restart', 'install'])
 
 const route = useRoute()
 
+// i18n keys, resolved in pageTitle.
 const ROUTE_TITLE = {
-  ServerOverview: 'Overview',
-  ServerConsole:  'Console',
-  ServerPlayers:  'Players',
-  ServerMods:     'Mods',
-  ServerFiles:    'Files',
-  ServerBackups:  'Backups',
-  ServerPlayit:   'playit.gg',
-  ServerSettings: 'Properties',
-  ServerGeneralSettings: 'Settings'
+  ServerOverview: 'nav.overview',
+  ServerConsole:  'nav.console',
+  ServerPlayers:  'nav.players',
+  ServerFiles:    'nav.files',
+  ServerBackups:  'nav.backups',
+  ServerSchedules: 'nav.schedules',
+  ServerPlayit:   'nav.playit',
+  ServerSettings: 'nav.properties',
+  ServerGeneralSettings: 'nav.settings'
 }
 
 const pageTitle = computed(() => {
@@ -51,7 +53,7 @@ const pageTitle = computed(() => {
   if (route.name === 'ServerMods') {
     return contentLabel(props.serverStatus.loader)
   }
-  return ROUTE_TITLE[route.name] || ''
+  return ROUTE_TITLE[route.name] ? t(ROUTE_TITLE[route.name]) : ''
 })
 
 // Settings is the one page with a level below it, so the title becomes a
@@ -92,7 +94,7 @@ const isPending = computed(() => props.serverStatus.status === 'pending')
   <header class="app-topbar">
     <div class="app-topbar__lead">
       <MobileMenuButton />
-      <nav v-if="settingsCrumb" class="app-topbar__title" aria-label="Breadcrumb">
+      <nav v-if="settingsCrumb" class="app-topbar__title" :aria-label="$t('common.breadcrumb')">
         <router-link :to="settingsCrumb.parent" class="app-topbar__crumb-link">{{ pageTitle }}</router-link>
         <span class="app-topbar__crumb-sep" aria-hidden="true">/</span>
         <span aria-current="page">{{ settingsCrumb.label }}</span>
@@ -110,7 +112,7 @@ const isPending = computed(() => props.serverStatus.status === 'pending')
           :loading="actionState.restart"
           @click="$emit('restart')"
         >
-          {{ actionState.restart ? 'Restarting' : 'Restart' }}
+          {{ actionState.restart ? $t('topbar.restarting') : $t('topbar.restart') }}
         </AppButton>
 
         <AppButton
@@ -121,7 +123,7 @@ const isPending = computed(() => props.serverStatus.status === 'pending')
           :loading="actionState.stop"
           @click="$emit('stop')"
         >
-          {{ actionState.stop ? 'Stopping' : 'Stop' }}
+          {{ actionState.stop ? $t('topbar.stopping') : $t('topbar.stop') }}
         </AppButton>
         <AppButton
           v-else

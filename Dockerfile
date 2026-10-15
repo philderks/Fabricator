@@ -4,7 +4,7 @@
 # Pinned to the build host arch ($BUILDPLATFORM): the dist output is
 # arch-independent, so this avoids emulating the whole Node toolchain under
 # QEMU on the linux/arm64 build (the slow, flaky part).
-FROM --platform=$BUILDPLATFORM node:20-slim AS frontend
+FROM --platform=$BUILDPLATFORM node:22-slim AS frontend
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci

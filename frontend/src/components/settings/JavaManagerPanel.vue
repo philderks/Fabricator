@@ -5,6 +5,7 @@ import AppButton from '../ui/AppButton.vue'
 import ConfirmModal from '../modals/ConfirmModal.vue'
 import { getInstalledJava, installJava, getJavaInstallProgress, uninstallJava } from '../../api/servers'
 import { useToast } from '../../composables/useToast'
+import { t } from '../../i18n'
 
 const toast = useToast()
 
@@ -49,11 +50,15 @@ const formatMb = (bytes) => {
 const installStatusLabel = computed(() => {
   switch (installStatus.value) {
     case 'installing':
-      return 'Extracting…'
+      return t('java.extracting')
     case 'downloading':
-      return `Downloading ${formatMb(downloaded.value)} of ${formatMb(total.value)} (${progressPercent.value}%)`
+      return t('java.downloadingProgress', {
+        done: formatMb(downloaded.value),
+        total: formatMb(total.value),
+        pct: progressPercent.value
+      })
     default:
-      return 'Starting…'
+      return t('java.starting')
   }
 })
 
@@ -84,7 +89,7 @@ const loadInstalled = async () => {
       selectedMajor.value = availableMajors.value[0] ?? null
     }
   } catch (err) {
-    error.value = err?.message || 'Failed to load installed Java runtimes.'
+    error.value = err?.message || t('java.loadFailed')
   } finally {
     loading.value = false
   }
@@ -98,13 +103,13 @@ const pollProgress = async (taskId) => {
     installStatus.value = task.status || installStatus.value
     if (task.status === 'error') {
       clearPoll()
-      toast.error(task.error || 'The Java install failed.', 'Java')
+      toast.error(task.error || t('java.installFailed'), t('java.title'))
       resetInstallState()
       return
     }
     if (task.status === 'cancelled') {
       clearPoll()
-      toast.warning('Java install was cancelled.', 'Java')
+      toast.warning(t('java.installCancelled'), t('java.title'))
       resetInstallState()
       return
     }
@@ -112,12 +117,12 @@ const pollProgress = async (taskId) => {
       clearPoll()
       const major = task.install_major || installMajor.value
       resetInstallState()
-      toast.success(`Java ${major} installed.`, 'Java')
+      toast.success(t('java.installed', { major }), t('java.title'))
       await loadInstalled()
     }
   } catch (err) {
     clearPoll()
-    toast.error(err?.message || 'Lost contact with the install task.', 'Java')
+    toast.error(err?.message || t('java.lostContact'), t('java.title'))
     resetInstallState()
   }
 }
@@ -136,7 +141,7 @@ const startInstall = async () => {
     clearPoll()
     pollHandle = setInterval(() => pollProgress(res.task_id), 750)
   } catch (err) {
-    toast.error(err?.message || 'Failed to start Java install.', 'Java')
+    toast.error(err?.message || t('java.startFailed'), t('java.title'))
     resetInstallState()
   }
 }
@@ -155,10 +160,10 @@ const confirmDelete = async () => {
   deleting.value = true
   try {
     await uninstallJava(major)
-    toast.success(`Java ${major} removed.`, 'Java')
+    toast.success(t('java.removed', { major }), t('java.title'))
     await loadInstalled()
   } catch (err) {
-    toast.error(err?.message || `Failed to remove Java ${major}.`, 'Java')
+    toast.error(err?.message || t('java.removeFailed', { major }), t('java.title'))
   } finally {
     deleting.value = false
     deleteTarget.value = null
@@ -167,9 +172,9 @@ const confirmDelete = async () => {
 
 const versionLabel = (entry) => {
   if (entry.version != null && entry.version !== entry.major) {
-    return `Java ${entry.major} (reports ${entry.version})`
+    return t('java.versionReports', { major: entry.major, version: entry.version })
   }
-  return `Java ${entry.major}`
+  return t('java.version', { major: entry.major })
 }
 
 onMounted(loadInstalled)
@@ -177,7 +182,7 @@ onBeforeUnmount(clearPoll)
 </script>
 
 <template>
-  <Panel title="Java">
+  <Panel :title="$t('java.title')">
     <template #action>
       <button
         type="button"
@@ -185,11 +190,11 @@ onBeforeUnmount(clearPoll)
         :disabled="loading || installing"
         @click="loadInstalled"
       >
-        Refresh
+        {{ $t('common.refresh') }}
       </button>
     </template>
 
-    <div v-if="loading" class="java-manager__state">Loading Java runtimes…</div>
+    <div v-if="loading" class="java-manager__state">{{ $t('java.loading') }}</div>
 
     <div v-else-if="error" class="java-manager__state java-manager__state--error">
       {{ error }}
@@ -203,11 +208,11 @@ onBeforeUnmount(clearPoll)
         >
           <div class="java-manager__info">
             <span class="java-manager__title">
-              System Java<template v-if="systemJava.version"> {{ systemJava.version }}</template>
+              {{ $t('java.systemJava') }}<template v-if="systemJava.version"> {{ systemJava.version }}</template>
             </span>
-            <span class="java-manager__path">On PATH ({{ systemJava.path }})</span>
+            <span class="java-manager__path">{{ $t('java.onPath', { path: systemJava.path }) }}</span>
           </div>
-          <span class="java-manager__badge">System</span>
+          <span class="java-manager__badge">{{ $t('java.systemBadge') }}</span>
         </li>
 
         <li
@@ -225,7 +230,7 @@ onBeforeUnmount(clearPoll)
             :disabled="installing"
             @click="requestDelete(entry)"
           >
-            Remove
+            {{ $t('common.remove') }}
           </AppButton>
         </li>
 
@@ -233,14 +238,14 @@ onBeforeUnmount(clearPoll)
           v-if="managed.length === 0 && !(systemJava && systemJava.installed)"
           class="java-manager__state"
         >
-          No Java runtimes installed yet.
+          {{ $t('java.none') }}
         </li>
       </ul>
 
       <div class="java-manager__install">
         <template v-if="installing">
           <div class="java-manager__progress-text">
-            <span>Installing Java {{ installMajor }}</span>
+            <span>{{ $t('java.installing', { major: installMajor }) }}</span>
             <span class="java-manager__progress-status">{{ installStatusLabel }}</span>
           </div>
           <div class="java-manager__progress-track">
@@ -253,7 +258,7 @@ onBeforeUnmount(clearPoll)
 
         <template v-else>
           <label class="java-manager__install-label" for="java-install-major">
-            Add a Java runtime
+            {{ $t('java.addRuntime') }}
           </label>
           <div class="java-manager__install-controls">
             <select
@@ -263,14 +268,14 @@ onBeforeUnmount(clearPoll)
               :disabled="availableMajors.length === 0"
             >
               <option v-if="availableMajors.length === 0" :value="null">
-                All common versions installed
+                {{ $t('java.allInstalled') }}
               </option>
               <option
                 v-for="major in availableMajors"
                 :key="major"
                 :value="major"
               >
-                Java {{ major }}
+                {{ $t('java.version', { major }) }}
               </option>
             </select>
             <AppButton
@@ -279,7 +284,7 @@ onBeforeUnmount(clearPoll)
               :disabled="selectedMajor == null"
               @click="startInstall"
             >
-              Install
+              {{ $t('common.install') }}
             </AppButton>
           </div>
         </template>
@@ -288,12 +293,11 @@ onBeforeUnmount(clearPoll)
 
     <ConfirmModal
       :show="!!deleteTarget"
-      title="Remove Java runtime?"
-      :message="deleteTarget ? `Remove Java ${deleteTarget.major}?` : ''"
-      description="Servers that need this version will prompt you to reinstall it the next time they start."
+      :title="$t('java.removeTitle')"
+      :message="deleteTarget ? $t('java.removeMessage', { major: deleteTarget.major }) : ''"
+      :description="$t('java.removeDescription')"
       type="danger"
-      confirm-text="Remove"
-      cancel-text="Cancel"
+      :confirm-text="$t('common.remove')"
       :loading="deleting"
       @confirm="confirmDelete"
       @cancel="cancelDelete"

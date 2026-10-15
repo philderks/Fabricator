@@ -6,10 +6,12 @@ import hashlib
 import io
 import json
 import logging
+import os
 import re
 import shutil
 import sys
 import tempfile
+import uuid
 import zipfile
 
 if sys.version_info >= (3, 11):
@@ -522,8 +524,8 @@ class ModrinthClient:
         - Filename is derived from the last URL path segment and must match
           a strict safe-character regex; traversal attempts raise
           ModrinthApiError.
-        - When ``hashes`` is provided, sha1/sha512 are verified; a mismatch
-          deletes the partial file and raises.
+        - Download into a temporary file and verify sha1/sha512 before
+          atomically replacing the destination. Failures keep the old jar.
         """
         from urllib.parse import urlparse, unquote
 
@@ -559,6 +561,7 @@ class ModrinthClient:
         sha1 = hashlib.sha1() if hashes and hashes.get("sha1") else None
         sha512 = hashlib.sha512() if hashes and hashes.get("sha512") else None
 
+        staged_path = None
         try:
             with self._request(
                 "get",
@@ -567,7 +570,9 @@ class ModrinthClient:
                 timeout=60,
                 error_context="Failed to download mod file",
             ) as response:
-                with open(target_path, "wb") as file_handle:
+                candidate = target_folder / f".fabricator-download-{uuid.uuid4().hex}.part"
+                with open(candidate, "xb") as file_handle:
+                    staged_path = candidate
                     for chunk in response.iter_content(chunk_size=8192):
                         if not chunk:
                             continue
@@ -576,19 +581,23 @@ class ModrinthClient:
                             sha1.update(chunk)
                         if sha512 is not None:
                             sha512.update(chunk)
-        except OSError as exc:
-            try:
-                target_path.unlink(missing_ok=True)
-            except OSError:
-                pass
-            raise ModrinthApiError(f"Failed to save mod file: {exc}") from exc
+                    file_handle.flush()
+                    os.fsync(file_handle.fileno())
 
-        if sha512 is not None and sha512.hexdigest() != hashes["sha512"].lower():
-            target_path.unlink(missing_ok=True)
-            raise ModrinthApiError(f"Mod download SHA-512 mismatch for {filename}")
-        if sha1 is not None and sha1.hexdigest() != hashes["sha1"].lower():
-            target_path.unlink(missing_ok=True)
-            raise ModrinthApiError(f"Mod download SHA-1 mismatch for {filename}")
+            if sha512 is not None and sha512.hexdigest() != hashes["sha512"].lower():
+                raise ModrinthApiError(f"Mod download SHA-512 mismatch for {filename}")
+            if sha1 is not None and sha1.hexdigest() != hashes["sha1"].lower():
+                raise ModrinthApiError(f"Mod download SHA-1 mismatch for {filename}")
+
+            os.replace(staged_path, target_path)
+        except OSError as exc:
+            raise ModrinthApiError(f"Failed to save mod file: {exc}") from exc
+        finally:
+            if staged_path is not None:
+                try:
+                    staged_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
         return target_path
 

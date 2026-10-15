@@ -17,6 +17,7 @@ import { computed, ref, watch } from 'vue'
 import BaseModal from './BaseModal.vue'
 import AppButton from '../ui/AppButton.vue'
 import { getModVersions } from '../../api/modrinth'
+import { t } from '../../i18n'
 
 const props = defineProps({
   show: { type: Boolean, required: true },
@@ -39,7 +40,8 @@ const error = ref('')
 const selectedId = ref('')
 const showIncompatible = ref(false)
 
-const TYPE_LABELS = { release: 'Release', beta: 'Beta', alpha: 'Alpha' }
+// i18n keys, resolved in `decorated`.
+const TYPE_LABELS = { release: 'modVersions.type.release', beta: 'modVersions.type.beta', alpha: 'modVersions.type.alpha' }
 
 function targetsThisServer(version) {
   if (!props.mcVersion) return true
@@ -52,7 +54,7 @@ const decorated = computed(() =>
     id: v.id,
     number: v.version_number || v.id,
     name: v.name || '',
-    type: TYPE_LABELS[v.version_type] || v.version_type || '',
+    type: TYPE_LABELS[v.version_type] ? t(TYPE_LABELS[v.version_type]) : (v.version_type || ''),
     published: v.date_published ? new Date(v.date_published).toLocaleDateString() : '',
     games: Array.isArray(v.game_versions) ? v.game_versions : [],
     loaders: Array.isArray(v.loaders) ? v.loaders : [],
@@ -72,8 +74,8 @@ const visible = computed(() =>
 const selected = computed(() => decorated.value.find((v) => v.id === selectedId.value) || null)
 
 const confirmLabel = computed(() => {
-  if (!props.installedVersionId) return 'Install this version'
-  return selected.value?.installed ? 'Reinstall this version' : 'Switch to this version'
+  if (!props.installedVersionId) return t('modVersions.install')
+  return selected.value?.installed ? t('modVersions.reinstall') : t('modVersions.switch')
 })
 
 async function load() {
@@ -96,7 +98,7 @@ async function load() {
     selectedId.value = installed?.id || decorated.value.find((v) => v.compatible)?.id || ''
     if (!compatibleCount.value && decorated.value.length) showIncompatible.value = true
   } catch (err) {
-    error.value = err?.message || 'Could not load versions for this mod.'
+    error.value = err?.message || t('modVersions.loadFailed')
   } finally {
     loading.value = false
   }
@@ -117,22 +119,18 @@ function confirm() {
 <template>
   <BaseModal
     :show="show"
-    :title="projectTitle ? `Versions — ${projectTitle}` : 'Choose a version'"
+    :title="projectTitle ? $t('modVersions.title', { title: projectTitle }) : $t('modVersions.titleFallback')"
     size="large"
     @close="emit('close')"
   >
-    <p v-if="loading" class="mv__state">Loading versions…</p>
+    <p v-if="loading" class="mv__state">{{ $t('modVersions.loading') }}</p>
     <p v-else-if="error" class="mv__state mv__state--error" role="alert">{{ error }}</p>
-    <p v-else-if="!decorated.length" class="mv__state">No versions published for this loader.</p>
+    <p v-else-if="!decorated.length" class="mv__state">{{ $t('modVersions.none') }}</p>
 
     <template v-else>
       <p class="mv__lead">
-        <template v-if="compatibleCount">
-          Showing versions for Minecraft {{ mcVersion }}.
-        </template>
-        <template v-else>
-          No version targets Minecraft {{ mcVersion }} — everything below is for another version.
-        </template>
+        <template v-if="compatibleCount">{{ $t('modVersions.showingFor', { version: mcVersion }) }}</template>
+        <template v-else>{{ $t('modVersions.noneTarget', { version: mcVersion }) }}</template>
       </p>
 
       <ul class="mv__list">
@@ -148,10 +146,10 @@ function confirm() {
             <span class="mv__main">
               <span class="mv__number">
                 {{ version.number }}
-                <span v-if="version.installed" class="mv__badge mv__badge--installed">Installed</span>
+                <span v-if="version.installed" class="mv__badge mv__badge--installed">{{ $t('common.installed') }}</span>
                 <span v-if="version.type" class="mv__badge">{{ version.type }}</span>
                 <span v-if="!version.compatible" class="mv__badge mv__badge--warn">
-                  Not for {{ mcVersion }}
+                  {{ $t('modVersions.notFor', { version: mcVersion }) }}
                 </span>
               </span>
               <span class="mv__meta">
@@ -170,18 +168,17 @@ function confirm() {
         @click="showIncompatible = !showIncompatible"
       >
         {{ showIncompatible
-          ? 'Hide versions for other Minecraft versions'
-          : `Show ${decorated.length - compatibleCount} version(s) for other Minecraft versions` }}
+          ? $t('modVersions.hideOther')
+          : $t('modVersions.showOther', decorated.length - compatibleCount) }}
       </button>
 
       <p v-if="selected && !selected.compatible" class="mv__warn" role="status">
-        This build does not list Minecraft {{ mcVersion }}. Installing it is allowed — that is
-        often deliberate — but the mod may fail to load.
+        {{ $t('modVersions.incompatibleWarning', { version: mcVersion }) }}
       </p>
     </template>
 
     <template #footer>
-      <AppButton variant="ghost" @click="emit('close')">Cancel</AppButton>
+      <AppButton variant="ghost" @click="emit('close')">{{ $t('common.cancel') }}</AppButton>
       <AppButton variant="primary" :disabled="!selected || loading" @click="confirm">
         {{ confirmLabel }}
       </AppButton>

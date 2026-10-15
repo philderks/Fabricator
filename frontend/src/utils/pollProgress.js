@@ -1,3 +1,5 @@
+import { t } from '../i18n'
+
 /**
  * Retry policy for install-progress polling.
  *
@@ -83,6 +85,4 @@ export function createProgressPoller(fetchProgress, options = {}) {
  * The message shown when polling gives up. Deliberately does not claim the
  * install failed — it very likely did not.
  */
-export const LOST_CONTACT_MESSAGE =
-  'Lost contact with the panel while installing. The install is most likely ' +
-  'still running in the background — reopen the server to check on it.'
+export const lostContactMessage = () => t('install.lostContact')

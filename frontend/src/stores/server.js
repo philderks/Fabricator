@@ -36,6 +36,7 @@ import {
 } from '../api/servers'
 import { useToast } from '../composables/useToast'
 import { usePreferencesStore } from './preferences'
+import { t } from '../i18n'
 import {
   enrichInstalledModsWithModrinth,
   invalidateModrinthMetaCache
@@ -47,35 +48,36 @@ import { installedEntryMatchesProjectRef } from '../utils/modrinthJarMatch'
 import { getEffectiveStatus as pickEffectiveStatus } from '../utils/getEffectiveStatus'
 import {
   createProgressPoller,
-  LOST_CONTACT_MESSAGE,
+  lostContactMessage,
   POLL_INTERVAL_MS
 } from '../utils/pollProgress'
 
+// Values are i18n keys, translated where the label is built.
 const MODPACK_STAGE_LABELS = {
-  starting: 'Starting install...',
-  resolving: 'Resolving modpack version...',
-  cleaning: 'Cleaning old modpack files...',
-  downloading_pack: 'Downloading modpack archive...',
-  checking_availability: 'Checking file availability...',
-  installing_files: 'Downloading mods...',
-  extracting_overrides: 'Extracting override files...',
-  verifying_mod_sides: 'Checking mods for server compatibility...',
-  done: 'Finishing up...'
+  starting: 'install.modpackStages.starting',
+  resolving: 'install.modpackStages.resolving',
+  cleaning: 'install.modpackStages.cleaning',
+  downloading_pack: 'install.modpackStages.downloadingPack',
+  checking_availability: 'install.modpackStages.checkingAvailability',
+  installing_files: 'install.modpackStages.installingFiles',
+  extracting_overrides: 'install.modpackStages.extractingOverrides',
+  verifying_mod_sides: 'install.modpackStages.verifyingModSides',
+  done: 'install.modpackStages.done'
 }
 
 // Loader-install phases, from backend/server/install_progress.py. The pack's
 // own stages are MODPACK_STAGE_LABELS above; these cover the stretch between
 // resolving a pack and installing it, which is still part of the same job.
 const INSTALL_PHASE_LABELS = {
-  starting: 'Starting install...',
-  resolving_modpack: 'Resolving modpack...',
-  resolving_versions: 'Resolving versions...',
-  downloading_installer: 'Downloading installer...',
-  downloading_server_jar: 'Downloading server files...',
-  verifying: 'Verifying download...',
-  running_installer: 'Running installer...',
-  detecting_artifacts: 'Finishing server files...',
-  writing_eula: 'Finishing server files...'
+  starting: 'install.phases.starting',
+  resolving_modpack: 'install.phases.resolvingModpack',
+  resolving_versions: 'install.phases.resolvingVersions',
+  downloading_installer: 'install.phases.downloadingInstaller',
+  downloading_server_jar: 'install.phases.downloadingServerJar',
+  verifying: 'install.phases.verifying',
+  running_installer: 'install.phases.runningInstaller',
+  detecting_artifacts: 'install.phases.finishing',
+  writing_eula: 'install.phases.finishing'
 }
 
 const TEXT_FILE_EXTENSIONS = new Set([
@@ -180,10 +182,10 @@ export const useServerStore = defineStore('server', () => {
 
   // ---------- Private helpers (not returned) ----------
   const defaultSettings = (data = {}) => ({
-    name: data.name || 'Minecraft Server',
+    name: data.name || t('servers.defaultName'),
     port: data.port ?? 25565,
     serverIp: data.serverIp || '',
-    motd: data.motd || 'A Minecraft Server',
+    motd: data.motd || t('servers.defaultMotd'),
     bugReportLink: data.bugReportLink || '',
     maxPlayers: data.maxPlayers ?? 20,
     difficulty: data.difficulty || 'normal',
@@ -260,8 +262,8 @@ export const useServerStore = defineStore('server', () => {
     // Count items, not preview-string lines — a `reason` containing `\n` would otherwise
     // inflate the line count and underreport `remaining`.
     const remaining = Math.max(0, missingFiles.length - 8)
-    const suffix = remaining > 0 ? `\n...and ${remaining} more.` : ''
-    return `The following files could not be downloaded:\n${preview}${suffix}\n\nInstall anyway without these files?`
+    const suffix = remaining > 0 ? `\n${t('modpacks.missingFilesMore', { n: remaining })}` : ''
+    return `${t('modpacks.missingFilesIntro')}\n${preview}${suffix}\n\n${t('modpacks.missingFilesQuestion')}`
   }
 
   // ---------- Computeds (getters) ----------
@@ -269,9 +271,10 @@ export const useServerStore = defineStore('server', () => {
   // Both progress sources describe the same install with the same stage
   // vocabulary, so the phrasing lives here once rather than per surface.
   function stageLabel(p) {
-    const stage = MODPACK_STAGE_LABELS[p.stage] || p.stage || 'Working...'
+    const key = MODPACK_STAGE_LABELS[p.stage]
+    const stage = key ? t(key) : (p.stage || t('common.working'))
     if (p.stage === 'installing_files' && p.total > 0) {
-      return `${stage} (${p.current}/${p.total})`
+      return t('install.stageProgress', { label: stage, current: p.current, total: p.total })
     }
     return stage
   }
@@ -329,7 +332,7 @@ export const useServerStore = defineStore('server', () => {
     return {
       kind: 'loader',
       name: p.modpack_name || '',
-      label: INSTALL_PHASE_LABELS[p.phase] || 'Installing server…',
+      label: INSTALL_PHASE_LABELS[p.phase] ? t(INSTALL_PHASE_LABELS[p.phase]) : t('install.installingServer'),
       percent: total > 0 ? Math.round((done / total) * 100) : 0,
       determinate: total > 0,
       detail: ''
@@ -349,7 +352,7 @@ export const useServerStore = defineStore('server', () => {
   const installDisplay = computed(() => installActivity.value || {
     kind: 'loader',
     name: '',
-    label: 'Installing server…',
+    label: t('install.installingServer'),
     percent: 0,
     determinate: false,
     detail: ''
@@ -376,10 +379,10 @@ export const useServerStore = defineStore('server', () => {
   const serverStatus = computed(() => {
     const loaderName = server.value?.loader
       ? server.value.loader.charAt(0).toUpperCase() + server.value.loader.slice(1)
-      : 'Unknown'
+      : t('common.unknown')
 
     return {
-      name: server.value?.name || 'Minecraft Server',
+      name: server.value?.name || t('servers.defaultName'),
       // Mirror backend _augment_with_runtime semantics: the runtime registry
       // only knows running/stopped. For in-flight states the persisted
       // status (installing, starting, stopping, failed, pending) is
@@ -460,22 +463,22 @@ export const useServerStore = defineStore('server', () => {
 
   const statusLabel = computed(() => {
     const s = serverStatus.value.status
-    if (s === 'running') return 'Running'
-    if (s === 'stopped') return 'Stopped'
-    if (s === 'pending') return 'Install Required'
-    if (s === 'installing') return 'Installing'
-    if (s === 'failed') return 'Failed'
-    return s ? s.charAt(0).toUpperCase() + s.slice(1) : 'Unknown'
+    if (s === 'running') return t('status.running')
+    if (s === 'stopped') return t('status.stopped')
+    if (s === 'pending') return t('status.pending')
+    if (s === 'installing') return t('status.installing')
+    if (s === 'failed') return t('status.failed')
+    return s ? s.charAt(0).toUpperCase() + s.slice(1) : t('status.unknown')
   })
 
   const startLocked = computed(() => serverStatus.value.status === 'installing')
 
   const startButtonLabel = computed(() => {
-    if (serverStatus.value.status === 'installing') return 'Installing…'
+    if (serverStatus.value.status === 'installing') return t('topbar.installing')
     if (serverStatus.value.status === 'pending') {
-      return actionState.value.install ? 'Installing…' : 'Install'
+      return actionState.value.install ? t('topbar.installing') : t('common.install')
     }
-    return actionState.value.start ? 'Starting…' : 'Start'
+    return actionState.value.start ? t('topbar.starting') : t('topbar.start')
   })
 
   const activeModpack = computed(() => server.value?.modpack || null)
@@ -527,7 +530,7 @@ export const useServerStore = defineStore('server', () => {
       await reorderServers(serversList.value.map((s) => s.id))
     } catch (error) {
       console.error('Failed to reorder servers:', error)
-      toast.error('Failed to save server order', 'Error')
+      toast.error(t('servers.orderSaveFailed'), t('common.error'))
       loadServers()
     }
   }
@@ -556,7 +559,7 @@ export const useServerStore = defineStore('server', () => {
       }
     } catch (error) {
       console.error('Failed to load server:', error)
-      toast.error('Could not load server details', 'Error')
+      toast.error(t('servers.detailsLoadFailed'), t('common.error'))
     } finally {
       if (!silent) serverLoading.value = false
     }
@@ -577,7 +580,7 @@ export const useServerStore = defineStore('server', () => {
           displayTitle: recorded?.title || null,
           iconUrl: recorded?.iconUrl || null,
           modrinth: recorded,
-          version: recorded?.versionNumber || file.version || 'local',
+          version: recorded?.versionNumber || file.version || t('mods.localVersion'),
           downloads: file.downloads || 'N/A',
           size: file.size,
           updatedAt: file.updatedAt,
@@ -601,7 +604,7 @@ export const useServerStore = defineStore('server', () => {
       loadModUpdates()
     } catch (error) {
       console.error('Failed to load mods:', error)
-      toast.error('Failed to load installed mods', 'Error')
+      toast.error(t('mods.loadFailed'), t('common.error'))
     } finally {
       modsLoading.value = false
     }
@@ -636,20 +639,20 @@ export const useServerStore = defineStore('server', () => {
     const deps = missingUpdateDeps.value
     const byFilename = new Map(installedMods.value.map((m) => [m.filename, m]))
     confirmModalData.value = {
-      title: 'Update Mods',
-      message: `Update ${n} mod${n === 1 ? '' : 's'} to the newest release?`,
+      title: t('mods.update.title'),
+      message: t('mods.update.message', n),
       description: deps.length
-        ? `The updates also need ${deps.length} mod${deps.length === 1 ? '' : 's'} you don't have, which will be installed first.`
-        : 'Each old jar is removed only once its replacement has downloaded.',
+        ? t('mods.update.depsDescription', deps.length)
+        : t('mods.update.description'),
       type: 'info',
-      confirmText: `Update ${n} mod${n === 1 ? '' : 's'}`,
-      cancelText: 'Cancel',
+      confirmText: t('mods.updateMods', n),
+      cancelText: t('common.cancel'),
       items: [
         ...entries.map(([filename, u]) => {
           const mod = byFilename.get(filename)
           return `${mod ? installedModDisplayName(mod) : filename}: ${mod?.version || '?'} → ${u.versionNumber}`
         }),
-        ...deps.map((d) => `New dependency: ${d.title}`)
+        ...deps.map((d) => t('mods.update.newDependency', { title: d.title }))
       ]
     }
     modToRemove.value = '__update__'
@@ -697,8 +700,8 @@ export const useServerStore = defineStore('server', () => {
       }
     }
     const done = jobs.length - failed.length
-    if (done) toast.success(`${done} mod${done === 1 ? '' : 's'} updated or installed`, 'Mods Updated')
-    if (failed.length) toast.error(`Could not install: ${failed.join(', ')}`, 'Update Failed')
+    if (done) toast.success(t('mods.update.done', done), t('mods.update.doneTitle'))
+    if (failed.length) toast.error(t('mods.update.failed', { list: failed.join(', ') }), t('mods.update.failedTitle'))
     updatingMods.value = false
     if (target.id === currentServerId.value) await loadMods()
   }
@@ -710,7 +713,7 @@ export const useServerStore = defineStore('server', () => {
       logs.value = await getServerLogs(currentServerId.value, { limit })
     } catch (error) {
       console.error('Failed to load logs:', error)
-      toast.error('Failed to load console logs', 'Error')
+      toast.error(t('console.logsLoadFailed'), t('common.error'))
     } finally {
       logsLoading.value = false
     }
@@ -728,7 +731,7 @@ export const useServerStore = defineStore('server', () => {
       fileBrowser.value = { ...data, entries: data.entries, loading: false, error: null }
     } catch (error) {
       console.error('Failed to browse files:', error)
-      fileBrowser.value = { currentPath: path, entries: [], loading: false, error: error.message || 'Unable to load files' }
+      fileBrowser.value = { currentPath: path, entries: [], loading: false, error: error.message || t('files.loadFailed') }
     }
   }
 
@@ -789,7 +792,7 @@ export const useServerStore = defineStore('server', () => {
         row.status = 'done'
         uploaded.push(file.name)
       } catch (error) {
-        row.error = error?.message || 'Upload failed'
+        row.error = error?.message || t('files.uploadFailed')
         if (error?.status === 409 && error?.data?.code === 'file-exists') {
           // Not a failure the user has to read: the replace prompt takes this
           // file over from here. Marking it 'failed' would leave a red "already
@@ -799,8 +802,8 @@ export const useServerStore = defineStore('server', () => {
           conflicts.push(file)
         } else {
           row.status = 'failed'
-          if (error?.message !== 'Upload cancelled') {
-            toast.error(`${file.name}: ${row.error}`, 'Files')
+          if (error?.message !== t('errors.uploadCancelled')) {
+            toast.error(`${file.name}: ${row.error}`, t('nav.files'))
           }
         }
       }
@@ -808,8 +811,8 @@ export const useServerStore = defineStore('server', () => {
 
     if (uploaded.length) {
       toast.success(
-        uploaded.length === 1 ? `Uploaded ${uploaded[0]}` : `Uploaded ${uploaded.length} files`,
-        'Files'
+        uploaded.length === 1 ? t('files.uploadedOne', { name: uploaded[0] }) : t('files.uploadedMany', uploaded.length),
+        t('nav.files')
       )
       await openFileBrowser(dirPath)
     }
@@ -836,8 +839,8 @@ export const useServerStore = defineStore('server', () => {
     try {
       result = await deleteServerFiles(currentServerId.value, list, { recursive })
     } catch (error) {
-      const message = error?.message || 'Delete failed'
-      toast.error(message, 'Files')
+      const message = error?.message || t('files.deleteFailed')
+      toast.error(message, t('nav.files'))
       return { deleted: [], errors: [{ error: message }], needsRecursive: [] }
     }
 
@@ -853,15 +856,15 @@ export const useServerStore = defineStore('server', () => {
 
     if (deleted.length) {
       toast.success(
-        deleted.length === 1 ? `Deleted ${deleted[0]}` : `Deleted ${deleted.length} items`,
-        'Files'
+        deleted.length === 1 ? t('files.deletedOne', { name: deleted[0] }) : t('files.deletedMany', deleted.length),
+        t('nav.files')
       )
       await openFileBrowser(fileBrowser.value.currentPath || '')
     }
 
     for (const entry of errors) {
       if (entry.code === 'not-empty') continue
-      toast.error(entry.path ? `${entry.path}: ${entry.error}` : entry.error, 'Files')
+      toast.error(entry.path ? `${entry.path}: ${entry.error}` : entry.error, t('nav.files'))
     }
 
     return { deleted, errors, needsRecursive }
@@ -871,11 +874,11 @@ export const useServerStore = defineStore('server', () => {
     const dirPath = fileBrowser.value.currentPath || ''
     try {
       await createServerFolder(currentServerId.value, dirPath, name)
-      toast.success(`Created ${name}`, 'Files')
+      toast.success(t('files.created', { name }), t('nav.files'))
       await openFileBrowser(dirPath)
       return true
     } catch (error) {
-      toast.error(error?.message || 'Could not create folder', 'Files')
+      toast.error(error?.message || t('files.createFolderFailed'), t('nav.files'))
       return false
     }
   }
@@ -914,7 +917,7 @@ export const useServerStore = defineStore('server', () => {
         active: true,
         loading: false,
         truncated: false,
-        error: error.message || 'Search failed',
+        error: error.message || t('files.search.failed'),
       }
     }
   }
@@ -940,7 +943,7 @@ export const useServerStore = defineStore('server', () => {
 
   async function openFile(path) {
     if (!isTextFile(path)) {
-      toast.error('Only supported text files can be edited', 'Files')
+      toast.error(t('files.notEditable'), t('nav.files'))
       return
     }
     fileEditor.value = { path, content: '', originalContent: '', loading: true, saving: false, error: null }
@@ -948,9 +951,9 @@ export const useServerStore = defineStore('server', () => {
       const file = await getServerFile(currentServerId.value, path)
       fileEditor.value = { path: file.path, content: file.content, originalContent: file.content, loading: false, saving: false, error: null }
     } catch (error) {
-      const message = error?.message || 'Unable to open file'
+      const message = error?.message || t('files.openFailed')
       fileEditor.value = { path: null, content: '', originalContent: '', loading: false, saving: false, error: message }
-      toast.error(message, 'Files')
+      toast.error(message, t('nav.files'))
     }
   }
 
@@ -961,11 +964,11 @@ export const useServerStore = defineStore('server', () => {
     try {
       await saveServerFile(currentServerId.value, fileEditor.value.path, fileEditor.value.content)
       fileEditor.value.originalContent = fileEditor.value.content
-      toast.success('File saved', 'Files')
+      toast.success(t('files.saved'), t('nav.files'))
     } catch (error) {
-      const message = error?.message || 'Failed to save file'
+      const message = error?.message || t('files.saveFailed')
       fileEditor.value.error = message
-      toast.error(message, 'Files')
+      toast.error(message, t('nav.files'))
     } finally {
       fileEditor.value.saving = false
     }
@@ -994,12 +997,12 @@ export const useServerStore = defineStore('server', () => {
     deletingServer.value = true
     try {
       await deleteServer(currentServerId.value)
-      toast.success('Server deleted', 'Servers')
+      toast.success(t('servers.deleted'), t('servers.title'))
       await loadServers()
       router.push({ name: 'Servers' })
     } catch (error) {
       console.error('Failed to delete server:', error)
-      toast.error(error.message || 'Failed to delete server', 'Server Error')
+      toast.error(error.message || t('servers.deleteFailed'), t('servers.errorTitle'))
     } finally {
       deletingServer.value = false
       showDeleteServerModal.value = false
@@ -1018,20 +1021,20 @@ export const useServerStore = defineStore('server', () => {
           loader: modData.loader,
           server_id: currentServerId.value
         })
-        await loadMods()
       }
       await installMod(modData.modId, {
         mc_version: modData.mcVersion,
         loader: modData.loader,
         server_id: currentServerId.value
       })
-      const suffix =
-        prereqs.length > 0 ? ` and ${prereqs.length} dependenc${prereqs.length === 1 ? 'y' : 'ies'}` : ''
-      toast.success(`${modData.modTitle} installed successfully${suffix}!`, 'Mod Installed')
+      const message = prereqs.length > 0
+        ? t('mods.installedWithDeps', { title: modData.modTitle }, prereqs.length)
+        : t('mods.installedToast', { title: modData.modTitle })
+      toast.success(message, t('mods.installedTitle'))
       await loadMods()
     } catch (error) {
       console.error('Install failed:', error)
-      toast.error(error.message || 'Mod installation failed', 'Installation Failed')
+      toast.error(error.message || t('mods.installFailed'), t('common.installationFailed'))
       try {
         await loadMods()
       } catch {
@@ -1070,10 +1073,7 @@ export const useServerStore = defineStore('server', () => {
   function openVersionPicker(mod) {
     const ref_ = modProjectRef(mod)
     if (!ref_) {
-      toast.info(
-        'This jar could not be matched to a Modrinth project, so its versions are unknown.',
-        'No version list'
-      )
+      toast.info(t('mods.noVersionList'), t('mods.noVersionListTitle'))
       return
     }
     versionPickerMod.value = ref_
@@ -1105,13 +1105,13 @@ export const useServerStore = defineStore('server', () => {
       // filename, and the new one needs resolving on the next list.
       if (target.filename) invalidateModrinthMetaCache(target.filename)
       toast.success(
-        `${target.title || 'Mod'} is now on version ${versionNumber}`,
-        'Version changed'
+        t('mods.versionChanged', { title: target.title || t('content.mod', 1), version: versionNumber }),
+        t('mods.versionChangedTitle')
       )
       await loadMods()
     } catch (error) {
       console.error('Version change failed:', error)
-      toast.error(error.message || 'Could not change the mod version', 'Install Failed')
+      toast.error(error.message || t('mods.versionChangeFailed'), t('mods.installFailedTitle'))
       try {
         await loadMods()
       } catch {
@@ -1205,16 +1205,19 @@ export const useServerStore = defineStore('server', () => {
       const missingCount = Array.isArray(result?.missing_files) ? result.missing_files.length : 0
       const skippedCount = Array.isArray(result?.files_skipped) ? result.files_skipped.length : 0
       const uncertainCount = Array.isArray(result?.uncertain_mod_files) ? result.uncertain_mod_files.length : 0
-      const cleanedNote = ` Replaced folders: ${cleanedCount}.`
-      const missingNote = missingCount ? ` Missing files skipped: ${missingCount}.` : ''
-      const skippedNote = skippedCount ? ` Skipped ${skippedCount} client-only mod${skippedCount === 1 ? '' : 's'}.` : ''
-      const uncertainNote = uncertainCount ? ` Installed ${uncertainCount} mod${uncertainCount === 1 ? '' : 's'} with unknown server compatibility.` : ''
-      const backupNote = result?.backup_file ? ` Backup: ${result.backup_file}.` : ''
-      toast.success(`${modpackData.title} installed successfully.${cleanedNote}${missingNote}${skippedNote}${uncertainNote}${backupNote}`, 'Modpack Installed')
+      const summary = [
+        t('modpacks.installedToast', { title: modpackData.title }),
+        t('modpacks.notes.replaced', { n: cleanedCount }),
+        missingCount ? t('modpacks.notes.missing', { n: missingCount }) : '',
+        skippedCount ? t('modpacks.notes.skipped', skippedCount) : '',
+        uncertainCount ? t('modpacks.notes.uncertain', uncertainCount) : '',
+        result?.backup_file ? t('modpacks.notes.backup', { file: result.backup_file }) : ''
+      ]
+      toast.success(summary.filter(Boolean).join(' '), t('modpacks.installedTitle'))
       if (uncertainCount) {
-        toast.warning('Unknown-side mods were kept because missing metadata is not evidence they are client-only. Check server logs if startup fails.', 'Compatibility Warning')
+        toast.warning(t('modpacks.unknownSideKept'), t('modpacks.compatibilityWarningTitle'))
       }
-      if (result?.java_warning) toast.warning(result.java_warning.message, 'Java Version Mismatch')
+      if (result?.java_warning) toast.warning(result.java_warning.message, t('modpacks.javaMismatchTitle'))
       await Promise.all([loadServer({ silent: true }), loadMods()])
     } catch (error) {
       const uncertainMods = error?.data?.uncertain_mod_files
@@ -1224,7 +1227,7 @@ export const useServerStore = defineStore('server', () => {
         pendingUncertainModpackData.value = modpackData
         uncertainModsReport.value = uncertainMods
         showUncertainModsModal.value = true
-        toast.warning('Some mods need a server/client decision before install can continue.', 'Uncertain Mod Side')
+        toast.warning(t('modpacks.needsSideDecision'), t('modpacks.uncertainSideTitle'))
         return
       }
       const missingFiles = error?.data?.missing_files
@@ -1234,12 +1237,12 @@ export const useServerStore = defineStore('server', () => {
         pendingMissingModsInstall.value = { ...modpackData, allowMissing: true }
         missingModsReport.value = missingFiles
         showMissingModsConfirmModal.value = true
-        toast.warning(`${missingFiles.length} files could not be downloaded. Choose if you want to continue without them.`, 'Missing Modpack Files')
+        toast.warning(t('modpacks.missingFilesToast', missingFiles.length), t('modpacks.missingFilesTitle'))
         return
       }
       showModpackInstallConfirmModal.value = false
       console.error('Modpack install failed:', error)
-      toast.error(error.message || 'Modpack installation failed', 'Installation Failed')
+      toast.error(error.message || t('modpacks.installFailed'), t('common.installationFailed'))
     } finally {
       modpackInstalling.value = false
     }
@@ -1270,7 +1273,7 @@ export const useServerStore = defineStore('server', () => {
     showUncertainModsModal.value = false
     uncertainModsReport.value = []
     pendingUncertainModpackData.value = null
-    toast.info('Modpack install canceled. Unknown mod sides were not confirmed.', 'Install Canceled')
+    toast.info(t('modpacks.installCanceled'), t('modpacks.installCanceledTitle'))
   }
 
   async function confirmUncertainModsDecision(overrides) {
@@ -1285,12 +1288,12 @@ export const useServerStore = defineStore('server', () => {
   function handleRemoveMod(mod) {
     modToRemove.value = mod
     confirmModalData.value = {
-      title: 'Remove Mod',
-      message: `Remove ${mod.name}?`,
-      description: 'This will delete the mod file from the server. This action cannot be undone.',
+      title: t('mods.remove.title'),
+      message: t('mods.remove.message', { name: mod.name }),
+      description: t('mods.remove.description'),
       type: 'danger',
-      confirmText: 'Remove',
-      cancelText: 'Cancel'
+      confirmText: t('common.remove'),
+      cancelText: t('common.cancel')
     }
     showConfirmModal.value = true
   }
@@ -1311,11 +1314,11 @@ export const useServerStore = defineStore('server', () => {
       // Drop cache entry so re-list doesn't show stale metadata if a
       // different jar with the same filename ever lands later.
       invalidateModrinthMetaCache(filename)
-      toast.success(`${modToRemove.value.name} removed`, 'Mod Removed')
+      toast.success(t('mods.remove.done', { name: modToRemove.value.name }), t('mods.remove.doneTitle'))
       await loadMods()
     } catch (error) {
       console.error('Failed to remove mod:', error)
-      toast.error('Failed to remove mod', 'Error')
+      toast.error(t('mods.remove.failed'), t('common.error'))
     } finally {
       showConfirmModal.value = false
       modToRemove.value = null
@@ -1360,12 +1363,12 @@ export const useServerStore = defineStore('server', () => {
     if (selectedCount.value === 0) return
     const n = selectedCount.value
     confirmModalData.value = {
-      title: 'Remove Mods',
-      message: `Remove ${n} selected mod${n === 1 ? '' : 's'}?`,
-      description: 'This will permanently delete the selected mod files from the server. This action cannot be undone.',
+      title: t('mods.bulkRemove.title'),
+      message: t('mods.bulkRemove.message', n),
+      description: t('mods.bulkRemove.description'),
       type: 'danger',
-      confirmText: `Remove ${n} mod${n === 1 ? '' : 's'}`,
-      cancelText: 'Cancel'
+      confirmText: t('mods.bulkRemove.confirm', n),
+      cancelText: t('common.cancel')
     }
     modToRemove.value = '__bulk__'
     showConfirmModal.value = true
@@ -1386,11 +1389,11 @@ export const useServerStore = defineStore('server', () => {
       for (const fn of filenames) {
         invalidateModrinthMetaCache(fn)
       }
-      toast.success(`${filenames.length} mod${filenames.length === 1 ? '' : 's'} removed`, 'Mods Removed')
+      toast.success(t('mods.bulkRemove.done', filenames.length), t('mods.bulkRemove.doneTitle'))
       await loadMods()
     } catch (error) {
       console.error('Failed to bulk remove mods:', error)
-      toast.error('Failed to remove selected mods', 'Error')
+      toast.error(t('mods.bulkRemove.failed'), t('common.error'))
     } finally {
       // F9: clear selection in finally — success AND failure both invalidate
       // the previous selection (some mods may have been deleted on the
@@ -1409,16 +1412,21 @@ export const useServerStore = defineStore('server', () => {
     try {
       const { renamed, errors } = await setModsEnabled(currentServerId.value, filenames, enabled)
       const n = Object.keys(renamed || {}).length
-      const verb = enabled ? 'enabled' : 'disabled'
       if (n) {
-        const restart = serverStatus.value.status === 'running' ? ' Restart the server to apply.' : ''
-        toast.success(`${n} mod${n === 1 ? '' : 's'} ${verb}.${restart}`, enabled ? 'Mods Enabled' : 'Mods Disabled')
+        const done = enabled ? t('mods.toggle.enabled', n) : t('mods.toggle.disabled', n)
+        const restart = serverStatus.value.status === 'running' ? ` ${t('mods.toggle.restartToApply')}` : ''
+        toast.success(`${done}${restart}`, enabled ? t('mods.toggle.enabledTitle') : t('mods.toggle.disabledTitle'))
       }
-      if (errors?.length) toast.error(`${errors[0].filename}: ${errors[0].error}`, `${errors.length} not ${verb}`)
+      if (errors?.length) {
+        const title = enabled
+          ? t('mods.toggle.notEnabled', { n: errors.length })
+          : t('mods.toggle.notDisabled', { n: errors.length })
+        toast.error(`${errors[0].filename}: ${errors[0].error}`, title)
+      }
       await loadMods()
     } catch (error) {
       console.error('Failed to toggle mods:', error)
-      toast.error(`Failed to ${enabled ? 'enable' : 'disable'} selected mods`, 'Error')
+      toast.error(enabled ? t('mods.toggle.enableFailed') : t('mods.toggle.disableFailed'), t('common.error'))
     } finally {
       selectedModPaths.value = new Set()
       togglingMods.value = false
@@ -1431,9 +1439,9 @@ export const useServerStore = defineStore('server', () => {
     try {
       const result = await fn(currentServerId.value)
       if (result.success) {
-        toast.success(successMessage, 'Server Updated')
+        toast.success(successMessage, t('servers.updatedTitle'))
       } else {
-        toast.error(result.message || 'Operation failed', 'Server Error')
+        toast.error(result.message || t('common.operationFailed'), t('servers.errorTitle'))
       }
     } catch (error) {
       console.error(`Failed to ${action} server:`, error)
@@ -1441,7 +1449,7 @@ export const useServerStore = defineStore('server', () => {
         pendingJavaAction.value = action
         showJavaModal.value = true
       } else {
-        toast.error(error.message || `Failed to ${action} server`, 'Server Error')
+        toast.error(error.message || t(`servers.actionFailed.${action}`), t('servers.errorTitle'))
       }
     } finally {
       actionState.value[action] = false
@@ -1452,9 +1460,9 @@ export const useServerStore = defineStore('server', () => {
     }
   }
 
-  function handleStart() { return performServerAction('start', startServer, 'Server start requested') }
-  function handleStop()  { return performServerAction('stop',  stopServer,  'Server stop requested') }
-  function handleRestart() { return performServerAction('restart', restartServer, 'Server restart requested') }
+  function handleStart() { return performServerAction('start', startServer, t('servers.startRequested')) }
+  function handleStop()  { return performServerAction('stop',  stopServer,  t('servers.stopRequested')) }
+  function handleRestart() { return performServerAction('restart', restartServer, t('servers.restartRequested')) }
 
   async function handleInstall() {
     if (actionState.value.install || !server.value) return
@@ -1496,11 +1504,11 @@ export const useServerStore = defineStore('server', () => {
       if (lostContact) {
         // Deliberately a warning, not an error: we do not know that the install
         // failed, and it most likely did not.
-        toast.warning(LOST_CONTACT_MESSAGE, 'Server Installation')
+        toast.warning(lostContactMessage(), t('install.title'))
       } else if (progress.phase === 'done') {
-        toast.success('Server installed successfully.', 'Server Installation')
+        toast.success(t('install.success'), t('install.title'))
       } else {
-        toast.error(progress.error || 'Installation failed', 'Server Installation')
+        toast.error(progress.error || t('install.failed'), t('install.title'))
       }
     } catch (error) {
       console.error('Failed to install server:', error)
@@ -1511,7 +1519,7 @@ export const useServerStore = defineStore('server', () => {
         pendingJavaAction.value = 'install'
         showJavaModal.value = true
       } else {
-        toast.error(error.message || 'Failed to install server', 'Server Error')
+        toast.error(error.message || t('install.serverFailed'), t('servers.errorTitle'))
       }
     } finally {
       actionState.value.install = false
@@ -1561,7 +1569,7 @@ export const useServerStore = defineStore('server', () => {
     commandSending.value = true
     try {
       await sendServerCommand(currentServerId.value, command)
-      toast.success('Command sent to server', 'Console')
+      toast.success(t('console.commandSent'), t('nav.console'))
       // Record only on success: a failed send leaves the text in the input for
       // the user to retry, so adding it here would duplicate that line.
       // Consecutive repeats collapse the way shells dedupe them.
@@ -1575,7 +1583,7 @@ export const useServerStore = defineStore('server', () => {
       await loadLogs()
     } catch (error) {
       console.error('Failed to send command:', error)
-      toast.error('Failed to send console command', 'Console Error')
+      toast.error(t('console.commandFailed'), t('console.errorTitle'))
     } finally {
       commandSending.value = false
     }
@@ -1588,10 +1596,10 @@ export const useServerStore = defineStore('server', () => {
       server.value = updated
       serverSettings.value = defaultSettings(updated)
       await loadServers()
-      toast.success('Settings saved successfully', 'Settings Updated')
+      toast.success(t('properties.saved'), t('properties.savedTitle'))
     } catch (error) {
       console.error('Failed to save settings:', error)
-      toast.error(error.message || 'Failed to save settings', 'Error')
+      toast.error(error.message || t('properties.saveFailed'), t('common.error'))
     }
   }
 
@@ -1612,10 +1620,10 @@ export const useServerStore = defineStore('server', () => {
     server.value = { ...server.value, autoStart: mode }  // optimistic
     try {
       await setServerAutoStart(currentServerId.value, mode)
-      toast.success('Auto-start updated', 'Settings')
+      toast.success(t('settings.autostart.updated'), t('nav.settings'))
     } catch (error) {
       server.value = { ...server.value, autoStart: previous }  // rollback
-      toast.error(error.message || 'Failed to update auto-start', 'Error')
+      toast.error(error.message || t('settings.autostart.updateFailed'), t('common.error'))
     }
   }
 

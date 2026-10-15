@@ -8,6 +8,7 @@ import ToggleRow from '../../components/ui/ToggleRow.vue'
 import { usePlayersStore } from '../../stores/players'
 import { useServerStore } from '../../stores/server'
 import { useToast } from '../../composables/useToast'
+import { t } from '../../i18n'
 
 const store = usePlayersStore()
 const serverStore = useServerStore()
@@ -60,11 +61,11 @@ function parseLastSeen(iso) {
 function relativeTime(date) {
   if (!date || Number.isNaN(date.getTime())) return ''
   const m = Math.max(0, Math.floor((Date.now() - date.getTime()) / 60000))
-  if (m < 1) return 'just now'
-  if (m < 60) return `${m}m ago`
+  if (m < 1) return t('players.justNow')
+  if (m < 60) return t('players.minutesAgo', { n: m })
   const h = Math.floor(m / 60)
-  if (h < 24) return `${h}h ago`
-  return `${Math.floor(h / 24)}d ago`
+  if (h < 24) return t('players.hoursAgo', { n: h })
+  return t('players.daysAgo', { n: Math.floor(h / 24) })
 }
 
 // Merge every player we know about — known players plus anyone with a role
@@ -112,11 +113,11 @@ const filter = ref('all')
 const search = ref('')
 
 const filters = computed(() => [
-  { id: 'all', label: 'All', count: allPlayers.value.length },
-  { id: 'online', label: 'Online', count: store.online.length },
-  { id: 'whitelisted', label: 'Whitelisted', count: store.whitelist.length },
-  { id: 'ops', label: 'Operators', count: store.ops.length },
-  { id: 'banned', label: 'Banned', count: store.bans.length },
+  { id: 'all', label: t('players.filters.all'), count: allPlayers.value.length },
+  { id: 'online', label: t('players.filters.online'), count: store.online.length },
+  { id: 'whitelisted', label: t('players.filters.whitelisted'), count: store.whitelist.length },
+  { id: 'ops', label: t('players.filters.ops'), count: store.ops.length },
+  { id: 'banned', label: t('players.filters.banned'), count: store.bans.length },
 ])
 
 const filteredPlayers = computed(() => {
@@ -134,13 +135,13 @@ const filteredPlayers = computed(() => {
 const showLoading = computed(() => store.loading && !allPlayers.value.length)
 
 const emptyMessage = computed(() => {
-  if (search.value.trim()) return `No players match “${search.value.trim()}”.`
+  if (search.value.trim()) return t('players.empty.search', { query: search.value.trim() })
   switch (filter.value) {
-    case 'online': return store.isRunning ? 'No players online.' : 'Server is stopped — no players online.'
-    case 'whitelisted': return 'No players whitelisted yet.'
-    case 'ops': return 'No operators yet.'
-    case 'banned': return 'No banned players.'
-    default: return 'No players yet.'
+    case 'online': return store.isRunning ? t('players.empty.online') : t('players.empty.onlineStopped')
+    case 'whitelisted': return t('players.empty.whitelisted')
+    case 'ops': return t('players.empty.ops')
+    case 'banned': return t('players.empty.banned')
+    default: return t('players.empty.all')
   }
 })
 
@@ -150,7 +151,7 @@ async function retry() {
 }
 
 async function safe(fn) {
-  try { await fn() } catch (e) { toast.error(e.message || 'Operation failed') }
+  try { await fn() } catch (e) { toast.error(e.message || t('common.operationFailed')) }
 }
 
 // Perform a reversible removal, then offer an Undo toast that restores it.
@@ -158,10 +159,10 @@ async function removeWithUndo(message, removeFn, undoFn) {
   try {
     await removeFn()
   } catch (e) {
-    toast.error(e.message || 'Operation failed')
+    toast.error(e.message || t('common.operationFailed'))
     return
   }
-  toast.action(message, 'Undo', () => safe(undoFn))
+  toast.action(message, t('common.undo'), () => safe(undoFn))
 }
 
 // ── Inline reason entry (shared by kick + ban) ──────────────────────────────
@@ -188,11 +189,11 @@ function cancelReason() {
 }
 
 async function submitReason() {
-  const t = reasonTarget.value
-  if (!t) return
+  const target = reasonTarget.value
+  if (!target) return
   const reason = reasonText.value.trim() || null
-  if (t.mode === 'kick') await safe(() => store.kick(t.name, reason))
-  else await safe(() => store.addBan(t.name, reason))
+  if (target.mode === 'kick') await safe(() => store.kick(target.name, reason))
+  else await safe(() => store.addBan(target.name, reason))
   cancelReason()
 }
 
@@ -200,7 +201,7 @@ async function submitReason() {
 function toggleWhitelist(p) {
   if (p.isWhitelisted) {
     removeWithUndo(
-      `Removed ${p.name} from the whitelist`,
+      t('players.removedFromWhitelist', { name: p.name }),
       () => store.removeWhitelist(p.name),
       () => store.addWhitelist(p.name)
     )
@@ -211,7 +212,7 @@ function toggleOp(p) {
   if (p.isOp) {
     const level = p.opLevel  // capture so Undo restores the same level
     removeWithUndo(
-      `Removed operator ${p.name}`,
+      t('players.removedOperator', { name: p.name }),
       () => store.removeOp(p.name),
       () => store.addOp(p.name, level)
     )
@@ -221,7 +222,7 @@ function toggleOp(p) {
 function unban(p) {
   const reason = bannedMap.value.get(p.name.toLowerCase())?.reason ?? null  // restore same reason on Undo
   removeWithUndo(
-    `Unbanned ${p.name}`,
+    t('players.unbanned', { name: p.name }),
     () => store.removeBan(p.name),
     () => store.addBan(p.name, reason)
   )
@@ -246,7 +247,7 @@ async function addPlayer(action) {
     else if (action === 'ban') await store.addBan(name, null)
     addName.value = ''
   } catch (e) {
-    toast.error(e.message || 'Operation failed')
+    toast.error(e.message || t('common.operationFailed'))
   } finally {
     addBusy.value = false
   }
@@ -264,43 +265,39 @@ function onToggleEnforce(value) {
 <template>
   <div class="players-page">
     <div v-if="!store.onlineMode" class="players-page__offline-banner" role="status">
-      Server is in offline mode — player avatars and online identity verification are unavailable.
+      {{ $t('players.offlineMode') }}
     </div>
 
     <div v-if="store.error" class="players-page__error-banner" role="alert">
       <span>{{ store.error }}</span>
-      <AppButton variant="ghost" size="sm" :loading="store.loading" @click="retry">Retry</AppButton>
+      <AppButton variant="ghost" size="sm" :loading="store.loading" @click="retry">{{ $t('common.retry') }}</AppButton>
     </div>
 
     <!-- Stats -->
     <div class="players-stats">
-      <StatCard label="Online now" :value="store.online.length" accent="success" />
-      <StatCard label="Whitelisted" :value="store.whitelist.length" />
-      <StatCard label="Operators" :value="store.ops.length" accent="primary" />
-      <StatCard label="Banned" :value="store.bans.length" accent="danger" />
+      <StatCard :label="$t('players.stats.online')" :value="store.online.length" accent="success" />
+      <StatCard :label="$t('players.stats.whitelisted')" :value="store.whitelist.length" />
+      <StatCard :label="$t('players.stats.ops')" :value="store.ops.length" accent="primary" />
+      <StatCard :label="$t('players.stats.banned')" :value="store.bans.length" accent="danger" />
     </div>
 
     <!-- Whitelist enforcement -->
     <section class="whitelist-settings">
       <ToggleRow
         v-if="store.isRunning"
-        label="Whitelist on (runtime)"
+        :label="$t('players.whitelistRuntime')"
         :model-value="store.whitelistActive"
         @update:model-value="onToggleActive"
       />
       <ToggleRow
         v-else
-        label="Enforce whitelist"
+        :label="$t('players.enforceWhitelist')"
         :model-value="store.enforceWhitelist"
         @update:model-value="onToggleEnforce"
       />
       <p class="whitelist-settings__hint">
-        <template v-if="store.isRunning">
-          Turns the whitelist on/off live. Resets to the persisted setting on next start.
-        </template>
-        <template v-else>
-          Persisted in server.properties — applies on next start.
-        </template>
+        <template v-if="store.isRunning">{{ $t('players.whitelistRuntimeHint') }}</template>
+        <template v-else>{{ $t('players.enforceWhitelistHint') }}</template>
       </p>
     </section>
 
@@ -315,7 +312,7 @@ function onToggleEnforce(value) {
           @click="filter = f.id"
         >{{ f.label }} <span class="filter-pill__count">{{ f.count }}</span></button>
       </div>
-      <input v-model="search" class="players-search" type="search" placeholder="Search players…" />
+      <input v-model="search" class="players-search" type="search" :placeholder="$t('players.search')" />
     </div>
 
     <!-- Add a player who hasn't joined -->
@@ -324,18 +321,18 @@ function onToggleEnforce(value) {
         v-model="addName"
         class="player-add__input"
         type="text"
-        placeholder="Add a player by name…"
+        :placeholder="$t('players.addPlaceholder')"
         :disabled="addBusy"
       />
-      <AppButton type="submit" variant="primary" size="sm" :loading="addBusy" :disabled="!addName.trim()">+ Whitelist</AppButton>
-      <AppButton type="button" variant="ghost" size="sm" :disabled="!addName.trim() || addBusy" @click="addPlayer('op')">+ Op</AppButton>
-      <AppButton type="button" variant="danger" size="sm" :disabled="!addName.trim() || addBusy" @click="addPlayer('ban')">Ban</AppButton>
+      <AppButton type="submit" variant="primary" size="sm" :loading="addBusy" :disabled="!addName.trim()">{{ $t('players.addWhitelist') }}</AppButton>
+      <AppButton type="button" variant="ghost" size="sm" :disabled="!addName.trim() || addBusy" @click="addPlayer('op')">{{ $t('players.addOp') }}</AppButton>
+      <AppButton type="button" variant="danger" size="sm" :disabled="!addName.trim() || addBusy" @click="addPlayer('ban')">{{ $t('players.ban') }}</AppButton>
     </form>
 
     <!-- Loading state (initial load only) -->
     <div v-if="showLoading" class="player-list__loading">
       <span class="player-list__spinner" aria-hidden="true" />
-      Loading players…
+      {{ $t('players.loading') }}
     </div>
 
     <!-- Unified player list -->
@@ -346,7 +343,7 @@ function onToggleEnforce(value) {
 
         <div class="player-row__main">
           <span class="player-row__name">{{ p.name }}</span>
-          <span class="player-row__when">{{ p.isOnline ? 'online' : (relativeTime(p.lastSeen) || 'never seen') }}</span>
+          <span class="player-row__when">{{ p.isOnline ? $t('players.online') : (relativeTime(p.lastSeen) || $t('players.neverSeen')) }}</span>
         </div>
 
         <!-- Reason entry mode replaces the actions -->
@@ -356,13 +353,13 @@ function onToggleEnforce(value) {
             v-model="reasonText"
             class="reason-input"
             type="text"
-            :placeholder="reasonTarget.mode === 'kick' ? 'Kick reason…' : 'Ban reason…'"
+            :placeholder="reasonTarget.mode === 'kick' ? $t('players.kickReason') : $t('players.banReason')"
             maxlength="256"
             @keydown.enter.prevent="submitReason"
             @keydown.escape="cancelReason"
           />
           <AppButton variant="danger" size="sm" @click="submitReason">
-            {{ reasonTarget.mode === 'kick' ? 'Kick' : 'Ban' }}
+            {{ reasonTarget.mode === 'kick' ? $t('players.kick') : $t('players.ban') }}
           </AppButton>
           <AppButton variant="ghost" size="sm" @click="cancelReason">✕</AppButton>
         </template>
@@ -372,29 +369,29 @@ function onToggleEnforce(value) {
           <button
             :class="['role-chip', { 'role-chip--on': p.isWhitelisted }]"
             type="button"
-            :title="p.isWhitelisted ? 'Remove from whitelist' : 'Add to whitelist'"
+            :title="p.isWhitelisted ? $t('players.removeFromWhitelist') : $t('players.addToWhitelist')"
             @click="toggleWhitelist(p)"
-          >{{ p.isWhitelisted ? '✓ Whitelisted' : '+ Whitelist' }}</button>
+          >{{ p.isWhitelisted ? $t('players.whitelisted') : $t('players.addWhitelist') }}</button>
 
           <span v-if="p.isOp" class="op-control">
-            <button class="role-chip role-chip--on role-chip--op" type="button" title="Remove operator" @click="toggleOp(p)">✓ Op</button>
+            <button class="role-chip role-chip--on role-chip--op" type="button" :title="$t('players.removeOperator')" @click="toggleOp(p)">{{ $t('players.op') }}</button>
             <select
               :value="p.opLevel"
               class="op-level"
               :disabled="store.isRunning"
-              :title="store.isRunning ? 'Stop the server to change op level' : 'Operator level'"
+              :title="store.isRunning ? $t('players.stopToChangeLevel') : $t('players.operatorLevel')"
               @change="changeOpLevel(p, $event.target.value)"
             >
-              <option v-for="l in [1,2,3,4]" :key="l" :value="l">L{{ l }}</option>
+              <option v-for="l in [1,2,3,4]" :key="l" :value="l">{{ $t('players.levelShort', { level: l }) }}</option>
             </select>
           </span>
-          <button v-else class="role-chip" type="button" title="Make operator" @click="toggleOp(p)">+ Op</button>
+          <button v-else class="role-chip" type="button" :title="$t('players.makeOperator')" @click="toggleOp(p)">{{ $t('players.addOp') }}</button>
 
           <span class="player-row__spacer" />
 
-          <AppButton v-if="p.isOnline" variant="ghost" size="sm" @click="startReason(p.name, 'kick')">Kick</AppButton>
-          <AppButton v-if="p.isBanned" variant="ghost" size="sm" @click="unban(p)">Unban</AppButton>
-          <AppButton v-else variant="danger" size="sm" @click="startReason(p.name, 'ban')">Ban</AppButton>
+          <AppButton v-if="p.isOnline" variant="ghost" size="sm" @click="startReason(p.name, 'kick')">{{ $t('players.kick') }}</AppButton>
+          <AppButton v-if="p.isBanned" variant="ghost" size="sm" @click="unban(p)">{{ $t('players.unban') }}</AppButton>
+          <AppButton v-else variant="danger" size="sm" @click="startReason(p.name, 'ban')">{{ $t('players.ban') }}</AppButton>
         </div>
       </li>
       <li v-if="!filteredPlayers.length" class="player-list__empty">{{ emptyMessage }}</li>

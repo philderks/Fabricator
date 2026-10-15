@@ -5,6 +5,7 @@ import AppButton from '../ui/AppButton.vue'
 import FormField from '../ui/FormField.vue'
 import { useAuthStore } from '../../stores/auth'
 import { useToast } from '../../composables/useToast'
+import { t } from '../../i18n'
 
 const MIN_LENGTH = 8
 
@@ -21,32 +22,32 @@ async function onSubmit() {
   if (submitting.value) return
   error.value = ''
   if (next.value.length < MIN_LENGTH) {
-    error.value = `New password must be at least ${MIN_LENGTH} characters.`
+    error.value = t('auth.change.tooShort', { min: MIN_LENGTH })
     return
   }
   if (next.value !== confirm.value) {
-    error.value = 'New passwords do not match.'
+    error.value = t('auth.change.mismatch')
     return
   }
   submitting.value = true
   const res = await auth.changePassword(current.value, next.value)
   submitting.value = false
   if (res.ok) {
-    toast.success('Password changed', 'Authentication')
+    toast.success(t('auth.change.success'), t('auth.toastTitle'))
     current.value = ''
     next.value = ''
     confirm.value = ''
   } else {
     error.value =
-      res.error?.data?.error || res.error?.message || 'Could not change the password.'
+      res.error?.data?.error || res.error?.message || t('auth.change.failed')
   }
 }
 </script>
 
 <template>
-  <Panel title="Password">
+  <Panel :title="$t('auth.password')">
     <form class="change-pw-form" @submit.prevent="onSubmit">
-      <FormField label="Current password" v-slot="{ id, describedBy }">
+      <FormField :label="$t('auth.currentPassword')" v-slot="{ id, describedBy }">
         <input
           :id="id"
           v-model="current"
@@ -56,7 +57,11 @@ async function onSubmit() {
           :aria-describedby="describedBy"
         />
       </FormField>
-      <FormField label="New password" hint="At least 8 characters." v-slot="{ id, describedBy }">
+      <FormField
+        :label="$t('auth.newPassword')"
+        :hint="$t('auth.minLengthHint', { min: MIN_LENGTH })"
+        v-slot="{ id, describedBy }"
+      >
         <input
           :id="id"
           v-model="next"
@@ -66,7 +71,7 @@ async function onSubmit() {
           :aria-describedby="describedBy"
         />
       </FormField>
-      <FormField label="Confirm new password" v-slot="{ id, describedBy }">
+      <FormField :label="$t('auth.change.confirmNew')" v-slot="{ id, describedBy }">
         <input
           :id="id"
           v-model="confirm"
@@ -79,7 +84,7 @@ async function onSubmit() {
       <p v-if="error" class="change-pw-form__error" role="alert">{{ error }}</p>
       <div class="change-pw-form__actions">
         <AppButton type="submit" variant="primary" size="md" :loading="submitting">
-          Change password
+          {{ $t('auth.change.submit') }}
         </AppButton>
       </div>
     </form>
