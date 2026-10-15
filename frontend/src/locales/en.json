@@ -70,6 +70,7 @@
     "players": "Players",
     "files": "Files",
     "backups": "Backups",
+    "schedules": "Schedules",
     "playit": "playit.gg",
     "properties": "Properties",
     "settings": "Settings"
@@ -1038,6 +1039,82 @@
     "snapshotDeleted": "Snapshot deleted",
     "snapshotDeleteFailed": "Failed to delete snapshot",
     "snapshotsLoadFailed": "Failed to load snapshots"
+  },
+  "schedules": {
+    "subtitle": "Run console commands, restarts and other steps on a timer.",
+    "new": "New schedule",
+    "empty": "No schedules yet. Create one to run commands automatically.",
+    "newTitle": "New schedule",
+    "editTitle": "Edit schedule",
+    "edit": "Edit",
+    "runNow": "Run now",
+    "when": "When",
+    "nextRun": "Next run",
+    "lastRun": "Last run",
+    "addStep": "+ Add step",
+    "moveUp": "Move step up",
+    "moveDown": "Move step down",
+    "removeStep": "Remove step",
+    "saved": "Schedule saved",
+    "saveFailed": "Could not save the schedule",
+    "loadFailed": "Could not load schedules",
+    "started": "Running \"{name}\"",
+    "runFailed": "Could not run the schedule",
+    "deleted": "Schedule deleted",
+    "deleteFailed": "Could not delete the schedule",
+    "deleteTitle": "Delete schedule",
+    "deleteMessage": "Delete \"{name}\"? It will stop running.",
+    "trigger": {
+      "interval": "Every N minutes",
+      "daily": "Daily at a time",
+      "cron": "Advanced (cron expression)"
+    },
+    "fields": {
+      "name": "Name",
+      "namePlaceholder": "Daily restart",
+      "when": "When",
+      "timeZoneHint": "Times are in {zone}.",
+      "minutes": "Every (minutes)",
+      "time": "Time",
+      "days": "Days",
+      "daysHint": "Leave all unchecked to run every day.",
+      "cron": "Cron expression",
+      "cronHint": "minute hour day month weekday. Use day names (mon-sun) for weekdays, and set either the day or the weekday, not both.",
+      "steps": "Steps",
+      "stepsHint": "Steps run in order. Wait is the pause before a step, in seconds.",
+      "wait": "Wait (s)",
+      "action": "Action",
+      "command": "Command",
+      "commandPlaceholder": "say Restarting in 5 minutes",
+      "enabled": "Enabled"
+    },
+    "actions": {
+      "command": "Command",
+      "start": "Start server",
+      "stop": "Stop server",
+      "restart": "Restart server"
+    },
+    "days": {
+      "mon": "Mon",
+      "tue": "Tue",
+      "wed": "Wed",
+      "thu": "Thu",
+      "fri": "Fri",
+      "sat": "Sat",
+      "sun": "Sun"
+    },
+    "summary": {
+      "interval": "Every minute | Every {n} minutes",
+      "daily": "Daily at {time} ({days})",
+      "everyDay": "every day",
+      "cron": "Cron: {expression}",
+      "wait": "wait {delay} →"
+    },
+    "status": {
+      "ok": "OK",
+      "skipped": "Skipped",
+      "error": "Failed"
+    }
   },
   "playit": {
     "downloadingAgent": "Downloading the playit.gg agent…",

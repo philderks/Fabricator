@@ -20,6 +20,7 @@ Errors are consistently `{"error": "<message>"}`. Anything under `/api` not list
 - [Java management](#java-management)
 - [Players](#players)
 - [Backups & snapshots](#backups--snapshots)
+- [Scheduled commands](#scheduled-commands)
 - [Modrinth integration](#modrinth-integration)
 - [playit.gg tunnel](#playitgg-tunnel)
 - [System updates](#system-updates)
@@ -191,7 +192,8 @@ the server is running and does not touch `server.properties`.
 
 #### `DELETE /api/servers/<server_id>`
 
-Stops the process, removes scheduled backups and backup records, deletes the server record, then
+Stops the process, removes scheduled backups, backup records and scheduled commands, deletes the
+server record, then
 deletes the install directory from disk.
 
 **Response (200):** `{ "success": true, "message": "Server deleted successfully" }`
@@ -792,6 +794,70 @@ Poll any backup, restore or world-import job. Job ids are globally unique, so th
 server-scoped.
 
 **Response (200):** `{ "active": true, ... }` · **Error (404):** unknown job
+
+---
+
+## Scheduled commands
+
+A schedule is an ordered list of steps that run when its trigger fires. Each step is a console
+`command`, or a `start`, `stop` or `restart` of the server, and waits `delaySeconds` (0–3600)
+before it runs. Schedules are stored on the server record and re-registered at boot.
+
+If the server is not running when a schedule fires, the run is **skipped**, unless the first step is
+`start`. A failed step ends the run. Only the last run is kept (`lastRun`, in memory, cleared on
+panel restart).
+
+The routes below are UI-only: API tokens of either scope get `403`. A `read` token still sees the
+list as the `schedules` field of the server record (`GET /api/servers/<server_id>`), the same way
+the console log shows commands that have run.
+
+#### `GET /api/servers/<server_id>/schedules`
+
+The server's schedules, each annotated with `nextRunTime` (ISO UTC, `null` when disabled) and
+`lastRun` (`{ "at", "status": "ok" | "skipped" | "error", "message" }` or `null`).
+
+#### `POST /api/servers/<server_id>/schedules`
+
+**Body:**
+```json
+{
+  "name": "Daily restart",
+  "enabled": true,
+  "timezone": "Europe/Berlin",
+  "trigger": { "type": "daily", "time": "04:00", "days": ["mon", "fri"] },
+  "steps": [
+    { "action": "command", "command": "say Restarting in 5 minutes", "delaySeconds": 0 },
+    { "action": "restart", "delaySeconds": 300 }
+  ]
+}
+```
+
+`trigger` is one of:
+
+| `type` | Fields | Notes |
+|---|---|---|
+| `interval` | `minutes` (1–10080) | Counted from when the schedule is saved or the panel starts. |
+| `daily` | `time` (`HH:MM`), `days` (`mon`…`sun`) | Empty `days` means every day. |
+| `cron` | `expression` (5 fields) | The day-of-week field must use names (`mon-fri`), not numbers, and may not be combined with a day of month. |
+
+Times are read in `timezone` (IANA). An empty `timezone` falls back to the host zone. There can be
+1–20 steps. A `command` must be a single line of at most 1000 characters.
+
+**Response (201):** the stored schedule with its `id` (`sch_…`), `nextRunTime` and `lastRun`.
+**Error (400):** `{ "error": "..." }` naming the invalid field.
+
+#### `PUT /api/servers/<server_id>/schedules/<schedule_id>`
+
+Replaces the schedule. The body has the same shape as `POST`. **Error (404):** unknown schedule.
+
+#### `DELETE /api/servers/<server_id>/schedules/<schedule_id>`
+
+**Response (200):** `{ "success": true }` · **Error (404):** unknown schedule
+
+#### `POST /api/servers/<server_id>/schedules/<schedule_id>/run`
+
+Runs the schedule now, in the background, whether or not it is enabled. Check `lastRun` for the
+result. **Response (202):** `{ "success": true }`
 
 ---
 
@@ -1505,8 +1571,9 @@ token list; the `<secret>` half is what is never shown again.
 | `manage` | Everything `read` can do, plus start / stop / restart, re-install the configured loader, install or update a mod by Modrinth ID, and remove, enable or disable installed mods. |
 
 Every `/api` route is classified into exactly one of three buckets, and the classification is
-enforced by the panel itself, not by the client: **32 read**, **7 manage**, **58 never**. Routes in
-the `never` bucket are refused for **every** token regardless of scope — the console, all file read
+enforced by the panel itself, not by the client: **36 read**, **8 manage**, **72 never**. Routes in
+the `never` bucket are refused for **every** token regardless of scope — the console, scheduled
+commands, all file read
 and write routes, server settings, autostart, server create and delete, Java installation, the
 self-updater, playit, backup restore/download/delete, world import, whole-modpack install (including
 the `.mrpack` upload routes), all player administration (bans, kicks, ops, whitelist), the
