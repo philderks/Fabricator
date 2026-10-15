@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref, watch } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import AppButton from '../../components/ui/AppButton.vue'
 import Panel from '../../components/ui/Panel.vue'
 import ToggleRow from '../../components/ui/ToggleRow.vue'
@@ -21,7 +21,11 @@ const serverStore = useServerStore()
 const toast = useToast()
 
 const schedules = ref([])
-const loading = ref(false)
+// False until the current server's list first arrives: drives the empty state,
+// and keeps background refreshes from toasting the same error every poll.
+const loaded = ref(false)
+const REFRESH_MS = 15000
+let refreshTimer = null
 
 // Editor: `editorOpen` + the schedule being edited (null = new).
 const editorOpen = ref(false)
@@ -35,15 +39,14 @@ const deleting = ref(false)
 async function load() {
   const serverId = serverStore.currentServerId
   if (!serverId) return
-  loading.value = true
   try {
     const list = await listSchedules(serverId)
     // Drop a reply that lands after the user switched servers.
-    if (serverId === serverStore.currentServerId) schedules.value = list
+    if (serverId !== serverStore.currentServerId) return
+    schedules.value = list
+    loaded.value = true
   } catch (err) {
-    toast.error(err?.message || t('schedules.loadFailed'), t('nav.schedules'))
-  } finally {
-    loading.value = false
+    if (!loaded.value) toast.error(err?.message || t('schedules.loadFailed'), t('nav.schedules'))
   }
 }
 
@@ -76,10 +79,14 @@ function bodyOf({ id, nextRunTime, lastRun, ...body }) {
 }
 
 async function setEnabled(schedule, enabled) {
+  // Flip the prop first: ToggleRow binds :checked, so only a prop change can
+  // move the switch back if the save fails.
+  schedule.enabled = enabled
   try {
-    await updateSchedule(serverStore.currentServerId, schedule.id, { ...bodyOf(schedule), enabled })
+    await updateSchedule(serverStore.currentServerId, schedule.id, bodyOf(schedule))
     await load()
   } catch (err) {
+    schedule.enabled = !enabled
     toast.error(err?.message || t('schedules.saveFailed'), t('nav.schedules'))
   }
 }
@@ -129,11 +136,18 @@ watch(
   (id, oldId) => {
     if (!id || id === oldId) return
     schedules.value = []
+    loaded.value = false
     load()
   }
 )
 
-onMounted(load)
+// Keeps nextRunTime and lastRun current (runs with waits finish much later).
+onMounted(() => {
+  load()
+  refreshTimer = setInterval(load, REFRESH_MS)
+})
+
+onUnmounted(() => clearInterval(refreshTimer))
 </script>
 
 <template>
@@ -146,7 +160,7 @@ onMounted(load)
       <AppButton variant="primary" size="md" @click="openEditor()">{{ $t('schedules.new') }}</AppButton>
     </header>
 
-    <p v-if="!loading && !schedules.length" class="schedules-page__empty">{{ $t('schedules.empty') }}</p>
+    <p v-if="loaded && !schedules.length" class="schedules-page__empty">{{ $t('schedules.empty') }}</p>
 
     <Panel v-for="schedule in schedules" :key="schedule.id" :title="schedule.name">
       <template #action>

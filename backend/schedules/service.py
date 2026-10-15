@@ -260,8 +260,8 @@ def delete_schedule(server_id: str, schedule_id: str) -> bool:
 def _annotate(schedule: Dict[str, Any]) -> Dict[str, Any]:
     return {
         **schedule,
-        "nextRunTime": _next_run(schedule["id"]),
-        "lastRun": _last_runs.get(schedule["id"]),
+        "nextRunTime": _next_run(schedule.get("id")),
+        "lastRun": _last_runs.get(schedule.get("id")),
     }
 
 
@@ -319,7 +319,17 @@ def register_all_jobs() -> None:
         return
     for server in servers:
         for schedule in server.get("schedules") or []:
-            register_job(server["id"], schedule)
+            # Stored schedules come from validate(), but servers.json can be
+            # hand-edited: skip a bad entry rather than fail the panel's boot.
+            clean, error = validate(schedule)
+            schedule_id = schedule.get("id") if isinstance(schedule, dict) else None
+            if error or not schedule_id:
+                logger.warning(
+                    "Skipping invalid schedule %s on %s: %s",
+                    schedule_id, server.get("id"), error or "missing id",
+                )
+                continue
+            register_job(server.get("id"), {"id": schedule_id, **clean})
 
 
 def _next_run(schedule_id: str) -> Optional[str]:

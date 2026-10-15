@@ -168,27 +168,43 @@ def test_runner_never_starts_an_installing_server(run_with):
     assert last["status"] == "error"
 
 
-def test_register_job_follows_enabled_flag(monkeypatch):
+@pytest.fixture
+def paused(monkeypatch):
+    """A started-but-paused scheduler swapped in: jobs register, none fire."""
     from apscheduler.schedulers.background import BackgroundScheduler
 
     # The module service holds, not a fresh import: test_app_factory.py purges
     # backend.* from sys.modules, so the two can differ.
     sched_mod = service.sched_mod
     monkeypatch.delenv("FABRICATOR_DISABLE_SCHEDULER", raising=False)
-    paused = BackgroundScheduler(timezone="UTC")
-    paused.start(paused=True)
-    monkeypatch.setattr(sched_mod.scheduler, "_scheduler", paused)
+    scheduler = BackgroundScheduler(timezone="UTC")
+    scheduler.start(paused=True)
+    monkeypatch.setattr(sched_mod.scheduler, "_scheduler", scheduler)
     monkeypatch.setattr(sched_mod, "_initialised", True)
-    try:
-        schedule = {"id": "sch_job", **service.validate(_body())[0]}
-        service.register_job(SERVER_ID, schedule)
-        assert paused.get_job("cmd-sch_job") is not None
-        assert service._next_run("sch_job").endswith("Z")
+    yield scheduler
+    scheduler.shutdown(wait=False)
 
-        service.register_job(SERVER_ID, {**schedule, "enabled": False})
-        assert paused.get_job("cmd-sch_job") is None
-    finally:
-        paused.shutdown(wait=False)
+
+def test_register_job_follows_enabled_flag(paused):
+    schedule = {"id": "sch_job", **service.validate(_body())[0]}
+    service.register_job(SERVER_ID, schedule)
+    assert paused.get_job("cmd-sch_job") is not None
+    assert service._next_run("sch_job").endswith("Z")
+
+    service.register_job(SERVER_ID, {**schedule, "enabled": False})
+    assert paused.get_job("cmd-sch_job") is None
+
+
+def test_boot_skips_invalid_schedules(paused, tmp_servers_root):
+    good = {"id": "sch_good", **service.validate(_body())[0]}
+    _seed_server(Path(tmp_servers_root), [
+        {"enabled": True},  # no id
+        {"id": "sch_bad", **_body(steps=[{"action": "command", "command": "a\nb"}])},
+        "not a schedule",
+        good,
+    ])
+    service.register_all_jobs()
+    assert [job.id for job in paused.get_jobs()] == ["cmd-sch_good"]
 
 
 @pytest.fixture
@@ -215,3 +231,14 @@ def test_crud_round_trip(no_scheduler, client, tmp_servers_root):
     assert client.delete(f"{base}/{schedule_id}").status_code == 200
     assert client.delete(f"{base}/{schedule_id}").status_code == 404
     assert client.get("/api/servers/srv_nope/schedules").status_code == 404
+    assert client.post(f"{base}/sch_missing/run").status_code == 404
+
+
+def test_server_create_drops_schedules(no_scheduler, client, tmp_servers_root):
+    response = client.post("/api/servers", json={
+        "name": "New", "version": "1.20.1", "loader": "fabric", "port": 25570,
+        "installPath": "srv_new", "schedules": [{"id": "sch_x", "steps": "junk"}],
+    })
+    assert response.status_code in (200, 201), response.get_json()
+    saved = json.loads((Path(tmp_servers_root) / "servers.json").read_text())
+    assert all("schedules" not in server for server in saved)

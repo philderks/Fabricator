@@ -836,7 +836,7 @@ The server's schedules, each annotated with `nextRunTime` (ISO UTC, `null` when 
 
 | `type` | Fields | Notes |
 |---|---|---|
-| `interval` | `minutes` (1–10080) | Counted from when the schedule is saved. |
+| `interval` | `minutes` (1–10080) | Counted from when the schedule is saved or the panel starts. |
 | `daily` | `time` (`HH:MM`), `days` (`mon`…`sun`) | Empty `days` means every day. |
 | `cron` | `expression` (5 fields) | The day-of-week field must use names (`mon-fri`), not numbers, and may not be combined with a day of month. |
 

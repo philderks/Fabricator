@@ -786,6 +786,9 @@ def create_server():
     if error:
         return jsonify({'error': error}), 400
 
+    # Schedules are only written through the /schedules routes, which validate them.
+    data.pop('schedules', None)
+
     try:
         data['status'] = 'pending'
         compatibility = _java_compat_payload(data.get('version', ''))
