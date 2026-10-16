@@ -38,12 +38,21 @@ function applyCode(style, code) {
   return MOTD_FORMATS[c] ? { ...style, [MOTD_FORMATS[c]]: true } : style
 }
 
-// Java's Properties decoding of the hand-typed `§` / `\n` workaround that
-// MOTDs used before the editor existed, so those still preview correctly.
+// Java's Properties decoding of the hand-typed `\u00A7` / `\n` workaround that
+// MOTDs used before the editor existed. The backend writes those two escapes
+// through untouched and doubles every other backslash, so decoding exactly
+// these, in one pass, previews what the game will show.
 function decodeLegacy(raw) {
-  return String(raw ?? '')
-    .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
-    .replace(/\\n/g, '\n')
+  return String(raw ?? '').replace(/\\(u[0-9a-fA-F]{4}|n)/g, (_, esc) =>
+    esc === 'n' ? '\n' : String.fromCharCode(parseInt(esc.slice(1), 16))
+  )
+}
+
+// What the editor works on: the old escapes turned into the characters they
+// stand for (so toolbar positions line up with what is shown), and no `\r`,
+// which a textarea drops and would throw selection offsets off.
+export function normalizeMotd(raw) {
+  return decodeLegacy(raw).replace(/\r/g, '')
 }
 
 // Up to two lines (all the server list shows) of `{ text, style }` segments.
@@ -82,13 +91,26 @@ export function shadowHex(hex) {
 }
 
 // The § codes that recreate the style active at `index` of `raw`, so wrapping
-// a selection can hand the text after it back its previous styling.
-export function codesAt(raw, index) {
+// a selection can hand the text after it back its previous styling. Without
+// `withColor`, just the formats: what a new colour code has to repeat, since
+// a colour clears them in-game.
+export function codesAt(raw, index, { withColor = true } = {}) {
   const text = String(raw ?? '').slice(0, index)
   let style = BASE
   for (let i = 0; i < text.length - 1; i += 1) {
     if (text[i] === '§') style = applyCode(style, text[++i])
   }
   const formats = Object.entries(MOTD_FORMATS).filter(([, flag]) => style[flag]).map(([code]) => `§${code}`)
-  return (style.color ? `§${style.color}` : '') + formats.join('')
+  return (withColor && style.color ? `§${style.color}` : '') + formats.join('')
+}
+
+// An index sitting between a § and its code letter, moved back before the §,
+// so nothing is ever inserted into the middle of a code.
+export function snapIndex(raw, index) {
+  for (let i = 0; i < index; i += 1) {
+    if (raw[i] !== '§') continue
+    if (i + 1 === index) return i
+    i += 1
+  }
+  return index
 }

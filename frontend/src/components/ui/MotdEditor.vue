@@ -1,12 +1,13 @@
 <script setup>
-import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
-import { MOTD_COLORS, MOTD_FORMATS, codesAt, colorHex, parseMotd, shadowHex } from '../../utils/motd'
+import { computed, onUnmounted, ref, watch } from 'vue'
+import { MOTD_COLORS, MOTD_FORMATS, codesAt, colorHex, parseMotd, shadowHex, snapIndex } from '../../utils/motd'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
   disabled: { type: Boolean, default: false },
   serverName: { type: String, default: '' },
-  maxPlayers: { type: Number, default: 20 },
+  // A String while the Max Players input is cleared (v-model.number gives '').
+  maxPlayers: { type: [Number, String], default: 20 },
   iconUrl: { type: String, default: '' },
   // Forwarded from FormField's slot so its label and hint point at the textarea.
   id: { type: String, default: undefined },
@@ -22,42 +23,67 @@ const formats = [...Object.entries(MOTD_FORMATS), ['r', 'reset']].map(([code, na
 
 // No selection: drop the code at the caret. A selection gets wrapped, then the
 // style that was active at its end is re-emitted so the text after it keeps
-// looking the way it did.
+// looking the way it did. In-game a colour code clears bold & co., so a colour
+// repeats the formats already active, and a format is repeated after every
+// colour inside the selection — either way the click only adds what it says.
 function apply(code) {
   const el = textarea.value
-  const value = props.modelValue ?? ''
-  const start = el?.selectionStart ?? value.length
-  const end = el?.selectionEnd ?? value.length
-  const tag = `§${code}`
+  if (!el) return
+  const { value } = el
+  const start = snapIndex(value, el.selectionStart)
+  const end = Math.max(start, snapIndex(value, el.selectionEnd))
+  const isColor = MOTD_COLORS.some((color) => color.code === code)
+  const tag = `§${code}${isColor ? codesAt(value, start, { withColor: false }) : ''}`
+  let inner = value.slice(start, end)
+  if (MOTD_FORMATS[code]) inner = inner.replace(/§[0-9a-fr]/gi, (match) => match + tag)
   const restore = start !== end && end < value.length ? `§r${codesAt(value, end)}` : ''
-  emit('update:modelValue', value.slice(0, start) + tag + value.slice(start, end) + restore + value.slice(end))
-  nextTick(() => {
-    el?.focus()
-    el?.setSelectionRange(start + tag.length, end + tag.length)
-  })
+
+  el.focus()
+  el.setSelectionRange(start, end)
+  // insertText keeps the edit on the browser's undo stack (assigning .value
+  // wipes it) and fires the input event that emits the new value.
+  if (!document.execCommand('insertText', false, tag + inner + restore)) {
+    el.setRangeText(tag + inner + restore, start, end)
+    emit('update:modelValue', el.value)
+  }
+  el.setSelectionRange(start + tag.length, start + tag.length + inner.length)
 }
 
-// The server list only ever shows two lines. Enter is refused on the second;
-// a pasted third line is folded into it.
+// The server list only ever shows two lines. Enter is refused once there are
+// two, unless it replaces the line break itself; a pasted third line is folded
+// into the second.
 function onKeydown(event) {
-  if (event.key === 'Enter' && (props.modelValue ?? '').includes('\n')) event.preventDefault()
+  if (event.key !== 'Enter') return
+  const { value, selectionStart, selectionEnd } = event.target
+  if (value.includes('\n') && !value.slice(selectionStart, selectionEnd).includes('\n')) event.preventDefault()
 }
 
 function onInput(event) {
-  const [first, ...rest] = event.target.value.replace(/\r/g, '').split('\n')
-  emit('update:modelValue', rest.length ? `${first}\n${rest.join(' ')}` : first)
+  const el = event.target
+  const [first, ...rest] = el.value.split('\n')
+  const value = rest.length ? `${first}\n${rest.join(' ')}` : first
+  if (value !== el.value) {
+    // Written back here rather than left to Vue, which would put the caret at
+    // the end. Newlines became spaces, so the offsets still line up.
+    const { selectionStart, selectionEnd } = el
+    el.value = value
+    el.setSelectionRange(selectionStart, selectionEnd)
+  }
+  emit('update:modelValue', value)
 }
 
 const lines = computed(() => parseMotd(props.modelValue))
 
 // §k text re-rolls its characters ten times a second, as it does in-game. The
-// timer only runs while there is some.
+// timer only runs while there is some, and not for viewers who asked for
+// reduced motion.
 const tick = ref(0)
 let timer = null
+const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
 const hasObfuscated = computed(() => lines.value.some((line) => line.some((seg) => seg.style.obfuscated)))
 watch(hasObfuscated, (on) => {
   clearInterval(timer)
-  timer = on ? setInterval(() => { tick.value += 1 }, 100) : null
+  timer = on && !reduceMotion ? setInterval(() => { tick.value += 1 }, 100) : null
 }, { immediate: true })
 onUnmounted(() => clearInterval(timer))
 
@@ -133,8 +159,8 @@ watch(() => props.iconUrl, () => { hasIcon.value = false })
       ></textarea>
     </div>
 
-    <!-- Drawn at the in-game size (GUI scale 2), so where a line is cut off
-         here is where it is cut off in the server list. -->
+    <!-- Drawn at the in-game size (GUI scale 2). The game word-wraps the MOTD
+         to the text column and shows the first two lines, so this does too. -->
     <div class="motd-editor__preview" role="img" :aria-label="$t('properties.motd.preview')">
       <div class="motd-editor__entry">
         <span class="motd-editor__icon">
@@ -151,8 +177,11 @@ watch(() => props.iconUrl, () => { hasIcon.value = false })
               </svg>
             </span>
           </div>
-          <div v-for="(line, index) in lines" :key="index" class="motd-editor__line">
-            <span v-for="(seg, segIndex) in line" :key="segIndex" :style="segmentStyle(seg)">{{ segmentText(seg) }}</span>
+          <div class="motd-editor__motd">
+            <template v-for="(line, index) in lines" :key="index">
+              <br v-if="index" />
+              <span v-for="(seg, segIndex) in line" :key="segIndex" :style="segmentStyle(seg)">{{ segmentText(seg) }}</span>
+            </template>
           </div>
         </div>
       </div>
@@ -298,7 +327,7 @@ watch(() => props.iconUrl, () => { hasIcon.value = false })
 .motd-editor__entry {
   display: flex;
   gap: 6px;
-  width: 610px;
+  width: max-content;
   padding: 2px;
   border: 2px solid #808080;
   background: #000;
@@ -327,9 +356,9 @@ watch(() => props.iconUrl, () => { hasIcon.value = false })
   image-rendering: pixelated;
 }
 
+/* 271 GUI px: the width vanilla wraps the MOTD to. */
 .motd-editor__text {
-  flex: 1;
-  min-width: 0;
+  width: 542px;
   padding-top: 2px;
 }
 
@@ -340,9 +369,11 @@ watch(() => props.iconUrl, () => { hasIcon.value = false })
   margin-bottom: 4px;
 }
 
-.motd-editor__line {
+.motd-editor__motd {
+  height: 36px;
   overflow: hidden;
-  height: 18px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .motd-editor__name {

@@ -43,6 +43,7 @@ import {
 } from '../utils/enrichInstalledModsModrinth'
 import { installedModDisplayName } from '../utils/installedModDisplay'
 import { installedEntryMatchesProjectRef } from '../utils/modrinthJarMatch'
+import { normalizeMotd } from '../utils/motd'
 // Status-display logic consolidated in utils/getEffectiveStatus (F6/CC5);
 // keep alias for the existing call sites in this file.
 import { getEffectiveStatus as pickEffectiveStatus } from '../utils/getEffectiveStatus'
@@ -185,7 +186,8 @@ export const useServerStore = defineStore('server', () => {
     name: data.name || t('servers.defaultName'),
     port: data.port ?? 25565,
     serverIp: data.serverIp || '',
-    motd: data.motd || t('servers.defaultMotd'),
+    // Normalized for the baseline too, so an old escaped MOTD isn't "dirty".
+    motd: normalizeMotd(data.motd) || t('servers.defaultMotd'),
     bugReportLink: data.bugReportLink || '',
     maxPlayers: data.maxPlayers ?? 20,
     difficulty: data.difficulty || 'normal',
