@@ -260,8 +260,6 @@
     "memoryMax": "Maximum Memory (GB)",
     "simulationDistance": "Simulation Distance",
     "onlineMode": "Online Mode (Authentication)",
-    "motd": "MOTD (Message of the Day)",
-    "motdPlaceholder": "A Minecraft Server",
     "defaultMotd": "A Minecraft Server managed by Fabricator",
     "eulaTitle": "Minecraft EULA",
     "eulaAgree": "I agree to the {eula}",
@@ -1274,8 +1272,7 @@
       "runningVersion": "Running Version",
       "runningVersionHint": "Version changes require reinstall",
       "modLoader": "Mod Loader",
-      "modLoaderHint": "Loader changes require reinstall",
-      "motdHint": "{count}/{max} characters"
+      "modLoaderHint": "Loader changes require reinstall"
     },
     "motd": {
       "hint": "Two lines. Pick a color or format to insert it at the cursor, or select text first to style just that. Anything past the edge of the preview is cut off in-game.",
