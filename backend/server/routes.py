@@ -444,7 +444,7 @@ def _write_server_properties(server: dict) -> tuple[bool, str | None]:
     for key, value in properties.items():
         if isinstance(value, bool):
             value = str(value).lower()
-        lines.append(f"{key}={escape_properties_value(value)}")
+        lines.append(f"{key}={escape_properties_value(value, keep_leading_space=key == 'motd')}")
 
     try:
         props_path.write_text('\n'.join(lines) + '\n', encoding='utf-8')

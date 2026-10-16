@@ -920,7 +920,7 @@ class InstallerBase(ABC):
             # Convert Python types to properties format
             if isinstance(value, bool):
                 value = str(value).lower()
-            lines.append(f"{key}={escape_properties_value(value)}")
+            lines.append(f"{key}={escape_properties_value(value, keep_leading_space=key == 'motd')}")
         
         props_path.write_text("\n".join(lines) + "\n")
         return props_path
