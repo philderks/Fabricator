@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import AppButton from '../../components/ui/AppButton.vue'
 import FormField from '../../components/ui/FormField.vue'
+import MotdEditor from '../../components/ui/MotdEditor.vue'
 import Panel from '../../components/ui/Panel.vue'
 import ToggleRow from '../../components/ui/ToggleRow.vue'
 import { useServerStore } from '../../stores/server'
@@ -134,7 +135,6 @@ const isDirty = computed(() => store.isDirtySettings)
 
 const showAdvanced = ref(false)
 
-const motdCharacters = computed(() => store.serverSettings?.motd?.length ?? 0)
 const statusIntervalDisabled = computed(
   () => !store.canEditSettings || !store.serverSettings?.enableStatus
 )
@@ -387,6 +387,19 @@ const onReset = () => {
           </div>
         </template>
       </FormField>
+      <FormField :label="$t('properties.identity.motd')" :hint="$t('properties.motd.hint')">
+        <template #default="{ id, describedBy }">
+          <MotdEditor
+            :id="id"
+            :described-by="describedBy"
+            v-model="store.serverSettings.motd"
+            :disabled="!store.canEditSettings"
+            :server-name="store.serverSettings.name"
+            :max-players="store.serverSettings.maxPlayers"
+            :icon-url="iconUrl"
+          />
+        </template>
+      </FormField>
       <div class="settings-page__grid">
         <FormField :label="$t('properties.identity.name')">
           <template #default="{ id, describedBy }">
@@ -401,34 +414,21 @@ const onReset = () => {
             />
           </template>
         </FormField>
-        <FormField :label="$t('properties.identity.bugReportUrl')" :hint="$t('properties.identity.bugReportUrlHint')">
+        <FormField :label="$t('properties.identity.maxPlayers')">
           <template #default="{ id, describedBy }">
             <input
               :id="id"
               class="settings-page__input"
-              type="url"
-              placeholder="https://example.com/issues"
-              v-model="store.serverSettings.bugReportLink"
+              type="number"
+              min="1"
+              max="1000"
+              v-model.number="store.serverSettings.maxPlayers"
               :disabled="!store.canEditSettings"
               :aria-describedby="describedBy"
             />
           </template>
         </FormField>
 
-        <FormField :label="$t('properties.identity.motd')" :hint="$t('properties.identity.motdHint', { count: motdCharacters, max: 59 })">
-          <template #default="{ id, describedBy }">
-            <input
-              :id="id"
-              class="settings-page__input"
-              type="text"
-              maxlength="59"
-              :placeholder="$t('properties.identity.motdPlaceholder')"
-              v-model="store.serverSettings.motd"
-              :disabled="!store.canEditSettings"
-              :aria-describedby="describedBy"
-            />
-          </template>
-        </FormField>
         <FormField :label="$t('properties.identity.port')" :hint="$t('properties.identity.portHint')">
           <template #default="{ id, describedBy }">
             <input
@@ -457,15 +457,14 @@ const onReset = () => {
             />
           </template>
         </FormField>
-        <FormField :label="$t('properties.identity.maxPlayers')">
+        <FormField class="settings-page__span" :label="$t('properties.identity.bugReportUrl')" :hint="$t('properties.identity.bugReportUrlHint')">
           <template #default="{ id, describedBy }">
             <input
               :id="id"
               class="settings-page__input"
-              type="number"
-              min="1"
-              max="1000"
-              v-model.number="store.serverSettings.maxPlayers"
+              type="url"
+              placeholder="https://example.com/issues"
+              v-model="store.serverSettings.bugReportLink"
               :disabled="!store.canEditSettings"
               :aria-describedby="describedBy"
             />
@@ -1499,6 +1498,10 @@ const onReset = () => {
 
 .settings-page__grid--three {
   grid-template-columns: repeat(3, 1fr);
+}
+
+.settings-page__span {
+  grid-column: 1 / -1;
 }
 
 .settings-page__field {

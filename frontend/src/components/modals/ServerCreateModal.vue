@@ -588,16 +588,15 @@
           </label>
         </div>
 
-        <FormField :label="$t('createServer.motd')" :hint="$t('properties.identity.motdHint', { count: formData.motd.length, max: 59 })">
+        <FormField :label="$t('createServer.motd')" :hint="$t('properties.motd.hint')">
           <template #default="{ id, describedBy }">
-            <textarea
+            <MotdEditor
               :id="id"
+              :described-by="describedBy"
               v-model="formData.motd"
-              rows="2"
-              :placeholder="$t('createServer.motdPlaceholder')"
-              maxlength="59"
-              :aria-describedby="describedBy"
-            ></textarea>
+              :server-name="formData.name"
+              :max-players="formData.maxPlayers"
+            />
           </template>
         </FormField>
       </Panel>
@@ -652,6 +651,7 @@ import JavaInstallModal from './JavaInstallModal.vue'
 import Panel from '../ui/Panel.vue'
 import AppButton from '../ui/AppButton.vue'
 import FormField from '../ui/FormField.vue'
+import MotdEditor from '../ui/MotdEditor.vue'
 import { createServer, installServer, getLoaderGameVersions, getJavaStatus, getServerInstallProgress } from '../../api/servers'
 import {
   createProgressPoller,
@@ -676,7 +676,8 @@ export default {
     JavaInstallModal,
     Panel,
     AppButton,
-    FormField
+    FormField,
+    MotdEditor
   },
   props: {
     show: {
