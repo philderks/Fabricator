@@ -1260,7 +1260,6 @@
       "title": "Server Identity",
       "icon": "Server Icon",
       "iconHint": "Any image — cropped and resized to 64×64. Shown in the multiplayer server list.",
-      "iconAlt": "Current server icon",
       "name": "Server Name",
       "namePlaceholder": "My Minecraft Server",
       "bugReportUrl": "Bug Report URL",

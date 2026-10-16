@@ -364,29 +364,6 @@ const onReset = () => {
     </Panel>
 
     <Panel :title="$t('properties.identity.title')">
-      <FormField class="settings-page__icon-field" :label="$t('properties.identity.icon')" :hint="$t('properties.identity.iconHint')">
-        <template #default="{ id, describedBy }">
-          <div class="settings-page__icon-row">
-            <span class="settings-page__icon">
-              <img v-show="hasIcon" :src="iconUrl" :alt="$t('properties.identity.iconAlt')" @load="hasIcon = true" @error="hasIcon = false" />
-              <span v-if="!hasIcon" aria-hidden="true">?</span>
-            </span>
-            <input
-              :id="id"
-              ref="iconInput"
-              type="file"
-              accept="image/*"
-              class="settings-page__icon-input"
-              :aria-describedby="describedBy"
-              @change="onIconPicked"
-            />
-            <AppButton variant="ghost" size="sm" :loading="iconBusy" @click="iconInput.click()">
-              {{ hasIcon ? $t('properties.icon.change') : $t('properties.icon.upload') }}
-            </AppButton>
-            <AppButton v-if="hasIcon" variant="ghost" size="sm" :disabled="iconBusy" @click="removeIcon">{{ $t('common.remove') }}</AppButton>
-          </div>
-        </template>
-      </FormField>
       <FormField :label="$t('properties.identity.motd')" :hint="$t('properties.motd.hint')">
         <template #default="{ id, describedBy }">
           <MotdEditor
@@ -397,7 +374,52 @@ const onReset = () => {
             :server-name="store.serverSettings.name"
             :max-players="store.serverSettings.maxPlayers"
             :icon-url="iconUrl"
-          />
+          >
+            <!-- The icon sits where it does in the server list: left of the
+                 MOTD. Clicking it uploads, hovering says so. -->
+            <template #icon>
+              <div class="settings-page__icon">
+                <button
+                  type="button"
+                  class="settings-page__icon-button"
+                  :aria-label="`${$t('properties.identity.icon')}: ${hasIcon ? $t('properties.icon.change') : $t('properties.icon.upload')}`"
+                  :title="$t('properties.identity.iconHint')"
+                  :disabled="iconBusy"
+                  @click="iconInput.click()"
+                >
+                  <img v-show="hasIcon" :src="iconUrl" alt="" @load="hasIcon = true" @error="hasIcon = false" />
+                  <span v-if="!hasIcon" aria-hidden="true">?</span>
+                  <span class="settings-page__icon-overlay" aria-hidden="true">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                      <path d="M12 15V4M12 4L7.5 8.5M12 4L16.5 8.5M4 15V20H20V15" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                  </span>
+                </button>
+                <button
+                  v-if="hasIcon"
+                  type="button"
+                  class="settings-page__icon-remove"
+                  :aria-label="`${$t('properties.identity.icon')}: ${$t('common.remove')}`"
+                  :title="$t('common.remove')"
+                  :disabled="iconBusy"
+                  @click="removeIcon"
+                >
+                  <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                    <path d="M2 2L8 8M8 2L2 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+                  </svg>
+                </button>
+                <input
+                  ref="iconInput"
+                  type="file"
+                  accept="image/*"
+                  class="settings-page__icon-input"
+                  tabindex="-1"
+                  aria-hidden="true"
+                  @change="onIconPicked"
+                />
+              </div>
+            </template>
+          </MotdEditor>
         </template>
       </FormField>
       <div class="settings-page__grid">
@@ -1454,36 +1476,100 @@ const onReset = () => {
   min-width: 104px;
 }
 
-.settings-page__icon-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-}
-
-.settings-page__icon-field {
-  margin-bottom: var(--space-4);
-}
-
 /* 64px, the size Minecraft renders it at, with pixelated scaling so what you
    see here is what players see. */
 .settings-page__icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  position: relative;
   width: 64px;
   height: 64px;
   flex-shrink: 0;
+}
+
+.settings-page__icon-button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 0;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   background: var(--bg-tertiary);
   color: var(--text-disabled);
+  font-family: inherit;
   overflow: hidden;
+  cursor: pointer;
 }
 
-.settings-page__icon img {
+.settings-page__icon-button:disabled {
+  cursor: progress;
+}
+
+.settings-page__icon-button img {
   width: 100%;
   height: 100%;
   image-rendering: pixelated;
+}
+
+.settings-page__icon-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 0.6);
+  color: #fff;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.settings-page__icon-button:hover .settings-page__icon-overlay,
+.settings-page__icon-button:focus-visible .settings-page__icon-overlay,
+.settings-page__icon-button:disabled .settings-page__icon-overlay {
+  opacity: 1;
+}
+
+.settings-page__icon-button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+/* Remove lives on the icon's corner and shows with the upload overlay. Touch
+   screens have no hover, so there it simply stays visible. */
+.settings-page__icon-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 50%;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.settings-page__icon:hover .settings-page__icon-remove,
+.settings-page__icon-remove:focus-visible {
+  opacity: 1;
+}
+
+.settings-page__icon-remove:hover {
+  color: var(--danger);
+  border-color: currentColor;
+}
+
+@media (hover: none) {
+  .settings-page__icon-remove {
+    opacity: 1;
+  }
 }
 
 .settings-page__icon-input {

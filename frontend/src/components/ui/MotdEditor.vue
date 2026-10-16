@@ -114,19 +114,24 @@ watch(() => props.iconUrl, () => { hasIcon.value = false })
       >{{ format.glyph }}</button>
     </div>
 
-    <textarea
-      :id="id"
-      ref="textarea"
-      class="motd-editor__input"
-      rows="2"
-      spellcheck="false"
-      :value="modelValue"
-      :placeholder="$t('properties.identity.motdPlaceholder')"
-      :disabled="disabled"
-      :aria-describedby="describedBy"
-      @keydown="onKeydown"
-      @input="onInput"
-    ></textarea>
+    <!-- Same shape as the server-list entry below: icon (if the page has one
+         to offer) on the left, the two MOTD lines beside it. -->
+    <div class="motd-editor__compose">
+      <slot name="icon" />
+      <textarea
+        :id="id"
+        ref="textarea"
+        class="motd-editor__input"
+        rows="2"
+        spellcheck="false"
+        :value="modelValue"
+        :placeholder="$t('properties.identity.motdPlaceholder')"
+        :disabled="disabled"
+        :aria-describedby="describedBy"
+        @keydown="onKeydown"
+        @input="onInput"
+      ></textarea>
+    </div>
 
     <!-- Drawn at the in-game size (GUI scale 2), so where a line is cut off
          here is where it is cut off in the server list. -->
@@ -253,8 +258,15 @@ watch(() => props.iconUrl, () => { hasIcon.value = false })
   background: var(--border-color);
 }
 
+.motd-editor__compose {
+  display: flex;
+  gap: var(--space-3);
+}
+
 .motd-editor__input {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
+  height: 64px;
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
