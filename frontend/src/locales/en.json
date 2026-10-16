@@ -1278,6 +1278,37 @@
       "modLoaderHint": "Loader changes require reinstall",
       "motdHint": "{count}/{max} characters"
     },
+    "motd": {
+      "hint": "Two lines. Pick a color or format to insert it at the cursor, or select text first to style just that. Anything past the edge of the preview is cut off in-game.",
+      "toolbar": "MOTD colors and formatting",
+      "preview": "Server list preview",
+      "colors": {
+        "black": "Black",
+        "darkBlue": "Dark Blue",
+        "darkGreen": "Dark Green",
+        "darkAqua": "Dark Aqua",
+        "darkRed": "Dark Red",
+        "darkPurple": "Dark Purple",
+        "gold": "Gold",
+        "gray": "Gray",
+        "darkGray": "Dark Gray",
+        "blue": "Blue",
+        "green": "Green",
+        "aqua": "Aqua",
+        "red": "Red",
+        "lightPurple": "Light Purple",
+        "yellow": "Yellow",
+        "white": "White"
+      },
+      "formats": {
+        "bold": "Bold",
+        "italic": "Italic",
+        "underline": "Underline",
+        "strikethrough": "Strikethrough",
+        "obfuscated": "Obfuscated",
+        "reset": "Reset formatting"
+      }
+    },
     "gameplay": {
       "title": "Gameplay",
       "difficulty": "Difficulty",
