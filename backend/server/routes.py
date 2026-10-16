@@ -39,7 +39,7 @@ from backend.server.locks import get_server_lock, try_acquire, discard_lock
 from backend.utils import platform as platform_utils
 from backend.utils.java import parse_java_major, parse_java_version_string
 from backend.utils.routes import require_server, with_server_lock
-from backend.utils.strings import bool_from_str
+from backend.utils.strings import bool_from_str, escape_properties_value
 from backend.utils.time import iso_z_from_timestamp, iso_z_now
 from backend.utils.upload import (
     UploadTooLargeError,
@@ -444,7 +444,7 @@ def _write_server_properties(server: dict) -> tuple[bool, str | None]:
     for key, value in properties.items():
         if isinstance(value, bool):
             value = str(value).lower()
-        lines.append(f"{key}={value}")
+        lines.append(f"{key}={escape_properties_value(value)}")
 
     try:
         props_path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
