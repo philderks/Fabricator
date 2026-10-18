@@ -562,6 +562,12 @@ Player names must match `[A-Za-z0-9_]{1,16}`. Ban/kick reasons must be a single 
 characters. When the server is running, changes are applied through console commands; when it is
 stopped, the JSON files are edited directly.
 
+Offline-mode servers (`onlineMode: false`) are the exception while running. A console command that
+names a player who has never joined makes Minecraft resolve a UUID that player doesn't log in with.
+So whitelist changes edit `whitelist.json` with the offline UUID and then send `whitelist reload`.
+Ops and bans (add or remove) for such a player return `409`. Once the player has joined, they go
+through the console as usual.
+
 Shared error responses: `409` when the operation needs a different server state ·
 `404` when the player is not in the list or is unknown to Mojang · `502` when the Mojang lookup fails.
 
@@ -600,6 +606,9 @@ endpoint makes no network calls.
 #### `POST` / `DELETE /api/servers/<server_id>/players/whitelist`
 
 Add or remove a whitelist entry. **Body:** `{ "name": "Steve" }`
+
+Adding a name that is already listed under a different UUID replaces that UUID. This repairs
+entries that vanilla's own `whitelist add` wrote with the wrong UUID on offline-mode servers.
 
 #### `PATCH /api/servers/<server_id>/players/whitelist/active`
 

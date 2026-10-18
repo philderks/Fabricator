@@ -158,6 +158,15 @@ def test_vanilla_reply_uses_the_target_rate_it_announced():
     assert mgr._consume_tps_line(PREFIX + "Percentiles: P50: 0.5ms P95: 0.9ms") is True
 
 
+def test_26_3_system_chat_marker_does_not_hide_the_reply():
+    """26.3 prefixes command feedback with "System chat: " — still a reply."""
+    mgr = _sampling_manager("fabric", "26.3")
+    mgr._tps_pending_until = time.monotonic() + 5
+    assert mgr._consume_tps_line(PREFIX + "System chat: Target tick rate: 20.0 per second.") is True
+    assert mgr._consume_tps_line("Average time per tick: 100.0ms (Target: 50.0ms)") is True
+    assert mgr._tps == pytest.approx(10.0)
+
+
 # The four lines a real Fabric 26.2 server sends back, copied verbatim from
 # logs/latest.log. The third has no log prefix: vanilla sends the whole reply as
 # one multi-line chat component, so log4j stamps only the first line — and the
