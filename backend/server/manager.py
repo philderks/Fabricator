@@ -64,14 +64,19 @@ class ServerManager:
     # and "[Not Secure] <Notch> ..." while still allowing spaces (Bedrock/Geyser
     # gamertags). Lines are ANSI-stripped (see _ANSI_RE) before matching, so a
     # colour-wrapped name isn't dropped by the "[" exclusion.
+    # Minecraft 26.3 logs every server-generated message as "System chat: ...",
+    # joins and leaves included, so that marker is skipped when present. ":" is
+    # excluded from the name too (no Java or Geyser name has one): without it,
+    # the whole "System chat: Steve" was taken for the player's name.
     _LOG_PREFIX = (
         r'^(?:'
         r'\[[^\]]*INFO\]'                            # legacy single bracket: [HH:MM:SS INFO]
         r'|\[[^\]]+\] \[[^\]]*INFO\](?: \[[^\]]*\])?'  # [time] [thread/INFO] (+ Forge [category])
         r'): '
     )
-    _PLAYER_JOIN_RE = re.compile(_LOG_PREFIX + r'([^<>\[\]]+) joined the game')
-    _PLAYER_LEAVE_RE = re.compile(_LOG_PREFIX + r'([^<>\[\]]+) left the game')
+    _SYSTEM_CHAT = r'(?:(?i:system chat): )?'
+    _PLAYER_JOIN_RE = re.compile(_LOG_PREFIX + _SYSTEM_CHAT + r'([^<>\[\]:]+) joined the game')
+    _PLAYER_LEAVE_RE = re.compile(_LOG_PREFIX + _SYSTEM_CHAT + r'([^<>\[\]:]+) left the game')
     # SGR colour escapes some setups emit around the message on the pipe.
     _ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
     # "Done (12.345s)! For help, type "help"" — the world is loaded and the

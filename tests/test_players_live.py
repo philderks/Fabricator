@@ -132,3 +132,43 @@ def test_join_matches_ansi_wrapped_name_after_strip():
     m = JOIN.search(clean)
     assert m is not None
     assert m.group(1) == "Notch"
+
+
+# Minecraft 26.3 logs every server-generated message as "System chat: ...".
+# Format copied from a real 26.3 server log. Before the prefix was recognised,
+# the whole "System chat: Name" was taken for the player's name (issue #92).
+
+def test_join_matches_26_3_system_chat_line():
+    line = "[12:17:15] [Server thread/INFO]: System chat: TheProStar joined the game"
+    m = JOIN.search(line)
+    assert m is not None
+    assert m.group(1) == "TheProStar"
+
+
+def test_leave_matches_26_3_system_chat_line():
+    line = "[12:24:25] [Server thread/INFO]: System chat: TheProStar left the game"
+    m = LEAVE.search(line)
+    assert m is not None
+    assert m.group(1) == "TheProStar"
+
+
+def test_system_chat_marker_is_case_insensitive():
+    line = "[12:17:15] [Server thread/INFO]: System Chat: TheProStar joined the game"
+    assert JOIN.search(line).group(1) == "TheProStar"
+
+
+def test_system_chat_marker_keeps_names_with_spaces():
+    line = "[12:17:15] [Server thread/INFO]: System chat: Cool Gamer joined the game"
+    assert JOIN.search(line).group(1) == "Cool Gamer"
+
+
+def test_join_never_captures_a_colon_in_the_name():
+    # An unknown "<label>: " marker must not leak into the name the way
+    # "System chat: " did — no real name contains a colon.
+    line = "[12:17:15] [Server thread/INFO]: Other label: TheProStar joined the game"
+    assert JOIN.search(line) is None
+
+
+def test_chat_quoting_system_chat_marker_is_still_ignored():
+    line = "[12:17:15] [Server thread/INFO]: <Griefer> System chat: Ghost joined the game"
+    assert JOIN.search(line) is None

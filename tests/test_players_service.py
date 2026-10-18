@@ -313,3 +313,129 @@ def test_stopped_ip_unban_missing_entry_raises(install):
     reg = _registry_for(install, "stopped")
     with pytest.raises(players_service.PlayerNotInList):
         players_service.unban_ip(reg, _server(), "9.9.9.9")
+
+
+# ---------- running + offline mode (issue #92) ------------------------------
+# A console command naming a never-joined player makes vanilla resolve that
+# name itself, which on an offline-mode server lands on a UUID the player never
+# logs in with. The whitelist goes through the file + `whitelist reload`
+# instead; commands with no reload are refused until the player has joined.
+
+def _usercache(install, name, uuid, expires="2999-01-01 00:00:00 +0000"):
+    players_files.write_json_list(install, "usercache.json", [
+        {"name": name, "uuid": uuid, "expiresOn": expires},
+    ])
+
+
+def test_running_offline_whitelist_add_writes_offline_uuid_and_reloads(install):
+    reg = _registry_for(install, "running", started_at=100.0)
+
+    result = players_service.add_to_whitelist(reg, _server(online_mode=False), "TheProStar")
+
+    expected = str(players_files.offline_uuid("TheProStar"))
+    assert players_files.read_json_list(install, "whitelist.json") == [
+        {"uuid": expected, "name": "TheProStar"},
+    ]
+    assert reg.sent_commands == ["whitelist reload"]
+    assert result == {"name": "TheProStar", "uuid": expected}
+
+
+def test_running_offline_whitelist_remove_edits_file_and_reloads(install):
+    reg = _registry_for(install, "running", started_at=100.0)
+    players_files.write_json_list(install, "whitelist.json", [
+        {"uuid": "u1", "name": "TheProStar"},
+        {"uuid": "u2", "name": "Notch"},
+    ])
+
+    players_service.remove_from_whitelist(reg, _server(online_mode=False), "theprostar")
+
+    assert players_files.read_json_list(install, "whitelist.json") == [{"uuid": "u2", "name": "Notch"}]
+    assert reg.sent_commands == ["whitelist reload"]
+
+
+def test_running_offline_whitelist_remove_missing_entry_raises_without_reload(install):
+    reg = _registry_for(install, "running", started_at=100.0)
+    with pytest.raises(players_service.PlayerNotInList):
+        players_service.remove_from_whitelist(reg, _server(online_mode=False), "TheProStar")
+    assert reg.sent_commands == []
+
+
+@pytest.mark.parametrize("status", ["running", "stopped"])
+def test_offline_whitelist_add_corrects_entry_with_wrong_uuid(install, status):
+    # What vanilla's own `whitelist add` leaves behind: the right name under a
+    # UUID the player never logs in with. Re-adding must repair it, not no-op.
+    reg = _registry_for(install, status, started_at=100.0)
+    players_files.write_json_list(install, "whitelist.json", [
+        {"uuid": "11111111-2222-3333-4444-555555555555", "name": "theprostar"},
+    ])
+
+    players_service.add_to_whitelist(reg, _server(online_mode=False), "TheProStar")
+
+    assert players_files.read_json_list(install, "whitelist.json") == [
+        {"uuid": str(players_files.offline_uuid("TheProStar")), "name": "TheProStar"},
+    ]
+
+
+def test_offline_whitelist_add_existing_correct_entry_is_idempotent(install):
+    reg = _registry_for(install, "stopped")
+    entry = {"uuid": str(players_files.offline_uuid("TheProStar")), "name": "TheProStar"}
+    players_files.write_json_list(install, "whitelist.json", [entry])
+
+    players_service.add_to_whitelist(reg, _server(online_mode=False), "TheProStar")
+
+    assert players_files.read_json_list(install, "whitelist.json") == [entry]
+
+
+@pytest.mark.parametrize("call", [
+    lambda reg, srv: players_service.op_player(reg, srv, "TheProStar"),
+    lambda reg, srv: players_service.deop_player(reg, srv, "TheProStar"),
+    lambda reg, srv: players_service.ban_player(reg, srv, "TheProStar"),
+    lambda reg, srv: players_service.unban_player(reg, srv, "TheProStar"),
+], ids=["op", "deop", "ban", "pardon"])
+def test_running_offline_never_joined_player_is_refused(install, call):
+    reg = _registry_for(install, "running", started_at=100.0)
+    with pytest.raises(players_service.ServerStateError):
+        call(reg, _server(online_mode=False))
+    assert reg.sent_commands == []
+
+
+def test_running_offline_op_of_joined_player_sends_command(install):
+    reg = _registry_for(install, "running", started_at=100.0)
+    _usercache(install, "TheProStar", str(players_files.offline_uuid("TheProStar")))
+
+    players_service.op_player(reg, _server(online_mode=False), "theprostar")
+
+    assert reg.sent_commands == ["op theprostar"]
+
+
+def test_running_offline_op_refused_when_usercache_holds_another_uuid(install):
+    # A cache entry from vanilla's own lookup (e.g. a premium UUID) would send
+    # the op to the wrong player just the same.
+    reg = _registry_for(install, "running", started_at=100.0)
+    _usercache(install, "TheProStar", "11111111-2222-3333-4444-555555555555")
+    with pytest.raises(players_service.ServerStateError):
+        players_service.op_player(reg, _server(online_mode=False), "TheProStar")
+    assert reg.sent_commands == []
+
+
+def test_running_offline_op_refused_when_usercache_entry_expired(install):
+    reg = _registry_for(install, "running", started_at=100.0)
+    _usercache(
+        install, "TheProStar", str(players_files.offline_uuid("TheProStar")),
+        expires="2000-01-01 00:00:00 +0000",
+    )
+    with pytest.raises(players_service.ServerStateError):
+        players_service.op_player(reg, _server(online_mode=False), "TheProStar")
+    assert reg.sent_commands == []
+
+
+def test_running_online_mode_still_sends_vanilla_commands(install):
+    reg = _registry_for(install, "running", started_at=100.0)
+    server = _server(online_mode=True)
+
+    players_service.add_to_whitelist(reg, server, "Linus")
+    players_service.remove_from_whitelist(reg, server, "Linus")
+    players_service.op_player(reg, server, "Linus")
+
+    assert reg.sent_commands == ["whitelist add Linus", "whitelist remove Linus", "op Linus"]
+    assert players_files.read_json_list(install, "whitelist.json") == []
