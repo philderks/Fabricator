@@ -50,3 +50,21 @@ def test_two_line_motd_stays_one_property(client, app, tmp_servers_root):
     lines = (tmp_servers_root / "servers" / "motd" / "server.properties").read_text().splitlines()
     assert [l for l in lines if l.startswith("motd=")] == ["motd=\\u00A76Line one\\n\\u00A7bonline-mode=false"]
     assert [l for l in lines if l.startswith("online-mode=")] == ["online-mode=true"]
+
+
+def test_empty_motd_is_written_empty(client, app, tmp_servers_root):
+    """An empty MOTD is a choice, not a missing value: Minecraft shows nothing."""
+    from backend.server import storage
+
+    with app.app_context():
+        sid = storage.create_server({
+            "name": "blank", "version": "1.21.4", "loader": "paper",
+            "port": 25942, "installPath": "blank",
+        })["id"]
+    (tmp_servers_root / "servers" / "blank").mkdir(parents=True, exist_ok=True)
+
+    resp = client.put(f"/api/servers/{sid}/settings", json={"motd": ""})
+    assert resp.status_code == 200, resp.get_json()
+    assert resp.get_json()["motd"] == ""
+    lines = (tmp_servers_root / "servers" / "blank" / "server.properties").read_text().splitlines()
+    assert "motd=" in lines

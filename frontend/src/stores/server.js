@@ -187,7 +187,9 @@ export const useServerStore = defineStore('server', () => {
     port: data.port ?? 25565,
     serverIp: data.serverIp || '',
     // Normalized for the baseline too, so an old escaped MOTD isn't "dirty".
-    motd: normalizeMotd(data.motd) || t('servers.defaultMotd'),
+    // Only a missing MOTD gets the default: an empty one is a valid choice
+    // (Minecraft shows nothing), not something to paper over.
+    motd: data.motd == null ? t('servers.defaultMotd') : normalizeMotd(data.motd),
     bugReportLink: data.bugReportLink || '',
     maxPlayers: data.maxPlayers ?? 20,
     difficulty: data.difficulty || 'normal',
