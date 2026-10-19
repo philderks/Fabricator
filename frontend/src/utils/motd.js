@@ -55,8 +55,8 @@ export function normalizeMotd(raw) {
   return decodeLegacy(raw).replace(/\r/g, '')
 }
 
-// Up to two lines (all the server list shows) of `{ text, style }` segments.
-// Style carries across the line break, as it does in-game.
+// The MOTD's lines as `{ text, style }` segments. Style carries across the
+// line break, as it does in-game.
 export function parseMotd(raw) {
   const text = decodeLegacy(raw)
   const lines = [[]]
@@ -68,7 +68,6 @@ export function parseMotd(raw) {
       continue
     }
     if (ch === '\n') {
-      if (lines.length === 2) break
       lines.push([])
       continue
     }
@@ -78,6 +77,111 @@ export function parseMotd(raw) {
     else line.push({ text: ch, style })
   }
   return lines
+}
+
+// Advance widths (GUI px) of the vanilla font for ' '..'~', read from the 26.3
+// client's font atlas the way the game measures glyphs (rightmost lit column
+// + 1; space is a fixed 4). Bold adds 1 to every glyph, spaces included.
+const ASCII_ADVANCES = '42466662444626266666666666225656766666666466666666666666666464663666665662653666666646666664247'
+// ponytail: outside ASCII everything counts as 6, the width of nearly every
+// accented Latin letter; read the full atlas if other scripts need centring.
+const OTHER_ADVANCE = 6
+
+// The width vanilla wraps the MOTD to: in 26.3 the 305px row, minus 4 padding,
+// the 32px icon and 2. Clients up to 1.21 wrapped at 271.
+export const MOTD_WIDTH = 267
+
+export function glyphAdvance(ch, bold) {
+  const code = ch.codePointAt(0)
+  const base = code >= 32 && code <= 126 ? Number(ASCII_ADVANCES[code - 32]) : OTHER_ADVANCE
+  return base + (bold ? 1 : 0)
+}
+
+function toSegments(chars) {
+  const segments = []
+  for (const { ch, style } of chars) {
+    const last = segments[segments.length - 1]
+    if (last?.style === style) last.text += ch
+    else segments.push({ text: ch, style })
+  }
+  return segments
+}
+
+// One line word-wrapped the way vanilla's StringSplitter does it: break at the
+// last space before the line overflows (that space is dropped), or mid-word
+// when there is none.
+function wrapLine(segments, width) {
+  const chars = segments.flatMap((seg) => Array.from(seg.text, (ch) => ({ ch, style: seg.style })))
+  const lines = []
+  let start = 0
+  do {
+    let used = 0
+    let lastSpace = -1
+    let end = chars.length
+    let next = chars.length
+    for (let i = start; i < chars.length; i += 1) {
+      if (chars[i].ch === ' ') lastSpace = i
+      used += glyphAdvance(chars[i].ch, chars[i].style.bold)
+      if (i > start && used > width) {
+        ;[end, next] = lastSpace === -1 ? [i, i] : [lastSpace, lastSpace + 1]
+        break
+      }
+    }
+    lines.push(toSegments(chars.slice(start, end)))
+    start = next
+  } while (start < chars.length)
+  return lines
+}
+
+// Every line the server list would lay out, wrapped. It shows the first two.
+export function wrapMotd(raw, width = MOTD_WIDTH) {
+  return parseMotd(raw).flatMap((line) => wrapLine(line, width))
+}
+
+// Leading spaces, wherever they sit among the line's opening § codes, are
+// what centring replaces.
+function stripLeadingSpaces(line) {
+  let codes = ''
+  let i = 0
+  while (i < line.length) {
+    if (line[i] === '§' && i + 1 < line.length) {
+      codes += line.slice(i, i + 2)
+      i += 2
+    } else if (line[i] === ' ') {
+      i += 1
+    } else {
+      break
+    }
+  }
+  return codes + line.slice(i)
+}
+
+// Pads each line with spaces so it sits centred in the server list. Earlier
+// padding is replaced, so centring twice changes nothing, and a line too wide
+// to centre (it wraps) ends up flush left.
+export function centerMotd(raw) {
+  let carried = BASE
+  return String(raw ?? '').split('\n').map((line) => {
+    const text = Array.from(stripLeadingSpaces(line))
+    let style = carried
+    let width = 0
+    let trailing = 0
+    for (let i = 0; i < text.length; i += 1) {
+      if (text[i] === '§') {
+        if (i + 1 < text.length) style = applyCode(style, text[++i])
+        continue
+      }
+      const advance = glyphAdvance(text[i], style.bold)
+      width += advance
+      trailing = text[i] === ' ' ? trailing + advance : 0
+    }
+    // The padding goes before the line's own codes, so it takes the style
+    // carried in from the line above.
+    const space = glyphAdvance(' ', carried.bold)
+    carried = style
+    const pad = Math.max(0, Math.round((MOTD_WIDTH - (width - trailing)) / 2 / space))
+    return ' '.repeat(pad) + text.join('')
+  }).join('\n')
 }
 
 export function colorHex(style) {
@@ -90,16 +194,22 @@ export function shadowHex(hex) {
   return `#${((n & 0xfcfcfc) >> 2).toString(16).padStart(6, '0')}`
 }
 
-// The § codes that recreate the style active at `index` of `raw`, so wrapping
-// a selection can hand the text after it back its previous styling. Without
-// `withColor`, just the formats: what a new colour code has to repeat, since
-// a colour clears them in-game.
-export function codesAt(raw, index, { withColor = true } = {}) {
+// The style text typed at `index` of `raw` would get.
+export function styleAt(raw, index) {
   const text = String(raw ?? '').slice(0, index)
   let style = BASE
   for (let i = 0; i < text.length - 1; i += 1) {
     if (text[i] === '§') style = applyCode(style, text[++i])
   }
+  return style
+}
+
+// The § codes that recreate the style active at `index` of `raw`, so wrapping
+// a selection can hand the text after it back its previous styling. Without
+// `withColor`, just the formats: what a new colour code has to repeat, since
+// a colour clears them in-game.
+export function codesAt(raw, index, { withColor = true } = {}) {
+  const style = styleAt(raw, index)
   const formats = Object.entries(MOTD_FORMATS).filter(([, flag]) => style[flag]).map(([code]) => `§${code}`)
   return (withColor && style.color ? `§${style.color}` : '') + formats.join('')
 }

@@ -1278,6 +1278,8 @@
       "hint": "Two lines. Pick a color or format to insert it at the cursor, or select text first to style just that. Long lines wrap as they do in-game, and only the first two lines show.",
       "toolbar": "MOTD colors and formatting",
       "preview": "Server list preview",
+      "center": "Center lines",
+      "overflow": "The server list only fits two lines, so the end of this MOTD won't show.",
       "colors": {
         "black": "Black",
         "darkBlue": "Dark Blue",

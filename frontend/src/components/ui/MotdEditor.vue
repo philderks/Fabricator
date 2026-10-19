@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onUnmounted, ref, watch } from 'vue'
-import { MOTD_COLORS, MOTD_FORMATS, codesAt, colorHex, parseMotd, shadowHex, snapIndex } from '../../utils/motd'
+import { MOTD_COLORS, MOTD_FORMATS, centerMotd, codesAt, colorHex, glyphAdvance, shadowHex, snapIndex, styleAt, wrapMotd } from '../../utils/motd'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
@@ -19,7 +19,29 @@ const emit = defineEmits(['update:modelValue'])
 const textarea = ref(null)
 
 const FORMAT_GLYPHS = { l: 'B', o: 'I', n: 'U', m: 'S', k: '▒', r: 'R' }
-const formats = [...Object.entries(MOTD_FORMATS), ['r', 'reset']].map(([code, name]) => ({ code, name, glyph: FORMAT_GLYPHS[code] }))
+// Ctrl/⌘ + key, as in any text editor.
+const SHORTCUTS = { b: 'l', i: 'o', u: 'n' }
+const SHORTCUT_KEYS = Object.fromEntries(Object.entries(SHORTCUTS).map(([key, code]) => [code, key.toUpperCase()]))
+const isMac = /Mac|iPhone|iPad/.test(navigator.platform)
+const formats = [...Object.entries(MOTD_FORMATS), ['r', 'reset']].map(([code, name]) => ({
+  code,
+  name,
+  glyph: FORMAT_GLYPHS[code],
+  shortcut: SHORTCUT_KEYS[code] && (isMac ? `⌘${SHORTCUT_KEYS[code]}` : `Ctrl+${SHORTCUT_KEYS[code]}`),
+  ariaShortcut: SHORTCUT_KEYS[code] && `${isMac ? 'Meta' : 'Control'}+${SHORTCUT_KEYS[code]}`
+}))
+
+// Replaces start..end of the textarea through insertText, which keeps the edit
+// on the browser's undo stack (assigning .value wipes it) and fires the input
+// event that emits the new value.
+function replaceRange(el, start, end, text) {
+  el.focus()
+  el.setSelectionRange(start, end)
+  if (!document.execCommand('insertText', false, text)) {
+    el.setRangeText(text, start, end, 'end')
+    emit('update:modelValue', el.value)
+  }
+}
 
 // No selection: drop the code at the caret. A selection gets wrapped, then the
 // style that was active at its end is re-emitted so the text after it keeps
@@ -37,26 +59,42 @@ function apply(code) {
   let inner = value.slice(start, end)
   if (MOTD_FORMATS[code]) inner = inner.replace(/§[0-9a-fr]/gi, (match) => match + tag)
   const restore = start !== end && end < value.length ? `§r${codesAt(value, end)}` : ''
-
-  el.focus()
-  el.setSelectionRange(start, end)
-  // insertText keeps the edit on the browser's undo stack (assigning .value
-  // wipes it) and fires the input event that emits the new value.
-  if (!document.execCommand('insertText', false, tag + inner + restore)) {
-    el.setRangeText(tag + inner + restore, start, end)
-    emit('update:modelValue', el.value)
-  }
+  replaceRange(el, start, end, tag + inner + restore)
   el.setSelectionRange(start + tag.length, start + tag.length + inner.length)
+  trackCaret()
+}
+
+function center() {
+  const el = textarea.value
+  if (!el) return
+  const centered = centerMotd(el.value)
+  if (centered !== el.value) replaceRange(el, 0, el.value.length, centered)
+  trackCaret()
 }
 
 // The server list only ever shows two lines. Enter is refused once there are
 // two, unless it replaces the line break itself; a pasted third line is folded
 // into the second.
 function onKeydown(event) {
+  const shortcut = (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && SHORTCUTS[event.key.toLowerCase()]
+  if (shortcut) {
+    event.preventDefault()
+    apply(shortcut)
+    return
+  }
   if (event.key !== 'Enter') return
   const { value, selectionStart, selectionEnd } = event.target
   if (value.includes('\n') && !value.slice(selectionStart, selectionEnd).includes('\n')) event.preventDefault()
 }
+
+// Where the caret is, so the toolbar can show the colour and formats the next
+// typed character would get, like a word processor's toolbar does.
+const caret = ref(0)
+function trackCaret() {
+  const el = textarea.value
+  if (el) caret.value = snapIndex(el.value, el.selectionStart)
+}
+const active = computed(() => styleAt(props.modelValue, caret.value))
 
 function onInput(event) {
   const el = event.target
@@ -70,9 +108,14 @@ function onInput(event) {
     el.setSelectionRange(selectionStart, selectionEnd)
   }
   emit('update:modelValue', value)
+  trackCaret()
 }
 
-const lines = computed(() => parseMotd(props.modelValue))
+// Laid out with the game's own glyph widths rather than the preview font's,
+// so the wrap, and whether anything falls past line two, match the client.
+const wrapped = computed(() => wrapMotd(props.modelValue))
+const lines = computed(() => wrapped.value.slice(0, 2))
+const overflows = computed(() => wrapped.value.length > 2)
 
 // §k text re-rolls its characters ten times a second, as it does in-game. The
 // timer only runs while there is some, and not for viewers who asked for
@@ -87,11 +130,19 @@ watch(hasObfuscated, (on) => {
 }, { immediate: true })
 onUnmounted(() => clearInterval(timer))
 
+// Every glyph sits in a box exactly as wide as the game draws it (at GUI scale
+// 2), so spacing and centring in the preview are the client's, not whatever
+// the preview font's own metrics would make of them.
+const glyphLines = computed(() => lines.value.map((line) => line.map((seg) => ({
+  seg,
+  glyphs: Array.from(seg.text, (ch) => ({ ch, width: `${glyphAdvance(ch, seg.style.bold) * 2}px` }))
+}))))
+
 const GLYPHS = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
-function segmentText(seg) {
-  if (!seg.style.obfuscated) return seg.text
+function glyphText(seg, ch) {
+  if (!seg.style.obfuscated || ch === ' ') return ch
   void tick.value
-  return seg.text.replace(/\S/g, () => GLYPHS[Math.floor(Math.random() * GLYPHS.length)])
+  return GLYPHS[Math.floor(Math.random() * GLYPHS.length)]
 }
 
 function segmentStyle({ style }) {
@@ -118,9 +169,11 @@ watch(() => props.iconUrl, () => { hasIcon.value = false })
         :key="color.code"
         type="button"
         class="motd-editor__swatch"
+        :class="{ 'motd-editor__swatch--active': active.color === color.code }"
         :style="{ background: color.hex }"
         :title="`${$t(`properties.motd.colors.${color.name}`)} (§${color.code})`"
         :aria-label="$t(`properties.motd.colors.${color.name}`)"
+        :aria-pressed="active.color === color.code"
         :disabled="disabled"
         @mousedown.prevent
         @click="apply(color.code)"
@@ -131,13 +184,29 @@ watch(() => props.iconUrl, () => { hasIcon.value = false })
         :key="format.code"
         type="button"
         class="motd-editor__format"
-        :class="`motd-editor__format--${format.name}`"
-        :title="`${$t(`properties.motd.formats.${format.name}`)} (§${format.code})`"
+        :class="[`motd-editor__format--${format.name}`, { 'motd-editor__format--active': active[format.name] }]"
+        :title="`${$t(`properties.motd.formats.${format.name}`)} (§${format.code}${format.shortcut ? `, ${format.shortcut}` : ''})`"
         :aria-label="$t(`properties.motd.formats.${format.name}`)"
+        :aria-pressed="format.code === 'r' ? undefined : Boolean(active[format.name])"
+        :aria-keyshortcuts="format.ariaShortcut"
         :disabled="disabled"
         @mousedown.prevent
         @click="apply(format.code)"
       >{{ format.glyph }}</button>
+      <span class="motd-editor__divider" aria-hidden="true"></span>
+      <button
+        type="button"
+        class="motd-editor__format"
+        :title="$t('properties.motd.center')"
+        :aria-label="$t('properties.motd.center')"
+        :disabled="disabled"
+        @mousedown.prevent
+        @click="center"
+      >
+        <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+          <path d="M2 3H12M4 7H10M2 11H12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+        </svg>
+      </button>
     </div>
 
     <!-- Same shape as the server-list entry below: icon (if the page has one
@@ -156,6 +225,10 @@ watch(() => props.iconUrl, () => { hasIcon.value = false })
         :aria-describedby="describedBy"
         @keydown="onKeydown"
         @input="onInput"
+        @select="trackCaret"
+        @click="trackCaret"
+        @keyup="trackCaret"
+        @focus="trackCaret"
       ></textarea>
     </div>
 
@@ -177,15 +250,18 @@ watch(() => props.iconUrl, () => { hasIcon.value = false })
               </svg>
             </span>
           </div>
-          <div class="motd-editor__motd">
-            <template v-for="(line, index) in lines" :key="index">
-              <br v-if="index" />
-              <span v-for="(seg, segIndex) in line" :key="segIndex" :style="segmentStyle(seg)">{{ segmentText(seg) }}</span>
-            </template>
+          <div v-for="(line, index) in glyphLines" :key="index" class="motd-editor__line">
+            <span v-for="(part, partIndex) in line" :key="partIndex" :style="segmentStyle(part.seg)"><span
+              v-for="(glyph, glyphIndex) in part.glyphs"
+              :key="glyphIndex"
+              class="motd-editor__glyph"
+              :style="{ width: glyph.width }"
+            >{{ glyphText(part.seg, glyph.ch) }}</span></span>
           </div>
         </div>
       </div>
     </div>
+    <p v-if="overflows" class="motd-editor__warning" role="status">{{ $t('properties.motd.overflow') }}</p>
   </div>
 </template>
 
@@ -275,6 +351,16 @@ watch(() => props.iconUrl, () => { hasIcon.value = false })
   font-size: var(--text-sm);
 }
 
+/* The colour or format the caret is in. */
+.motd-editor__swatch--active {
+  box-shadow: 0 0 0 2px var(--bg-primary), 0 0 0 4px var(--primary);
+}
+
+.motd-editor__format--active {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
 .motd-editor__format--bold { font-weight: 700; }
 .motd-editor__format--italic { font-style: italic; }
 .motd-editor__format--underline { text-decoration: underline; }
@@ -332,7 +418,8 @@ watch(() => props.iconUrl, () => { hasIcon.value = false })
   border: 2px solid #808080;
   background: #000;
   font-family: 'Minecraft', var(--font-mono);
-  font-size: 16px;
+  /* One font pixel = 2px, the game's pixel at GUI scale 2. */
+  font-size: 19.2px;
   line-height: 18px;
   white-space: pre;
   user-select: none;
@@ -356,9 +443,9 @@ watch(() => props.iconUrl, () => { hasIcon.value = false })
   image-rendering: pixelated;
 }
 
-/* 271 GUI px: the width vanilla wraps the MOTD to. */
+/* MOTD_WIDTH (267 GUI px) at GUI scale 2. */
 .motd-editor__text {
-  width: 542px;
+  width: 534px;
   padding-top: 2px;
 }
 
@@ -369,11 +456,23 @@ watch(() => props.iconUrl, () => { hasIcon.value = false })
   margin-bottom: 4px;
 }
 
-.motd-editor__motd {
-  height: 36px;
+/* Lines arrive already wrapped; clipping only covers the preview font being a
+   hair wider than the game's. */
+.motd-editor__line {
+  height: 18px;
   overflow: hidden;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+}
+
+/* Decoration doesn't propagate into inline-blocks, so each glyph takes it. */
+.motd-editor__glyph {
+  display: inline-block;
+  text-decoration-line: inherit;
+}
+
+.motd-editor__warning {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--warning);
 }
 
 .motd-editor__name {
