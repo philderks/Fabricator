@@ -113,6 +113,11 @@
     "starting": "Starting…",
     "installing": "Installing…"
   },
+  "serverEntry": {
+    "players": "{online} of {max} players online",
+    "pinging": "Starting up",
+    "offline": "Offline"
+  },
   "switcher": {
     "reorderLabel": "Reorder {name}. Drag, or use arrow keys. The top server opens by default.",
     "reorderTitle": "Drag to reorder — the top server opens by default",
@@ -260,8 +265,6 @@
     "memoryMax": "Maximum Memory (GB)",
     "simulationDistance": "Simulation Distance",
     "onlineMode": "Online Mode (Authentication)",
-    "motd": "MOTD (Message of the Day)",
-    "motdPlaceholder": "A Minecraft Server",
     "defaultMotd": "A Minecraft Server managed by Fabricator",
     "eulaTitle": "Minecraft EULA",
     "eulaAgree": "I agree to the {eula}",
@@ -461,6 +464,8 @@
     }
   },
   "overview": {
+    "serverList": "Server list",
+    "editMotd": "Edit MOTD",
     "stats": {
       "players": "Players",
       "uptime": "Uptime",
@@ -1260,8 +1265,7 @@
     "identity": {
       "title": "Server Identity",
       "icon": "Server Icon",
-      "iconHint": "Any image — cropped and resized to 64×64. Shown in the multiplayer server list.",
-      "iconAlt": "Current server icon",
+      "iconHint": "Click the icon to change it: any image works, cropped and resized to 64×64.",
       "name": "Server Name",
       "namePlaceholder": "My Minecraft Server",
       "bugReportUrl": "Bug Report URL",
@@ -1275,8 +1279,44 @@
       "runningVersion": "Running Version",
       "runningVersionHint": "Version changes require reinstall",
       "modLoader": "Mod Loader",
-      "modLoaderHint": "Loader changes require reinstall",
-      "motdHint": "{count}/{max} characters"
+      "modLoaderHint": "Loader changes require reinstall"
+    },
+    "motd": {
+      "hint": "Two lines. Select text and pick a color or format to style it; pick it again to take it off. Alignment applies to the line you're on. Long lines wrap as they do in-game, and only the first two show.",
+      "toolbar": "MOTD colors and formatting",
+      "preview": "Server list preview",
+      "align": {
+        "left": "Align left",
+        "center": "Center",
+        "right": "Align right"
+      },
+      "overflow": "The server list only fits two lines, so the end of this MOTD won't show.",
+      "colors": {
+        "black": "Black",
+        "darkBlue": "Dark Blue",
+        "darkGreen": "Dark Green",
+        "darkAqua": "Dark Aqua",
+        "darkRed": "Dark Red",
+        "darkPurple": "Dark Purple",
+        "gold": "Gold",
+        "gray": "Gray",
+        "darkGray": "Dark Gray",
+        "blue": "Blue",
+        "green": "Green",
+        "aqua": "Aqua",
+        "red": "Red",
+        "lightPurple": "Light Purple",
+        "yellow": "Yellow",
+        "white": "White"
+      },
+      "formats": {
+        "bold": "Bold",
+        "italic": "Italic",
+        "underline": "Underline",
+        "strikethrough": "Strikethrough",
+        "obfuscated": "Obfuscated",
+        "reset": "Clear formatting"
+      }
     },
     "gameplay": {
       "title": "Gameplay",

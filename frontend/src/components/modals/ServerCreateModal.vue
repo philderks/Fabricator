@@ -587,19 +587,6 @@
             <span>{{ $t('properties.gameplay.commandBlocks') }}</span>
           </label>
         </div>
-
-        <FormField :label="$t('createServer.motd')" :hint="$t('properties.identity.motdHint', { count: formData.motd.length, max: 59 })">
-          <template #default="{ id, describedBy }">
-            <textarea
-              :id="id"
-              v-model="formData.motd"
-              rows="2"
-              :placeholder="$t('createServer.motdPlaceholder')"
-              maxlength="59"
-              :aria-describedby="describedBy"
-            ></textarea>
-          </template>
-        </FormField>
       </Panel>
 
       <!-- EULA Agreement -->

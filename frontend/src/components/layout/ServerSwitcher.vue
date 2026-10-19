@@ -83,6 +83,18 @@ const onHandleKey = (id, delta) => {
 // Historical local fallback was 'unknown' (drift); now uses the util's
 // 'pending' default, lockstep with stores/server.js + the backend pin.
 
+// Server icons beside the names. A server without one answers 404; that is
+// remembered per icon URL (which carries the store's icon version), so it is
+// not asked again on every open, yet a freshly uploaded icon still shows.
+const missingIcons = ref(new Set())
+const iconFor = (s) => {
+  const url = store.iconUrlFor(s.id)
+  return missingIcons.value.has(url) ? null : url
+}
+const markMissing = (s) => missingIcons.value.add(store.iconUrlFor(s.id))
+// Rows without an icon keep its space while any row has one, so names line up.
+const anyIcon = computed(() => orderedServers.value.some((s) => iconFor(s)))
+
 const dotColor = (s) => {
   switch (statusOf(s)) {
     case 'running':    return 'var(--success)'
@@ -173,6 +185,7 @@ onBeforeUnmount(() => {
       @click="toggle"
     >
       <span class="server-switcher__dot" :style="{ background: dotColor(currentServer) }"></span>
+      <img v-if="iconFor(currentServer)" class="server-switcher__icon" :src="iconFor(currentServer)" alt="" @error="markMissing(currentServer)" />
       <span class="server-switcher__info">
         <span class="server-switcher__name">{{ currentServer.name }}</span>
         <span class="server-switcher__meta">{{ metaText(currentServer) }}</span>
@@ -198,6 +211,8 @@ onBeforeUnmount(() => {
           @click="switchTo(s.id)"
         >
           <span class="server-switcher__dot server-switcher__dot--small" :style="{ background: dotColor(s) }"></span>
+          <img v-if="iconFor(s)" class="server-switcher__icon server-switcher__icon--small" :src="iconFor(s)" alt="" @error="markMissing(s)" />
+          <span v-else-if="anyIcon" class="server-switcher__icon server-switcher__icon--small" aria-hidden="true"></span>
           {{ s.name }}
         </button>
         <span
@@ -249,7 +264,8 @@ onBeforeUnmount(() => {
    dropped outright rather than visually hidden — the trigger's `title` carries
    both, so nothing is lost to assistive tech. */
 .server-switcher.is-collapsed .server-switcher__info,
-.server-switcher.is-collapsed .server-switcher__chevron {
+.server-switcher.is-collapsed .server-switcher__chevron,
+.server-switcher.is-collapsed .server-switcher__trigger .server-switcher__icon {
   display: none;
 }
 
@@ -301,6 +317,20 @@ onBeforeUnmount(() => {
 .server-switcher__dot--small {
   width: 6px;
   height: 6px;
+}
+
+.server-switcher__icon {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 3px;
+  image-rendering: pixelated;
+}
+
+.server-switcher__icon--small {
+  width: 18px;
+  height: 18px;
+  border-radius: 2px;
 }
 
 .server-switcher__info {

@@ -16,6 +16,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+from backend.utils.strings import unescape_properties_value
 from backend.utils.time import iso_z_from_timestamp
 
 
@@ -65,7 +66,7 @@ def _level_name_from_properties(install_path: Path) -> Optional[str]:
             continue
         key, _, raw = stripped.partition("=")
         if key.strip() == "level-name":
-            value = raw.strip()
+            value = unescape_properties_value(raw.strip())
     return value or None
 
 

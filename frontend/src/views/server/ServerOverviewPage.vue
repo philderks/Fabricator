@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import StatCard from '../../components/ui/StatCard.vue'
 import Panel from '../../components/ui/Panel.vue'
+import ServerListEntry from '../../components/ui/ServerListEntry.vue'
 import { installedModDisplayName, installedModInitial } from '../../utils/installedModDisplay'
 import { useServerStore } from '../../stores/server'
 import { usePlayitStore } from '../../stores/playit'
@@ -12,6 +13,15 @@ import { isPluginLoader } from '../../utils/loaderKind'
 import { t } from '../../i18n'
 
 const store = useServerStore()
+
+// How the multiplayer list would show the server right now: the bars cycle
+// while it starts or stops, and an unreachable server gets the red ✕.
+const entryStatus = computed(() => {
+  const status = store.serverStatus.status
+  if (status === 'running') return 'online'
+  return ['starting', 'stopping', 'installing'].includes(status) ? 'pinging' : 'offline'
+})
+
 const playit = usePlayitStore()
 const prefs = usePreferencesStore()
 const auth = useAuthStore()
@@ -176,6 +186,23 @@ onUnmounted(() => {
 
 <template>
   <div class="overview-page">
+    <Panel :title="$t('overview.serverList')">
+      <template #action>
+        <router-link class="overview-page__panel-link" :to="{ name: 'ServerSettings', params: { id: store.currentServerId } }">
+          {{ $t('overview.editMotd') }}
+          <svg class="icon-arrow-right" width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 6H7.5M7.5 3.25l3.25 2.75L7.5 8.75" /></svg>
+        </router-link>
+      </template>
+      <ServerListEntry
+        :name="store.server?.name"
+        :motd="store.savedMotd"
+        :icon-url="store.iconUrlFor(store.currentServerId)"
+        :players="store.serverStatus.players.online"
+        :max-players="store.serverStatus.players.max"
+        :status="entryStatus"
+      />
+    </Panel>
+
     <section class="overview-page__stats">
       <StatCard :label="$t('overview.stats.players')" :value="store.serverStatus.players.online" :unit="store.serverStatus.players.max ? `/${store.serverStatus.players.max}` : ''" />
       <StatCard :label="$t('overview.stats.uptime')" :value="store.serverStatus.uptime" />
