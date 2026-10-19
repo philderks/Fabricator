@@ -1,6 +1,7 @@
 """Process registry for managing per-server runtime state."""
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
@@ -12,6 +13,10 @@ from backend.managed import ManagedConfigError, is_managed, managed_memory_gb
 from backend.server import java_manager
 from backend.server.jvm_args import parse_jvm_args
 from backend.server.manager import ServerManager
+from backend.server.players import service as players_service
+
+
+logger = logging.getLogger(__name__)
 
 DIR_PERMISSIONS = 0o775
 
@@ -275,6 +280,14 @@ class ServerProcessRegistry:
             # Fail-closed: map the launch-builder refusal to the clean stopped
             # shape (no 500). Boot autostart logs this via _start_one and moves on.
             return {"status": "stopped", "message": str(exc)}
+        if not manager.is_running and not manager.is_stopping:
+            # Players forgotten while the server last ran leave usercache.json
+            # now, before it is loaded again (see players/service.py). A
+            # failure here only keeps them cached; it must not block the start.
+            try:
+                players_service.apply_forgotten_players(self.resolve_install_path(server), server)
+            except Exception:
+                logger.warning("Could not apply forgotten players for %s", server.get('id'), exc_info=True)
         result = manager.start(required_java_major=required_java_major)
         if result.get('status') == 'running':
             server_id = str(server['id'])

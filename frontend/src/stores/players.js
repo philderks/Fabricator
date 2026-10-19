@@ -242,6 +242,14 @@ export const usePlayersStore = defineStore('players', () => {
     )
   }
 
+  async function forgetPlayer(name) {
+    return optimistic(
+      knownPlayers,
+      () => { knownPlayers.value = knownPlayers.value.filter(excluding('name', name)) },
+      () => api.forgetPlayer(currentServerId.value, name)
+    )
+  }
+
   async function toggleEnforceWhitelist(active) {
     return optimistic(
       enforceWhitelist,
@@ -295,6 +303,7 @@ export const usePlayersStore = defineStore('players', () => {
     removeBan,
     addIpBan,
     removeIpBan,
+    forgetPlayer,
     kick,
     resetState
   }

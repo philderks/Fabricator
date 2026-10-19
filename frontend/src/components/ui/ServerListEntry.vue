@@ -11,10 +11,7 @@ const props = defineProps({
   iconUrl: { type: String, default: '' },
   players: { type: [Number, String], default: 0 },
   // A String while the Max Players input is cleared (v-model.number gives '').
-  maxPlayers: { type: [Number, String], default: 20 },
-  // 'online' (green bars), 'pinging' (bars cycling, as while the game waits
-  // for an answer) or 'offline' (the red ✕ of a server it can't reach).
-  status: { type: String, default: 'online' }
+  maxPlayers: { type: [Number, String], default: 20 }
 })
 
 const displayName = computed(() => props.name || t('servers.defaultName'))
@@ -67,9 +64,7 @@ function segmentStyle({ style }) {
 // The picture is decorative to a screen reader; this says what it shows.
 const label = computed(() => {
   const motd = lines.value.map((line) => line.map((seg) => seg.text).join('').trim()).filter(Boolean).join(' ')
-  const state = props.status === 'online'
-    ? t('serverEntry.players', { online: props.players, max: props.maxPlayers })
-    : t(`serverEntry.${props.status}`)
+  const state = t('serverEntry.players', { online: props.players, max: props.maxPlayers })
   return [displayName.value, motd, state].filter(Boolean).join('. ')
 })
 
@@ -89,12 +84,9 @@ watch(() => props.iconUrl, () => { hasIcon.value = false })
         <div class="server-entry__head">
           <span class="server-entry__name">{{ displayName }}</span>
           <span class="server-entry__status">
-            <span v-if="status === 'online'"><span class="server-entry__gray">{{ players }}</span><span class="server-entry__dark">/</span><span class="server-entry__gray">{{ maxPlayers }}</span></span>
-            <svg v-if="status === 'offline'" class="server-entry__ping" width="20" height="16" viewBox="0 0 10 8" aria-hidden="true">
-              <path d="M2.5 1.5l5 5m0-5l-5 5" fill="none" stroke="#ff3c3c" stroke-width="1.5" stroke-linecap="square" />
-            </svg>
-            <svg v-else class="server-entry__ping" :class="{ 'server-entry__ping--pinging': status === 'pinging' }" width="20" height="16" viewBox="0 0 10 8" aria-hidden="true">
-              <rect v-for="bar in 5" :key="bar" :x="(bar - 1) * 2" :y="8 - bar - 3" width="1" :height="bar + 3" :style="{ animationDelay: `${bar * 120}ms` }" />
+            <span><span class="server-entry__gray">{{ players }}</span><span class="server-entry__dark">/</span><span class="server-entry__gray">{{ maxPlayers }}</span></span>
+            <svg class="server-entry__ping" width="20" height="16" viewBox="0 0 10 8" aria-hidden="true">
+              <rect v-for="bar in 5" :key="bar" :x="(bar - 1) * 2" :y="8 - bar - 3" width="1" :height="bar + 3" />
             </svg>
           </span>
         </div>
@@ -240,22 +232,5 @@ watch(() => props.iconUrl, () => { hasIcon.value = false })
   image-rendering: pixelated;
   shape-rendering: crispEdges;
   fill: #00ff21;
-}
-
-/* Waiting for an answer: the bars light up one after another. */
-.server-entry__ping--pinging rect {
-  fill: #555;
-  animation: server-entry-ping 720ms steps(1) infinite;
-}
-
-@keyframes server-entry-ping {
-  0%, 30% { fill: #00ff21; }
-  31%, 100% { fill: #555; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .server-entry__ping--pinging rect {
-    animation: none;
-  }
 }
 </style>

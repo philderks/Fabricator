@@ -147,7 +147,7 @@ _NEVER = [
     # answer no question the diagnosis use case asks.
     ("GET", "/api/servers/<server_id>/players/state"),
     ("GET", "/api/servers/<server_id>/players/online"),
-    # players surface (bans / kick / ops / whitelist)
+    # players surface (bans / kick / ops / whitelist / known players)
     ("POST", "/api/servers/<server_id>/players/bans"),
     ("DELETE", "/api/servers/<server_id>/players/bans"),
     ("POST", "/api/servers/<server_id>/players/bans/ip"),
@@ -160,6 +160,7 @@ _NEVER = [
     ("DELETE", "/api/servers/<server_id>/players/whitelist"),
     ("PATCH", "/api/servers/<server_id>/players/whitelist/active"),
     ("PATCH", "/api/servers/<server_id>/players/whitelist/enforce"),
+    ("DELETE", "/api/servers/<server_id>/players/known"),
     # auth mutation
     ("POST", "/api/auth/setup"),
     ("POST", "/api/auth/login"),

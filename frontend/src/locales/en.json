@@ -114,9 +114,7 @@
     "installing": "Installing…"
   },
   "serverEntry": {
-    "players": "{online} of {max} players online",
-    "pinging": "Starting up",
-    "offline": "Offline"
+    "players": "{online} of {max} players online"
   },
   "switcher": {
     "reorderLabel": "Reorder {name}. Drag, or use arrow keys. The top server opens by default.",
@@ -464,8 +462,6 @@
     }
   },
   "overview": {
-    "serverList": "Server list",
-    "editMotd": "Edit MOTD",
     "stats": {
       "players": "Players",
       "uptime": "Uptime",
@@ -810,6 +806,7 @@
     "removedFromWhitelist": "Removed {name} from the whitelist",
     "removedOperator": "Removed operator {name}",
     "unbanned": "Unbanned {name}",
+    "forgotten": "Removed {name} from the list",
     "offlineMode": "Server is in offline mode — player avatars and online identity verification are unavailable.",
     "stats": {
       "online": "Online now",
@@ -840,6 +837,8 @@
     "operatorLevel": "Operator level",
     "levelShort": "L{level}",
     "makeOperator": "Make operator",
+    "forget": "Remove",
+    "forgetHint": "Remove from the list (clears the name from usercache.json). Their world data is kept, and they reappear if they join again.",
     "ipBans": {
       "title": "IP bans ({n})",
       "toastTitle": "IP Bans",

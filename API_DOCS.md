@@ -652,6 +652,16 @@ IPv4 or a wildcard such as `192.168.*`. Invalid values return `400`.
 
 Running server only. **Body:** `{ "name": "Steve", "reason": "..." }`
 
+#### `DELETE /api/servers/<server_id>/players/known`
+
+Remove a player from `knownPlayers` by deleting their `usercache.json` entry. Use it to clear names
+that linger after every role was removed. **Body:** `{ "name": "Steve" }`
+
+On a stopped server the entry is deleted right away. A running server keeps the cache in memory and
+rewrites `usercache.json` from it, so there the player is hidden from `knownPlayers` immediately and
+the entry is deleted just before the next start. World data is not touched, and a player who joins
+again is listed again.
+
 ---
 
 ## Backups & snapshots

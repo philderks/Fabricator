@@ -17,10 +17,12 @@ The whitelist-active runtime toggle is tracked here keyed by manager identity
 (via started_at) so that a stop/start cycle naturally re-initialises from the
 persisted enforce-whitelist property.
 """
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from backend.server.players import files as players_files
+from backend.server.players import lastseen as players_lastseen
 from backend.server.players.mojang import (
     resolve_name as mojang_resolve_name,
 )
@@ -31,6 +33,7 @@ OPS_FILE = "ops.json"
 BANS_FILE = "banned-players.json"
 BANS_IP_FILE = "banned-ips.json"
 USERCACHE_FILE = "usercache.json"
+FORGOTTEN_FILE = ".fabricator/forgotten-players.json"
 
 _USERCACHE_EXPIRY_FORMAT = "%Y-%m-%d %H:%M:%S %z"
 
@@ -294,6 +297,93 @@ def unban_ip(registry, server, ip: str) -> dict:
     entries.remove(entry)
     players_files.write_json_list(install_path, BANS_IP_FILE, entries)
     return {"ip": ip}
+
+
+# ----------------- known players (usercache.json) ------------------------
+#
+# A running server owns usercache.json: it holds the cache in memory and
+# rewrites the whole file whenever it adds a profile (a join, or a name lookup
+# such as `whitelist add`), so deleting an entry then would be undone. A player
+# forgotten while running is recorded in FORGOTTEN_FILE instead, hidden from
+# the known-players list straight away, and dropped from usercache.json by
+# apply_forgotten_players() just before the next launch. Joining again after
+# being forgotten (a playerdata write newer than the record) cancels it.
+
+def _forgotten(install_path) -> Dict[str, float]:
+    """Pending forgets as lowercased name → forgottenAt (epoch seconds)."""
+    records = players_files.read_json_list(install_path, FORGOTTEN_FILE)
+    return {
+        str(r["name"]).lower(): float(r.get("forgottenAt", 0))
+        for r in records if "name" in r
+    }
+
+
+def _write_forgotten(install_path, forgotten: Dict[str, float]) -> None:
+    players_files.write_json_list(install_path, FORGOTTEN_FILE, [
+        {"name": name, "forgottenAt": at} for name, at in forgotten.items()
+    ])
+
+
+def _seen_since(install_path, level_name: str, entry: dict, forgotten_at: float) -> bool:
+    seen = players_lastseen.last_seen_timestamp(install_path, level_name, str(entry.get("uuid") or ""))
+    return seen is not None and seen > forgotten_at
+
+
+def _is_forgotten(install_path, level_name: str, forgotten: Dict[str, float], entry: dict) -> bool:
+    forgotten_at = forgotten.get(str(entry.get("name", "")).lower())
+    return forgotten_at is not None and not _seen_since(install_path, level_name, entry, forgotten_at)
+
+
+def visible_known_players(install_path, server, entries: list) -> list:
+    """``entries`` (usercache.json) without players forgotten while running."""
+    forgotten = _forgotten(install_path)
+    if not forgotten:
+        return entries
+    level_name = players_lastseen.read_level_name(install_path, server)
+    return [e for e in entries if not _is_forgotten(install_path, level_name, forgotten, e)]
+
+
+def forget_player(registry, server, name: str) -> dict:
+    """Drop ``name`` from the known-players list (usercache.json).
+
+    Nothing else is touched: the player's world data stays, and joining again
+    lists them again.
+    """
+    install_path = _install_path(registry, server)
+    entries = players_files.read_json_list(install_path, USERCACHE_FILE)
+    remaining = [e for e in entries if str(e.get("name", "")).lower() != name.lower()]
+    if len(remaining) == len(entries):
+        raise PlayerNotInList(name)
+
+    forgotten = _forgotten(install_path)
+    # A server that is still shutting down reads as stopped to the registry,
+    # but its JVM can write the cache once more on the way out.
+    if _is_running(registry, str(server["id"])) or server.get("status") == "stopping":
+        forgotten[name.lower()] = time.time()
+        _write_forgotten(install_path, forgotten)
+        return {"name": name}
+
+    players_files.write_json_list(install_path, USERCACHE_FILE, remaining)
+    if forgotten.pop(name.lower(), None) is not None:
+        _write_forgotten(install_path, forgotten)
+    return {"name": name}
+
+
+def apply_forgotten_players(install_path, server) -> None:
+    """Drop players forgotten while the server ran from usercache.json.
+
+    Called with the server stopped, just before it launches, so the server
+    loads a cache without them.
+    """
+    forgotten = _forgotten(install_path)
+    if not forgotten:
+        return
+    entries = players_files.read_json_list(install_path, USERCACHE_FILE)
+    level_name = players_lastseen.read_level_name(install_path, server)
+    remaining = [e for e in entries if not _is_forgotten(install_path, level_name, forgotten, e)]
+    if len(remaining) != len(entries):
+        players_files.write_json_list(install_path, USERCACHE_FILE, remaining)
+    _write_forgotten(install_path, {})
 
 
 # ----------------- whitelist active cache --------------------------------

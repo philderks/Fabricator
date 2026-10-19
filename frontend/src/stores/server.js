@@ -506,10 +506,6 @@ export const useServerStore = defineStore('server', () => {
     return fileEditor.value.content !== fileEditor.value.originalContent
   })
 
-  // The MOTD as saved (and so as players see it), by the same rules as the
-  // settings form, unsaved edits aside.
-  const savedMotd = computed(() => (server.value ? defaultSettings(server.value).motd : ''))
-
   const isDirtySettings = computed(() => {
     if (!server.value || !serverSettings.value) return false
     const baseline = defaultSettings(server.value)
@@ -1706,7 +1702,6 @@ export const useServerStore = defineStore('server', () => {
     logs,
     serverSettings,
     iconUrlFor,
-    savedMotd,
     iconChanged,
     showModBrowser,
     showVersionPicker,

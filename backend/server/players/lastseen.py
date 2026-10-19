@@ -71,7 +71,13 @@ def _level_name_from_properties(install_path: Path) -> Optional[str]:
 
 
 def last_seen_iso(install_path: Path, level_name: str, uuid: str) -> Optional[str]:
-    """Newest per-player-file mtime for ``uuid`` as an ISO-Z string, or None.
+    """:func:`last_seen_timestamp` as an ISO-Z string, or None."""
+    timestamp = last_seen_timestamp(install_path, level_name, uuid)
+    return iso_z_from_timestamp(timestamp) if timestamp is not None else None
+
+
+def last_seen_timestamp(install_path: Path, level_name: str, uuid: str) -> Optional[float]:
+    """Newest per-player-file mtime for ``uuid`` (epoch seconds), or None.
 
     Minecraft has stored per-player data at two locations across versions, so
     we probe both — no version detection, no version-string parsing:
@@ -112,7 +118,7 @@ def last_seen_iso(install_path: Path, level_name: str, uuid: str) -> Optional[st
             continue
     if not mtimes:
         return None
-    return iso_z_from_timestamp(max(mtimes))
+    return max(mtimes)
 
 
 def annotate_known_players(

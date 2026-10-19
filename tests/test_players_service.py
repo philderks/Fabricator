@@ -8,6 +8,8 @@ Verifies that:
   - status change between check and send → 409
   - whitelist_active cache resets across stop/start (started_at differs)
 """
+import os
+import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -439,3 +441,181 @@ def test_running_online_mode_still_sends_vanilla_commands(install):
 
     assert reg.sent_commands == ["whitelist add Linus", "whitelist remove Linus", "op Linus"]
     assert players_files.read_json_list(install, "whitelist.json") == []
+
+
+# ---------- forget known player (issue #95) --------------------------------
+# A name looked up by a running server stays in usercache.json after its last
+# role is removed, so the Players tab keeps listing it until it's forgotten.
+
+def test_stopped_forget_removes_usercache_entry_case_insensitive(install):
+    reg = _registry_for(install, "stopped")
+    players_files.write_json_list(install, "usercache.json", [
+        {"name": "Linus", "uuid": "u1", "expiresOn": "2999-01-01 00:00:00 +0000"},
+        {"name": "Notch", "uuid": "u2", "expiresOn": "2999-01-01 00:00:00 +0000"},
+    ])
+
+    assert players_service.forget_player(reg, _server(), "LINUS") == {"name": "LINUS"}
+
+    remaining = players_files.read_json_list(install, "usercache.json")
+    assert [e["name"] for e in remaining] == ["Notch"]
+
+
+def test_stopped_forget_leaves_role_files_untouched(install):
+    reg = _registry_for(install, "stopped")
+    _usercache(install, "Linus", "u1")
+    players_files.write_json_list(install, "whitelist.json", [{"uuid": "u1", "name": "Linus"}])
+
+    players_service.forget_player(reg, _server(), "Linus")
+
+    assert players_files.read_json_list(install, "whitelist.json") == [{"uuid": "u1", "name": "Linus"}]
+
+
+def test_stopped_forget_missing_entry_raises(install):
+    reg = _registry_for(install, "stopped")
+    _usercache(install, "Notch", "u2")
+    with pytest.raises(players_service.PlayerNotInList):
+        players_service.forget_player(reg, _server(), "Linus")
+
+
+def _playerdata(install, uuid, mtime):
+    pd = install / "world" / "playerdata"
+    pd.mkdir(parents=True, exist_ok=True)
+    dat = pd / f"{uuid}.dat"
+    dat.write_bytes(b"NBT")
+    os.utime(dat, (mtime, mtime))
+
+
+_UUID = "11111111-2222-3333-4444-555555555555"
+
+
+def test_running_forget_hides_player_but_leaves_usercache_to_the_server(install):
+    reg = _registry_for(install, "running", started_at=100.0)
+    _usercache(install, "Linus", _UUID)
+
+    assert players_service.forget_player(reg, _server(), "linus") == {"name": "linus"}
+
+    entries = players_files.read_json_list(install, "usercache.json")
+    assert [e["name"] for e in entries] == ["Linus"]  # the server owns the file while running
+    assert players_service.visible_known_players(install, _server(), entries) == []
+    assert reg.sent_commands == []
+
+
+def test_forget_while_server_is_stopping_is_deferred(install):
+    # The registry already reads "stopped" while the JVM drains, but the
+    # persisted status still says "stopping".
+    reg = _registry_for(install, "stopped")
+    _usercache(install, "Linus", _UUID)
+
+    players_service.forget_player(reg, {**_server(), "status": "stopping"}, "Linus")
+
+    entries = players_files.read_json_list(install, "usercache.json")
+    assert [e["name"] for e in entries] == ["Linus"]
+    assert players_service.visible_known_players(install, _server(), entries) == []
+
+
+def test_running_forget_missing_entry_raises(install):
+    reg = _registry_for(install, "running", started_at=100.0)
+    _usercache(install, "Notch", "u2")
+    with pytest.raises(players_service.PlayerNotInList):
+        players_service.forget_player(reg, _server(), "Linus")
+
+
+def test_apply_forgotten_players_drops_entry_before_next_start(install):
+    reg = _registry_for(install, "running", started_at=100.0)
+    players_files.write_json_list(install, "usercache.json", [
+        {"name": "Linus", "uuid": _UUID, "expiresOn": "2999-01-01 00:00:00 +0000"},
+        {"name": "Notch", "uuid": "u2", "expiresOn": "2999-01-01 00:00:00 +0000"},
+    ])
+    players_service.forget_player(reg, _server(), "Linus")
+
+    players_service.apply_forgotten_players(install, _server())
+
+    assert [e["name"] for e in players_files.read_json_list(install, "usercache.json")] == ["Notch"]
+    assert players_files.read_json_list(install, players_service.FORGOTTEN_FILE) == []
+
+
+def test_player_who_joins_after_being_forgotten_is_listed_and_kept(install):
+    reg = _registry_for(install, "running", started_at=100.0)
+    _usercache(install, "Linus", _UUID)
+    players_service.forget_player(reg, _server(), "Linus")
+
+    _playerdata(install, _UUID, time.time() + 60)  # saved when they quit, after the forget
+
+    entries = players_files.read_json_list(install, "usercache.json")
+    assert players_service.visible_known_players(install, _server(), entries) == entries
+    players_service.apply_forgotten_players(install, _server())
+    assert [e["name"] for e in players_files.read_json_list(install, "usercache.json")] == ["Linus"]
+    assert players_files.read_json_list(install, players_service.FORGOTTEN_FILE) == []
+
+
+def test_player_seen_before_being_forgotten_stays_hidden(install):
+    reg = _registry_for(install, "running", started_at=100.0)
+    _usercache(install, "Linus", _UUID)
+    _playerdata(install, _UUID, time.time() - 3600)
+
+    players_service.forget_player(reg, _server(), "Linus")
+
+    entries = players_files.read_json_list(install, "usercache.json")
+    assert players_service.visible_known_players(install, _server(), entries) == []
+
+
+def test_stopped_forget_clears_a_pending_record(install):
+    _usercache(install, "Linus", _UUID)
+    players_service.forget_player(_registry_for(install, "running", started_at=100.0), _server(), "Linus")
+
+    players_service.forget_player(_registry_for(install, "stopped"), _server(), "Linus")
+
+    assert players_files.read_json_list(install, "usercache.json") == []
+    assert players_files.read_json_list(install, players_service.FORGOTTEN_FILE) == []
+
+
+def test_apply_forgotten_players_without_records_leaves_files_alone(install):
+    _usercache(install, "Linus", _UUID)
+    players_service.apply_forgotten_players(install, _server())
+    assert [e["name"] for e in players_files.read_json_list(install, "usercache.json")] == ["Linus"]
+    assert not (install / players_service.FORGOTTEN_FILE).exists()
+
+
+def _registry_with_fake_manager(tmp_path, monkeypatch, *, stopping=False):
+    # Late import: test_app_factory wipes backend.* from sys.modules mid-session.
+    from backend.server.registry import ServerProcessRegistry
+
+    registry = ServerProcessRegistry(tmp_path)
+    server = {"id": "srv-1", "installPath": "srv-1", "onlineMode": True}
+    install_path = registry.resolve_install_path(server)
+    install_path.mkdir(parents=True, exist_ok=True)
+    seen_at_launch = []
+    manager = MagicMock(is_running=False, is_stopping=stopping)
+    manager.start.side_effect = lambda **_: seen_at_launch.append(
+        [e["name"] for e in players_files.read_json_list(install_path, "usercache.json")]
+    ) or {"status": "stopped"}
+    registry._instances["srv-1"] = manager
+    monkeypatch.setattr(registry, "_build_command", lambda s: ["java", "-jar", "server.jar"])
+    return registry, server, install_path, seen_at_launch
+
+
+def test_start_server_drops_forgotten_players_before_launch(tmp_path, monkeypatch):
+    registry, server, install_path, seen_at_launch = _registry_with_fake_manager(tmp_path, monkeypatch)
+    _usercache(install_path, "Linus", _UUID)
+    players_files.write_json_list(install_path, players_service.FORGOTTEN_FILE, [
+        {"name": "linus", "forgottenAt": time.time()},
+    ])
+
+    registry.start_server(server)
+
+    assert seen_at_launch == [[]]
+
+
+def test_start_server_leaves_usercache_alone_while_a_stop_drains(tmp_path, monkeypatch):
+    registry, server, install_path, seen_at_launch = _registry_with_fake_manager(
+        tmp_path, monkeypatch, stopping=True,
+    )
+    _usercache(install_path, "Linus", _UUID)
+    players_files.write_json_list(install_path, players_service.FORGOTTEN_FILE, [
+        {"name": "linus", "forgottenAt": time.time()},
+    ])
+
+    registry.start_server(server)
+
+    assert seen_at_launch == [["Linus"]]
+    assert len(players_files.read_json_list(install_path, players_service.FORGOTTEN_FILE)) == 1
