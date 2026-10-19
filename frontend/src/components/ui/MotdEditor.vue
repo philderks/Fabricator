@@ -1,6 +1,8 @@
 <script setup>
-import { computed, onUnmounted, ref, watch } from 'vue'
-import { MOTD_COLORS, MOTD_FORMATS, activeStyle, applyStyle, centerMotd, colorHex, glyphAdvance, shadowHex, wrapMotd } from '../../utils/motd'
+import { computed, ref } from 'vue'
+import ServerListEntry from './ServerListEntry.vue'
+import { MOTD_COLORS, MOTD_FORMATS, activeStyle, alignMotd, alignmentOf, applyStyle, wrapMotd } from '../../utils/motd'
+import { t } from '../../i18n'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
@@ -17,19 +19,7 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue'])
 
 const textarea = ref(null)
-
-const FORMAT_GLYPHS = { l: 'B', o: 'I', n: 'U', m: 'S', k: '▒', r: 'R' }
-// Ctrl/⌘ + key, as in any text editor.
-const SHORTCUTS = { b: 'l', i: 'o', u: 'n' }
-const SHORTCUT_KEYS = Object.fromEntries(Object.entries(SHORTCUTS).map(([key, code]) => [code, key.toUpperCase()]))
-const isMac = /Mac|iPhone|iPad/.test(navigator.platform)
-const formats = [...Object.entries(MOTD_FORMATS), ['r', 'reset']].map(([code, name]) => ({
-  code,
-  name,
-  glyph: FORMAT_GLYPHS[code],
-  shortcut: SHORTCUT_KEYS[code] && (isMac ? `⌘${SHORTCUT_KEYS[code]}` : `Ctrl+${SHORTCUT_KEYS[code]}`),
-  ariaShortcut: SHORTCUT_KEYS[code] && `${isMac ? 'Meta' : 'Control'}+${SHORTCUT_KEYS[code]}`
-}))
+const toolbarEl = ref(null)
 
 // Replaces start..end of the textarea through insertText, which keeps the edit
 // on the browser's undo stack (assigning .value wipes it) and fires the input
@@ -43,26 +33,34 @@ function replaceRange(el, start, end, text) {
   }
 }
 
-// Toggles a colour or format on the selected characters (or, with a caret, on
-// what gets typed next), rewriting only the codes that touch the selection.
-// See applyStyle for the rules.
-function apply(code) {
+// Makes an edit from applyStyle or alignMotd: only the part that changes is
+// replaced, and the selection lands where the edit says.
+function commit(edit) {
   const el = textarea.value
-  if (!el) return
-  const edit = applyStyle(el.value, el.selectionStart, el.selectionEnd, code)
   if (el.value.slice(edit.from, edit.to) !== edit.text) replaceRange(el, edit.from, edit.to, edit.text)
   el.focus()
   el.setSelectionRange(edit.selectionStart, edit.selectionEnd)
   trackCaret()
 }
 
-function center() {
+// Toggles a colour or format on the selected characters (or, with a caret, on
+// what gets typed next), rewriting only the codes that touch the selection.
+// See applyStyle for the rules.
+function apply(code) {
   const el = textarea.value
-  if (!el) return
-  const centered = centerMotd(el.value)
-  if (centered !== el.value) replaceRange(el, 0, el.value.length, centered)
-  trackCaret()
+  if (el) commit(applyStyle(el.value, el.selectionStart, el.selectionEnd, code))
 }
+
+// Aligns the line(s) the selection is on, as a word processor does.
+function align(where) {
+  const el = textarea.value
+  if (el) commit(alignMotd(el.value, where, el.selectionStart, el.selectionEnd))
+}
+
+// Ctrl/⌘ + key, as in any text editor.
+const SHORTCUTS = { b: 'l', i: 'o', u: 'n' }
+const SHORTCUT_KEYS = Object.fromEntries(Object.entries(SHORTCUTS).map(([key, code]) => [code, key.toUpperCase()]))
+const isMac = /Mac|iPhone|iPad/.test(navigator.platform)
 
 // The server list only ever shows two lines. Enter is refused once there are
 // two, unless it replaces the line break itself; a pasted third line is folded
@@ -79,16 +77,6 @@ function onKeydown(event) {
   if (value.includes('\n') && !value.slice(selectionStart, selectionEnd).includes('\n')) event.preventDefault()
 }
 
-// The selection, so the toolbar can show what is on for it (or, with a caret,
-// for the next typed character), like a word processor's toolbar does. A
-// pressed button is one a click would turn off.
-const selection = ref([0, 0])
-function trackCaret() {
-  const el = textarea.value
-  if (el) selection.value = [el.selectionStart, el.selectionEnd]
-}
-const active = computed(() => activeStyle(props.modelValue, ...selection.value))
-
 function onInput(event) {
   const el = event.target
   const [first, ...rest] = el.value.split('\n')
@@ -104,102 +92,124 @@ function onInput(event) {
   trackCaret()
 }
 
-// Laid out with the game's own glyph widths rather than the preview font's,
-// so the wrap, and whether anything falls past line two, match the client.
-const wrapped = computed(() => wrapMotd(props.modelValue))
-const lines = computed(() => wrapped.value.slice(0, 2))
-const overflows = computed(() => wrapped.value.length > 2)
+// The selection, so the toolbar can show what is on for it (or, with a caret,
+// for the next typed character), like a word processor's toolbar does. A
+// pressed button is one a click would turn off.
+const selection = ref([0, 0])
+function trackCaret() {
+  const el = textarea.value
+  if (el) selection.value = [el.selectionStart, el.selectionEnd]
+}
+const active = computed(() => activeStyle(props.modelValue, ...selection.value))
+const alignment = computed(() => alignmentOf(props.modelValue, ...selection.value))
 
-// §k text re-rolls its characters ten times a second, as it does in-game. The
-// timer only runs while there is some, and not for viewers who asked for
-// reduced motion.
-const tick = ref(0)
-let timer = null
-const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-const hasObfuscated = computed(() => lines.value.some((line) => line.some((seg) => seg.style.obfuscated)))
-watch(hasObfuscated, (on) => {
-  clearInterval(timer)
-  timer = on && !reduceMotion ? setInterval(() => { tick.value += 1 }, 100) : null
-}, { immediate: true })
-onUnmounted(() => clearInterval(timer))
+const overflows = computed(() => wrapMotd(props.modelValue).length > 2)
 
-// Every glyph sits in a box exactly as wide as the game draws it (at GUI scale
-// 2), so spacing and centring in the preview are the client's, not whatever
-// the preview font's own metrics would make of them.
-const glyphLines = computed(() => lines.value.map((line) => line.map((seg) => ({
-  seg,
-  glyphs: Array.from(seg.text, (ch) => ({ ch, width: `${glyphAdvance(ch, seg.style.bold) * 2}px` }))
-}))))
+// ---------- Toolbar ----------
+// One list, so arrow keys can walk it: the toolbar is a single Tab stop, as
+// role="toolbar" promises, and Left/Right/Home/End move between its buttons.
 
-const GLYPHS = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
-function glyphText(seg, ch) {
-  if (!seg.style.obfuscated || ch === ' ') return ch
-  void tick.value
-  return GLYPHS[Math.floor(Math.random() * GLYPHS.length)]
+const FORMAT_GLYPHS = { l: 'B', o: 'I', n: 'U', m: 'S', k: '▒' }
+const ICONS = {
+  reset: 'M2.5 3h7M6 3v8M9 8.5l3 3m0-3l-3 3',
+  left: 'M2 3h10M2 7h6M2 11h10',
+  center: 'M2 3h10M4 7h6M2 11h10',
+  right: 'M2 3h10M6 7h6M2 11h10'
 }
 
-function segmentStyle({ style }) {
-  const hex = colorHex(style)
-  const decoration = [style.underline && 'underline', style.strikethrough && 'line-through'].filter(Boolean).join(' ')
-  return {
-    color: hex,
-    textShadow: `2px 2px 0 ${shadowHex(hex)}`,
-    fontWeight: style.bold ? 700 : 400,
-    fontStyle: style.italic ? 'italic' : 'normal',
-    textDecorationLine: decoration || 'none'
-  }
+const toolbar = computed(() => {
+  const swatches = MOTD_COLORS.map((color) => {
+    const label = t(`properties.motd.colors.${color.name}`)
+    return {
+      key: color.code,
+      swatch: true,
+      background: color.hex,
+      label,
+      title: `${label} (§${color.code})`,
+      pressed: active.value.color === color.code,
+      run: () => apply(color.code)
+    }
+  })
+  const formats = [...Object.entries(MOTD_FORMATS), ['r', 'reset']].map(([code, name]) => {
+    const label = t(`properties.motd.formats.${name}`)
+    const key = SHORTCUT_KEYS[code]
+    return {
+      key: code,
+      name,
+      label,
+      glyph: FORMAT_GLYPHS[code],
+      icon: ICONS[name],
+      title: `${label} (§${code}${key ? `, ${isMac ? '⌘' : 'Ctrl+'}${key}` : ''})`,
+      shortcut: key && `${isMac ? 'Meta' : 'Control'}+${key}`,
+      // Clearing is an action, not a state.
+      pressed: code === 'r' ? undefined : Boolean(active.value[name]),
+      run: () => apply(code)
+    }
+  })
+  const aligns = ['left', 'center', 'right'].map((where) => {
+    const label = t(`properties.motd.align.${where}`)
+    return { key: where, name: where, label, title: label, icon: ICONS[where], pressed: alignment.value === where, run: () => align(where) }
+  })
+  let index = 0
+  return [...swatches, { key: 'd1' }, ...formats, { key: 'd2' }, ...aligns].map((item) =>
+    item.run ? { ...item, index: index++ } : { ...item, divider: true }
+  )
+})
+
+const focusIndex = ref(0)
+
+// A keyboard press keeps focus on the button, so the next one is an arrow key
+// away; a mouse click leaves it in the textarea to carry on typing.
+function run(item, event) {
+  const button = event.currentTarget
+  item.run()
+  if (event.detail === 0) button.focus()
 }
 
-const hasIcon = ref(false)
-watch(() => props.iconUrl, () => { hasIcon.value = false })
+function onToolbarKeydown(event) {
+  const buttons = [...toolbarEl.value.querySelectorAll('button')]
+  const current = buttons.indexOf(document.activeElement)
+  const next = { ArrowRight: current + 1, ArrowLeft: current - 1, Home: 0, End: buttons.length - 1 }[event.key]
+  if (current < 0 || next === undefined) return
+  event.preventDefault()
+  buttons[(next + buttons.length) % buttons.length].focus()
+}
 </script>
 
 <template>
   <div class="motd-editor">
-    <div class="motd-editor__toolbar" role="toolbar" :aria-label="$t('properties.motd.toolbar')">
-      <button
-        v-for="color in MOTD_COLORS"
-        :key="color.code"
-        type="button"
-        class="motd-editor__swatch"
-        :class="{ 'motd-editor__swatch--active': active.color === color.code }"
-        :style="{ background: color.hex }"
-        :title="`${$t(`properties.motd.colors.${color.name}`)} (§${color.code})`"
-        :aria-label="$t(`properties.motd.colors.${color.name}`)"
-        :aria-pressed="active.color === color.code"
-        :disabled="disabled"
-        @mousedown.prevent
-        @click="apply(color.code)"
-      ></button>
-      <span class="motd-editor__divider" aria-hidden="true"></span>
-      <button
-        v-for="format in formats"
-        :key="format.code"
-        type="button"
-        class="motd-editor__format"
-        :class="[`motd-editor__format--${format.name}`, { 'motd-editor__format--active': active[format.name] }]"
-        :title="`${$t(`properties.motd.formats.${format.name}`)} (§${format.code}${format.shortcut ? `, ${format.shortcut}` : ''})`"
-        :aria-label="$t(`properties.motd.formats.${format.name}`)"
-        :aria-pressed="format.code === 'r' ? undefined : Boolean(active[format.name])"
-        :aria-keyshortcuts="format.ariaShortcut"
-        :disabled="disabled"
-        @mousedown.prevent
-        @click="apply(format.code)"
-      >{{ format.glyph }}</button>
-      <span class="motd-editor__divider" aria-hidden="true"></span>
-      <button
-        type="button"
-        class="motd-editor__format"
-        :title="$t('properties.motd.center')"
-        :aria-label="$t('properties.motd.center')"
-        :disabled="disabled"
-        @mousedown.prevent
-        @click="center"
-      >
-        <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-          <path d="M2 3H12M4 7H10M2 11H12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
-        </svg>
-      </button>
+    <div
+      ref="toolbarEl"
+      class="motd-editor__toolbar"
+      role="toolbar"
+      :aria-label="$t('properties.motd.toolbar')"
+      @keydown="onToolbarKeydown"
+    >
+      <template v-for="item in toolbar" :key="item.key">
+        <span v-if="item.divider" class="motd-editor__divider" aria-hidden="true"></span>
+        <button
+          v-else
+          type="button"
+          :class="item.swatch
+            ? ['motd-editor__swatch', { 'motd-editor__swatch--active': item.pressed }]
+            : ['motd-editor__format', `motd-editor__format--${item.name}`, { 'motd-editor__format--active': item.pressed }]"
+          :style="item.swatch ? { background: item.background } : null"
+          :title="item.title"
+          :aria-label="item.label"
+          :aria-pressed="item.pressed"
+          :aria-keyshortcuts="item.shortcut"
+          :tabindex="item.index === focusIndex ? 0 : -1"
+          :disabled="disabled"
+          @mousedown.prevent
+          @focus="focusIndex = item.index"
+          @click="run(item, $event)"
+        >
+          <svg v-if="item.icon" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+            <path :d="item.icon" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+          </svg>
+          <template v-else-if="item.glyph">{{ item.glyph }}</template>
+        </button>
+      </template>
     </div>
 
     <!-- Same shape as the server-list entry below: icon (if the page has one
@@ -225,75 +235,12 @@ watch(() => props.iconUrl, () => { hasIcon.value = false })
       ></textarea>
     </div>
 
-    <!-- Drawn at the in-game size (GUI scale 2). The game word-wraps the MOTD
-         to the text column and shows the first two lines, so this does too. -->
-    <div class="motd-editor__preview" role="img" :aria-label="$t('properties.motd.preview')">
-      <div class="motd-editor__entry">
-        <span class="motd-editor__icon">
-          <img v-if="iconUrl" v-show="hasIcon" :src="iconUrl" alt="" @load="hasIcon = true" @error="hasIcon = false" />
-          <span v-if="!hasIcon" aria-hidden="true">?</span>
-        </span>
-        <div class="motd-editor__text">
-          <div class="motd-editor__row">
-            <span class="motd-editor__name">{{ serverName || $t('servers.defaultName') }}</span>
-            <span class="motd-editor__players">
-              <span><span class="motd-editor__gray">0</span><span class="motd-editor__dark">/</span><span class="motd-editor__gray">{{ maxPlayers }}</span></span>
-              <svg class="motd-editor__ping" width="20" height="16" viewBox="0 0 10 8" aria-hidden="true">
-                <rect v-for="bar in 5" :key="bar" :x="(bar - 1) * 2" :y="8 - bar - 3" width="1" :height="bar + 3" fill="#00ff21" />
-              </svg>
-            </span>
-          </div>
-          <div v-for="(line, index) in glyphLines" :key="index" class="motd-editor__line">
-            <span v-for="(part, partIndex) in line" :key="partIndex" :style="segmentStyle(part.seg)"><span
-              v-for="(glyph, glyphIndex) in part.glyphs"
-              :key="glyphIndex"
-              class="motd-editor__glyph"
-              :style="{ width: glyph.width }"
-            >{{ glyphText(part.seg, glyph.ch) }}</span></span>
-          </div>
-        </div>
-      </div>
-    </div>
+    <ServerListEntry :name="serverName" :motd="modelValue" :icon-url="iconUrl" :max-players="maxPlayers" />
     <p v-if="overflows" class="motd-editor__warning" role="status">{{ $t('properties.motd.overflow') }}</p>
   </div>
 </template>
 
 <style scoped>
-/* "Minecraft" by Jacob Debono (JDGraphics), Public Domain —
-   https://www.fontspace.com/minecraft-font-f28180. Each face only downloads
-   once the preview actually uses it. */
-@font-face {
-  font-family: 'Minecraft';
-  src: url('../../assets/fonts/minecraft/Minecraft-Regular.otf') format('opentype');
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Minecraft';
-  src: url('../../assets/fonts/minecraft/Minecraft-Bold.otf') format('opentype');
-  font-weight: 700;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Minecraft';
-  src: url('../../assets/fonts/minecraft/Minecraft-Italic.otf') format('opentype');
-  font-weight: 400;
-  font-style: italic;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Minecraft';
-  src: url('../../assets/fonts/minecraft/Minecraft-BoldItalic.otf') format('opentype');
-  font-weight: 700;
-  font-style: italic;
-  font-display: swap;
-}
-
 .motd-editor {
   display: flex;
   flex-direction: column;
@@ -310,6 +257,9 @@ watch(() => props.iconUrl, () => { hasIcon.value = false })
 
 .motd-editor__swatch,
 .motd-editor__format {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 24px;
   height: 24px;
   padding: 0;
@@ -344,7 +294,7 @@ watch(() => props.iconUrl, () => { hasIcon.value = false })
   font-size: var(--text-sm);
 }
 
-/* The colour or format the caret is in. */
+/* What is on for the selection — a click would turn it off. */
 .motd-editor__swatch--active {
   box-shadow: 0 0 0 2px var(--bg-primary), 0 0 0 4px var(--primary);
 }
@@ -395,104 +345,9 @@ watch(() => props.iconUrl, () => { hasIcon.value = false })
   cursor: not-allowed;
 }
 
-/* Scrolls rather than shrinks on narrow screens, so the clipping stays true. */
-.motd-editor__preview {
-  overflow-x: auto;
-  padding: var(--space-3);
-  border-radius: var(--radius-sm);
-  background: #0b0b0b;
-}
-
-.motd-editor__entry {
-  display: flex;
-  gap: 6px;
-  width: max-content;
-  padding: 2px;
-  border: 2px solid #808080;
-  background: #000;
-  font-family: 'Minecraft', var(--font-mono);
-  /* One font pixel = 2px, the game's pixel at GUI scale 2. */
-  font-size: 19.2px;
-  line-height: 18px;
-  white-space: pre;
-  user-select: none;
-}
-
-.motd-editor__icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 64px;
-  height: 64px;
-  flex-shrink: 0;
-  background: #1f1f1f;
-  color: #555;
-  font-size: 32px;
-}
-
-.motd-editor__icon img {
-  width: 100%;
-  height: 100%;
-  image-rendering: pixelated;
-}
-
-/* MOTD_WIDTH (267 GUI px) at GUI scale 2. */
-.motd-editor__text {
-  width: 534px;
-  padding-top: 2px;
-}
-
-.motd-editor__row {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--space-2);
-  margin-bottom: 4px;
-}
-
-/* Lines arrive already wrapped; clipping only covers the preview font being a
-   hair wider than the game's. */
-.motd-editor__line {
-  height: 18px;
-  overflow: hidden;
-}
-
-/* Decoration doesn't propagate into inline-blocks, so each glyph takes it. */
-.motd-editor__glyph {
-  display: inline-block;
-  text-decoration-line: inherit;
-}
-
 .motd-editor__warning {
   margin: 0;
   font-size: var(--text-xs);
   color: var(--warning);
-}
-
-.motd-editor__name {
-  overflow: hidden;
-  color: #fff;
-  text-shadow: 2px 2px 0 #3f3f3f;
-}
-
-.motd-editor__players {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-.motd-editor__gray {
-  color: #aaa;
-  text-shadow: 2px 2px 0 #2a2a2a;
-}
-
-.motd-editor__dark {
-  color: #555;
-  text-shadow: 2px 2px 0 #151515;
-}
-
-.motd-editor__ping {
-  image-rendering: pixelated;
-  shape-rendering: crispEdges;
 }
 </style>

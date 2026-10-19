@@ -156,32 +156,89 @@ function stripLeadingSpaces(line) {
   return codes + line.slice(i)
 }
 
-// Pads each line with spaces so it sits centred in the server list. Earlier
-// padding is replaced, so centring twice changes nothing, and a line too wide
-// to centre (it wraps) ends up flush left.
-export function centerMotd(raw) {
-  let carried = BASE
-  return String(raw ?? '').split('\n').map((line) => {
-    const text = Array.from(stripLeadingSpaces(line))
-    let style = carried
-    let width = 0
-    let trailing = 0
-    for (let i = 0; i < text.length; i += 1) {
-      if (text[i] === '§') {
-        if (i + 1 < text.length) style = applyCode(style, text[++i])
-        continue
-      }
-      const advance = glyphAdvance(text[i], style.bold)
-      width += advance
-      trailing = text[i] === ' ' ? trailing + advance : 0
+// A line as the game lays it out: its width, how much of that is trailing
+// spaces, and the style it hands on to the next line.
+function measureLine(chars, carried) {
+  let style = carried
+  let width = 0
+  let trailing = 0
+  for (let i = 0; i < chars.length; i += 1) {
+    if (chars[i] === '§') {
+      if (i + 1 < chars.length) style = applyCode(style, chars[++i])
+      continue
     }
-    // The padding goes before the line's own codes, so it takes the style
-    // carried in from the line above.
-    const space = glyphAdvance(' ', carried.bold)
-    carried = style
-    const pad = Math.max(0, Math.round((MOTD_WIDTH - (width - trailing)) / 2 / space))
-    return ' '.repeat(pad) + text.join('')
-  }).join('\n')
+    const advance = glyphAdvance(chars[i], style.bold)
+    width += advance
+    trailing = chars[i] === ' ' ? trailing + advance : 0
+  }
+  return { width, trailing, style }
+}
+
+// One line padded with leading spaces to sit left, centred or right. Earlier
+// padding is replaced, so aligning twice changes nothing. Padding never pushes
+// the line past the width the game wraps at, so a line too wide to move stays
+// flush left. Centring ignores trailing spaces, which nobody sees.
+function alignLine(line, carried, align) {
+  const chars = Array.from(stripLeadingSpaces(line))
+  const { width, trailing } = measureLine(chars, carried)
+  // The padding goes before the line's own codes, so it takes the style
+  // carried in from the line above.
+  const space = glyphAdvance(' ', carried.bold)
+  const room = Math.floor((MOTD_WIDTH - width) / space)
+  const wanted = { left: 0, center: Math.round((MOTD_WIDTH - (width - trailing)) / 2 / space), right: room }[align]
+  return ' '.repeat(Math.max(0, Math.min(room, wanted))) + chars.join('')
+}
+
+// The lines a selection touches, as in a word processor: a caret's line, or
+// every line the selection covers (one ending right at the start of a line
+// leaves that line out).
+function touchedLines(text, start, end) {
+  const first = text.slice(0, start).split('\n').length - 1
+  let last = text.slice(0, end).split('\n').length - 1
+  if (end > start && text[end - 1] === '\n') last -= 1
+  return [first, Math.max(first, last)]
+}
+
+// The edit aligning the selection's lines makes: replace `from`..`to` with
+// `text`, then select `selectionStart`..`selectionEnd`, which stay on the same
+// characters as before.
+export function alignMotd(raw, align, start, end) {
+  const text = String(raw ?? '')
+  const lines = text.split('\n')
+  const [first, last] = touchedLines(text, start, end)
+  let carried = BASE
+  const aligned = lines.map((line, i) => {
+    const out = i >= first && i <= last ? alignLine(line, carried, align) : line
+    carried = measureLine(Array.from(line), carried).style
+    return out
+  })
+  // Padding only ever changes at a line's start, so a position keeps its
+  // distance from the end of its line.
+  const ends = (list) => { let at = -1; return list.map((line) => (at += line.length + 1)) }
+  const oldEnds = ends(lines)
+  const newEnds = ends(aligned)
+  const place = (index) => {
+    const i = text.slice(0, index).split('\n').length - 1
+    return Math.max(newEnds[i] - aligned[i].length, newEnds[i] - (oldEnds[i] - index))
+  }
+  return {
+    from: oldEnds[first] - lines[first].length,
+    to: oldEnds[last],
+    text: aligned.slice(first, last + 1).join('\n'),
+    selectionStart: place(start),
+    selectionEnd: place(end)
+  }
+}
+
+// The alignment the selection's lines already have, for the toolbar: the
+// first of left, centre and right they all match. A line with nothing to move
+// (empty, or as wide as the list) matches all three.
+export function alignmentOf(raw, start, end) {
+  const text = String(raw ?? '')
+  return ['left', 'center', 'right'].find((align) => {
+    const edit = alignMotd(text, align, start, end)
+    return edit.text === text.slice(edit.from, edit.to)
+  }) ?? null
 }
 
 export function colorHex(style) {

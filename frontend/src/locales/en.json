@@ -113,6 +113,11 @@
     "starting": "Starting…",
     "installing": "Installing…"
   },
+  "serverEntry": {
+    "players": "{online} of {max} players online",
+    "pinging": "Starting up",
+    "offline": "Offline"
+  },
   "switcher": {
     "reorderLabel": "Reorder {name}. Drag, or use arrow keys. The top server opens by default.",
     "reorderTitle": "Drag to reorder — the top server opens by default",
@@ -459,6 +464,8 @@
     }
   },
   "overview": {
+    "serverList": "Server list",
+    "editMotd": "Edit MOTD",
     "stats": {
       "players": "Players",
       "uptime": "Uptime",
@@ -1258,7 +1265,7 @@
     "identity": {
       "title": "Server Identity",
       "icon": "Server Icon",
-      "iconHint": "Any image — cropped and resized to 64×64. Shown in the multiplayer server list.",
+      "iconHint": "Click the icon to change it: any image works, cropped and resized to 64×64.",
       "name": "Server Name",
       "namePlaceholder": "My Minecraft Server",
       "bugReportUrl": "Bug Report URL",
@@ -1275,10 +1282,14 @@
       "modLoaderHint": "Loader changes require reinstall"
     },
     "motd": {
-      "hint": "Two lines. Select text and pick a color or format to style it, and pick it again to take it off; with nothing selected it applies to what you type next. Long lines wrap as they do in-game, and only the first two lines show.",
+      "hint": "Two lines. Select text and pick a color or format to style it; pick it again to take it off. Alignment applies to the line you're on. Long lines wrap as they do in-game, and only the first two show.",
       "toolbar": "MOTD colors and formatting",
       "preview": "Server list preview",
-      "center": "Center lines",
+      "align": {
+        "left": "Align left",
+        "center": "Center",
+        "right": "Align right"
+      },
       "overflow": "The server list only fits two lines, so the end of this MOTD won't show.",
       "colors": {
         "black": "Black",
@@ -1304,7 +1315,7 @@
         "underline": "Underline",
         "strikethrough": "Strikethrough",
         "obfuscated": "Obfuscated",
-        "reset": "Reset formatting"
+        "reset": "Clear formatting"
       }
     },
     "gameplay": {

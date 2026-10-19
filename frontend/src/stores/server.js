@@ -127,6 +127,12 @@ export const useServerStore = defineStore('server', () => {
   const modSearch = ref('')
   const logs = ref({ stdout: [], stderr: [], running: false })
   const serverSettings = ref(null)
+  // Bumped whenever an icon changes, and put on every icon URL: the browser
+  // reuses an image it already decoded for the same URL, so without it the
+  // switcher and the overview would keep showing the old icon.
+  const iconVersion = ref(Date.now())
+  const iconUrlFor = (id) => `/api/servers/${id}/icon?v=${iconVersion.value}`
+  const iconChanged = () => { iconVersion.value = Date.now() }
   const showModBrowser = ref(false)
   const showJavaModal = ref(false)
   const pendingJavaAction = ref(null)
@@ -499,6 +505,10 @@ export const useServerStore = defineStore('server', () => {
     if (!fileEditor.value.path) return false
     return fileEditor.value.content !== fileEditor.value.originalContent
   })
+
+  // The MOTD as saved (and so as players see it), by the same rules as the
+  // settings form, unsaved edits aside.
+  const savedMotd = computed(() => (server.value ? defaultSettings(server.value).motd : ''))
 
   const isDirtySettings = computed(() => {
     if (!server.value || !serverSettings.value) return false
@@ -1695,6 +1705,9 @@ export const useServerStore = defineStore('server', () => {
     modSearch,
     logs,
     serverSettings,
+    iconUrlFor,
+    savedMotd,
+    iconChanged,
     showModBrowser,
     showVersionPicker,
     versionPickerMod,

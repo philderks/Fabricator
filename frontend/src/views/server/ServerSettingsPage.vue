@@ -19,15 +19,14 @@ const toast = useToast()
 // not a server.properties key. The img's own load/error says whether one exists.
 const hasIcon = ref(false)
 const iconBusy = ref(false)
-const iconVersion = ref(Date.now())
 const iconInput = ref(null)
-const iconUrl = computed(() => `/api/servers/${store.currentServerId}/icon?v=${iconVersion.value}`)
+const iconUrl = computed(() => store.iconUrlFor(store.currentServerId))
 
 async function changeIcon(action, successKey) {
   iconBusy.value = true
   try {
     await action()
-    iconVersion.value = Date.now()
+    store.iconChanged()
     const restart = store.canEditSettings ? '' : ` ${t('properties.icon.restartToShow')}`
     toast.success(`${t(successKey)}${restart}`, t('properties.icon.toastTitle'))
   } catch (error) {
@@ -364,7 +363,7 @@ const onReset = () => {
     </Panel>
 
     <Panel :title="$t('properties.identity.title')">
-      <FormField :label="$t('properties.identity.motd')" :hint="$t('properties.motd.hint')">
+      <FormField :label="$t('properties.identity.motd')" :hint="`${$t('properties.motd.hint')} ${$t('properties.identity.iconHint')}`">
         <template #default="{ id, describedBy }">
           <MotdEditor
             :id="id"
@@ -384,6 +383,7 @@ const onReset = () => {
                   class="settings-page__icon-button"
                   :aria-label="`${$t('properties.identity.icon')}: ${hasIcon ? $t('properties.icon.change') : $t('properties.icon.upload')}`"
                   :title="$t('properties.identity.iconHint')"
+                  :aria-describedby="describedBy"
                   :disabled="iconBusy"
                   @click="iconInput.click()"
                 >
