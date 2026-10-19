@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onUnmounted, ref, watch } from 'vue'
-import { MOTD_COLORS, MOTD_FORMATS, centerMotd, codesAt, colorHex, glyphAdvance, shadowHex, snapIndex, styleAt, wrapMotd } from '../../utils/motd'
+import { MOTD_COLORS, MOTD_FORMATS, activeStyle, applyStyle, centerMotd, colorHex, glyphAdvance, shadowHex, wrapMotd } from '../../utils/motd'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
@@ -43,24 +43,16 @@ function replaceRange(el, start, end, text) {
   }
 }
 
-// No selection: drop the code at the caret. A selection gets wrapped, then the
-// style that was active at its end is re-emitted so the text after it keeps
-// looking the way it did. In-game a colour code clears bold & co., so a colour
-// repeats the formats already active, and a format is repeated after every
-// colour inside the selection — either way the click only adds what it says.
+// Toggles a colour or format on the selected characters (or, with a caret, on
+// what gets typed next), rewriting only the codes that touch the selection.
+// See applyStyle for the rules.
 function apply(code) {
   const el = textarea.value
   if (!el) return
-  const { value } = el
-  const start = snapIndex(value, el.selectionStart)
-  const end = Math.max(start, snapIndex(value, el.selectionEnd))
-  const isColor = MOTD_COLORS.some((color) => color.code === code)
-  const tag = `§${code}${isColor ? codesAt(value, start, { withColor: false }) : ''}`
-  let inner = value.slice(start, end)
-  if (MOTD_FORMATS[code]) inner = inner.replace(/§[0-9a-fr]/gi, (match) => match + tag)
-  const restore = start !== end && end < value.length ? `§r${codesAt(value, end)}` : ''
-  replaceRange(el, start, end, tag + inner + restore)
-  el.setSelectionRange(start + tag.length, start + tag.length + inner.length)
+  const edit = applyStyle(el.value, el.selectionStart, el.selectionEnd, code)
+  if (el.value.slice(edit.from, edit.to) !== edit.text) replaceRange(el, edit.from, edit.to, edit.text)
+  el.focus()
+  el.setSelectionRange(edit.selectionStart, edit.selectionEnd)
   trackCaret()
 }
 
@@ -87,14 +79,15 @@ function onKeydown(event) {
   if (value.includes('\n') && !value.slice(selectionStart, selectionEnd).includes('\n')) event.preventDefault()
 }
 
-// Where the caret is, so the toolbar can show the colour and formats the next
-// typed character would get, like a word processor's toolbar does.
-const caret = ref(0)
+// The selection, so the toolbar can show what is on for it (or, with a caret,
+// for the next typed character), like a word processor's toolbar does. A
+// pressed button is one a click would turn off.
+const selection = ref([0, 0])
 function trackCaret() {
   const el = textarea.value
-  if (el) caret.value = snapIndex(el.value, el.selectionStart)
+  if (el) selection.value = [el.selectionStart, el.selectionEnd]
 }
-const active = computed(() => styleAt(props.modelValue, caret.value))
+const active = computed(() => activeStyle(props.modelValue, ...selection.value))
 
 function onInput(event) {
   const el = event.target

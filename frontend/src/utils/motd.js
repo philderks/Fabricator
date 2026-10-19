@@ -194,33 +194,144 @@ export function shadowHex(hex) {
   return `#${((n & 0xfcfcfc) >> 2).toString(16).padStart(6, '0')}`
 }
 
-// The style text typed at `index` of `raw` would get.
-export function styleAt(raw, index) {
-  const text = String(raw ?? '').slice(0, index)
+// ---------- Toolbar edits ----------
+// The toolbar treats the MOTD as characters that each have a style, the way a
+// word processor does, and writes § codes only where the style changes.
+
+const FLAGS = Object.values(MOTD_FORMATS)
+
+// `raw` as tokens, each a § code (with its letter, or alone at the very end)
+// or one character, plus the style in effect before each token;
+// styles[tokens.length] is the style at the very end.
+function tokenize(raw) {
+  const text = String(raw ?? '')
+  const tokens = []
+  const styles = [BASE]
   let style = BASE
-  for (let i = 0; i < text.length - 1; i += 1) {
-    if (text[i] === '§') style = applyCode(style, text[++i])
+  for (let i = 0; i < text.length;) {
+    let end
+    if (text[i] === '§') {
+      end = Math.min(i + 2, text.length)
+      tokens.push({ start: i, end, isCode: true })
+      if (end > i + 1) style = applyCode(style, text[i + 1])
+    } else {
+      end = i + (text.codePointAt(i) > 0xffff ? 2 : 1)
+      tokens.push({ start: i, end, ch: text.slice(i, end) })
+    }
+    styles.push(style)
+    i = end
   }
-  return style
+  return { text, tokens, styles }
 }
 
-// The § codes that recreate the style active at `index` of `raw`, so wrapping
-// a selection can hand the text after it back its previous styling. Without
-// `withColor`, just the formats: what a new colour code has to repeat, since
-// a colour clears them in-game.
-export function codesAt(raw, index, { withColor = true } = {}) {
-  const style = styleAt(raw, index)
-  const formats = Object.entries(MOTD_FORMATS).filter(([, flag]) => style[flag]).map(([code]) => `§${code}`)
-  return (withColor && style.color ? `§${style.color}` : '') + formats.join('')
+// The first token not wholly before `index`. An index between a § and its
+// letter lands on that code's start, so nothing ever splits a code.
+function tokenAt(tokens, index) {
+  let t = 0
+  while (t < tokens.length && tokens[t].end <= index) t += 1
+  return t
 }
 
-// An index sitting between a § and its code letter, moved back before the §,
-// so nothing is ever inserted into the middle of a code.
-export function snapIndex(raw, index) {
-  for (let i = 0; i < index; i += 1) {
-    if (raw[i] !== '§') continue
-    if (i + 1 === index) return i
-    i += 1
+const isVisible = (token) => !token.isCode && token.ch !== '\n'
+
+function selectionOf(raw, start, end) {
+  const parsed = tokenize(raw)
+  const a = tokenAt(parsed.tokens, start)
+  const b = Math.max(a, tokenAt(parsed.tokens, end))
+  const chars = []
+  for (let t = a; t < b; t += 1) if (isVisible(parsed.tokens[t])) chars.push(parsed.styles[t])
+  return { ...parsed, a, b, chars }
+}
+
+// What the toolbar shows as on. For a selection: the colour every selected
+// character shares and the formats they all have. For a caret (or a selection
+// of nothing but codes): the style the next typed character would get.
+export function activeStyle(raw, start, end) {
+  const { styles, b, chars } = selectionOf(raw, start, end)
+  if (!chars.length) return styles[b]
+  const color = chars.every((style) => style.color === chars[0].color) ? chars[0].color : null
+  return Object.fromEntries([['color', color], ...FLAGS.map((flag) => [flag, chars.every((style) => style[flag])])])
+}
+
+// A toolbar code as a change to one style. A colour or format is a toggle:
+// already on for everything it applies to, it comes off (a colour then leaves
+// the text uncoloured); otherwise it goes on. Reset clears everything.
+function restyler(code, active) {
+  if (code === 'r') return () => BASE
+  if (COLOR_HEX[code]) {
+    const on = active.color === code
+    return (style) => ({ ...style, color: on ? null : code })
   }
-  return index
+  const flag = MOTD_FORMATS[code]
+  const on = Boolean(active[flag])
+  return (style) => ({ ...style, [flag]: !on })
+}
+
+const sameStyle = (a, b) => (a.color ?? null) === (b.color ?? null) && FLAGS.every((flag) => !a[flag] === !b[flag])
+
+function formatCodes(style, already = BASE) {
+  return Object.entries(MOTD_FORMATS)
+    .filter(([, flag]) => style[flag] && !already[flag])
+    .map(([code]) => `§${code}`)
+    .join('')
+}
+
+// The fewest § codes that turn style `from` into `to`. Formats can only be
+// added; taking one away needs a colour code or §r, and both clear them all.
+function transition(from, to) {
+  if (sameStyle(from, to)) return ''
+  const keepsFormats = FLAGS.every((flag) => !from[flag] || to[flag])
+  if ((from.color ?? null) === (to.color ?? null) && keepsFormats) return formatCodes(to, from)
+  return (to.color ? `§${to.color}` : '§r') + formatCodes(to)
+}
+
+// The edit one toolbar click makes on the textarea's selection: replace
+// `from`..`to` with `text`, then select `selectionStart`..`selectionEnd`.
+//
+// Only the selected characters change style. Codes sitting directly against
+// the selection only ever style it, so they are folded into the rewrite:
+// switching a colour replaces its code, toggling it off removes it, and
+// nothing piles up. Everything after the selection keeps exactly the style it
+// had. With a caret (no characters selected) the same applies to the style
+// the next typed character gets, and the text after the caret is untouched.
+export function applyStyle(raw, start, end, code) {
+  const { text: value, tokens, styles, a, b, chars } = selectionOf(raw, start, end)
+  const restyle = restyler(code.toLowerCase(), activeStyle(raw, start, end))
+  const caret = !chars.length
+
+  let lo = caret ? b : a
+  while (lo > 0 && tokens[lo - 1].isCode) lo -= 1
+  let hi = b
+  while (hi < tokens.length && tokens[hi].isCode) hi += 1
+
+  let style = styles[lo]
+  let text = ''
+  let selFrom = null
+  let selTo = 0
+  if (caret) {
+    const pending = restyle(styles[b])
+    text = transition(style, pending)
+    style = pending
+    selFrom = selTo = text.length
+  } else {
+    for (let t = a; t < b; t += 1) {
+      const token = tokens[t]
+      if (token.isCode) continue
+      if (token.ch !== '\n') {
+        const next = restyle(styles[t])
+        text += transition(style, next)
+        style = next
+      }
+      if (selFrom === null) selFrom = text.length
+      text += token.ch
+      selTo = text.length
+    }
+  }
+  // Hand whatever follows the style it had. Codes folded in from the very end
+  // of the text style nothing, so with nothing after they are simply dropped.
+  if (hi < tokens.length) text += transition(style, styles[hi])
+
+  const offset = (t) => (t < tokens.length ? tokens[t].start : value.length)
+  const from = offset(lo)
+  return { from, to: offset(hi), text, selectionStart: from + selFrom, selectionEnd: from + selTo }
 }
