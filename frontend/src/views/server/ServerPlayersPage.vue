@@ -228,6 +228,20 @@ function unban(p) {
   )
 }
 
+// A row with no role that isn't online exists only because usercache.json
+// remembers the name (e.g. a whitelist add on a running server that was later
+// undone), so dropping that entry is the only way to clear it from the list.
+const canForget = (p) => !p.isOnline && !p.isWhitelisted && !p.isOp && !p.isBanned
+
+async function forget(p) {
+  try {
+    await store.forgetPlayer(p.name)
+    toast.success(t('players.forgotten', { name: p.name }))
+  } catch (e) {
+    toast.error(e.message || t('common.operationFailed'))
+  }
+}
+
 function changeOpLevel(p, level) {
   if (store.isRunning) return  // disabled in template; defensive guard
   safe(() => store.setOpLevel(p.name, Number(level)))
@@ -392,6 +406,7 @@ function onToggleEnforce(value) {
           <AppButton v-if="p.isOnline" variant="ghost" size="sm" @click="startReason(p.name, 'kick')">{{ $t('players.kick') }}</AppButton>
           <AppButton v-if="p.isBanned" variant="ghost" size="sm" @click="unban(p)">{{ $t('players.unban') }}</AppButton>
           <AppButton v-else variant="danger" size="sm" @click="startReason(p.name, 'ban')">{{ $t('players.ban') }}</AppButton>
+          <AppButton v-if="canForget(p)" variant="ghost" size="sm" :title="$t('players.forgetHint')" @click="forget(p)">{{ $t('players.forget') }}</AppButton>
         </div>
       </li>
       <li v-if="!filteredPlayers.length" class="player-list__empty">{{ emptyMessage }}</li>

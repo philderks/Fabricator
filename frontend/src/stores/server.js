@@ -43,6 +43,7 @@ import {
 } from '../utils/enrichInstalledModsModrinth'
 import { installedModDisplayName } from '../utils/installedModDisplay'
 import { installedEntryMatchesProjectRef } from '../utils/modrinthJarMatch'
+import { normalizeMotd } from '../utils/motd'
 // Status-display logic consolidated in utils/getEffectiveStatus (F6/CC5);
 // keep alias for the existing call sites in this file.
 import { getEffectiveStatus as pickEffectiveStatus } from '../utils/getEffectiveStatus'
@@ -126,6 +127,12 @@ export const useServerStore = defineStore('server', () => {
   const modSearch = ref('')
   const logs = ref({ stdout: [], stderr: [], running: false })
   const serverSettings = ref(null)
+  // Bumped whenever an icon changes, and put on every icon URL: the browser
+  // reuses an image it already decoded for the same URL, so without it the
+  // switcher and the overview would keep showing the old icon.
+  const iconVersion = ref(Date.now())
+  const iconUrlFor = (id) => `/api/servers/${id}/icon?v=${iconVersion.value}`
+  const iconChanged = () => { iconVersion.value = Date.now() }
   const showModBrowser = ref(false)
   const showJavaModal = ref(false)
   const pendingJavaAction = ref(null)
@@ -185,7 +192,10 @@ export const useServerStore = defineStore('server', () => {
     name: data.name || t('servers.defaultName'),
     port: data.port ?? 25565,
     serverIp: data.serverIp || '',
-    motd: data.motd || t('servers.defaultMotd'),
+    // Normalized for the baseline too, so an old escaped MOTD isn't "dirty".
+    // Only a missing MOTD gets the default: an empty one is a valid choice
+    // (Minecraft shows nothing), not something to paper over.
+    motd: data.motd == null ? t('servers.defaultMotd') : normalizeMotd(data.motd),
     bugReportLink: data.bugReportLink || '',
     maxPlayers: data.maxPlayers ?? 20,
     difficulty: data.difficulty || 'normal',
@@ -1691,6 +1701,8 @@ export const useServerStore = defineStore('server', () => {
     modSearch,
     logs,
     serverSettings,
+    iconUrlFor,
+    iconChanged,
     showModBrowser,
     showVersionPicker,
     versionPickerMod,

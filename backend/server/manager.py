@@ -686,6 +686,11 @@ class ServerManager:
     def is_running(self) -> bool:
         return bool(self._process and self._process.poll() is None)
 
+    @property
+    def is_stopping(self) -> bool:
+        """True while stop() drains a JVM that is still alive (see _stopping)."""
+        return self._stopping
+
     def status(self) -> dict:
         running = self.is_running
         status_value = "running" if running else "stopped"

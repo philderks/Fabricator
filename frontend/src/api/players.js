@@ -58,6 +58,10 @@ export async function unbanIp(serverId, ip) {
   return del(`/api/servers/${serverId}/players/bans/ip`, { ip })
 }
 
+export async function forgetPlayer(serverId, name) {
+  return del(`/api/servers/${serverId}/players/known`, { name })
+}
+
 export async function setEnforceWhitelist(serverId, active) {
   return patch(`/api/servers/${serverId}/players/whitelist/enforce`, { active })
 }

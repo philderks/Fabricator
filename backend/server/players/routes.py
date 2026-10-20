@@ -94,7 +94,10 @@ def get_state(server_id, server):
     ops = players_files.read_json_list(install_path, players_service.OPS_FILE)
     bans = players_files.read_json_list(install_path, players_service.BANS_FILE)
     ip_bans = players_files.read_json_list(install_path, players_service.BANS_IP_FILE)
-    known = players_files.read_json_list(install_path, "usercache.json")
+    known = players_service.visible_known_players(
+        install_path, server,
+        players_files.read_json_list(install_path, players_service.USERCACHE_FILE),
+    )
     # Attach a real "last seen" (playerdata mtime) per known player — see
     # players/lastseen.py for why usercache.json's expiresOn is not it.
     known = players_lastseen.annotate_known_players(install_path, server, known)
@@ -276,6 +279,18 @@ def ip_bans_remove(server_id, server):
     if err:
         return err
     return _execute(players_service.unban_ip, _registry(), server, ip)
+
+
+# ---------- known players --------------------------------------------
+
+@players_bp.route("/servers/<server_id>/players/known", methods=["DELETE"])
+@require_server
+@with_server_lock
+def known_remove(server_id, server):
+    name, err = _validate_name((request.get_json() or {}).get("name"))
+    if err:
+        return err
+    return _execute(players_service.forget_player, _registry(), server, name)
 
 
 # ---------- enforceWhitelist (stopped-server persisted toggle) ---------

@@ -345,3 +345,75 @@ def test_ip_ban_delete_invalid_ip_returns_400(client, tmp_servers_root):
         content_type="application/json",
     )
     assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# DELETE /servers/<id>/players/known (issue #95)
+# ---------------------------------------------------------------------------
+
+def test_known_delete_removes_usercache_entry(client, tmp_servers_root):
+    install = _seed_server(Path(tmp_servers_root), "srv_forget")
+
+    from backend.server.players import files as players_files
+    players_files.write_json_list(install, "usercache.json", [
+        {"uuid": "99999999-8888-7777-6666-555555555555", "name": "Ghost"},
+    ])
+
+    resp = client.delete(
+        "/api/servers/srv_forget/players/known",
+        json={"name": "Ghost"},
+        content_type="application/json",
+    )
+    assert resp.status_code == 200
+    assert resp.get_json() == {"name": "Ghost"}
+    assert players_files.read_json_list(install, "usercache.json") == []
+
+    state = client.get("/api/servers/srv_forget/players/state").get_json()
+    assert state["knownPlayers"] == []
+
+
+def test_known_delete_missing_entry_returns_404(client, tmp_servers_root):
+    _seed_server(Path(tmp_servers_root), "srv_forget404")
+    resp = client.delete(
+        "/api/servers/srv_forget404/players/known",
+        json={"name": "Ghost"},
+        content_type="application/json",
+    )
+    assert resp.status_code == 404
+
+
+def test_known_delete_invalid_name_returns_400(client, tmp_servers_root):
+    _seed_server(Path(tmp_servers_root), "srv_forgetbad")
+    resp = client.delete(
+        "/api/servers/srv_forgetbad/players/known",
+        json={"name": "../etc"},
+        content_type="application/json",
+    )
+    assert resp.status_code == 400
+
+
+def test_known_delete_running_server_hides_player_from_state(client, tmp_servers_root, monkeypatch):
+    install = _seed_server(Path(tmp_servers_root), "srv_forgetrun")
+
+    from backend.server.players import files as players_files
+    players_files.write_json_list(install, "usercache.json", [
+        {"uuid": "99999999-8888-7777-6666-555555555555", "name": "Ghost"},
+    ])
+
+    fake_reg = MagicMock()
+    fake_reg.get_status.return_value = {"status": "running"}
+    fake_reg.resolve_install_path.return_value = install
+    monkeypatch.setattr("backend.server.players.routes._registry", lambda: fake_reg)
+
+    resp = client.delete(
+        "/api/servers/srv_forgetrun/players/known",
+        json={"name": "Ghost"},
+        content_type="application/json",
+    )
+    assert resp.status_code == 200
+    # The running server owns usercache.json; the entry goes at the next start.
+    assert len(players_files.read_json_list(install, "usercache.json")) == 1
+    fake_reg.send_command.assert_not_called()
+
+    state = client.get("/api/servers/srv_forgetrun/players/state").get_json()
+    assert state["knownPlayers"] == []
