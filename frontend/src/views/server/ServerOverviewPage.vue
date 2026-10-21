@@ -8,7 +8,7 @@ import { usePlayitStore } from '../../stores/playit'
 import { useAuthStore } from '../../stores/auth'
 import { usePreferencesStore } from '../../stores/preferences'
 import { copyToClipboard } from '../../utils/clipboard'
-import { isPluginLoader } from '../../utils/loaderKind'
+import { isPluginLoader, loaderContentKind } from '../../utils/loaderKind'
 import { t } from '../../i18n'
 
 const store = useServerStore()
@@ -18,6 +18,8 @@ const auth = useAuthStore()
 
 // "Mods" vs "Plugins" for the installed-content panel, per loader.
 const isPlugins = computed(() => isPluginLoader(store.server?.loader))
+// Vanilla has neither, and the sidebar hides its Mods page, so drop the surfaces that lead there.
+const hasContent = computed(() => loaderContentKind(store.server?.loader) !== 'none')
 
 const RECENT_LOG_PREVIEW_LINES = 16
 
@@ -176,11 +178,11 @@ onUnmounted(() => {
 
 <template>
   <div class="overview-page">
-    <section class="overview-page__stats">
+    <section class="overview-page__stats" :class="{ 'overview-page__stats--three': !hasContent }">
       <StatCard :label="$t('overview.stats.players')" :value="store.serverStatus.players.online" :unit="store.serverStatus.players.max ? `/${store.serverStatus.players.max}` : ''" />
       <StatCard :label="$t('overview.stats.uptime')" :value="store.serverStatus.uptime" />
       <StatCard :label="$t('overview.stats.tps')" :value="tpsDisplay" :accent="tpsAccent" />
-      <StatCard :label="$t('overview.stats.mods')" :value="store.installedMods.length" :accent="store.installedMods.length > 0 ? 'primary' : 'default'" />
+      <StatCard v-if="hasContent" :label="$t('overview.stats.mods')" :value="store.installedMods.length" :accent="store.installedMods.length > 0 ? 'primary' : 'default'" />
     </section>
 
     <!-- Forge/NeoForge run a subprocess installer that can take minutes, during
@@ -267,7 +269,7 @@ onUnmounted(() => {
       </div>
 
       <div class="overview-page__col">
-        <Panel :title="isPlugins ? $t('mods.installedPlugins') : $t('mods.installedMods')">
+        <Panel v-if="hasContent" :title="isPlugins ? $t('mods.installedPlugins') : $t('mods.installedMods')">
           <template #action>
             <a class="overview-page__panel-link" @click.prevent="store.goToMods">
               {{ $t('common.manage') }}
@@ -368,6 +370,11 @@ onUnmounted(() => {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-3);
   min-width: 0;
+}
+
+/* Vanilla: no Mods card. */
+.overview-page__stats--three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .overview-page__modpack {
