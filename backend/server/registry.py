@@ -11,6 +11,7 @@ from typing import Dict, Optional
 from backend.core.config import get_config
 from backend.managed import ManagedConfigError, is_managed, managed_memory_gb
 from backend.server import java_manager
+from backend.server.java_compat import max_java_for
 from backend.server.jvm_args import parse_jvm_args
 from backend.server.manager import ServerManager
 from backend.server.players import service as players_service
@@ -170,17 +171,25 @@ class ServerProcessRegistry:
         1. Explicit ``javaPath`` on the server record (user override).
         2. Managed Java install matching the server's MC version.
         3. Fall back to ``'java'`` on PATH so the existing probe / missing-java
-           error flow can trigger the install modal.
+           error flow can trigger the install modal — unless the server has a
+           max Java (legacy Forge), where a too-new PATH java would crash it:
+           then the missing managed install is reported instead.
         """
         explicit = server.get('javaPath')
         if explicit:
             return str(explicit)
+        version = str(server.get('version') or '')
+        maximum = max_java_for(version, server.get('loader'))
         try:
-            required = java_manager.required_java_for(str(server.get('version') or ''))
-            resolved = java_manager.find_compatible_java(required)
+            required = java_manager.required_java_for(version)
+            resolved = java_manager.find_compatible_java(required, maximum)
         except Exception:
-            resolved = None
-        return resolved or 'java'
+            return 'java'
+        if resolved:
+            return resolved
+        if maximum:
+            return str(java_manager.managed_java_binary_path(required))
+        return 'java'
 
     def __init__(self, base_dir: str | Path):
         self.base_dir = Path(base_dir).expanduser().resolve()

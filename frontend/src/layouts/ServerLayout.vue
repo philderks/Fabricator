@@ -307,6 +307,7 @@ onUnmounted(() => {
       v-if="!auth.managed"
       :show="store.showJavaModal"
       :mc-version="store.server?.version || ''"
+      :loader="store.server?.loader || ''"
       @close="store.closeJavaModal"
       @java-installed="store.handleJavaInstalled"
     />

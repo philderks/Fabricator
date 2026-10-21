@@ -485,8 +485,11 @@ Set `FABRICATOR_SKIP_JAVA_CHECK=1` to bypass enforcement.
 
 #### `GET /api/java/status`
 
-**Query:** `mc_version` (string, optional) · `required_java` (int, optional) ·
+**Query:** `mc_version` (string, optional) · `loader` (string, optional) · `required_java` (int, optional) ·
 `java_path` (string, optional, default `java`)
+
+With `loader=forge` and a 1.16.x-or-older `mc_version`, `meets_requirement` is also false when
+Java is too new: legacy Forge only boots on Java 8 (≤1.12.2) or Java 8–11 (1.13–1.16.5).
 
 ```json
 {

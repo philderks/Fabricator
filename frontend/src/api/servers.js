@@ -225,11 +225,14 @@ export async function getSystemMetrics() {
   return get('/api/metrics/system')
 }
 
-/** @param {{mcVersion?: string, requiredJava?: number, javaPath?: string}} options */
+/** @param {{mcVersion?: string, loader?: string, requiredJava?: number, javaPath?: string}} options */
 export async function getJavaStatus(options = {}) {
   const params = {}
   if (options.mcVersion) {
     params.mc_version = options.mcVersion
+  }
+  if (options.loader) {
+    params.loader = options.loader
   }
   if (options.requiredJava) {
     params.required_java = options.requiredJava

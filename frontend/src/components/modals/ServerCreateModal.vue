@@ -627,6 +627,7 @@
   <JavaInstallModal
     :show="showJavaModal"
     :mc-version="pendingJavaMcVersion"
+    :loader="pendingJavaLoader"
     @close="showJavaModal = false"
     @java-installed="handleJavaInstalled"
   />
@@ -692,6 +693,7 @@ export default {
       imp: null,
       showJavaModal: false,
       pendingJavaMcVersion: '',
+      pendingJavaLoader: '',
       pendingJavaRetryServerId: null,
       uploadedPack: null,
       packUploading: false,
@@ -1408,6 +1410,7 @@ export default {
     
     openJavaModal({ createdServerId = null } = {}) {
       this.pendingJavaMcVersion = this.formData.version || ''
+      this.pendingJavaLoader = this.formData.loader || ''
       this.pendingJavaRetryServerId = createdServerId
       this.showJavaModal = true
     },
@@ -1618,10 +1621,11 @@ export default {
         }
       }
 
-      // Pre-flight Java check (existing — unchanged).
+      // Pre-flight Java check.
       try {
         const status = await getJavaStatus({
           mcVersion: this.formData.version,
+          loader: this.formData.loader,
           javaPath: this.formData.javaPath || undefined
         })
         const hasManaged = !!status?.managed_java?.installed
@@ -1762,6 +1766,7 @@ export default {
       if (!keepJavaModal) {
         this.showJavaModal = false
         this.pendingJavaMcVersion = ''
+        this.pendingJavaLoader = ''
         this.pendingJavaRetryServerId = null
       }
 
