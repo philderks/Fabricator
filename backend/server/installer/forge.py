@@ -8,8 +8,9 @@ the boundary.
 Era detection (Task 2 fills in):
     Modern (≥1.17):  libraries/net/minecraftforge/forge/<mc>-<build>/{unix,win}_args.txt
                      → LaunchSpec(type="args_file", args_file=...)
-    Legacy (≤1.16):  forge-<mc>-<build>.jar (1.13–1.16) or
-                     forge-<mc>-<build>-universal.jar (≤1.12.2) in install root
+    Legacy (≤1.16):  forge-<mc>-<build>.jar (1.13–1.16),
+                     forge-<mc>-<build>-universal.jar (1.7–1.12.2) or
+                     minecraftforge-universal-<mc>-<build>.jar (1.5.2–1.6.4) in install root
                      → LaunchSpec(type="jar", jar=...)
 
 Boot (via _build_command's existing branches):
@@ -59,6 +60,7 @@ class ForgeInstaller(InstallerBase):
         "promotions_slim.json"
     )
     MAVEN_BASE = "https://maven.minecraftforge.net"
+    MAVEN_METADATA_URL = f"{MAVEN_BASE}/net/minecraftforge/forge/maven-metadata.xml"
 
     @property
     def loader_name(self) -> str:
@@ -117,6 +119,10 @@ class ForgeInstaller(InstallerBase):
             match = _PROMO_KEY_RE.match(key)
             if not match:
                 continue
+            mc_key = self._mc_sort_key(match.group("mc"))
+            # Forge before MC 1.5.2 has no installer jar (zips merged by hand).
+            if mc_key and mc_key < [1, 5, 2]:
+                continue
             seen.add(match.group("mc"))
 
         out = [
@@ -168,6 +174,40 @@ class ForgeInstaller(InstallerBase):
         if recommended:
             return recommended
         return promos.get(f"{mc_version}-latest")
+
+    def _maven_build(self, mc_version: str, build: str) -> str:
+        """Return ``build`` as Forge Maven names it.
+
+        Promotions drop the branch suffix some 1.7–1.10 builds carry on Maven
+        (``10.13.4.1614`` is published as ``1.7.10-10.13.4.1614-1.7.10``), and
+        the installer names its jar after the Maven version. Falls back to
+        ``build`` unchanged if the metadata can't be fetched.
+        """
+        def _do_request() -> str:
+            response = self.session.get(self.MAVEN_METADATA_URL, timeout=15)
+            response.raise_for_status()
+            return response.text
+
+        try:
+            metadata = request_with_retry(
+                _do_request,
+                retries=3,
+                on_retry=lambda attempt, exc: logger.warning(
+                    "Retrying Forge Maven metadata fetch (attempt %d): %s",
+                    attempt, exc,
+                ),
+            )
+        except requests.RequestException as exc:
+            logger.warning("Failed to fetch Forge Maven metadata: %s", exc)
+            return build
+
+        if f"<version>{mc_version}-{build}</version>" in metadata:
+            return build
+        match = re.search(
+            rf"<version>{re.escape(mc_version)}-({re.escape(build)}-[^<]+)</version>",
+            metadata,
+        )
+        return match.group(1) if match else build
 
     def _installer_jar_url(self, mc_version: str, build: str) -> str:
         return (
@@ -325,11 +365,13 @@ class ForgeInstaller(InstallerBase):
                 program_args=["nogui"],
             )
 
-        # Legacy: forge-<mc>-<build>.jar (1.13–1.16) or
-        # forge-<mc>-<build>-universal.jar (≤1.12).
+        # Legacy: forge-<mc>-<build>.jar (1.13–1.16),
+        # forge-<mc>-<build>-universal.jar (1.7–1.12) or
+        # minecraftforge-universal-<mc>-<build>.jar (1.5.2–1.6.4).
         for candidate_name in (
             f"forge-{mc_version}-{build}.jar",
             f"forge-{mc_version}-{build}-universal.jar",
+            f"minecraftforge-universal-{mc_version}-{build}.jar",
         ):
             candidate = self._resolve_within_install_path(candidate_name)
             if candidate.exists():
@@ -378,6 +420,7 @@ class ForgeInstaller(InstallerBase):
         if not build:
             msg = f"No Forge release found for Minecraft {mc_version}."
             return self._fail(progress_callback, msg, mc_version=mc_version)
+        build = self._maven_build(mc_version, build)
 
         try:
             build = validate_version_token(build, field_name="build")

@@ -31,6 +31,10 @@ class VanillaInstaller(InstallerBase):
         "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
     )
 
+    # 1.2.5's release date. piston-meta has no server jar for anything older
+    # (1.2.4 and below, all old_alpha/old_beta); everything from here on has one.
+    FIRST_SERVER_JAR_RELEASE = "2012-03-29"
+
     @property
     def loader_name(self) -> str:
         return "vanilla"
@@ -73,6 +77,9 @@ class VanillaInstaller(InstallerBase):
             mc_id = entry.get("id")
             mc_type = entry.get("type", "release")
             if not mc_id:
+                continue
+            release_time = entry.get("releaseTime")
+            if release_time and release_time < self.FIRST_SERVER_JAR_RELEASE:
                 continue
             out.append({
                 "version": self._canonicalize_mc_version(mc_id),

@@ -164,18 +164,22 @@ def _parse_system_java_major() -> Optional[int]:
     return parse_java_major(output)
 
 
-def find_compatible_java(required: int) -> Optional[str]:
-    """Locate a java binary with major >= ``required``.
+def find_compatible_java(required: int, maximum: Optional[int] = None) -> Optional[str]:
+    """Locate a java binary with major >= ``required`` (and <= ``maximum`` if set).
 
     Resolution order:
-    1. System java on PATH (if ``java -version`` reports a high enough major).
+    1. System java on PATH (if ``java -version`` reports a major in range).
     2. Previously installed managed JDK at the requested major.
     3. Managed JDK at the fallback major (e.g. 17 when 16 was requested).
     4. None — caller must trigger a download.
     """
     required_int = int(required)
     system_major = _parse_system_java_major()
-    if system_major is not None and system_major >= required_int:
+    if (
+        system_major is not None
+        and system_major >= required_int
+        and (maximum is None or system_major <= maximum)
+    ):
         return "java"
 
     managed_path = managed_java_binary_path(required_int)

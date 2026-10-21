@@ -92,7 +92,7 @@ def test_managed_only_flat_fields_report_managed(client):
     )
     with run_p, find_p as find_mock, asset_p:
         body = _get_status(client, "?required_java=21")
-    find_mock.assert_called_once_with(21)
+    find_mock.assert_called_once_with(21, None)
     assert body["installed"] is True
     assert body["detected_major"] == 21
     assert body["version"] is not None
@@ -194,3 +194,16 @@ def test_required_unknown_probes_path(client):
     assert body["required_java"] is None
     assert body["meets_requirement"] is False
     assert body["java_path"] == "java"
+
+
+def test_legacy_forge_rejects_too_new_java(client):
+    """Forge 1.12.2 needs Java 8 exactly: a PATH Java 21 must not count as meeting it."""
+    run_p, find_p, asset_p = _patched(None, system_major=21)
+    with run_p, find_p as find_mock, asset_p:
+        forge = _get_status(client, "?mc_version=1.12.2&loader=forge")
+        vanilla = _get_status(client, "?mc_version=1.12.2&loader=vanilla")
+    assert find_mock.call_args_list[0].args == (8, 8)
+    assert forge["meets_requirement"] is False
+    assert forge["system_java"]["meets_requirement"] is False
+    assert vanilla["meets_requirement"] is True
+    assert vanilla["system_java"]["meets_requirement"] is True

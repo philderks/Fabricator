@@ -185,3 +185,18 @@ def resolve_required_java(mc_version: str) -> JavaCompatibility:
         warning="Could not determine Java requirement with confidence.",
     )
 
+
+
+def max_java_for(mc_version: str, loader: Optional[str]) -> Optional[int]:
+    """Newest Java major a server boots on, or None when there is no cap.
+
+    Only legacy Forge has one: up to 1.12.2 it crashes on Java 9+
+    (URLClassLoader cast), and 1.16.5 boots on 11 but not 17+ (modlauncher
+    IllegalAccessError). 1.13–1.15 are assumed to match 1.16.5.
+    """
+    if str(loader or "").strip().lower() != "forge":
+        return None
+    parsed = _parse_mc_version(mc_version)
+    if not parsed or parsed[0] != 1 or parsed[1] > 16:
+        return None
+    return 8 if parsed[1] <= 12 else 11

@@ -451,6 +451,8 @@ def test_forge_install_emits_phases_in_order(tmp_path, monkeypatch):
             resp.iter_content = lambda chunk_size: iter([bytes_payload])
             resp.__enter__ = lambda s: s
             resp.__exit__ = lambda *a: False
+        elif url.endswith("maven-metadata.xml"):
+            resp.text = ""
         elif url.endswith(".sha1"):
             resp.text = hashlib.sha1(bytes_payload).hexdigest()
         return resp
@@ -517,6 +519,8 @@ def test_forge_download_installer_bytes_monotonic(tmp_path, monkeypatch):
             resp.iter_content = lambda chunk_size: iter(chunks)
             resp.__enter__ = lambda s: s
             resp.__exit__ = lambda *a: False
+        elif url.endswith("maven-metadata.xml"):
+            resp.text = ""
         elif url.endswith(".sha1"):
             resp.text = sha1
         return resp

@@ -32,7 +32,7 @@ from backend.server.installer import (
     get_installer_for,
     supported_loaders,
 )
-from backend.server.java_compat import resolve_required_java, skip_java_enforcement
+from backend.server.java_compat import max_java_for, resolve_required_java, skip_java_enforcement
 from backend.server import java_manager
 from backend.server import jvm_args
 from backend.server.locks import get_server_lock, try_acquire, discard_lock
@@ -2138,6 +2138,7 @@ def get_java_status():
         required_java = int(compat.required_java)
     if required_java is None and mc_version:
         required_java = java_manager.required_java_for(mc_version)
+    maximum = max_java_for(mc_version, request.args.get('loader'))
 
     def _probe(path):
         """Probe ``path -version`` — byte-same semantics as the old inline probe."""
@@ -2169,7 +2170,7 @@ def get_java_status():
     path_probe_target = java_path_param or 'java'
     java_path = path_probe_target
     if java_path_param is None and required_java is not None:
-        java_path = java_manager.find_compatible_java(int(required_java)) or 'java'
+        java_path = java_manager.find_compatible_java(int(required_java), maximum) or 'java'
 
     installed, version, detected_major = _probe(java_path)
 
@@ -2182,7 +2183,8 @@ def get_java_status():
         installed and
         required_java is not None and
         detected_major is not None and
-        detected_major >= required_java
+        detected_major >= required_java and
+        (maximum is None or detected_major <= maximum)
     )
     if (
         enforcement_skipped and
@@ -2206,7 +2208,8 @@ def get_java_status():
             system_installed and
             required_java is not None and
             system_major is not None and
-            system_major >= required_java
+            system_major >= required_java and
+            (maximum is None or system_major <= maximum)
         )
         if (
             enforcement_skipped and

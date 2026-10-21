@@ -96,10 +96,8 @@ const navItems = computed(() => {
   const base = auth.managed
     ? ALL_NAV_ITEMS.filter(item => !MANAGED_HIDDEN_NAV.has(item.name))
     : ALL_NAV_ITEMS
-  if (kind === 'none') {
-    return base.filter(item => item.name !== 'ServerMods')
-  }
-  return base.map(item => ({
+  const items = kind === 'none' ? base.filter(item => item.name !== 'ServerMods') : base
+  return items.map(item => ({
     ...item,
     label: item.name === 'ServerMods' ? contentLabel(loader) : t(item.label)
   }))

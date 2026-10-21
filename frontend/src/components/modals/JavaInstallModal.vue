@@ -161,7 +161,9 @@ import { t } from '../../i18n'
 
 const props = defineProps({
   show: { type: Boolean, required: true },
-  mcVersion: { type: String, default: '' }
+  mcVersion: { type: String, default: '' },
+  // Legacy Forge also has a max Java, so the status check needs the loader.
+  loader: { type: String, default: '' }
 })
 
 const emit = defineEmits(['close', 'java-installed'])
@@ -276,7 +278,7 @@ const loadStatus = async () => {
   try {
     resetModalState()
     state.value = 'checking'
-    const status = await getJavaStatus({ mcVersion: props.mcVersion })
+    const status = await getJavaStatus({ mcVersion: props.mcVersion, loader: props.loader })
     applyStatus(status)
     if (!requiredJava.value) {
       errorMessage.value = t('javaInstall.unknownRequirement')

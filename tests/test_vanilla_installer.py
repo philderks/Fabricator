@@ -65,6 +65,18 @@ def test_get_minecraft_versions_normalizes(tmp_path, fake_manifest):
     ]
 
 
+def test_get_minecraft_versions_hides_versions_without_server_jar(tmp_path):
+    from backend.server.installer.vanilla import VanillaInstaller
+    inst = VanillaInstaller(tmp_path)
+    _patch_session(inst, manifest={"versions": [
+        {"id": "1.2.5", "type": "release", "releaseTime": "2012-03-29T22:00:00+00:00"},
+        {"id": "1.2.4", "type": "release", "releaseTime": "2012-03-21T22:00:00+00:00"},
+        {"id": "b1.7.3", "type": "old_beta", "releaseTime": "2011-07-07T22:00:00+00:00"},
+    ]})
+
+    assert [v["version"] for v in inst.get_minecraft_versions()] == ["1.2.5"]
+
+
 def test_get_available_versions_returns_empty(tmp_path):
     """Vanilla has no separate loader versions."""
     from backend.server.installer.vanilla import VanillaInstaller
