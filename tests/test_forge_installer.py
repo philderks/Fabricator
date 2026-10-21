@@ -139,8 +139,8 @@ def test_get_minecraft_versions_returns_empty_on_meta_failure(tmp_path):
 
 
 def _patch_session_with_install(installer, *, promotions=None,
-                                installer_jar_bytes=b"PKforgeINST"):
-    """Stub installer.session.get for promotions + Maven jar + sha1 endpoints."""
+                                installer_jar_bytes=b"PKforgeINST", metadata=""):
+    """Stub installer.session.get for promotions + Maven metadata/jar/sha1 endpoints."""
     session = MagicMock()
 
     def get(url, **_):
@@ -149,6 +149,8 @@ def _patch_session_with_install(installer, *, promotions=None,
         resp.headers = {"Content-Length": str(len(installer_jar_bytes))}
         if "promotions_slim.json" in url:
             resp.json.return_value = promotions
+        elif url.endswith("maven-metadata.xml"):
+            resp.text = metadata
         elif url.endswith(".jar"):
             resp.iter_content = lambda chunk_size=8192: iter([installer_jar_bytes])
             resp.__enter__ = lambda s: s
@@ -214,6 +216,63 @@ def test_install_legacy_pre_1_13_returns_universal_jar_launchspec(
     assert result.success is True
     assert result.launch.type == "jar"
     assert result.launch.jar == "forge-1.12.2-14.23.5.2859-universal.jar"
+
+
+def test_get_minecraft_versions_hides_pre_installer_versions(tmp_path):
+    """Forge before MC 1.5.2 has no installer jar, so it can't be offered."""
+    from backend.server.installer.forge import ForgeInstaller
+    inst = ForgeInstaller(tmp_path)
+    _patch_session(inst, promotions={"promos": {
+        "1.5.2-latest": "7.8.1.738",
+        "1.5.1-latest": "7.7.2.682",
+        "1.5-latest": "7.7.0.598",
+        "1.2.5-latest": "3.4.9.171",
+    }})
+
+    assert [v["version"] for v in inst.get_minecraft_versions()] == ["1.5.2"]
+
+
+def test_install_resolves_maven_branch_suffix(tmp_path, monkeypatch):
+    """Promotions say 10.13.4.1614; Maven and the installer's jar say 10.13.4.1614-1.7.10."""
+    import subprocess
+    from backend.server.installer.forge import ForgeInstaller
+    inst = ForgeInstaller(tmp_path)
+    session = _patch_session_with_install(
+        inst,
+        promotions={"promos": {"1.7.10-recommended": "10.13.4.1614"}},
+        metadata=(
+            "<versions><version>1.7.10-10.13.4.1614-1.7.10</version>"
+            "<version>1.8.9-11.15.1.2318-1.8.9</version></versions>"
+        ),
+    )
+
+    def fake_run(cmd, **kwargs):
+        (tmp_path / "forge-1.7.10-10.13.4.1614-1.7.10-universal.jar").write_bytes(b"PKuni")
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+    monkeypatch.setattr("backend.server.installer.forge.run_subprocess_streaming", fake_run)
+
+    result = inst.install("1.7.10")
+    assert result.success is True
+    assert result.launch.jar == "forge-1.7.10-10.13.4.1614-1.7.10-universal.jar"
+    urls = [call.args[0] for call in session.get.call_args_list]
+    assert any(u.endswith("/1.7.10-10.13.4.1614-1.7.10/forge-1.7.10-10.13.4.1614-1.7.10-installer.jar") for u in urls)
+
+
+def test_install_detects_1_6_era_minecraftforge_universal_jar(tmp_path, monkeypatch):
+    """1.5.2–1.6.4 installers write minecraftforge-universal-<mc>-<build>.jar."""
+    import subprocess
+    from backend.server.installer.forge import ForgeInstaller
+    inst = ForgeInstaller(tmp_path)
+    _patch_session_with_install(inst, promotions={"promos": {"1.6.4-recommended": "9.11.1.1345"}})
+
+    def fake_run(cmd, **kwargs):
+        (tmp_path / "minecraftforge-universal-1.6.4-9.11.1.1345.jar").write_bytes(b"PKuni")
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+    monkeypatch.setattr("backend.server.installer.forge.run_subprocess_streaming", fake_run)
+
+    result = inst.install("1.6.4")
+    assert result.success is True
+    assert result.launch.jar == "minecraftforge-universal-1.6.4-9.11.1.1345.jar"
 
 
 def test_install_modern_1_20_1_returns_args_file_launchspec(
@@ -485,6 +544,8 @@ def test_install_sha1_mismatch_aborts_before_subprocess(
             resp.iter_content = lambda chunk_size=8192: iter([bytes_payload])
             resp.__enter__ = lambda s: s
             resp.__exit__ = lambda *a: False
+        elif url.endswith("maven-metadata.xml"):
+            resp.text = ""
         elif url.endswith(".sha1"):
             resp.text = "deadbeef" * 5  # 40 chars, intentionally wrong
         return resp
