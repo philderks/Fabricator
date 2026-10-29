@@ -25,6 +25,7 @@ from backend.server.manager import ServerManager
 from backend.server.registry import get_server_process_registry
 from backend.server import storage
 from backend.server import install_progress
+from backend.server import importer as server_importer
 from backend.server import upgrade as upgrade_service
 from backend.managed import is_managed
 from backend.server.installer import (
@@ -429,6 +430,34 @@ def _build_server_properties(server: dict) -> dict:
     }
 
 
+def _record_fields_from_properties(props: dict) -> dict:
+    """Map an existing ``server.properties`` onto record fields.
+
+    Settings saves rewrite server.properties from the record, so an imported
+    server's real values have to land in the record first or the first save
+    would reset them to defaults. Derived from :func:`_build_server_properties`
+    by feeding it a marker per field, so the two cannot drift apart.
+    """
+    marked = _build_server_properties({field: f'\0{field}' for field in _SETTINGS_PROPERTY_FIELDS})
+    defaults = _build_server_properties({})
+    record = {}
+    for key, marker in marked.items():
+        field = str(marker).removeprefix('minecraft:').removeprefix('\0')
+        if key not in props or field not in _SETTINGS_PROPERTY_FIELDS:
+            continue
+        raw, default = props[key], defaults[key]
+        if isinstance(default, bool):
+            record[field] = raw.strip().lower() == 'true'
+        elif isinstance(default, int):
+            try:
+                record[field] = int(raw)
+            except ValueError:
+                continue
+        else:
+            record[field] = raw
+    return record
+
+
 def _write_server_properties(server: dict) -> tuple[bool, str | None]:
     try:
         install_path = _registry().resolve_install_path(server)
@@ -759,55 +788,207 @@ def create_server():
             'error': f'Missing required fields: {", ".join(missing_fields)}'
         }), 400
 
+    error = _validate_new_server(data)
+    if error:
+        return jsonify({'error': error}), 400
+
+    # Schedules are only written through the /schedules routes, which validate them.
+    data.pop('schedules', None)
+    # Only the import route may register a folder outside the server root.
+    data.pop('external', None)
+
+    try:
+        data['status'] = 'pending'
+        return jsonify(_create_server_record(data)), 201
+    except Exception as exc:
+        return jsonify({'error': str(exc)}), 500
+
+
+def _validate_new_server(data: dict) -> Optional[str]:
+    """Normalize the launch/port/memory fields of a new record in place."""
     # Coerce before the duplicate check so the comparison is int-vs-int, and
     # before the record is written so the stored type is always int. An
     # unparseable port is the caller's mistake — a 400, not an unhandled 500.
     data.setdefault('port', 25565)
     error = _normalize_port(data)
     if error:
-        return jsonify({'error': error}), 400
+        return error
     requested_port = data['port']
 
-    existing_servers = storage.get_all_servers()
-    if _port_taken_by_other(requested_port, existing_servers):
-        return jsonify({'error': f'Port {requested_port} is already in use by another server'}), 400
+    if _port_taken_by_other(requested_port, storage.get_all_servers()):
+        return f'Port {requested_port} is already in use by another server'
 
     # Same validation as the settings route — the create modal offers javaPath
     # too, and an unvalidated value here would produce a server that installs
     # fine and then refuses to start.
     error = _normalize_launch_overrides(data)
     if error:
-        return jsonify({'error': error}), 400
+        return error
 
     # Validate JVM heap settings before persisting them. ``memory`` is -Xmx
     # and ``memoryMin`` is -Xms; when memoryMin is omitted it inherits memory
     # for compatibility with existing clients.
-    error = _normalize_memory(data)
+    return _normalize_memory(data)
+
+
+def _create_server_record(data: dict) -> dict:
+    """Persist a validated record and attach its Java requirement."""
+    compatibility = _java_compat_payload(data.get('version', ''))
+    data['javaCompatibility'] = compatibility
+    server = storage.create_server(data)
+    java_check = _server_java_check_payload(server)
+    recommendation = None
+    if compatibility.get('required_java'):
+        recommendation = _build_java_recommendation(
+            platform_utils.platform_label(),
+            int(compatibility['required_java'])
+        )
+    server['javaRequirement'] = {
+        **java_check,
+        'recommended_install': recommendation
+    }
+    return server
+
+
+# Fields the import form may set; everything else comes from the folder.
+_IMPORT_FIELDS = (
+    'name', 'version', 'loader', 'port', 'memory', 'memoryMin', 'memoryUnit',
+    'javaPath', 'jvmArgs',
+)
+
+
+@server_bp.route('/servers/import/inspect', methods=['POST'])
+def inspect_import():
+    data = request.get_json(silent=True) or {}
+    try:
+        path = server_importer.validate_folder(data.get('path'))
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    return jsonify(server_importer.inspect_folder(path))
+
+
+@server_bp.route('/servers/import', methods=['POST'])
+def import_server():
+    """Register a server folder Fabricator did not create.
+
+    ``mode`` is ``copy`` (the default: duplicate it into the server root and
+    leave the original alone) or ``inplace`` (run it where it is; deleting it
+    in Fabricator then keeps the folder). Copying and Modrinth linking run in
+    a worker reporting through the install-progress store.
+    """
+    if is_managed():
+        return jsonify({'error': 'Server import is disabled in managed mode'}), 403
+
+    data = request.get_json(silent=True) or {}
+    mode = data.get('mode', 'copy')
+    if mode not in ('copy', 'inplace'):
+        return jsonify({'error': "mode must be 'copy' or 'inplace'"}), 400
+    try:
+        source = server_importer.validate_folder(data.get('path'))
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    # The launch target is re-detected here, never taken from the client: it
+    # ends up on a java command line.
+    detected = server_importer.inspect_folder(source)
+    if not detected['launch']:
+        return jsonify({'error': 'No server jar or launch file found in that folder'}), 400
+
+    registry = _registry()
+    if mode == 'inplace':
+        for other in storage.get_all_servers():
+            try:
+                other_path = registry.resolve_install_path(other)
+            except ValueError:
+                continue
+            if other_path == source or other_path in source.parents or source in other_path.parents:
+                return jsonify({'error': f"That folder is already used by server '{other.get('name')}'"}), 400
+    elif source == registry.base_dir or source in registry.base_dir.parents:
+        return jsonify({'error': 'Cannot copy a folder that contains the server root'}), 400
+
+    record = _record_fields_from_properties(server_importer.read_properties(source))
+    record.update({
+        'name': detected['name'],
+        'version': detected['version'],
+        'loader': detected['loader'],
+        **({'port': detected['port']} if detected['port'] else {}),
+        **{field: data[field] for field in _IMPORT_FIELDS if field in data},
+        'launch': detected['launch'],
+        'installPath': str(source) if mode == 'inplace' else '',
+        'status': 'installing',
+    })
+    if mode == 'inplace':
+        record['external'] = True
+    missing = [field for field in ('name', 'version', 'loader') if not record.get(field)]
+    if missing:
+        return jsonify({'error': f'Missing required fields: {", ".join(missing)}'}), 400
+
+    error = _validate_new_server(record)
     if error:
         return jsonify({'error': error}), 400
 
-    # Schedules are only written through the /schedules routes, which validate them.
-    data.pop('schedules', None)
+    server = _create_server_record(record)
+    server_id = server['id']
+    install_progress.clear(server_id)
+    install_progress.update(server_id, phase='starting', server_id=server_id)
 
+    def _run_import():
+        worker_lock = get_server_lock(server_id)
+        worker_lock.acquire()
+        try:
+            if mode == 'copy':
+                install_progress.update(server_id, phase='copying')
+                shutil.copytree(
+                    source, registry.resolve_install_path(server),
+                    symlinks=True, dirs_exist_ok=True,
+                )
+            install_progress.update(server_id, phase='linking_mods')
+            install_progress.update(server_id, **_link_imported_mods(server))
+            storage.update_server_status(server_id, 'stopped')
+            install_progress.update(server_id, phase='done')
+        except Exception as exc:  # noqa: BLE001 - surfaced to the UI
+            logger.exception('Import of %s failed', source)
+            storage.update_server_status(server_id, 'failed')
+            install_progress.update(server_id, phase='failed', error=f'Import failed: {exc}')
+        finally:
+            worker_lock.release()
+
+    threading.Thread(target=_run_import, name=f'import-{server_id}', daemon=True).start()
+    return jsonify({
+        **server,
+        'progress': {'active': True, **install_progress.get(server_id)},
+    }), 202
+
+
+def _link_imported_mods(server: dict) -> dict:
+    """Record every jar Modrinth recognises by hash in the content manifest.
+
+    Best-effort: an unreachable Modrinth leaves the jars untracked, exactly
+    like hand-dropped ones, rather than failing the import.
+    """
+    from backend.modrinth import installed as modrinth_installed
+
+    content_path = _registry().resolve_content_path(server)
+    jars = sorted(
+        path for path in content_path.iterdir()
+        if path.is_file() and path.name.lower().endswith(('.jar', '.jar.disabled'))
+    )
     try:
-        data['status'] = 'pending'
-        compatibility = _java_compat_payload(data.get('version', ''))
-        data['javaCompatibility'] = compatibility
-        server = storage.create_server(data)
-        java_check = _server_java_check_payload(server)
-        recommendation = None
-        if compatibility.get('required_java'):
-            recommendation = _build_java_recommendation(
-                platform_utils.platform_label(),
-                int(compatibility['required_java'])
-            )
-        server['javaRequirement'] = {
-            **java_check,
-            'recommended_install': recommendation
-        }
-        return jsonify(server), 201
-    except Exception as exc:
-        return jsonify({'error': str(exc)}), 500
+        resolved = modrinth_installed.resolve_jar_files(ModrinthClient(), jars)
+    except Exception as exc:  # noqa: BLE001 - see docstring
+        logger.warning('Modrinth lookup for imported server failed: %s', exc)
+        return {'mods_total': len(jars), 'mods_linked': 0, 'mods_link_error': str(exc)}
+
+    now = iso_z_now()
+    for filename, meta in resolved.items():
+        storage.record_content_install(
+            server['id'], filename, {**meta, 'pinned': False, 'installedAt': now},
+        )
+    return {
+        'mods_total': len(jars),
+        'mods_linked': len(resolved),
+        'mods_unlinked': [jar.name for jar in jars if jar.name not in resolved],
+    }
 
 
 @server_bp.route('/servers/<server_id>', methods=['GET'])
@@ -1559,9 +1740,10 @@ def delete_server_route(server_id, server):
     storage.delete_server(server_id)
     discard_lock(server_id)
 
-    # Delete files on disk
+    # Delete files on disk — unless the folder was imported in place and
+    # belongs to the user.
     removal_error = None
-    if install_path and install_path.exists():
+    if install_path and install_path.exists() and not server.get('external'):
         try:
             shutil.rmtree(install_path, onerror=_handle_remove_readonly)
         except OSError as exc:
@@ -1571,6 +1753,8 @@ def delete_server_route(server_id, server):
         'success': removal_error is None,
         'message': 'Server deleted successfully' if not removal_error else 'Server removed but files could not be deleted',
     }
+    if server.get('external'):
+        response['message'] = 'Server removed; its folder was left on disk'
     if removal_error:
         response['error'] = removal_error
     return jsonify(response), 200 if removal_error is None else 500

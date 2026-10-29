@@ -3,6 +3,7 @@ import { provide, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import ToastContainer from './components/common/ToastContainer.vue'
 import ServerCreateModal from './components/modals/ServerCreateModal.vue'
+import ImportServerModal from './components/modals/ImportServerModal.vue'
 import { useToast } from './composables/useToast'
 import { useAuthStore } from './stores/auth'
 import { t } from './i18n'
@@ -17,6 +18,16 @@ const auth = useAuthStore()
 // available regardless of which layout is active.
 const showCreateModal = ref(false)
 provide('showCreateModal', showCreateModal)
+const showImportModal = ref(false)
+
+const openImport = () => {
+  showCreateModal.value = false
+  showImportModal.value = true
+}
+
+const handleImportedServer = (server) => {
+  if (server?.id) router.push({ name: 'ServerOverview', params: { id: server.id } })
+}
 
 const handleCreateServer = (createdServer) => {
   if (!createdServer) return
@@ -45,12 +56,19 @@ const handleCreateServer = (createdServer) => {
 
 <template>
   <router-view />
-  <ServerCreateModal
-    v-if="!auth.managed && (auth.isAuthenticated || !auth.enabled)"
-    :show="showCreateModal"
-    @close="showCreateModal = false"
-    @create="handleCreateServer"
-  />
+  <template v-if="!auth.managed && (auth.isAuthenticated || !auth.enabled)">
+    <ServerCreateModal
+      :show="showCreateModal"
+      @close="showCreateModal = false"
+      @create="handleCreateServer"
+      @import="openImport"
+    />
+    <ImportServerModal
+      :show="showImportModal"
+      @close="showImportModal = false"
+      @imported="handleImportedServer"
+    />
+  </template>
   <ToastContainer />
 </template>
 
