@@ -243,3 +243,11 @@ def test_cannot_import_a_folder_containing_the_server_root(client, tmp_servers_r
             'path': str(tmp_servers_root), 'mode': mode, 'loader': 'vanilla', 'version': '1.21.1',
         })
         assert response.status_code == 400, mode
+
+
+def test_symlink_back_to_an_ancestor_is_refused(tmp_path):
+    (tmp_path / 'server.jar').write_bytes(b'x')
+    (tmp_path / 'world').mkdir()
+    (tmp_path / 'world' / 'loop').symlink_to(tmp_path, target_is_directory=True)
+    with pytest.raises(ValueError, match='links back'):
+        _detect(tmp_path)

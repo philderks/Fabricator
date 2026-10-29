@@ -95,7 +95,8 @@ function watchProgress(serverId) {
   const poll = createProgressPoller(() => getServerInstallProgress(serverId))
   pollTimer = setInterval(async () => {
     const result = await poll()
-    if (result.status === 'retry') return
+    // A slow tick can land after the final one; it must not overwrite it.
+    if (state.value !== 'running' || result.status === 'retry') return
     if (result.status === 'giveup') {
       clearInterval(pollTimer)
       state.value = 'failed'

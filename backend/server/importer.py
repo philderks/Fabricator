@@ -130,19 +130,30 @@ def _args_file_build(path: Path, builds_dir: str, args_name: str) -> Optional[st
     return builds[-1] if builds else None
 
 
+# Map-tile plugins (dynmap, BlueMap) can leave millions of files behind; the
+# walk runs inside a request, so it stops checking after this many entries.
+_ACCESS_SCAN_LIMIT = 100_000
+
+
 def _access_problem(path: Path) -> Optional[str]:
-    """``permissions`` if anything under ``path`` is read-only; raise if unreadable.
+    """``permissions`` if anything under ``path`` is read-only; raise if unusable.
 
     A server run as root leaves root-owned files behind, which is the usual
     reason an import fails on Linux; the top folder alone does not show it.
-    Unreadable breaks copy and in-place alike, so it is refused outright.
+    Unreadable breaks copy and in-place alike, so it is refused outright, as
+    is a symlink to one of its own ancestors: the copy follows symlinks and
+    would recurse into it until the disk is full.
     """
     problem = None
+    seen = 0
     for root, dirs, files in os.walk(path):
         for names, needed in ((dirs, os.R_OK | os.X_OK), (files, os.R_OK)):
             for name in names:
-                entry = os.path.join(root, name)
-                if os.path.islink(entry):
+                entry = Path(root) / name
+                if entry.is_symlink():
+                    target = entry.resolve()
+                    if target.is_dir() and target in entry.parents:
+                        raise ValueError(f"'{entry}' links back to its own parent folder")
                     continue  # access follows the link; a dangling one says nothing
                 if not os.access(entry, needed):
                     raise ValueError(
@@ -151,6 +162,11 @@ def _access_problem(path: Path) -> Optional[str]:
                     )
                 if not os.access(entry, os.W_OK):
                     problem = 'permissions'
+                seen += 1
+                if seen >= _ACCESS_SCAN_LIMIT:
+                    # shortcut: files past the limit go unchecked; an unreadable
+                    # one then fails the copy with its own error instead.
+                    return problem
     return problem
 
 

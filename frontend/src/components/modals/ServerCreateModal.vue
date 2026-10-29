@@ -92,7 +92,10 @@
              settings, so it hands off to a separate, much shorter dialog. -->
         <button
           type="button"
+          role="tab"
           class="mode-toggle-btn"
+          aria-selected="false"
+          aria-haspopup="dialog"
           @click="$emit('import')"
         >
           {{ $t('createServer.importExisting') }}
