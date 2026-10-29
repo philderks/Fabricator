@@ -862,9 +862,9 @@ def inspect_import():
     data = request.get_json(silent=True) or {}
     try:
         path = server_importer.validate_folder(data.get('path'))
+        return jsonify(server_importer.inspect_folder(path))
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
-    return jsonify(server_importer.inspect_folder(path))
 
 
 @server_bp.route('/servers/import', methods=['POST'])
@@ -883,18 +883,21 @@ def import_server():
     mode = data.get('mode', 'copy')
     if mode not in ('copy', 'inplace'):
         return jsonify({'error': "mode must be 'copy' or 'inplace'"}), 400
-    try:
-        source = server_importer.validate_folder(data.get('path'))
-    except ValueError as exc:
-        return jsonify({'error': str(exc)}), 400
-
     # The launch target is re-detected here, never taken from the client: it
     # ends up on a java command line.
-    detected = server_importer.inspect_folder(source)
+    try:
+        source = server_importer.validate_folder(data.get('path'))
+        detected = server_importer.inspect_folder(source)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
     if not detected['launch']:
         return jsonify({'error': 'No server jar or launch file found in that folder'}), 400
 
     registry = _registry()
+    # Neither mode may swallow the server root: copying it would recurse into
+    # its own copy, and registering it in place would put every server inside one.
+    if source == registry.base_dir or source in registry.base_dir.parents:
+        return jsonify({'error': 'That folder contains the Fabricator server root'}), 400
     if mode == 'inplace':
         for other in storage.get_all_servers():
             try:
@@ -903,8 +906,6 @@ def import_server():
                 continue
             if other_path == source or other_path in source.parents or source in other_path.parents:
                 return jsonify({'error': f"That folder is already used by server '{other.get('name')}'"}), 400
-    elif source == registry.base_dir or source in registry.base_dir.parents:
-        return jsonify({'error': 'Cannot copy a folder that contains the server root'}), 400
 
     record = _record_fields_from_properties(server_importer.read_properties(source))
     record.update({
@@ -938,9 +939,12 @@ def import_server():
         try:
             if mode == 'copy':
                 install_progress.update(server_id, phase='copying')
+                # Symlinks are followed: copying the link itself (a world kept
+                # on another disk, say) would leave the copy writing into the
+                # original server's files.
                 shutil.copytree(
                     source, registry.resolve_install_path(server),
-                    symlinks=True, dirs_exist_ok=True,
+                    dirs_exist_ok=True, ignore_dangling_symlinks=True,
                 )
             install_progress.update(server_id, phase='linking_mods')
             install_progress.update(server_id, **_link_imported_mods(server))

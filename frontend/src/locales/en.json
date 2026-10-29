@@ -1554,7 +1554,7 @@
       "loader": "Could not detect the loader — pick it below.",
       "version": "Could not detect the Minecraft version — enter it below.",
       "launch": "No server jar or launch file found; this folder cannot be started as is.",
-      "permissions": "Fabricator does not have read and write access to this folder. Copy it, or fix the permissions first."
+      "permissions": "Some files in this folder are read-only for the user Fabricator runs as. Copying works; running it in place may fail to save the world or configs."
     },
     "phases": {
       "starting": "Starting import…",

@@ -180,3 +180,66 @@ def test_create_route_cannot_claim_external(client):
     })
     assert response.status_code == 201
     assert 'external' not in _mod('storage').get_server(response.get_json()['id'])
+
+
+def test_picks_the_forge_build_the_run_script_uses(tmp_path, monkeypatch):
+    monkeypatch.setattr(_mod('importer'), 'is_windows', lambda: False)
+    for build in ('1.20.1-47.1.0', '1.20.1-47.2.0'):
+        args = tmp_path / 'libraries/net/minecraftforge/forge' / build / 'unix_args.txt'
+        args.parent.mkdir(parents=True)
+        args.write_text('')
+    (tmp_path / 'run.sh').write_text('java @user_jvm_args.txt @libraries/net/minecraftforge/forge/1.20.1-47.1.0/unix_args.txt "$@"\n')
+    (tmp_path / 'eula.txt').write_text('eula=true')
+    info = _detect(tmp_path)
+    assert info['loaderVersion'] == '47.1.0'
+    assert '47.1.0' in info['launch']['args_file']
+
+
+needs_non_root = pytest.mark.skipif(
+    not hasattr(__import__('os'), 'geteuid') or __import__('os').geteuid() == 0,
+    reason='permission bits are ignored for root / on Windows',
+)
+
+
+@needs_non_root
+def test_unreadable_files_are_refused_not_a_500(client, fabric_server):
+    secret = fabric_server / 'mods' / 'sodium.jar'
+    secret.chmod(0o000)
+    try:
+        response = client.post('/api/servers/import/inspect', json={'path': str(fabric_server)})
+    finally:
+        secret.chmod(0o644)
+    assert response.status_code == 400
+    assert 'sodium.jar' in response.get_json()['error']
+
+
+@needs_non_root
+def test_read_only_files_only_warn(fabric_server):
+    (fabric_server / 'server.properties').chmod(0o444)
+    assert 'permissions' in _detect(fabric_server)['warnings']
+
+
+def test_copy_does_not_share_symlinked_files_with_the_original(client, fabric_server, fake_modrinth):
+    shared = fabric_server.parent / 'big-disk-world'
+    shared.mkdir()
+    (shared / 'level.dat').write_bytes(b'original')
+    (fabric_server / 'world').symlink_to(shared, target_is_directory=True)
+
+    response = client.post('/api/servers/import', json={'path': str(fabric_server)})
+    assert response.status_code == 202, response.get_json()
+    server_id = response.get_json()['id']
+    assert _wait_done(server_id)['phase'] == 'done'
+
+    copied_world = fabric_server.parents[1] / 'servers' / server_id / 'world'
+    assert not copied_world.is_symlink()
+    assert (copied_world / 'level.dat').read_bytes() == b'original'
+
+
+def test_cannot_import_a_folder_containing_the_server_root(client, tmp_servers_root):
+    # tmp_servers_root holds servers/ (the root); make it look like a server.
+    (tmp_servers_root / 'server.jar').write_bytes(b'x')
+    for mode in ('copy', 'inplace'):
+        response = client.post('/api/servers/import', json={
+            'path': str(tmp_servers_root), 'mode': mode, 'loader': 'vanilla', 'version': '1.21.1',
+        })
+        assert response.status_code == 400, mode

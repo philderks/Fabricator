@@ -132,9 +132,11 @@ or the home folder, and the folder must contain `server.properties`, `eula.txt` 
 
 **Response (200):** `{ path, name, loader, version, loaderVersion, port, modsCount, launch, warnings }`.
 Undetected values are `null`. `warnings` holds codes: `loader`, `version`, `launch`, `permissions`
-(the panel user cannot read/write the folder).
+(some files are read-only for the panel user; running in place may fail). For a Forge/NeoForge
+folder holding several builds, the one named in `run.sh`/`run.bat` wins.
 
-**Errors:** `400` invalid path or a folder that doesn't look like a server
+**Errors:** `400` invalid path, a folder that doesn't look like a server, or any file or folder in
+it the panel user cannot read (the message names it)
 
 #### `POST /api/servers/import`
 
@@ -153,7 +155,8 @@ Modrinth recognises by hash are recorded in the content manifest. If Modrinth ca
 `mods_link_error` is set and the import still succeeds.
 
 **Errors:** `400` bad path or mode, nothing launchable found, missing name/version/loader, a port
-already in use, or an in-place folder already used by another server
+already in use, an in-place folder already used by another server, or a folder that contains the server
+root. A copy follows symlinks, so it never shares files with the original
 
 #### `GET /api/servers/<server_id>`
 

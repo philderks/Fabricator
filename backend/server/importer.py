@@ -57,6 +57,9 @@ def validate_folder(raw_path: Any) -> Path:
         raise ValueError(f"Folder '{path}' does not exist")
     if path == Path(path.anchor) or path == Path.home().resolve():
         raise ValueError('Refusing to import a drive root or home folder')
+    # Checked first: an unreadable folder would otherwise just look empty.
+    if not os.access(path, os.R_OK | os.X_OK):
+        raise ValueError(f"Fabricator cannot read '{path}'; check the folder's permissions")
     looks_like_server = (
         (path / 'server.properties').is_file()
         or (path / 'eula.txt').is_file()
@@ -104,6 +107,53 @@ def _single_child(path: Path) -> Optional[str]:
     return children[0] if len(children) == 1 else None
 
 
+def _args_file_build(path: Path, builds_dir: str, args_name: str) -> Optional[str]:
+    """The loader build folder under ``builds_dir`` that holds ``args_name``.
+
+    An in-place loader upgrade leaves the old build behind; the run script
+    names the one actually in use, so it decides between several.
+    """
+    root = path / builds_dir
+    if not root.is_dir():
+        return None
+    builds = sorted(child.name for child in root.iterdir() if (child / args_name).is_file())
+    if len(builds) > 1:
+        for script in ('run.sh', 'run.bat'):
+            try:
+                text = (path / script).read_text(encoding='utf-8', errors='replace').replace('\\', '/')
+            except OSError:
+                continue
+            named = [build for build in builds if f'/{build}/' in text]
+            if len(named) == 1:
+                return named[0]
+    # shortcut: lexical, not version order, when no run script settles it.
+    return builds[-1] if builds else None
+
+
+def _access_problem(path: Path) -> Optional[str]:
+    """``permissions`` if anything under ``path`` is read-only; raise if unreadable.
+
+    A server run as root leaves root-owned files behind, which is the usual
+    reason an import fails on Linux; the top folder alone does not show it.
+    Unreadable breaks copy and in-place alike, so it is refused outright.
+    """
+    problem = None
+    for root, dirs, files in os.walk(path):
+        for names, needed in ((dirs, os.R_OK | os.X_OK), (files, os.R_OK)):
+            for name in names:
+                entry = os.path.join(root, name)
+                if os.path.islink(entry):
+                    continue  # access follows the link; a dangling one says nothing
+                if not os.access(entry, needed):
+                    raise ValueError(
+                        f"Fabricator cannot read '{entry}'. Give the user Fabricator "
+                        "runs as access to the whole folder (e.g. chown -R) and try again"
+                    )
+                if not os.access(entry, os.W_OK):
+                    problem = 'permissions'
+    return problem
+
+
 def _jar_launch(jar: str) -> Dict[str, Any]:
     return {'type': 'jar', 'jar': jar, 'jvm_args': [], 'program_args': ['nogui'], 'args_file': None}
 
@@ -119,8 +169,8 @@ def _detect(path: Path, jars: List[str]) -> Dict[str, Any]:
     """Return ``{loader, version, loaderVersion, launch}``; unknowns are ``None``."""
     args_name = 'win_args.txt' if is_windows() else 'unix_args.txt'
 
-    neo_version = _single_child(path / 'libraries' / 'net' / 'neoforged' / 'neoforge')
-    if neo_version and (path / 'libraries/net/neoforged/neoforge' / neo_version / args_name).is_file():
+    neo_version = _args_file_build(path, 'libraries/net/neoforged/neoforge', args_name)
+    if neo_version:
         return {
             'loader': 'neoforge',
             'version': NeoForgeInstaller._neoforge_to_mc_version(neo_version),
@@ -130,8 +180,8 @@ def _detect(path: Path, jars: List[str]) -> Dict[str, Any]:
             ),
         }
 
-    forge_version = _single_child(path / 'libraries' / 'net' / 'minecraftforge' / 'forge')
-    if forge_version and (path / 'libraries/net/minecraftforge/forge' / forge_version / args_name).is_file():
+    forge_version = _args_file_build(path, 'libraries/net/minecraftforge/forge', args_name)
+    if forge_version:
         mc, _, build = forge_version.partition('-')
         return {
             'loader': 'forge', 'version': mc, 'loaderVersion': build or None,
@@ -222,7 +272,11 @@ def _fallback_mc_version(path: Path, jars: List[str]) -> Optional[str]:
 
 
 def inspect_folder(path: Path) -> Dict[str, Any]:
-    """Describe the server in ``path`` (already passed through :func:`validate_folder`)."""
+    """Describe the server in ``path`` (already passed through :func:`validate_folder`).
+
+    Raises ``ValueError`` if part of the folder is unreadable.
+    """
+    access = _access_problem(path)
     jars = sorted(entry.name for entry in path.iterdir() if entry.is_file() and entry.suffix == '.jar')
     detected = _detect(path, jars)
     if not detected['version']:
@@ -247,8 +301,8 @@ def inspect_folder(path: Path) -> Dict[str, Any]:
         warnings.append('version')
     if not detected['launch']:
         warnings.append('launch')
-    if not os.access(path, os.R_OK | os.W_OK):
-        warnings.append('permissions')
+    if access:
+        warnings.append(access)
 
     return {
         'path': str(path),
