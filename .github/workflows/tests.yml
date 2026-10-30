@@ -1,10 +1,9 @@
 name: Tests
 
-# Gate for merges to main: the backend suite must pass. Mark the "pytest" job
-# as a required status check in the branch protection rule for main.
+# Gate for merges: the backend suite must pass on every pull request. Mark the
+# "pytest" job as a required status check in the branch protection rules.
 on:
   pull_request:
-    branches: [main]
   push:
     branches: [dev]
 
