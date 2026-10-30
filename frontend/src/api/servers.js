@@ -27,6 +27,15 @@ export async function createServer(serverData) {
   return post('/api/servers', serverData)
 }
 
+export async function inspectServerImport(path) {
+  return post('/api/servers/import/inspect', { path })
+}
+
+/** Returns the new record plus `progress`; poll getServerInstallProgress() until inactive. */
+export async function importServer(payload) {
+  return post('/api/servers/import', payload)
+}
+
 export async function updateServerSettings(serverId, settings) {
   return put(`/api/servers/${serverId}/settings`, settings)
 }

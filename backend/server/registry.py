@@ -223,6 +223,13 @@ class ServerProcessRegistry:
             raise ValueError('Server entry is missing an id')
 
         raw_path = server.get('installPath')
+        if server.get('external'):
+            # Imported in place: the folder belongs to the user and lives
+            # wherever they keep it, so no root check, mkdir or chmod.
+            candidate = Path(str(raw_path or '')).expanduser().resolve()
+            if not raw_path or not candidate.is_dir():
+                raise ValueError(f"Server folder '{candidate}' no longer exists")
+            return candidate
         if raw_path:
             candidate = Path(str(raw_path))
             if not candidate.is_absolute():

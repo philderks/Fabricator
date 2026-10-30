@@ -190,7 +190,8 @@
     "delete": {
       "title": "Delete Server",
       "message": "Delete this server permanently?",
-      "description": "All server files and backups will be deleted. This cannot be undone."
+      "description": "All server files and backups will be deleted. This cannot be undone.",
+      "descriptionExternal": "Fabricator forgets this server and deletes its backups. The server folder was imported in place and stays on disk."
     },
     "defaultName": "Minecraft Server",
     "defaultMotd": "A Minecraft Server",
@@ -328,7 +329,8 @@
     "modpackInstalled": "{title} installed successfully!",
     "uncertainMods": "{n} mod could not be confirmed as server-safe. Review it on the server's mods page. | {n} mods could not be confirmed as server-safe. Review them on the server's mods page.",
     "failed": "Server creation failed",
-    "failedTitle": "Server Creation Failed"
+    "failedTitle": "Server Creation Failed",
+    "importExisting": "Import existing"
   },
   "modpacks": {
     "installingTitle": "Installing Modpack...",
@@ -1526,5 +1528,39 @@
     "unknownRequirement": "Could not determine the Java version this server needs.",
     "checkFailed": "Failed to check Java status.",
     "taskFailed": "The install task failed."
+  },
+  "importServer": {
+    "title": "Import existing server",
+    "intro": "Bring in a Minecraft server that was set up without Fabricator. The folder is inspected first; nothing is changed until you confirm.",
+    "path": "Server folder",
+    "pathHint": "Absolute path on the machine running Fabricator, e.g. /srv/minecraft or C:\\\\Servers\\\\survival.",
+    "pathPlaceholder": "/path/to/server",
+    "inspect": "Inspect",
+    "inspectFailed": "Could not inspect that folder",
+    "fieldsRequired": "Name, loader and Minecraft version are required.",
+    "modsFound": "{count} mod/plugin jar(s) found — they will be matched against Modrinth.",
+    "mode": "Where should the server live?",
+    "modeCopy": "Copy into Fabricator",
+    "modeCopyHint": "the original folder is left untouched.",
+    "modeInplace": "Keep it where it is",
+    "modeInplaceHint": "Fabricator runs it from this folder and never deletes it. The user Fabricator runs as needs read and write access.",
+    "confirm": "Import",
+    "open": "Open server",
+    "done": "{name} was imported.",
+    "modsLinked": "{linked} of {total} mods linked to Modrinth. The rest stay as plain files.",
+    "modsLinkFailed": "Modrinth could not be reached, so mods were not linked. They still work as plain files.",
+    "failed": "Import failed",
+    "warnings": {
+      "loader": "Could not detect the loader — pick it below.",
+      "version": "Could not detect the Minecraft version — enter it below.",
+      "launch": "No server jar or launch file found; this folder cannot be started as is.",
+      "permissions": "Some files in this folder are read-only for the user Fabricator runs as. Copying works; running it in place may fail to save the world or configs."
+    },
+    "phases": {
+      "starting": "Starting import…",
+      "copying": "Copying server files…",
+      "linking_mods": "Matching mods on Modrinth…",
+      "done": "Done"
+    }
   }
 }
