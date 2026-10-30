@@ -95,6 +95,9 @@ _NEVER = [
     ("PUT", "/api/servers/<server_id>/autostart"),
     ("DELETE", "/api/servers/<server_id>"),
     ("POST", "/api/servers"),
+    # Import reads (and in place, runs) an arbitrary host folder.
+    ("POST", "/api/servers/import"),
+    ("POST", "/api/servers/import/inspect"),
     ("PUT", "/api/servers/order"),
     # Server icon (#85): writes server-icon.png into the install path.
     ("PUT", "/api/servers/<server_id>/icon"),

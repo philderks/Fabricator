@@ -88,6 +88,18 @@
         >
           {{ $t('createServer.importModpack') }}
         </button>
+        <!-- Not a mode of this form: an imported server brings its own
+             settings, so it hands off to a separate, much shorter dialog. -->
+        <button
+          type="button"
+          role="tab"
+          class="mode-toggle-btn"
+          aria-selected="false"
+          aria-haspopup="dialog"
+          @click="$emit('import')"
+        >
+          {{ $t('createServer.importExisting') }}
+        </button>
       </div>
 
       <!-- Above Basic Settings on purpose: the pack decides the Minecraft
@@ -672,7 +684,7 @@ export default {
       required: true
     }
   },
-  emits: ['close', 'create'],
+  emits: ['close', 'create', 'import'],
   setup() {
     const toast = useToast()
     return { toast, formatNumber }

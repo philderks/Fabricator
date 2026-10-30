@@ -123,6 +123,41 @@ required Java major, what was detected, and a `recommended_install` download hin
 **Errors:** `400` missing fields, the port is already used by another server, or invalid memory
 fields (validated as in [settings](#put-apiserversserver_idsettings)) · `500` on write failure
 
+#### `POST /api/servers/import/inspect`
+
+Inspect a server folder Fabricator did not create. Read-only.
+
+**Body:** `{ "path": "/abs/path/to/server" }`. The path must be absolute and must not be a drive root
+or the home folder, and the folder must contain `server.properties`, `eula.txt` or a `*.jar`.
+
+**Response (200):** `{ path, name, loader, version, loaderVersion, port, modsCount, launch, warnings }`.
+Undetected values are `null`. `warnings` holds codes: `loader`, `version`, `launch`, `permissions`
+(some files are read-only for the panel user; running in place may fail). For a Forge/NeoForge
+folder holding several builds, the one named in `run.sh`/`run.bat` wins.
+
+**Errors:** `400` invalid path, a folder that doesn't look like a server, or any file or folder in
+it the panel user cannot read (the message names it)
+
+#### `POST /api/servers/import`
+
+Register that folder as a server. Disabled in managed mode (`403`).
+
+**Body:** `path`, `mode` (`copy`, the default, duplicates the folder into the server root;
+`inplace` runs it where it is and marks the record `external`), plus optional overrides of the
+detected `name`, `version`, `loader`, `port` and of `memory`, `memoryMin`, `memoryUnit`, `javaPath`,
+`jvmArgs`. The launch target is always re-detected on the server. `server.properties` values are
+copied into the record.
+
+**Response (202):** the created record (status `installing`) plus `progress`. Poll
+[`/install/progress`](#get-apiserversserver_idinstallprogress) for phases `copying`, `linking_mods`,
+`done`/`failed`. When done, the entry holds `mods_total`, `mods_linked` and `mods_unlinked`; mods
+Modrinth recognises by hash are recorded in the content manifest. If Modrinth can't be reached,
+`mods_link_error` is set and the import still succeeds.
+
+**Errors:** `400` bad path or mode, nothing launchable found, missing name/version/loader, a port
+already in use, an in-place folder already used by another server, or a folder that contains the server
+root. A copy follows symlinks, so it never shares files with the original
+
 #### `GET /api/servers/<server_id>`
 
 Single server, augmented with runtime state. `404` if unknown.
@@ -194,7 +229,7 @@ the server is running and does not touch `server.properties`.
 
 Stops the process, removes scheduled backups, backup records and scheduled commands, deletes the
 server record, then
-deletes the install directory from disk.
+deletes the install directory from disk. Servers imported in place (`external`) keep their folder.
 
 **Response (200):** `{ "success": true, "message": "Server deleted successfully" }`
 **Response (500):** the record is gone but the files could not be removed — the body carries

@@ -8,7 +8,7 @@
 
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/philderks/Fabricator?style=flat-square)](https://github.com/philderks/Fabricator/stargazers)
-[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Docker-lightgrey?style=flat-square)](https://github.com/philderks/Fabricator)
+[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20Docker-lightgrey?style=flat-square)](https://github.com/philderks/Fabricator)
 [![Docker](https://img.shields.io/badge/ghcr.io-philderks%2Ffabricator-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/philderks/Fabricator/pkgs/container/fabricator)
 
 [Website](https://fabricator.site/) | [Documentation](https://docs.fabricator.site/) | [MCP server for AI clients](mcp/README.md)
@@ -29,23 +29,27 @@
 | | Feature | Status |
 |---|---|---|
 | 🧩 | **Loaders**: Fabric, Quilt, NeoForge, Forge, Paper, Purpur, Folia, Pufferfish, Vanilla | ✅ Available |
-| 📦 | **Mod & plugin management**: install, remove, and browse Modrinth mods and plugins | ✅ Available |
+| 📦 | **Mod & plugin management**: install, remove, enable/disable, and browse Modrinth mods and plugins; update checks with missing-dependency detection | ✅ Available |
 | 🧰 | **Modpack import**: find popular Modrinth packs, search by name or link, or upload an exported `.mrpack` | ✅ Available |
 | 📋 | **Logs & monitoring**: live log stream, TPS and RAM graphs | ✅ Available |
 | 📁 | **File explorer & editor**: browse the server tree, search files, and edit configuration files in the panel | ✅ Available |
 | 👥 | **Player management**: online players, player heads, custom actions | ✅ Available |
-| 💾 | **Backups & restore**: manual snapshots, restore from any backup | ✅ Available |
+| 💾 | **Backups & restore**: manual and scheduled snapshots, restore from any backup | ✅ Available |
+| ⏰ | **Scheduled commands**: run console commands and server actions on a schedule | ✅ Available |
+| 🔄 | **One-click server upgrades**: Vanilla and Paper, with an automatic snapshot first | ✅ Available |
 | 🌍 | **World import**: upload a world archive and swap it in | ✅ Available |
-| 🖥️ | **Multiple servers**: manage several instances from one dashboard | ✅ Available |
+| 📂 | **Server import**: adopt an existing server folder into Fabricator | ✅ Available |
+| 🎨 | **MOTD editor & server icon**: colors and formatting with a live server-list preview | ✅ Available |
+| 🖥️ | **Multiple servers**: manage several instances from one dashboard, in your own order | ✅ Available |
 | ▶️ | **Auto-start**: always, never, or last-state restore | ✅ Available |
 | ☕ | **Managed Java runtimes**: downloaded and pinned per server | ✅ Available |
 | 🌐 | **playit.gg tunnels**: public access without port forwarding | ✅ Available |
 | 🐳 | **Docker**: single multi-arch (amd64/arm64) image, runs non-root | ✅ Available |
 | ⌨️ | **CLI** (`fabricator`): `status`, `start`/`stop`, `update`, `version`, `uninstall` | ✅ Available |
 | ⬆️ | **Self-update**: from the web UI, or via the CLI or install script | ✅ Available |
+| 🤖 | **[MCP server](mcp/README.md)**: manage servers from AI clients | ✅ Available |
 | ⌨️ | **CLI**: expanded server and mod management commands | 📋 Planned |
-| ⏰ | **Scheduled commands** | 📋 Planned |
-| 🔄 | **One-click Minecraft / Fabric server upgrades** | 📋 Planned |
+| 🔄 | **Upgrades for modded loaders** (Fabric, Quilt, NeoForge, Forge) | 📋 Planned |
 | 📊 | **Metrics tab**: CPU, RAM, and usage over time | 📋 Planned |
 | 🔐 | **User roles and permissions** | 📋 Planned |
 | ✏️ | **Advanced editor & archived logs** | 📋 Planned |
@@ -108,6 +112,17 @@ docker compose pull && docker compose up -d
 Docker is the simplest way to run Fabricator on **Linux, macOS, or Windows** (via
 Docker Desktop / WSL2).
 
+### Windows (portable .exe)
+
+Every [release](https://github.com/philderks/Fabricator/releases) includes a portable
+`Fabricator-<version>.exe`. Download it and run it — no install needed. It opens the
+panel in your browser at `http://127.0.0.1:5000` and adds a tray icon with **Open in
+Browser**, **Open Data Folder**, and **Quit**. The panel listens on loopback only.
+
+Data lives in `%APPDATA%\Fabricator`, so you can move or replace the `.exe` freely.
+To update, use the update button in the panel's sidebar: it downloads the new `.exe`
+and verifies its checksum.
+
 ### One-line installer
 
 The script downloads a **release tarball** from [GitHub Releases](https://github.com/philderks/Fabricator/releases), installs dependencies, creates a `fabricator` user and systemd unit, and starts the app. Supported distros: Debian/Ubuntu (and derivatives), Arch, Fedora/RHEL family. **systemd** and **curl** are required.
@@ -168,11 +183,11 @@ Environment variables are documented in `.env.example`. For production-like path
 | | Requirement |
 |---|---|
 | Docker | Any OS with Docker Engine or Docker Desktop (recommended path) |
-| OS | Linux (Debian/Ubuntu, Arch, or Fedora/RHEL, systemd) for the native installer |
+| OS | Linux (Debian/Ubuntu, Arch, or Fedora/RHEL, systemd) for the native installer; Windows for the portable `.exe` |
 | Python | 3.11+ (manual/native install) |
 | Node.js | 22.x (frontend build only) |
 
-> The native installer targets Linux. On macOS and Windows, run Fabricator via Docker.
+> The native installer targets Linux, and Windows has the portable `.exe`. On macOS, run Fabricator via Docker.
 
 ---
 
@@ -290,6 +305,10 @@ fabricator help              # list all commands
 ```
 
 The read commands (`status`, `version`, `help`) accept `--json` for scripting. The CLI is currently minimal and will grow to cover server and mod management.
+
+---
+
+> **A note on AI usage:** I use Claude while developing Fabricator. It lets me ship features and fixes faster than my free time would otherwise allow. I review and test every change myself before it is released, and backend tests run on every pull request. If you'd rather not run AI-assisted software, that's a fair choice, and I'd rather you know upfront.
 
 ---
 
