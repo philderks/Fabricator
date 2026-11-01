@@ -540,6 +540,7 @@ def _java_compat_payload(mc_version: str) -> dict:
 
 _SETTINGS_RECORD_FIELDS = frozenset({
     'name', 'memory', 'memoryMin', 'memoryUnit', 'javaPath', 'jvmArgs',
+    'preStartCommand',
 })
 
 _SETTINGS_PROPERTY_FIELDS = frozenset({
@@ -693,7 +694,7 @@ def _port_taken_by_other(port: int, servers: list, exclude_id=None) -> bool:
 
 
 def _normalize_launch_overrides(data: dict) -> str | None:
-    """Validate and normalize ``javaPath`` / ``jvmArgs`` in-place.
+    """Validate and normalize ``javaPath`` / ``jvmArgs`` / ``preStartCommand`` in-place.
 
     Returns an error message, or None when the payload is fine. Both fields are
     user-owned launch tuning (#54): the JVM binary the server runs on, and extra
@@ -718,6 +719,20 @@ def _normalize_launch_overrides(data: dict) -> str | None:
                 data[key] = raw.strip() if isinstance(raw, str) else raw
         except jvm_args.JvmArgsError as exc:
             return str(exc)
+    # Shell command run before each start (#103). One line: cmd.exe and sh
+    # disagree on what a newline means, so a multi-line script belongs in a file.
+    if 'preStartCommand' in data:
+        raw = data['preStartCommand']
+        if raw is None:
+            raw = ''
+        if not isinstance(raw, str):
+            return 'Pre-start command must be a string'
+        raw = raw.strip()
+        if len(raw) > 2000:
+            return f'Pre-start command is too long ({len(raw)} characters, max 2000)'
+        if any(ch in raw for ch in '\r\n\0'):
+            return 'Pre-start command must be a single line'
+        data['preStartCommand'] = raw
     return None
 
 
@@ -1615,7 +1630,8 @@ def update_server_settings(server_id, server):
     # explicitly rather than silently strip so a managed override is loud.
     if is_managed():
         forbidden = [
-            key for key in ('command', 'javaPath', 'jvmArgs', 'launch') if key in data
+            key for key in ('command', 'javaPath', 'jvmArgs', 'preStartCommand', 'launch')
+            if key in data
         ]
         if forbidden:
             return jsonify({
@@ -2182,12 +2198,20 @@ def start_server_by_id(server_id, server):
     if skip_java_enforcement():
         required_java_major = None
 
+    # A pre-start command can run for minutes; without this the UI would show
+    # "stopped" and offer Start again while it works.
+    marked_starting = bool(server.get('preStartCommand')) and server.get('status') == 'stopped'
+    if marked_starting:
+        storage.update_server_status(server_id, 'starting')
+
     try:
         result = _registry().start_server(
             server,
             required_java_major=required_java_major
         )
     except ValueError as exc:
+        if marked_starting:
+            storage.update_server_status(server_id, 'stopped')
         return jsonify({'error': str(exc)}), 400
 
     if result.get('stopping'):

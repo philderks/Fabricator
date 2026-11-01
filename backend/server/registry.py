@@ -304,7 +304,12 @@ class ServerProcessRegistry:
                 players_service.apply_forgotten_players(self.resolve_install_path(server), server)
             except Exception:
                 logger.warning("Could not apply forgotten players for %s", server.get('id'), exc_info=True)
-        result = manager.start(required_java_major=required_java_major)
+        result = manager.start(
+            required_java_major=required_java_major,
+            # Managed mode owns the launch; the settings route refuses this
+            # field there, and a record that predates the switch is not trusted.
+            pre_start_command='' if is_managed() else str(server.get('preStartCommand') or '').strip(),
+        )
         if result.get('status') == 'running':
             server_id = str(server['id'])
             with self._lock:

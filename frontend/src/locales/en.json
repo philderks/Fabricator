@@ -1411,6 +1411,8 @@
       "path": "Java Executable Path",
       "jvmArgs": "JVM Arguments",
       "jvmArgsHint": "Extra flags passed to the JVM, e.g. -XX:+UseZGC -XX:+ZGenerational. Set the heap with Memory Allocation below, not with -Xmx.",
+      "preStartCommand": "Pre-start Command",
+      "preStartCommandHint": "Runs in the server folder before every start, e.g. to sync a packwiz modpack. Its output appears in the console. If it fails or runs longer than 10 minutes, the server does not start.",
       "notice": "These change how the server process is launched and take effect on the next start.",
       "auto": "Automatic (recommended)",
       "managedOption": "Java {major} (managed)",
