@@ -2297,9 +2297,17 @@ def stop_server_by_id(server_id, server):
 @require_server
 @with_server_lock
 def restart_server_by_id(server_id, server):
+    # Same reason as the start route: the pre-start command can run for minutes.
+    marked_starting = bool(server.get('preStartCommand')) and server.get('status') in ('running', 'stopped')
+    if marked_starting:
+        storage.update_server_status(server_id, 'starting')
+
     try:
         result = _registry().restart_server(server)
     except (ValueError, RuntimeError) as exc:
+        if marked_starting:
+            # A failed stop half leaves the old process up; report what is true.
+            storage.update_server_status(server_id, _registry().get_status(server_id).get('status', 'stopped'))
         return jsonify({'error': str(exc)}), 400
 
     start_status = result['start'].get('status')

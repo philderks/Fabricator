@@ -65,6 +65,14 @@ def test_timeout_kills_the_whole_tree(tmp_path):
     assert mgr._process is None
 
 
+def test_server_java_dir_leads_path(tmp_path):
+    mgr = _manager(tmp_path)
+    mgr.command = ["/opt/managed-jdk/bin/java", "-jar", "server.jar"]
+    mgr._spawn_process = lambda *a, **k: (False, "not spawned")  # only the pre-start matters here
+    mgr.start(pre_start_command='echo "$PATH"')
+    assert _stdout(mgr)[1].startswith("[pre-start] /opt/managed-jdk/bin:")
+
+
 def test_concurrent_start_is_refused_while_pre_start_runs(tmp_path):
     mgr = _manager(tmp_path)
     mgr._pre_starting = True
@@ -108,6 +116,34 @@ def test_settings_rejects_invalid_command(client, app, tmp_servers_root, value):
     resp = client.put(f"/api/servers/{sid}/settings", json={"preStartCommand": value})
     assert resp.status_code == 400
     assert "Pre-start command" in resp.get_json()["error"]
+
+
+@pytest.mark.parametrize("route", ["start", "restart"])
+def test_status_reads_starting_while_pre_start_runs(client, app, tmp_servers_root, monkeypatch, route):
+    from backend.server import registry as registry_module
+    from backend.server import storage
+
+    sid = _make_server(app, tmp_servers_root, 25964, f"ps-{route}")
+    with app.app_context():
+        storage.update_server(sid, {"preStartCommand": "sh sync.sh", "status": "stopped"})
+
+    seen = {}
+
+    def fake_start(server, **_):
+        with app.app_context():
+            seen["status"] = storage.get_server(sid)["status"]
+        return {"status": "stopped", "message": "Pre-start command failed (exit code 1)"}
+
+    reg = registry_module.get_server_process_registry()
+    monkeypatch.setattr(reg, "start_server", fake_start)
+    monkeypatch.setattr(reg, "stop_server", lambda _sid: {"status": "stopped"})
+    monkeypatch.setattr(registry_module.time, "sleep", lambda _s: None)
+
+    resp = client.post(f"/api/servers/{sid}/{route}")
+    assert resp.status_code == 400
+    assert seen["status"] == "starting"
+    with app.app_context():
+        assert storage.get_server(sid)["status"] == "stopped"
 
 
 def test_managed_rejects_pre_start_command(client, app, tmp_servers_root, monkeypatch):

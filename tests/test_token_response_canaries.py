@@ -127,6 +127,7 @@ def canary(tmp_path, monkeypatch):
         "installPath": str(install_path),                                  # path
         "javaPath": str(root / "java" / "21" / "bin" / "java.exe"),        # path
         "rconPassword": CANARY_SECRET,                                     # credential
+        "preStartCommand": f"sync --token {CANARY_SECRET}",               # credential
         "enableRcon": True,
     })
     sid = server["id"]

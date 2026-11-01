@@ -588,11 +588,18 @@ class ServerManager:
         try:
             self._begin_run_logs()
             self._append_stdout("[pre-start] Running pre-start command\n")
+            # Put the server's own Java first on PATH so a plain `java` in the
+            # command (packwiz) works where only a managed JDK is installed.
+            env = None
+            java_dir = os.path.dirname(self._java_executable())
+            if java_dir:
+                env = {**os.environ, "PATH": java_dir + os.pathsep + os.environ.get("PATH", "")}
             try:
                 proc = subprocess.Popen(
                     command,
                     shell=True,
                     cwd=self.cwd,
+                    env=env,
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
