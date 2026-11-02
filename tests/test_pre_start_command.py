@@ -7,6 +7,7 @@ validates it (one line) and refuses it in managed mode.
 from __future__ import annotations
 
 import sys
+import threading
 import time
 
 import pytest
@@ -71,6 +72,40 @@ def test_server_java_dir_leads_path(tmp_path):
     mgr._spawn_process = lambda *a, **k: (False, "not spawned")  # only the pre-start matters here
     mgr.start(pre_start_command='echo "$PATH"')
     assert _stdout(mgr)[1].startswith("[pre-start] /opt/managed-jdk/bin:")
+
+
+def test_stop_cancels_a_running_pre_start(tmp_path):
+    mgr = _manager(tmp_path)
+    result = {}
+    worker = threading.Thread(target=lambda: result.update(mgr.start(pre_start_command="sleep 30")))
+    worker.start()
+    deadline = time.monotonic() + 5
+    while mgr._pre_start_kill is None and time.monotonic() < deadline:
+        time.sleep(0.05)
+
+    assert mgr.stop()["message"] == "Pre-start command cancelled"
+    worker.join(timeout=5)
+    assert not worker.is_alive()
+    assert result["status"] == "stopped"
+    assert "cancelled" in result["message"]
+    assert mgr._process is None
+
+
+def test_stop_after_the_command_but_before_launch_still_cancels(tmp_path):
+    mgr = _manager(tmp_path)
+
+    def finished_then_stopped(_command):
+        mgr._pre_starting = True  # handed over, as a successful run leaves it
+        mgr._pre_start_cancelled = False
+        mgr.stop()
+        return None
+
+    mgr._run_pre_start = finished_then_stopped
+    result = mgr.start(pre_start_command="true")
+    assert result["status"] == "stopped"
+    assert "cancelled" in result["message"]
+    assert mgr._process is None
+    assert mgr._pre_starting is False
 
 
 def test_concurrent_start_is_refused_while_pre_start_runs(tmp_path):
