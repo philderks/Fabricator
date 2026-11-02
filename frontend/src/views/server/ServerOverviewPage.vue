@@ -217,7 +217,6 @@ onUnmounted(() => {
         <span class="overview-page__modpack-name">{{ store.activeModpack.name || store.activeModpack.projectId }}</span>
         <span class="overview-page__modpack-version">{{ store.activeModpack.version }}</span>
         <AppButton
-          v-if="store.activeModpack.projectId"
           variant="ghost"
           size="sm"
           :title="$t('modpacks.changeVersionTitle', { name: store.activeModpack.name || store.activeModpack.projectId })"

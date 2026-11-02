@@ -138,6 +138,8 @@ export const useServerStore = defineStore('server', () => {
   const showJavaModal = ref(false)
   const pendingJavaAction = ref(null)
   const showModpackBrowser = ref(false)
+  // Which tab the browser opens on: 'search', or 'file' to change an uploaded pack's version.
+  const modpackBrowserMethod = ref('search')
   const showConfirmModal = ref(false)
   const confirmModalData = ref({})
   const modToRemove = ref(null)
@@ -991,7 +993,10 @@ export const useServerStore = defineStore('server', () => {
 
   function openModBrowser() { showModBrowser.value = true }
   function closeModBrowser() { showModBrowser.value = false }
-  function openModpackBrowser() { showModpackBrowser.value = true }
+  function openModpackBrowser(method = 'search') {
+    modpackBrowserMethod.value = method
+    showModpackBrowser.value = true
+  }
   function closeModpackBrowser() { showModpackBrowser.value = false }
   function closeJavaModal() { showJavaModal.value = false }
   function openDeleteServerModal() { showDeleteServerModal.value = true }
@@ -1093,10 +1098,16 @@ export const useServerStore = defineStore('server', () => {
   function closeVersionPicker() { versionPickerMod.value = null }
 
   // Same picker for the server's modpack (#104). The choice goes through the
-  // normal modpack confirm/install flow rather than the mod-jar swap.
+  // normal modpack confirm/install flow rather than the mod-jar swap. An
+  // uploaded pack (.mrpack or server pack zip) has no versions to list, so
+  // another version of it is uploaded instead.
   function openModpackVersionPicker() {
     const pack = activeModpack.value
-    if (!pack?.projectId) return
+    if (!pack) return
+    if (!pack.projectId) {
+      openModpackBrowser('file')
+      return
+    }
     versionPickerMod.value = {
       kind: 'modpack',
       projectId: pack.projectId,
@@ -1771,6 +1782,7 @@ export const useServerStore = defineStore('server', () => {
     showJavaModal,
     pendingJavaAction,
     showModpackBrowser,
+    modpackBrowserMethod,
     showConfirmModal,
     confirmModalData,
     modToRemove,

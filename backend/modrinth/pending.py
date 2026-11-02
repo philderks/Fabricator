@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
-from backend.modrinth import mrpack
+from backend.modrinth import mrpack, serverpack
 from backend.utils.time import iso_z_now
 
 logger = logging.getLogger(__name__)
@@ -114,6 +114,8 @@ class PreparedPack:
     source: str = "project"
     upload_id: str = ""
     identity: Dict[str, Any] = field(default_factory=dict)
+    # What upload staging read off the archive; tells a server pack (#104) apart.
+    summary: Dict[str, Any] = field(default_factory=dict)
     _tmp_dir: Optional[str] = None
 
     def cleanup(self) -> None:
@@ -148,6 +150,7 @@ def prepare(client: Any, intent: Dict[str, Any]) -> PreparedPack:
             loader_version=str(summary.get("loader_version") or ""),
             filename=staged.filename,
             source="upload",
+            summary=summary,
             upload_id=upload_id,
         )
 
@@ -202,15 +205,26 @@ def install_prepared(
     worth taking. The interactive install route keeps both options for packs
     going onto a server that already has content.
     """
-    result = client.install_mrpack_archive(
-        prepared.archive,
-        install_path,
-        loader=prepared.loader or None,
-        clean_install=False,
-        allow_missing=True,
-        mod_side_overrides=intent.get("mod_side_overrides"),
-        progress_callback=progress_callback,
-    )
+    if prepared.summary.get("kind") == serverpack.KIND:
+        result = serverpack.install(
+            prepared.archive,
+            install_path,
+            prepared.summary,
+            clean=client.clean_modpack_switch_paths,
+            protected=client.PROTECTED_SERVER_PATHS,
+            clean_install=False,
+            progress_callback=progress_callback,
+        )
+    else:
+        result = client.install_mrpack_archive(
+            prepared.archive,
+            install_path,
+            loader=prepared.loader or None,
+            clean_install=False,
+            allow_missing=True,
+            mod_side_overrides=intent.get("mod_side_overrides"),
+            progress_callback=progress_callback,
+        )
 
     # A pack fetched from Modrinth has an upstream identity the index cannot
     # know; an uploaded one has only its filename.

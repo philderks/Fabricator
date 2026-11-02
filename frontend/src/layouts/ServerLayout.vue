@@ -217,6 +217,7 @@ onUnmounted(() => {
       :show="store.showModpackBrowser"
       :mc-version="store.server?.version || store.serverStatus.version"
       :loader="(store.server?.loader || store.serverStatus.loader).toLowerCase()"
+      :initial-method="store.modpackBrowserMethod"
       @close="store.closeModpackBrowser"
       @install="store.handleInstallModpack"
     />

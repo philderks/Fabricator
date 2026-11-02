@@ -70,7 +70,7 @@ const selectAllLabel = computed(() => {
         >
           {{ tk('mods.updateMods', 'mods.updatePlugins', updateCount) }}
         </AppButton>
-        <AppButton v-if="!isPlugin" variant="ghost" @click="store.openModpackBrowser">{{ $t('mods.browseModpacks') }}</AppButton>
+        <AppButton v-if="!isPlugin" variant="ghost" @click="store.openModpackBrowser()">{{ $t('mods.browseModpacks') }}</AppButton>
         <AppButton
           variant="primary"
           :loading="store.isInstalling"
@@ -127,7 +127,6 @@ const selectAllLabel = computed(() => {
           </svg>
         </a>
         <AppButton
-          v-if="store.activeModpack.projectId"
           variant="ghost"
           size="sm"
           :title="$t('modpacks.changeVersionTitle', { name: store.activeModpack.name || store.activeModpack.projectId })"

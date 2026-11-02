@@ -9,7 +9,7 @@ from pathlib import Path
 from flask import Blueprint, current_app, jsonify, request
 from werkzeug.utils import secure_filename
 
-from backend.modrinth import installed, mrpack
+from backend.modrinth import installed, mrpack, serverpack
 from backend.modrinth.client import ModrinthClient, ModrinthApiError
 from backend.server import importer, storage
 from backend.server.installer import get_installer_for
@@ -936,7 +936,7 @@ def install_modpack(project_id, server):
 
 @modrinth_bp.route('/modpack/upload', methods=['POST'])
 def upload_modpack_archive():
-    """Stage an uploaded .mrpack and report what it declares.
+    """Stage an uploaded .mrpack or server pack zip and report what it declares.
 
     The raw archive bytes are the request body (``fetch(url, {body: file})``);
     the display filename comes from the ``filename`` query param or the
@@ -976,12 +976,16 @@ def upload_modpack_archive():
         return jsonify({'error': 'Empty upload — no file received'}), 400
 
     try:
-        index = mrpack.read_index(temp_path)
+        summary = mrpack.describe(mrpack.read_index(temp_path), temp_path)
     except mrpack.InvalidMrpackError as exc:
-        temp_path.unlink(missing_ok=True)
-        return jsonify({'error': str(exc)}), 400
-
-    summary = mrpack.describe(index, temp_path)
+        # Not a .mrpack: a CurseForge-style server pack zip also installs (#104).
+        try:
+            summary = serverpack.describe(temp_path, safe_display)
+        except mrpack.InvalidMrpackError as pack_exc:
+            temp_path.unlink(missing_ok=True)
+            # Report against what the user meant to upload.
+            error = pack_exc if safe_display.lower().endswith('.zip') else exc
+            return jsonify({'error': str(error)}), 400
     staged = mrpack.stage(
         temp_path, filename=safe_display, size_bytes=written, summary=summary
     )
@@ -1003,7 +1007,7 @@ def discard_modpack_upload(upload_id):
     busy_message='A modpack install is already in progress for this server',
 )
 def install_uploaded_modpack(upload_id, server):
-    """Install a previously staged .mrpack onto a server (#53)."""
+    """Install a previously staged .mrpack (#53) or server pack (#104) onto a server."""
     data = request.get_json() or {}
     staged = mrpack.get(upload_id)
     if staged is None:
@@ -1026,6 +1030,16 @@ def install_uploaded_modpack(upload_id, server):
     loader = data.get('loader') or staged.summary.get('loader') or server.get('loader')
 
     def _run(install_path, progress_cb):
+        if staged.summary.get('kind') == serverpack.KIND:
+            return serverpack.install(
+                staged.path,
+                install_path,
+                staged.summary,
+                clean=modrinth_client.clean_modpack_switch_paths,
+                protected=modrinth_client.PROTECTED_SERVER_PATHS,
+                clean_install=_parse_bool(data.get('clean_install'), default=True),
+                progress_callback=progress_cb,
+            )
         return modrinth_client.install_mrpack_archive(
             staged.path,
             install_path,

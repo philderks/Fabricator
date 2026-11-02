@@ -243,7 +243,7 @@
                   :id="id"
                   ref="mrpackInput"
                   type="file"
-                  accept=".mrpack,application/zip"
+                  accept=".mrpack,.zip,application/zip"
                   :disabled="packUploading"
                   :aria-describedby="describedBy"
                   @change="handlePackFileChange"
