@@ -223,3 +223,122 @@ def test_upgrade_route_starts_a_tracked_upgrade_job(client, tmp_servers_root, mo
     assert progress["phase"] == "done"
     assert progress["kind"] == "upgrade"
     assert progress["snapshot_id"] == "snap_upgrade"
+
+
+# ---------------------------------------------------------------------------
+# Loader-build swap (#104)
+# ---------------------------------------------------------------------------
+
+class _LoaderInstaller:
+    requires_java_for_install = True
+
+    def __init__(self, events, result=None, builds=("21.1.169", "21.1.200")):
+        self.events, self.result, self.builds = events, result, builds
+
+    def get_available_versions(self, mc_version=None):
+        return [{"version": b} for b in self.builds]
+
+    def set_java_exec(self, path):
+        self.events.append(("java", path))
+
+    def install(self, mc_version, loader_version=None, progress_callback=None):
+        self.events.append(("install", mc_version, loader_version))
+        return self.result
+
+    def install_with_config(self, *args, **kwargs):  # pragma: no cover - must not run
+        raise AssertionError("install_with_config would overwrite server.properties")
+
+
+def test_loader_upgrade_backs_up_stops_installs_build_and_records_it(monkeypatch, tmp_path):
+    from backend.server import upgrade
+
+    server = _server(loader="neoforge", version="1.21.1", loaderVersion="21.1.169")
+    events, updates = [], []
+    result = InstallResult(
+        success=True, status=InstallStatus.COMPLETED, message="installed",
+        launch=LaunchSpec(type="jar", jar="server.jar", program_args=["nogui"]),
+    )
+    installer = _LoaderInstaller(events, result)
+
+    class Registry:
+        def resolve_install_path(self, record):
+            return tmp_path
+
+        def get_java_runtime(self, record):
+            return {"java_exec": "/jdk/bin/java", "java_missing": False}
+
+        def stop_server(self, server_id):
+            events.append(("stop", server_id))
+
+    monkeypatch.setattr(upgrade.server_storage, "get_server", lambda _id: server)
+    monkeypatch.setattr(upgrade, "get_server_process_registry", lambda: Registry())
+    monkeypatch.setattr(
+        upgrade.backup_service, "run_adhoc_backup",
+        lambda server_id, **kwargs: events.append(("backup", server_id)) or {"id": "snap_1"},
+    )
+    monkeypatch.setattr(upgrade, "get_installer_for", lambda loader, path: installer)
+    monkeypatch.setattr(
+        upgrade.server_storage, "update_server",
+        lambda server_id, patch: updates.append(patch) or {**server, **patch},
+    )
+
+    done = upgrade.upgrade_loader("srv_upgrade", "21.1.200")
+
+    assert events == [
+        ("java", "/jdk/bin/java"),
+        ("backup", "srv_upgrade"),
+        ("stop", "srv_upgrade"),
+        ("install", "1.21.1", "21.1.200"),
+    ]
+    assert updates == [{
+        "loaderVersion": "21.1.200", "status": "stopped", "launch": result.launch.to_dict(),
+    }]
+    assert done["from_loader_version"] == "21.1.169"
+    assert done["to_loader_version"] == "21.1.200"
+
+
+@pytest.mark.parametrize(
+    "loader,build,message",
+    [
+        ("vanilla", "21.1.200", "only supported"),
+        ("neoforge", "", "No loader version"),
+        ("neoforge", "21.1.999", "not available"),
+    ],
+)
+def test_loader_upgrade_rejects_unsupported_loaders_and_unknown_builds(monkeypatch, loader, build, message):
+    from backend.server import upgrade
+
+    monkeypatch.setattr(upgrade, "get_installer_for", lambda _l, _p: _LoaderInstaller([]))
+    with pytest.raises(upgrade.UpgradeError, match=message):
+        upgrade.validate_loader_upgrade(_server(loader=loader, version="1.21.1"), build)
+
+
+def test_upgrade_route_dispatches_loader_version_to_loader_upgrade(client, tmp_servers_root, monkeypatch):
+    import threading
+
+    from backend.server import storage
+    from backend.server import upgrade as upgrade_service
+
+    server = storage.create_server({
+        "name": "Pack", "version": "1.21.1", "loader": "neoforge",
+        "port": 25566, "installPath": "pack-loader",
+    })
+    called = []
+    complete = threading.Event()
+
+    def fake_upgrade_loader(server_id, build, *, progress_callback):
+        called.append((server_id, build))
+        complete.set()
+        return {"snapshot_id": "snap_loader"}
+
+    monkeypatch.setattr(upgrade_service, "validate_loader_upgrade", lambda _s, build: build)
+    monkeypatch.setattr(upgrade_service, "upgrade_loader", fake_upgrade_loader)
+
+    response = client.post(
+        f"/api/servers/{server['id']}/upgrade", json={"loader_version": "21.1.200"},
+    )
+
+    assert response.status_code == 202
+    assert response.get_json()["kind"] == "loader_upgrade"
+    assert complete.wait(timeout=2)
+    assert called == [(server["id"], "21.1.200")]

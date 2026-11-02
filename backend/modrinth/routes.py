@@ -11,8 +11,10 @@ from werkzeug.utils import secure_filename
 
 from backend.modrinth import installed, mrpack
 from backend.modrinth.client import ModrinthClient, ModrinthApiError
-from backend.server import storage
+from backend.server import importer, storage
+from backend.server.installer import get_installer_for
 from backend.server.registry import get_server_process_registry
+from backend.server.upgrade import loader_build_available
 from backend.server.java_compat import resolve_required_java, skip_java_enforcement
 from backend.utils.routes import require_server, with_server_lock
 from backend.utils.strings import bool_from_str
@@ -772,6 +774,37 @@ def install_mod(mod_id, server):
     })
 
 
+def _loader_change(server, install_path, result):
+    """The loader build the installed pack asks for, if the server runs another (#104).
+
+    None when the pack names no build, names a different loader, or names a
+    build the installer cannot supply. A server whose build is unknown (a
+    Fabric/Quilt ``server.jar`` installed before builds were recorded) gets the
+    offer too: reinstalling the same build is harmless, a mismatch is not.
+    """
+    summary = mrpack.describe({'dependencies': result.get('dependencies') or {}})
+    loader = (server.get('loader') or '').strip().lower()
+    declared = summary['loader_version']
+    if not declared or summary['loader'] != loader:
+        return None
+
+    current = server.get('loaderVersion')
+    if not current:
+        jars = sorted(p.name for p in install_path.iterdir() if p.is_file() and p.suffix == '.jar')
+        current = importer._detect(install_path, jars)['loaderVersion']
+    if current == declared:
+        return None
+
+    installer = get_installer_for(loader, install_path)
+    try:
+        if installer is None or not loader_build_available(installer, server.get('version'), declared):
+            return None
+    except Exception:  # noqa: BLE001 - the offer is optional, the install already succeeded
+        current_app.logger.warning('Could not list %s versions for the loader-change offer', loader)
+        return None
+    return {'loader': loader, 'current': current, 'required': declared}
+
+
 def _run_modpack_install(server, data, run_install, build_modpack_info, *, log_label):
     """Run a modpack install and everything that has to happen around one.
 
@@ -857,6 +890,9 @@ def _run_modpack_install(server, data, run_install, build_modpack_info, *, log_l
         payload['backup_file'] = backup_file
     if java_warning:
         payload['java_warning'] = java_warning
+    loader_change = _loader_change(server, Path(install_path), result)
+    if loader_change:
+        payload['loader_change'] = loader_change
     return jsonify(payload)
 
 
@@ -879,6 +915,7 @@ def install_modpack(project_id, server):
             allow_missing=_parse_bool(data.get('allow_missing'), default=False),
             mod_side_overrides=data.get('mod_side_overrides'),
             progress_callback=progress_cb,
+            version_id=data.get('version_id') or None,
         )
 
     def _modpack_info(result):

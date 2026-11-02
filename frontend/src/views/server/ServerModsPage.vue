@@ -126,6 +126,15 @@ const selectAllLabel = computed(() => {
             <path d="M9 8v2.5H1.5V3H4" />
           </svg>
         </a>
+        <AppButton
+          v-if="store.activeModpack.projectId"
+          variant="ghost"
+          size="sm"
+          :title="$t('modpacks.changeVersionTitle', { name: store.activeModpack.name || store.activeModpack.projectId })"
+          @click="store.openModpackVersionPicker"
+        >
+          {{ $t('modpacks.changeVersion') }}
+        </AppButton>
       </div>
     </Panel>
 

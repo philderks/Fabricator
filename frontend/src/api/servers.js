@@ -220,6 +220,15 @@ export async function upgradeServer(serverId, version) {
   return post(`/api/servers/${encodeURIComponent(serverId)}/upgrade`, { version })
 }
 
+/**
+ * Take a mandatory snapshot, then reinstall a modded server's loader at
+ * `loaderVersion` under the same Minecraft version (#104). Polled like
+ * upgradeServer().
+ */
+export async function upgradeLoader(serverId, loaderVersion) {
+  return post(`/api/servers/${encodeURIComponent(serverId)}/upgrade`, { loader_version: loaderVersion })
+}
+
 export async function getLoaderGameVersions(loader) {
   return get(`/api/loaders/${encodeURIComponent(loader)}/versions/game`)
 }

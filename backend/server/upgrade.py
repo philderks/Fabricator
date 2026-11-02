@@ -20,6 +20,8 @@ from backend.server.locks import get_server_lock
 from backend.server.registry import get_server_process_registry
 
 _SUPPORTED_LOADERS = frozenset({"vanilla", "paper"})
+# Loaders whose build can be swapped under an unchanged Minecraft version (#104).
+_LOADER_BUILD_LOADERS = frozenset({"fabric", "quilt", "forge", "neoforge"})
 
 # A numbered stable release, in either naming scheme Mojang has shipped: the
 # classic ``1.y`` / ``1.y.z`` era and the year-based ``26.n`` / ``26.n.p`` one.
@@ -198,5 +200,125 @@ def upgrade_server(
             "server_id": server_id,
             "from_version": previous_version,
             "to_version": target,
+            "snapshot_id": snapshot.get("id"),
+        }
+
+
+def loader_build_available(installer: Any, mc_version: str, build: str) -> bool:
+    """Whether ``installer`` can supply loader ``build`` for ``mc_version``.
+
+    Raises whatever the installer's version listing raises; callers decide
+    whether an unreadable list is fatal.
+    """
+    known = {
+        str(v.get("version") if isinstance(v, dict) else v).strip()
+        for v in (installer.get_available_versions(mc_version) or [])
+    }
+    return str(build or "").strip() in known
+
+
+def validate_loader_upgrade(server: Dict[str, Any], build: object) -> str:
+    """Validate a request to swap the loader build of a modded server."""
+    loader = str(server.get("loader") or "").strip().lower()
+    if loader not in _LOADER_BUILD_LOADERS:
+        raise UpgradeError(
+            "Changing the loader build is only supported for Fabric, Quilt, "
+            "Forge and NeoForge servers."
+        )
+    target = str(build or "").strip()
+    if not target:
+        raise UpgradeError("No loader version given")
+    mc_version = str(server.get("version") or "").strip()
+    # Only lists versions, so the install path is never touched.
+    installer = get_installer_for(loader, Path("."))
+    try:
+        available = loader_build_available(installer, mc_version, target)
+    except Exception as exc:  # noqa: BLE001 - network/metadata failure
+        raise UpgradeError(f"Could not list {loader} versions: {exc}") from exc
+    if not available:
+        raise UpgradeError(
+            f"{loader} {target} is not available for Minecraft {mc_version}"
+        )
+    return target
+
+
+def upgrade_loader(
+    server_id: str,
+    build: object,
+    *,
+    progress_callback: Optional[ProgressCallback] = None,
+) -> Dict[str, Any]:
+    """Back up, stop, install loader ``build`` for the same Minecraft version.
+
+    Mirrors :func:`upgrade_server`. A modpack update can pin a different
+    loader build than the server runs, and its mods are compiled against that
+    build (see ``_pack_loader_version`` in routes), so the pack switch alone
+    is not enough (#104).
+    """
+    lock = get_server_lock(server_id)
+    with lock:
+        server = server_storage.get_server(server_id)
+        if not server:
+            raise UpgradeError("Server not found")
+        target = validate_loader_upgrade(server, build)
+        mc_version = str(server["version"])
+        previous_build = server.get("loaderVersion")
+
+        registry = get_server_process_registry()
+        install_path = registry.resolve_install_path(server)
+        installer = get_installer_for(str(server["loader"]), install_path)
+        if installer is None:  # defensive; validate_loader_upgrade already gates it
+            raise UpgradeError("No installer is available for this server")
+
+        runtime = registry.get_java_runtime(server)
+        if installer.requires_java_for_install and runtime.get("java_missing"):
+            raise UpgradeError("Java is required to install this loader")
+        installer.set_java_exec(runtime.get("java_exec"))
+
+        if progress_callback:
+            progress_callback("creating_backup", {"from_version": previous_build})
+        snapshot = backup_service.run_adhoc_backup(
+            server_id,
+            compress=True,
+            flush=True,
+            shutdown=False,
+            trigger="upgrade",
+        )
+
+        if progress_callback:
+            progress_callback("stopping_server", {})
+        registry.stop_server(server_id)
+        rollback_jar = _preserve_server_jar(install_path)
+
+        def _installer_progress(phase: str, detail: Dict[str, Any]) -> None:
+            if progress_callback:
+                progress_callback(phase, detail)
+
+        try:
+            # Not install_with_config: it would overwrite user-edited
+            # server.properties. A failed install leaves the old launch record
+            # in place, whose loader files the installer does not remove.
+            result = installer.install(
+                mc_version, target, progress_callback=_installer_progress
+            )
+            if not result.success:
+                raise UpgradeError(result.message)
+
+            updates: Dict[str, Any] = {"loaderVersion": target, "status": "stopped"}
+            if result.launch is not None:
+                updates["launch"] = result.launch.to_dict()
+            server_storage.update_server(server_id, updates)
+        except Exception:
+            _restore_server_jar(rollback_jar, install_path)
+            raise
+        else:
+            _discard_rollback_jar(rollback_jar)
+
+        if progress_callback:
+            progress_callback("done", {"snapshot_id": snapshot.get("id")})
+        return {
+            "server_id": server_id,
+            "from_loader_version": previous_build,
+            "to_loader_version": target,
             "snapshot_id": snapshot.get("id"),
         }

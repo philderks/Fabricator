@@ -443,6 +443,25 @@ class ModrinthClient:
             "version_number": best_version.get("version_number"),
         }
 
+    def _version_for_project(self, project_id: str, version_id: str) -> Dict[str, Any]:
+        """Fetch ``version_id``, refusing it unless it belongs to ``project_id``.
+
+        ``project_id`` may be a slug, so the check compares against both it and
+        the project's canonical id.
+        """
+        version = self.get_version(version_id)
+        owner = str(version.get("project_id") or "")
+
+        if owner.lower() != str(project_id).lower():
+            # Slug was passed — resolve it before declaring a mismatch.
+            project = self.get_project(project_id)
+            if owner != str(project.get("id") or ""):
+                raise ModrinthApiError(
+                    f"Version {version_id} does not belong to {project_id}",
+                    status_code=400,
+                )
+        return version
+
     def get_pinned_download(
         self, project_id: str, version_id: str
     ) -> Optional[Dict[str, Any]]:
@@ -459,18 +478,7 @@ class ModrinthClient:
         the project's canonical id. Returns None when the version has no
         downloadable primary file; raises ModrinthApiError for unknown ids.
         """
-        version = self.get_version(version_id)
-        owner = str(version.get("project_id") or "")
-
-        if owner.lower() != str(project_id).lower():
-            # Slug was passed — resolve it before declaring a mismatch.
-            project = self.get_project(project_id)
-            if owner != str(project.get("id") or ""):
-                raise ModrinthApiError(
-                    f"Version {version_id} does not belong to {project_id}",
-                    status_code=400,
-                )
-
+        version = self._version_for_project(project_id, version_id)
         url = self.get_primary_file_url(version)
         if not url:
             return None
@@ -611,10 +619,12 @@ class ModrinthClient:
         allow_missing: bool = False,
         mod_side_overrides: Optional[Dict[str, str]] = None,
         progress_callback: Optional[Any] = None,
+        version_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Download a modpack from Modrinth and install it into a server dir.
 
-        Resolves the best version for ``mc_version``/``loader``, downloads its
+        Resolves the best version for ``mc_version``/``loader`` — or takes
+        ``version_id`` when the user picked one (#104) — downloads its
         .mrpack, then hands off to :meth:`install_mrpack_archive` — which is
         the same code path an uploaded pack takes (#53). Upstream project and
         version identity is layered on afterwards, since only a pack fetched
@@ -628,7 +638,11 @@ class ModrinthClient:
         project_details = self.get_project(project_id)
         project_title = project_details.get("title", project_id)
 
-        best = self._resolve_modpack_version(project_id, mc_version, loader)
+        if version_id:
+            best = self._version_for_project(project_id, version_id)
+            self._check_modpack_compat(best, mc_version, loader)
+        else:
+            best = self._resolve_modpack_version(project_id, mc_version, loader)
         download_url = self.get_primary_file_url(best)
         if not download_url:
             raise ModrinthApiError("No download URL found for modpack version")
@@ -778,10 +792,20 @@ class ModrinthClient:
         if not best:
             raise ModrinthApiError("No suitable modpack version found")
 
+        self._check_modpack_compat(best, mc_version, loader)
+        return best
+
+    def _check_modpack_compat(
+        self,
+        best: Dict[str, Any],
+        mc_version: Optional[str],
+        loader: Optional[str],
+    ) -> None:
+        """Refuse a modpack version this server's Minecraft/loader cannot run."""
         version_game_versions = best.get("game_versions") or []
         if mc_version and version_game_versions and mc_version not in version_game_versions:
             raise ModrinthApiError(
-                f"This modpack's latest version targets Minecraft {', '.join(version_game_versions)}, "
+                f"This modpack version targets Minecraft {', '.join(version_game_versions)}, "
                 f"but your server runs Minecraft {mc_version}. "
                 f"Pick a different modpack, or recreate the server with a compatible Minecraft version.",
                 status_code=409,
@@ -794,7 +818,7 @@ class ModrinthClient:
         version_loaders = [str(v).lower() for v in (best.get("loaders") or [])]
         if loader and version_loaders and loader.lower() not in version_loaders:
             raise ModrinthApiError(
-                f"This modpack's latest version targets {', '.join(version_loaders)}, "
+                f"This modpack version targets {', '.join(version_loaders)}, "
                 f"but your server uses {loader}. "
                 f"Pick a different modpack, or recreate the server with a compatible loader.",
                 status_code=409,
@@ -803,8 +827,6 @@ class ModrinthClient:
                     "modpack_loaders": version_loaders,
                 },
             )
-
-        return best
 
     def _download_mrpack(self, download_url: str, tmp_dir: Path) -> Path:
         """Download the .mrpack archive to a temporary directory."""

@@ -22,6 +22,7 @@ import {
   restartServer,
   installServer,
   getServerInstallProgress,
+  upgradeLoader,
   updateServerSettings,
   setServerAutoStart,
   sendServerCommand,
@@ -1091,6 +1092,19 @@ export const useServerStore = defineStore('server', () => {
 
   function closeVersionPicker() { versionPickerMod.value = null }
 
+  // Same picker for the server's modpack (#104). The choice goes through the
+  // normal modpack confirm/install flow rather than the mod-jar swap.
+  function openModpackVersionPicker() {
+    const pack = activeModpack.value
+    if (!pack?.projectId) return
+    versionPickerMod.value = {
+      kind: 'modpack',
+      projectId: pack.projectId,
+      title: pack.name || pack.projectId,
+      installedVersionId: pack.versionId || ''
+    }
+  }
+
   /**
    * Install the chosen version, replacing the jar currently on disk.
    *
@@ -1102,6 +1116,16 @@ export const useServerStore = defineStore('server', () => {
     const target = versionPickerMod.value
     if (!target || !server.value) return
     versionPickerMod.value = null
+    if (target.kind === 'modpack') {
+      handleInstallModpack({
+        projectId: target.projectId,
+        title: `${target.title} ${versionNumber}`,
+        mcVersion: server.value.version,
+        loader: (server.value.loader || '').toLowerCase(),
+        versionId
+      })
+      return
+    }
     installLoading.value = true
     try {
       await installMod(target.projectId, {
@@ -1205,7 +1229,8 @@ export const useServerStore = defineStore('server', () => {
           clean_install: !isRetry,
           create_backup: isRetry ? false : modpackData.createBackup,
           allow_missing: Boolean(modpackData.allowMissing),
-          mod_side_overrides: modpackData.modSideOverrides || null
+          mod_side_overrides: modpackData.modSideOverrides || null,
+          version_id: modpackData.versionId || undefined
         })
       showModpackBrowser.value = false
       showModpackInstallConfirmModal.value = false
@@ -1229,6 +1254,7 @@ export const useServerStore = defineStore('server', () => {
       }
       if (result?.java_warning) toast.warning(result.java_warning.message, t('modpacks.javaMismatchTitle'))
       await Promise.all([loadServer({ silent: true }), loadMods()])
+      if (result?.loader_change) pendingLoaderChange.value = { ...result.loader_change, title: modpackData.title }
     } catch (error) {
       const uncertainMods = error?.data?.uncertain_mod_files
       const canContinueWithUncertain = Boolean(error?.data?.can_continue_with_uncertain)
@@ -1255,6 +1281,42 @@ export const useServerStore = defineStore('server', () => {
       toast.error(error.message || t('modpacks.installFailed'), t('common.installationFailed'))
     } finally {
       modpackInstalling.value = false
+    }
+  }
+
+  // ── Loader build swap after a pack switch (#104) ───────────────────────
+  // Set when the installed pack pins a loader build the server does not run.
+  const pendingLoaderChange = ref(null)
+  const loaderChanging = ref(false)
+
+  function cancelLoaderChange() { pendingLoaderChange.value = null }
+
+  async function confirmLoaderChange() {
+    const change = pendingLoaderChange.value
+    const serverId = currentServerId.value
+    if (!change || !serverId || loaderChanging.value) return
+    loaderChanging.value = true
+    try {
+      await upgradeLoader(serverId, change.required)
+      let progress
+      do {
+        await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS))
+        progress = await getServerInstallProgress(serverId)
+      } while (progress?.active)
+      if (progress?.phase === 'done') {
+        toast.success(
+          t('modpacks.loaderChange.done', { loader: change.loader, version: change.required }),
+          t('modpacks.loaderChange.doneTitle')
+        )
+      } else {
+        toast.error(progress?.error || t('modpacks.loaderChange.failed'), t('common.installationFailed'))
+      }
+      await loadServer({ silent: true })
+    } catch (error) {
+      toast.error(error.message || t('modpacks.loaderChange.failed'), t('common.installationFailed'))
+    } finally {
+      loaderChanging.value = false
+      pendingLoaderChange.value = null
     }
   }
 
@@ -1735,6 +1797,8 @@ export const useServerStore = defineStore('server', () => {
     serverInstallProgress,
     showModpackInstallConfirmModal,
     pendingModpackInstall,
+    pendingLoaderChange,
+    loaderChanging,
     modpackCreateBackup,
     showMissingModsConfirmModal,
     pendingMissingModsInstall,
@@ -1772,7 +1836,10 @@ export const useServerStore = defineStore('server', () => {
     closeModBrowser,
     openVersionPicker,
     closeVersionPicker,
+    openModpackVersionPicker,
     handleSelectVersion,
+    confirmLoaderChange,
+    cancelLoaderChange,
     closeModpackBrowser,
     closeJavaModal,
     setConsoleCommand,
