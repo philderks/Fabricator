@@ -62,7 +62,7 @@
       </div>
     </div>
 
-    <form v-else @submit.prevent="handleCreate" class="settings-form">
+    <div v-else class="settings-form">
       <!-- First question, not a later one. A modpack targets a specific
            Minecraft version and loader, so when one is being imported it is the
            pack that decides those — picking them first and discovering the pack
@@ -74,6 +74,7 @@
           class="mode-toggle-btn"
           :class="{ active: formData.setupMode === 'custom' }"
           :aria-selected="formData.setupMode === 'custom'"
+          :disabled="importBusy"
           @click="formData.setupMode = 'custom'"
         >
           {{ $t('createServer.customServer') }}
@@ -84,23 +85,34 @@
           class="mode-toggle-btn"
           :class="{ active: formData.setupMode === 'modpack' }"
           :aria-selected="formData.setupMode === 'modpack'"
+          :disabled="importBusy"
           @click="formData.setupMode = 'modpack'"
         >
           {{ $t('createServer.importModpack') }}
         </button>
-        <!-- Not a mode of this form: an imported server brings its own
-             settings, so it hands off to a separate, much shorter dialog. -->
+        <!-- An imported server brings its own settings, so this tab swaps the
+             whole create form for the much shorter import form. -->
         <button
           type="button"
           role="tab"
           class="mode-toggle-btn"
-          aria-selected="false"
-          aria-haspopup="dialog"
-          @click="$emit('import')"
+          :class="{ active: formData.setupMode === 'import' }"
+          :aria-selected="formData.setupMode === 'import'"
+          @click="formData.setupMode = 'import'"
         >
           {{ $t('createServer.importExisting') }}
         </button>
       </div>
+
+      <ImportServerForm
+        v-if="formData.setupMode === 'import'"
+        ref="importer"
+        @busy="importBusy = $event"
+        @close="closeModal"
+        @imported="$emit('imported', $event)"
+      />
+
+      <form v-else @submit.prevent="handleCreate" class="settings-form">
 
       <!-- Above Basic Settings on purpose: the pack decides the Minecraft
            version and loader shown there, so it has to be chosen first. -->
@@ -615,10 +627,11 @@
           </div>
         </label>
       </Panel>
-    </form>
+      </form>
+    </div>
 
     <template #footer>
-      <template v-if="!installState">
+      <template v-if="!installState && formData.setupMode !== 'import'">
         <AppButton variant="ghost" size="md" :disabled="creating" @click="handleClose">
           {{ $t('common.cancel') }}
         </AppButton>
@@ -649,6 +662,7 @@
 <script>
 import BaseModal from './BaseModal.vue'
 import JavaInstallModal from './JavaInstallModal.vue'
+import ImportServerForm from './ImportServerForm.vue'
 import Panel from '../ui/Panel.vue'
 import AppButton from '../ui/AppButton.vue'
 import FormField from '../ui/FormField.vue'
@@ -674,6 +688,7 @@ export default {
   components: {
     BaseModal,
     JavaInstallModal,
+    ImportServerForm,
     Panel,
     AppButton,
     FormField
@@ -684,7 +699,7 @@ export default {
       required: true
     }
   },
-  emits: ['close', 'create', 'import'],
+  emits: ['close', 'create', 'imported'],
   setup() {
     const toast = useToast()
     return { toast, formatNumber }
@@ -692,6 +707,7 @@ export default {
   data() {
     return {
       creating: false,
+      importBusy: false,
       // Phase 3c: install-progress state. Modal flips into 'installing' or
       // 'failed' once the user submits and the backend returns 202; the
       // existing 'creating' flag stays true during this phase to keep the
@@ -1347,10 +1363,15 @@ export default {
     },
 
     handleClose() {
-      if (!this.creating) {
-        this.$emit('close');
-        this.resetForm();
-      }
+      // The importer decides: it refuses mid-import and reports a finished one.
+      if (this.formData.setupMode === 'import') return this.$refs.importer.close()
+      if (!this.creating) this.closeModal()
+    },
+
+    closeModal() {
+      this.importBusy = false
+      this.$emit('close');
+      this.resetForm();
     },
     
     async loadGameVersions() {

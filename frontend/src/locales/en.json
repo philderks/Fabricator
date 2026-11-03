@@ -1545,7 +1545,6 @@
     "taskFailed": "The install task failed."
   },
   "importServer": {
-    "title": "Import existing server",
     "intro": "Bring in a Minecraft server that was set up without Fabricator. The folder is inspected first; nothing is changed until you confirm.",
     "path": "Server folder",
     "pathHint": "Absolute path on the machine running Fabricator, e.g. /srv/minecraft or C:\\\\Servers\\\\survival.",

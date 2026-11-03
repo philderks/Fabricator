@@ -1,16 +1,12 @@
 <script setup>
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
-import BaseModal from './BaseModal.vue'
 import AppButton from '../ui/AppButton.vue'
 import FormField from '../ui/FormField.vue'
 import { inspectServerImport, importServer, getServerInstallProgress } from '../../api/servers'
 import { createProgressPoller, lostContactMessage, POLL_INTERVAL_MS } from '../../utils/pollProgress'
 import { t, te } from '../../i18n'
 
-const props = defineProps({
-  show: { type: Boolean, required: true }
-})
-const emit = defineEmits(['close', 'imported'])
+const emit = defineEmits(['close', 'imported', 'busy'])
 
 const LOADERS = ['fabric', 'quilt', 'neoforge', 'forge', 'paper', 'purpur', 'folia', 'pufferfish', 'vanilla']
 
@@ -26,20 +22,11 @@ const progress = ref(null)
 const server = ref(null)
 let pollTimer = null
 
-watch(() => props.show, (open) => {
-  if (!open) return
-  path.value = ''
-  detected.value = null
-  mode.value = 'copy'
-  error.value = null
-  state.value = null
-  progress.value = null
-  server.value = null
-})
-
 onBeforeUnmount(() => clearInterval(pollTimer))
 
 const busy = computed(() => inspecting.value || state.value === 'running')
+// Lets the host dialog lock its tabs: switching away would unmount the poller.
+watch(busy, (value) => emit('busy', value))
 
 const phaseLabel = computed(() => {
   const key = `importServer.phases.${progress.value?.phase}`
@@ -111,6 +98,8 @@ function watchProgress(serverId) {
   }, POLL_INTERVAL_MS)
 }
 
+defineExpose({ close })
+
 function close() {
   if (state.value === 'running') return
   if (state.value === 'done') emit('imported', server.value)
@@ -119,13 +108,7 @@ function close() {
 </script>
 
 <template>
-  <BaseModal
-    :show="props.show"
-    :title="$t('importServer.title')"
-    size="medium"
-    :close-on-escape="!busy"
-    @close="close"
-  >
+  <div class="import-server">
     <div v-if="state === 'running'" class="import-server__status">
       <div class="import-server__spinner" :aria-label="$t('common.working')"></div>
       <p>{{ phaseLabel }}</p>
@@ -217,7 +200,7 @@ function close() {
       <p v-if="error" class="import-server__error">{{ error }}</p>
     </form>
 
-    <template #footer>
+    <div class="import-server__actions">
       <template v-if="!state">
         <AppButton variant="ghost" size="md" :disabled="busy" @click="close">{{ $t('common.cancel') }}</AppButton>
         <AppButton variant="primary" size="md" :disabled="!detected || busy" @click="submit">
@@ -227,8 +210,8 @@ function close() {
       <AppButton v-else-if="state !== 'running'" variant="primary" size="md" @click="close">
         {{ state === 'done' ? $t('importServer.open') : $t('common.close') }}
       </AppButton>
-    </template>
-  </BaseModal>
+    </div>
+  </div>
 </template>
 
 <style scoped>
@@ -236,6 +219,12 @@ function close() {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+}
+
+.import-server__actions {
+  display: flex;
+  gap: var(--space-3);
+  justify-content: flex-end;
 }
 
 .import-server__path {
