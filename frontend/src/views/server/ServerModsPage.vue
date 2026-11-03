@@ -70,7 +70,7 @@ const selectAllLabel = computed(() => {
         >
           {{ tk('mods.updateMods', 'mods.updatePlugins', updateCount) }}
         </AppButton>
-        <AppButton v-if="!isPlugin" variant="ghost" @click="store.openModpackBrowser">{{ $t('mods.browseModpacks') }}</AppButton>
+        <AppButton v-if="!isPlugin" variant="ghost" @click="store.openModpackBrowser()">{{ $t('mods.browseModpacks') }}</AppButton>
         <AppButton
           variant="primary"
           :loading="store.isInstalling"
@@ -126,6 +126,14 @@ const selectAllLabel = computed(() => {
             <path d="M9 8v2.5H1.5V3H4" />
           </svg>
         </a>
+        <AppButton
+          variant="ghost"
+          size="sm"
+          :title="$t('modpacks.changeVersionTitle', { name: store.activeModpack.name || store.activeModpack.projectId })"
+          @click="store.openModpackVersionPicker"
+        >
+          {{ $t('modpacks.changeVersion') }}
+        </AppButton>
       </div>
     </Panel>
 

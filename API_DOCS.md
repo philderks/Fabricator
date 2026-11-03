@@ -1158,8 +1158,16 @@ made) and `java_warning` (when the pack's Minecraft version needs a newer Java t
 
 #### `POST /api/modrinth/modpack/upload`
 
-Stage a `.mrpack` exported from the Modrinth app. Nothing is installed — the response describes
-what the pack declares, so a server can be created to match it before the pack is installed.
+Stage a `.mrpack` exported from the Modrinth app, or a modpack's server files zip (#104). Nothing
+is installed — the response describes what the pack declares, so a server can be created to match
+it before the pack is installed.
+
+A zip without `modrinth.index.json` is accepted as a **server pack** when it has a `mods/` folder at
+its root (or under one wrapping folder). Its response carries `"kind": "serverpack"`; the loader and
+build are read from a shipped installer jar, `libraries/`, or a start-script variable
+(`NEOFORGE_VERSION`, `FORGE_VERSION`, `MODLOADER`/`MODLOADER_VERSION`, ...), and `version` is guessed
+from the file name. A CurseForge client export (`manifest.json` + `overrides/`) is rejected with a
+`400`, since it lists mods instead of including them.
 
 **Body:** the raw archive bytes (`Content-Type: application/octet-stream`). The display filename
 comes from the `filename` query param or the `X-Filename` header.
@@ -1205,6 +1213,11 @@ pack declares) · `clean_install` (bool, default `true`) · `create_backup` (boo
 
 The upload survives a failed install so the missing-file retry can reuse it; a successful install
 consumes it.
+
+A server pack replaces the pack-managed folders (`mods`, `config`, `defaultconfigs`, `kubejs`,
+`scripts`) and installs only the pack's top-level folders. Its top-level files (start scripts,
+installers, `server.properties`, `eula.txt`) and any folder holding a world are skipped. When the
+pack wants another loader build, the response includes `loader_change`, as for a `.mrpack`.
 
 **Errors:** `400` server running, or install path unresolvable · `404` server not found, or the
 upload expired · `409` an install is already in progress; missing files; or — without `force` —

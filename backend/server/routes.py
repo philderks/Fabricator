@@ -540,6 +540,7 @@ def _java_compat_payload(mc_version: str) -> dict:
 
 _SETTINGS_RECORD_FIELDS = frozenset({
     'name', 'memory', 'memoryMin', 'memoryUnit', 'javaPath', 'jvmArgs',
+    'preStartCommand',
 })
 
 _SETTINGS_PROPERTY_FIELDS = frozenset({
@@ -693,7 +694,7 @@ def _port_taken_by_other(port: int, servers: list, exclude_id=None) -> bool:
 
 
 def _normalize_launch_overrides(data: dict) -> str | None:
-    """Validate and normalize ``javaPath`` / ``jvmArgs`` in-place.
+    """Validate and normalize ``javaPath`` / ``jvmArgs`` / ``preStartCommand`` in-place.
 
     Returns an error message, or None when the payload is fine. Both fields are
     user-owned launch tuning (#54): the JVM binary the server runs on, and extra
@@ -718,6 +719,20 @@ def _normalize_launch_overrides(data: dict) -> str | None:
                 data[key] = raw.strip() if isinstance(raw, str) else raw
         except jvm_args.JvmArgsError as exc:
             return str(exc)
+    # Shell command run before each start (#103). One line: cmd.exe and sh
+    # disagree on what a newline means, so a multi-line script belongs in a file.
+    if 'preStartCommand' in data:
+        raw = data['preStartCommand']
+        if raw is None:
+            raw = ''
+        if not isinstance(raw, str):
+            return 'Pre-start command must be a string'
+        raw = raw.strip()
+        if len(raw) > 2000:
+            return f'Pre-start command is too long ({len(raw)} characters, max 2000)'
+        if any(ch in raw for ch in '\r\n\0'):
+            return 'Pre-start command must be a single line'
+        data['preStartCommand'] = raw
     return None
 
 
@@ -1615,7 +1630,8 @@ def update_server_settings(server_id, server):
     # explicitly rather than silently strip so a managed override is loud.
     if is_managed():
         forbidden = [
-            key for key in ('command', 'javaPath', 'jvmArgs', 'launch') if key in data
+            key for key in ('command', 'javaPath', 'jvmArgs', 'preStartCommand', 'launch')
+            if key in data
         ]
         if forbidden:
             return jsonify({
@@ -1783,16 +1799,12 @@ def _pack_loader_version(installer, prepared, mc_version: str) -> Optional[str]:
         return None
 
     try:
-        available = installer.get_available_versions(mc_version)
+        available = upgrade_service.loader_build_available(installer, mc_version, declared)
     except Exception:  # noqa: BLE001 - a version list we cannot read is not fatal
         logger.warning('Could not list loader versions; ignoring the pack pin')
         return None
 
-    known = {
-        str(v.get('version') if isinstance(v, dict) else v).strip()
-        for v in (available or [])
-    }
-    if declared not in known:
+    if not available:
         logger.warning(
             'Modpack asks for loader %s but it is not available for %s; '
             'installing the default instead', declared, mc_version,
@@ -2053,6 +2065,10 @@ def install_server(server_id, server):
                 updates: dict = {'status': 'stopped'}
                 if result.launch is not None:
                     updates['launch'] = result.launch.to_dict()
+                if loader_version:
+                    # A Fabric/Quilt server.jar does not name its build, so a
+                    # later pack switch can only compare against this (#104).
+                    updates['loaderVersion'] = loader_version
                 storage.update_server(server_id, updates)
                 if modpack_intent and prepared is not None:
                     _install_pending_modpack(
@@ -2088,18 +2104,28 @@ def install_server(server_id, server):
 @server_bp.route('/servers/<server_id>/upgrade', methods=['POST'])
 @require_server
 def upgrade_server(server_id, server):
-    """Queue a safe Vanilla/Paper release upgrade.
+    """Queue a safe Vanilla/Paper release upgrade, or a loader-build swap.
 
-    The worker makes a mandatory full-server snapshot before stopping the JVM or
-    replacing its jar. It shares the established install-progress protocol so
-    callers can use the existing polling endpoint while the migration runs.
+    A body with ``loader_version`` swaps the build of a modded loader under an
+    unchanged Minecraft version (#104); one with ``version`` upgrades
+    Vanilla/Paper. The worker makes a mandatory full-server snapshot before
+    stopping the JVM or replacing its jar. It shares the established
+    install-progress protocol so callers can use the existing polling endpoint
+    while the migration runs.
     """
     payload = request.get_json(silent=True) or {}
     if not isinstance(payload, dict):
         return jsonify({'error': 'Request body must be a JSON object'}), 400
-    target_version = payload.get('version')
+    if payload.get('loader_version') is not None:
+        kind, run = 'loader_upgrade', upgrade_service.upgrade_loader
+        validate, target_key = upgrade_service.validate_loader_upgrade, 'loader_version'
+        from_value = server.get('loaderVersion')
+    else:
+        kind, run = 'upgrade', upgrade_service.upgrade_server
+        validate, target_key = upgrade_service.validate_upgrade, 'version'
+        from_value = server.get('version')
     try:
-        target_version = upgrade_service.validate_upgrade(server, target_version)
+        target_version = validate(server, payload.get(target_key))
     except upgrade_service.UpgradeError as exc:
         return jsonify({'error': str(exc)}), 400
 
@@ -2114,26 +2140,26 @@ def upgrade_server(server_id, server):
         server_id,
         phase='starting',
         server_id=server_id,
-        kind='upgrade',
-        from_version=server.get('version'),
+        kind=kind,
+        from_version=from_value,
         to_version=target_version,
     )
 
     def _run_upgrade():
         try:
             def _on_progress(phase, detail):
-                install_progress.update(server_id, phase=phase, kind='upgrade', **detail)
+                install_progress.update(server_id, phase=phase, kind=kind, **detail)
 
-            result = upgrade_service.upgrade_server(
+            result = run(
                 server_id, target_version, progress_callback=_on_progress,
             )
             install_progress.update(
-                server_id, phase='done', kind='upgrade', **result,
+                server_id, phase='done', kind=kind, **result,
             )
         except Exception as exc:  # surfaced to the polling client
             logger.exception('Server upgrade failed for %s', server_id)
             install_progress.update(
-                server_id, phase='failed', kind='upgrade', error=str(exc),
+                server_id, phase='failed', kind=kind, error=str(exc),
             )
 
     threading.Thread(
@@ -2182,12 +2208,20 @@ def start_server_by_id(server_id, server):
     if skip_java_enforcement():
         required_java_major = None
 
+    # A pre-start command can run for minutes; without this the UI would show
+    # "stopped" and offer Start again while it works.
+    marked_starting = bool(server.get('preStartCommand')) and server.get('status') == 'stopped'
+    if marked_starting:
+        storage.update_server_status(server_id, 'starting')
+
     try:
         result = _registry().start_server(
             server,
             required_java_major=required_java_major
         )
     except ValueError as exc:
+        if marked_starting:
+            storage.update_server_status(server_id, 'stopped')
         return jsonify({'error': str(exc)}), 400
 
     if result.get('stopping'):
@@ -2273,9 +2307,17 @@ def stop_server_by_id(server_id, server):
 @require_server
 @with_server_lock
 def restart_server_by_id(server_id, server):
+    # Same reason as the start route: the pre-start command can run for minutes.
+    marked_starting = bool(server.get('preStartCommand')) and server.get('status') in ('running', 'stopped')
+    if marked_starting:
+        storage.update_server_status(server_id, 'starting')
+
     try:
         result = _registry().restart_server(server)
     except (ValueError, RuntimeError) as exc:
+        if marked_starting:
+            # A failed stop half leaves the old process up; report what is true.
+            storage.update_server_status(server_id, _registry().get_status(server_id).get('status', 'stopped'))
         return jsonify({'error': str(exc)}), 400
 
     start_status = result['start'].get('status')

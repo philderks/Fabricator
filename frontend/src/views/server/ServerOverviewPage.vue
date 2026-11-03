@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import StatCard from '../../components/ui/StatCard.vue'
 import Panel from '../../components/ui/Panel.vue'
+import AppButton from '../../components/ui/AppButton.vue'
 import { installedModDisplayName, installedModInitial } from '../../utils/installedModDisplay'
 import { useServerStore } from '../../stores/server'
 import { usePlayitStore } from '../../stores/playit'
@@ -215,6 +216,14 @@ onUnmounted(() => {
       <div class="overview-page__modpack">
         <span class="overview-page__modpack-name">{{ store.activeModpack.name || store.activeModpack.projectId }}</span>
         <span class="overview-page__modpack-version">{{ store.activeModpack.version }}</span>
+        <AppButton
+          variant="ghost"
+          size="sm"
+          :title="$t('modpacks.changeVersionTitle', { name: store.activeModpack.name || store.activeModpack.projectId })"
+          @click="store.openModpackVersionPicker"
+        >
+          {{ $t('modpacks.changeVersion') }}
+        </AppButton>
       </div>
     </Panel>
 

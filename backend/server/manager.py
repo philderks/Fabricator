@@ -54,6 +54,10 @@ class ServerManager:
     # console is where a crash gets diagnosed, and restarting to recover used to
     # wipe exactly the output that explained the crash.
     PREV_RUN_LINES = 500
+    # Upper bound for the user's pre-start command (#103). Generous because a
+    # first modpack sync downloads every mod; a hung network must not block the
+    # start forever.
+    PRE_START_TIMEOUT_SEC = 600
     # Player join/leave detection from server stdout. The log prefix is pinned
     # to the START of the line — "[<timestamp>] [<thread>/INFO]" (plus Forge's
     # optional "[<category>]") — so a player who types "INFO]: Ghost joined the
@@ -192,6 +196,14 @@ class ServerManager:
         # is still up; start() checks this flag to avoid launching a second
         # process on the same world during that window.
         self._stopping = False
+        # True while the pre-start command runs. That happens outside self._lock
+        # (so status and console reads stay live), so a second start() needs
+        # this to refuse instead of running the command twice.
+        self._pre_starting = False
+        # Set by stop() to cancel a pre-start; _pre_start_kill ends the running
+        # command (None before it has spawned or once it has exited).
+        self._pre_start_cancelled = False
+        self._pre_start_kill = None
 
     def _parse_command(self, command: Optional[Iterable[str]]) -> Optional[List[str]]:
         if command is None:
@@ -326,7 +338,26 @@ class ServerManager:
             "java_missing": False,
         }
 
-    def _start_log_streams(self) -> None:
+    def _begin_run_logs(self) -> None:
+        with self._buffer_lock:
+            # Demote the finished run's tail instead of dropping it, so a
+            # restart no longer erases the output that prompted the restart.
+            self._prev_stdout_buffer = self._stdout_buffer[-self.PREV_RUN_LINES:]
+            self._prev_stderr_buffer = self._stderr_buffer[-self.PREV_RUN_LINES:]
+            self._stdout_buffer = []
+            self._stderr_buffer = []
+            self._stdout_total = 0
+
+    def _append_stdout(self, line: str) -> None:
+        with self._buffer_lock:
+            self._stdout_buffer.append((iso_z_now(), line))
+            if len(self._stdout_buffer) > self.MAX_LOG_LINES:
+                del self._stdout_buffer[: len(self._stdout_buffer) - self.MAX_LOG_LINES]
+            self._stdout_total += 1
+
+    def _start_log_streams(self, new_run: bool = True) -> None:
+        """``new_run=False`` keeps the current buffers: the pre-start command
+        already opened this run and its output belongs with the server's."""
         if not self._process:
             return
 
@@ -372,14 +403,8 @@ class ServerManager:
                     print(line, end="")
             pipe.close()
 
-        with self._buffer_lock:
-            # Demote the finished run's tail instead of dropping it, so a
-            # restart no longer erases the output that prompted the restart.
-            self._prev_stdout_buffer = self._stdout_buffer[-self.PREV_RUN_LINES:]
-            self._prev_stderr_buffer = self._stderr_buffer[-self.PREV_RUN_LINES:]
-            self._stdout_buffer = []
-            self._stderr_buffer = []
-            self._stdout_total = 0
+        if new_run:
+            self._begin_run_logs()
         # Belongs to the run, like the buffers: cleared before the stream threads
         # that set it are started.
         self._ready_event.clear()
@@ -516,7 +541,7 @@ class ServerManager:
         self._tps_thread = thread
         thread.start()
 
-    def _spawn_process(self, command_to_run: List[str]) -> tuple[bool, str]:
+    def _spawn_process(self, command_to_run: List[str], new_run: bool = True) -> tuple[bool, str]:
         try:
             self._process = subprocess.Popen(
                 command_to_run,
@@ -528,7 +553,7 @@ class ServerManager:
                 **platform_utils.subprocess_no_window_kwargs(),
             )
             self._ps_process = None
-            self._start_log_streams()
+            self._start_log_streams(new_run)
             time.sleep(0.5)
 
             if self._process.poll() is not None:
@@ -550,9 +575,124 @@ class ServerManager:
             self._process = None
             return False, f"Failed to start server: {exc}"
 
-    def start(self, required_java_major: Optional[int] = None) -> dict:
-        """Start the server process if it is not already running."""
+    def _run_pre_start(self, command: str) -> Optional[dict]:
+        """Run the user's pre-start command (#103), e.g. a packwiz sync.
+
+        Returns a stopped-shaped result when the server must not start, None to
+        go on. Runs outside self._lock so status and console polling stay live
+        for the minutes a modpack sync can take; its output opens this run's
+        console, prefixed so it is not mistaken for the server's own.
+        """
         with self._lock:
+            if self.is_running or self._stopping:
+                return None  # start() reports these itself
+            if self._pre_starting:
+                return {"status": "stopped", "message": "The pre-start command is already running"}
+            self._pre_starting = True
+            self._pre_start_cancelled = False
+        handed_over = False
+        try:
+            self._begin_run_logs()
+            self._append_stdout("[pre-start] Running pre-start command\n")
+            # Put the server's own Java first on PATH so a plain `java` in the
+            # command (packwiz) works where only a managed JDK is installed.
+            env = None
+            java_dir = os.path.dirname(self._java_executable())
+            if java_dir:
+                env = {**os.environ, "PATH": java_dir + os.pathsep + os.environ.get("PATH", "")}
+            try:
+                proc = subprocess.Popen(
+                    command,
+                    shell=True,
+                    cwd=self.cwd,
+                    env=env,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    errors="replace",
+                    **platform_utils.subprocess_no_window_kwargs(),
+                )
+            except OSError as exc:
+                return {"status": "stopped", "message": f"Pre-start command could not run: {exc}"}
+
+            timed_out = threading.Event()
+
+            def _kill_tree():
+                # The shell's children (java for packwiz) hold the pipe open,
+                # so killing only the shell would leave readline() blocked.
+                if psutil:
+                    try:
+                        children = psutil.Process(proc.pid).children(recursive=True)
+                    except psutil.Error:
+                        children = []
+                    for child in children:
+                        try:
+                            child.kill()
+                        except psutil.Error:
+                            pass
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
+
+            def _time_out():
+                timed_out.set()
+                _kill_tree()
+
+            with self._lock:
+                self._pre_start_kill = _kill_tree
+                cancelled_early = self._pre_start_cancelled
+            if cancelled_early:
+                _kill_tree()
+            timer = threading.Timer(self.PRE_START_TIMEOUT_SEC, _time_out)
+            timer.daemon = True
+            timer.start()
+            try:
+                for line in iter(proc.stdout.readline, ""):
+                    text = line.rstrip("\n")
+                    self._append_stdout(f"[pre-start] {text}\n")
+                proc.stdout.close()
+                exit_code = proc.wait()
+            finally:
+                timer.cancel()
+                with self._lock:
+                    self._pre_start_kill = None
+                    cancelled = self._pre_start_cancelled
+
+            if cancelled:
+                message = "Pre-start command was cancelled"
+            elif timed_out.is_set():
+                message = f"Pre-start command timed out after {self.PRE_START_TIMEOUT_SEC // 60} minutes"
+            elif exit_code != 0:
+                message = f"Pre-start command failed (exit code {exit_code}); see the console for its output"
+            else:
+                # start() clears _pre_starting under its lock, so a stop() that
+                # lands between here and the launch still cancels it.
+                handed_over = True
+                return None
+            self._append_stdout(f"[pre-start] {message}\n")
+            return {"status": "stopped", "message": message}
+        finally:
+            if not handed_over:
+                with self._lock:
+                    self._pre_starting = False
+
+    def start(self, required_java_major: Optional[int] = None, pre_start_command: str = "") -> dict:
+        """Start the server process if it is not already running."""
+        if pre_start_command:
+            refused = self._run_pre_start(pre_start_command)
+            if refused:
+                return refused
+        with self._lock:
+            if self._pre_starting:
+                if not pre_start_command:
+                    return {"status": "stopped", "message": "The pre-start command is already running"}
+                # Handed over by _run_pre_start (see there).
+                self._pre_starting = False
+                if self._pre_start_cancelled:
+                    self._append_stdout("[pre-start] Pre-start command was cancelled\n")
+                    return {"status": "stopped", "message": "Pre-start command was cancelled"}
             if self.is_running:
                 return {"status": "running", "message": "Server is already running"}
 
@@ -602,7 +742,7 @@ class ServerManager:
                 }
 
             command_to_run = self._with_unsafe_suppression(command_to_run, detected_java)
-            started, message = self._spawn_process(command_to_run)
+            started, message = self._spawn_process(command_to_run, new_run=not pre_start_command)
             status = "running" if started else "stopped"
             combined_message = message
             if started:
@@ -617,7 +757,18 @@ class ServerManager:
             }
 
     def stop(self) -> dict:
-        """Stop the server process if it is running."""
+        """Stop the server process if it is running, or cancel its pre-start."""
+        with self._lock:
+            cancelling = self._pre_starting
+            if cancelling:
+                self._pre_start_cancelled = True
+                kill = self._pre_start_kill
+        if cancelling:
+            # Nothing has launched yet; ending the command is the whole stop.
+            if kill:
+                kill()
+            return {"status": "stopped", "message": "Pre-start command cancelled"}
+
         with self._lock:
             if not self.is_running or not self._process:
                 return {"status": "stopped", "message": "Server is not running"}
