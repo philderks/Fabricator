@@ -314,6 +314,9 @@ const pollProgress = async () => {
     if (task.status === 'installing') state.value = 'installing'
     if (task.status === 'done') {
       clearPoll()
+      // Overlapping polls can all see 'done'; only the first may continue,
+      // or the caller's create/start runs several times.
+      taskId.value = null
       // `error` is terminal. Otherwise carry on with whatever needed Java
       // (start / install / create) instead of stopping on a confirmation.
       if (state.value === 'error') return
