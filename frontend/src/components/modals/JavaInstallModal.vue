@@ -64,20 +64,6 @@
         </div>
       </template>
 
-      <!-- confirming_install -->
-      <template v-else-if="state === 'confirming_install'">
-        <div class="java-icon success">
-          <svg width="52" height="52" viewBox="0 0 24 24" fill="none">
-            <path d="M5 12l5 5L20 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </div>
-        <p class="java-heading">{{ $t('javaInstall.downloadComplete') }}</p>
-        <i18n-t keypath="javaInstall.readyToInstall" tag="p" class="java-subtext">
-          <template #major>{{ effectiveMajor }}</template>
-          <template #install><strong>{{ $t('common.install') }}</strong></template>
-        </i18n-t>
-      </template>
-
       <!-- installing -->
       <template v-else-if="state === 'installing'">
         <div class="java-spinner"></div>
@@ -132,11 +118,6 @@
 
       <template v-else-if="state === 'downloading' || state === 'installing'">
         <AppButton variant="ghost" size="md" :loading="true">{{ $t('common.working') }}</AppButton>
-      </template>
-
-      <template v-else-if="state === 'confirming_install'">
-        <AppButton variant="ghost" size="md" @click="handleClose">{{ $t('common.cancel') }}</AppButton>
-        <AppButton variant="primary" size="md" @click="confirmInstall">{{ $t('common.install') }}</AppButton>
       </template>
 
       <template v-else-if="state === 'done'">
@@ -225,7 +206,6 @@ const modalTitle = computed(() => {
   switch (state.value) {
     case 'downloading': return t('javaInstall.titles.downloading')
     case 'installing': return t('javaInstall.titles.installing')
-    case 'confirming_install': return t('javaInstall.titles.confirming')
     case 'done': return t('javaInstall.titles.done')
     case 'error': return t('javaInstall.titles.error')
     default: return t('javaInstall.titles.default')
@@ -330,19 +310,14 @@ const pollProgress = async () => {
       state.value = 'error'
       return
     }
-    if (task.status === 'installing' && state.value === 'downloading') {
-      clearPoll()
-      state.value = 'confirming_install'
-      return
-    }
+    // The backend extracts straight after downloading; just reflect it.
+    if (task.status === 'installing') state.value = 'installing'
     if (task.status === 'done') {
       clearPoll()
-      javaPath.value = task.java_path || ''
-      // `error` is terminal; every other state (downloading,
-      // confirming_install, installing, and the rare done re-poll) transitions
-      // forward to `done`.
+      // `error` is terminal. Otherwise carry on with whatever needed Java
+      // (start / install / create) instead of stopping on a confirmation.
       if (state.value === 'error') return
-      state.value = 'done'
+      finishAndStart()
     }
   } catch (err) {
     if (taskId.value !== localTaskId) return
@@ -350,13 +325,6 @@ const pollProgress = async () => {
     errorMessage.value = err?.message || t('java.lostContact')
     state.value = 'error'
   }
-}
-
-const confirmInstall = () => {
-  state.value = 'installing'
-  // The backend thread is already extracting; resume polling for completion.
-  clearPoll()
-  pollHandle = setInterval(pollProgress, 500)
 }
 
 const finishAndStart = () => {

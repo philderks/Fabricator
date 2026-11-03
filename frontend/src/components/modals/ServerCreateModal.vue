@@ -392,8 +392,16 @@
                 min="1024"
                 max="65535"
                 placeholder="25565"
-                :aria-describedby="describedBy"
+                :class="{ 'port-input--taken': portOwner }"
+                :aria-invalid="!!portOwner"
+                :aria-describedby="portOwner ? 'create-port-taken' : describedBy"
               >
+              <p v-if="portOwner" id="create-port-taken" class="port-taken" role="alert">
+                {{ $t('createServer.portTaken', { port: formData.port, name: portOwner.name }) }}
+                <button type="button" class="port-taken__fix" @click="formData.port = freePort">
+                  {{ $t('createServer.useFreePort', { port: freePort }) }}
+                </button>
+              </p>
             </template>
           </FormField>
 
@@ -638,7 +646,7 @@
         <AppButton
           variant="primary"
           size="md"
-          :disabled="creating || !formData.acceptEula"
+          :disabled="creating || !formData.acceptEula || !!portOwner"
           :loading="creating"
           @click="handleCreate"
         >
@@ -678,6 +686,7 @@ import {
   discardModpackUpload
 } from '../../api/modrinth'
 import { useToast } from '../../composables/useToast'
+import { useServerStore } from '../../stores/server'
 import { useModpackImport } from '../../composables/useModpackImport'
 import { formatNumber } from '../../utils/format'
 import { loaderContentKind } from '../../utils/loaderKind'
@@ -702,7 +711,7 @@ export default {
   emits: ['close', 'create', 'imported'],
   setup() {
     const toast = useToast()
-    return { toast, formatNumber }
+    return { toast, formatNumber, serverStore: useServerStore() }
   },
   data() {
     return {
@@ -769,6 +778,19 @@ export default {
     this.loadGameVersions()
   },
   computed: {
+    // Same rule as the backend's create check: another server's configured port.
+    // shortcut: ignores non-Fabricator processes on the port; needs a backend bind probe for that.
+    portOwner() {
+      return this.serverStore.serversList.find(s => Number(s.port ?? 25565) === this.formData.port)
+    },
+
+    freePort() {
+      const used = new Set(this.serverStore.serversList.map(s => Number(s.port ?? 25565)))
+      let port = 25565
+      while (used.has(port)) port++
+      return port
+    },
+
     // Module-scope imports are not visible to an Options API template, so the
     // shared copy is surfaced here rather than duplicated as a literal.
     lostContactMessage() {
@@ -1607,7 +1629,7 @@ export default {
     },
 
     async handleCreate() {
-      if (this.creating) return
+      if (this.creating || this.portOwner) return
 
       if (!this.formData.name.trim()) {
         this.toast.warning(this.$t('createServer.nameRequired'), this.$t('createServer.nameRequiredTitle'))
@@ -2108,6 +2130,27 @@ export default {
   object-fit: cover;
   border: 1px solid var(--border-color);
   flex-shrink: 0;
+}
+
+.port-input--taken {
+  border-color: var(--danger);
+}
+
+.port-taken {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--danger);
+}
+
+.port-taken__fix {
+  margin-left: var(--space-1);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--primary);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .modpack-error {
