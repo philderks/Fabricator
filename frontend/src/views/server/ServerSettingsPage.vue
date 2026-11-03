@@ -1140,6 +1140,24 @@ const onReset = () => {
           ></textarea>
         </template>
       </FormField>
+
+      <FormField
+        :label="$t('properties.java.preStartCommand')"
+        :hint="$t('properties.java.preStartCommandHint')"
+      >
+        <template #default="{ id, describedBy }">
+          <input
+            :id="id"
+            class="settings-page__input"
+            type="text"
+            spellcheck="false"
+            placeholder="java -jar packwiz-installer-bootstrap.jar -g -s server https://example.com/pack.toml"
+            v-model.trim="store.serverSettings.preStartCommand"
+            :disabled="!store.canEditSettings"
+            :aria-describedby="describedBy"
+          />
+        </template>
+      </FormField>
     </Panel>
 
     <Panel :title="$t('properties.performance.title')">

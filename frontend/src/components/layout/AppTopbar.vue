@@ -84,6 +84,8 @@ const pillSub = computed(() => {
 })
 
 const isRunning = computed(() => props.serverStatus.status === 'running')
+// 'starting' means a pre-start command is running (#103); Stop cancels it.
+const canStop = computed(() => isRunning.value || props.serverStatus.status === 'starting')
 
 // A 'pending' server (created but never installed) turns the start button
 // into an actionable Install control instead of a dead locked one.
@@ -116,7 +118,7 @@ const isPending = computed(() => props.serverStatus.status === 'pending')
         </AppButton>
 
         <AppButton
-          v-if="isRunning"
+          v-if="canStop"
           variant="danger"
           size="md"
           :disabled="actionState.stop"

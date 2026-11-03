@@ -52,8 +52,10 @@ _CREDENTIAL_MARKERS = (
 )
 
 # Exact keys that are credentials on their own but too short to match as a
-# substring without catching innocent words ("monkey", "keys").
-_CREDENTIAL_KEYS = frozenset({"key", "apikey", "api_key"})
+# substring without catching innocent words ("monkey", "keys"). The pre-start
+# command (#103) is here because it routinely embeds one: a private modpack
+# URL, an access token passed to a sync tool.
+_CREDENTIAL_KEYS = frozenset({"key", "apikey", "api_key", "prestartcommand"})
 
 
 def is_token_request() -> bool:

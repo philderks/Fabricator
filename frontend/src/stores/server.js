@@ -249,6 +249,7 @@ export const useServerStore = defineStore('server', () => {
     // back to the managed JDK matching the MC version, jvmArgs adds nothing.
     javaPath: data.javaPath || '',
     jvmArgs: data.jvmArgs || '',
+    preStartCommand: data.preStartCommand || '',
     levelName: data.levelName || 'world',
     levelType: data.levelType || 'default',
     seed: data.seed || '',
