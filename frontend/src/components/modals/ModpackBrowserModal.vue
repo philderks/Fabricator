@@ -29,7 +29,7 @@
         <input
           ref="fileInput"
           type="file"
-          accept=".mrpack,application/zip"
+          accept=".mrpack,.zip,application/zip"
           :disabled="uploading"
           @change="handleFileChange"
         >
@@ -181,6 +181,7 @@ const props = defineProps({
   show: { type: Boolean, required: true },
   mcVersion: { type: String, default: '' },
   loader: { type: String, default: 'fabric' },
+  initialMethod: { type: String, default: 'search' },
 })
 
 const emit = defineEmits(['close', 'install'])
@@ -249,6 +250,7 @@ const canInstall = computed(() =>
 
 watch(() => props.show, (next) => {
   if (next) {
+    importMethod.value = props.initialMethod
     // Open onto something browsable instead of an empty box. Filtered to this
     // server's version and loader, as the heading promises — a popular pack it
     // cannot install is worse than no suggestion at all.

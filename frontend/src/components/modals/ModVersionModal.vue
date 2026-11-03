@@ -29,7 +29,12 @@ const props = defineProps({
   /** Loader facets this server accepts (e.g. ['paper','spigot','bukkit']). */
   loaders: { type: Array, default: () => [] },
   /** Version currently on disk, if any — marks the row and retitles the CTA. */
-  installedVersionId: { type: String, default: '' }
+  installedVersionId: { type: String, default: '' },
+  /**
+   * Never offer builds for another Minecraft version. A modpack (#104) can't
+   * change the server's Minecraft version, so for it those rows are dead ends.
+   */
+  strict: { type: Boolean, default: false }
 })
 
 const emit = defineEmits(['close', 'select'])
@@ -94,9 +99,9 @@ async function load() {
     versions.value = Array.isArray(result) ? result : []
     // Preselect what is installed, else the newest compatible build, so the
     // common case is one click.
-    const installed = decorated.value.find((v) => v.installed)
+    const installed = decorated.value.find((v) => v.installed && (v.compatible || !props.strict))
     selectedId.value = installed?.id || decorated.value.find((v) => v.compatible)?.id || ''
-    if (!compatibleCount.value && decorated.value.length) showIncompatible.value = true
+    if (!compatibleCount.value && decorated.value.length && !props.strict) showIncompatible.value = true
   } catch (err) {
     error.value = err?.message || t('modVersions.loadFailed')
   } finally {
@@ -162,7 +167,7 @@ function confirm() {
       </ul>
 
       <button
-        v-if="compatibleCount && compatibleCount < decorated.length"
+        v-if="!strict && compatibleCount && compatibleCount < decorated.length"
         type="button"
         class="mv__toggle"
         @click="showIncompatible = !showIncompatible"

@@ -208,6 +208,7 @@ onUnmounted(() => {
       :mc-version="store.server?.version || store.serverStatus.version"
       :loaders="loaderModrinthFacets(store.server?.loader || store.serverStatus.loader)"
       :installed-version-id="store.versionPickerMod?.installedVersionId || ''"
+      :strict="store.versionPickerMod?.kind === 'modpack'"
       @close="store.closeVersionPicker"
       @select="store.handleSelectVersion"
     />
@@ -216,6 +217,7 @@ onUnmounted(() => {
       :show="store.showModpackBrowser"
       :mc-version="store.server?.version || store.serverStatus.version"
       :loader="(store.server?.loader || store.serverStatus.loader).toLowerCase()"
+      :initial-method="store.modpackBrowserMethod"
       @close="store.closeModpackBrowser"
       @install="store.handleInstallModpack"
     />
@@ -260,6 +262,23 @@ onUnmounted(() => {
       :loading="store.modpackInstalling"
       @confirm="store.confirmInstallWithMissingMods"
       @cancel="store.cancelMissingModsConfirmation"
+    />
+
+    <!-- #104: the pack just installed pins a loader build the server lacks. -->
+    <ConfirmModal
+      :show="Boolean(store.pendingLoaderChange)"
+      :title="$t('modpacks.loaderChange.title')"
+      :message="store.pendingLoaderChange
+        ? $t(store.pendingLoaderChange.current ? 'modpacks.loaderChange.message' : 'modpacks.loaderChange.messageUnknown', store.pendingLoaderChange)
+        : ''"
+      :description="$t('modpacks.loaderChange.description')"
+      type="warning"
+      :confirm-text="$t('modpacks.loaderChange.confirm')"
+      :cancel-text="$t('modpacks.loaderChange.skip')"
+      :loading-text="$t('common.installing')"
+      :loading="store.loaderChanging"
+      @confirm="store.confirmLoaderChange"
+      @cancel="store.cancelLoaderChange"
     />
 
     <ModSideDecisionModal

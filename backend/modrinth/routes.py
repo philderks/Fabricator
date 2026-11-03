@@ -9,10 +9,12 @@ from pathlib import Path
 from flask import Blueprint, current_app, jsonify, request
 from werkzeug.utils import secure_filename
 
-from backend.modrinth import installed, mrpack
+from backend.modrinth import installed, mrpack, serverpack
 from backend.modrinth.client import ModrinthClient, ModrinthApiError
-from backend.server import storage
+from backend.server import importer, storage
+from backend.server.installer import get_installer_for
 from backend.server.registry import get_server_process_registry
+from backend.server.upgrade import loader_build_available
 from backend.server.java_compat import resolve_required_java, skip_java_enforcement
 from backend.utils.routes import require_server, with_server_lock
 from backend.utils.strings import bool_from_str
@@ -772,6 +774,37 @@ def install_mod(mod_id, server):
     })
 
 
+def _loader_change(server, install_path, result):
+    """The loader build the installed pack asks for, if the server runs another (#104).
+
+    None when the pack names no build, names a different loader, or names a
+    build the installer cannot supply. A server whose build is unknown (a
+    Fabric/Quilt ``server.jar`` installed before builds were recorded) gets the
+    offer too: reinstalling the same build is harmless, a mismatch is not.
+    """
+    summary = mrpack.describe({'dependencies': result.get('dependencies') or {}})
+    loader = (server.get('loader') or '').strip().lower()
+    declared = summary['loader_version']
+    if not declared or summary['loader'] != loader:
+        return None
+
+    current = server.get('loaderVersion')
+    if not current:
+        jars = sorted(p.name for p in install_path.iterdir() if p.is_file() and p.suffix == '.jar')
+        current = importer._detect(install_path, jars)['loaderVersion']
+    if current == declared:
+        return None
+
+    installer = get_installer_for(loader, install_path)
+    try:
+        if installer is None or not loader_build_available(installer, server.get('version'), declared):
+            return None
+    except Exception:  # noqa: BLE001 - the offer is optional, the install already succeeded
+        current_app.logger.warning('Could not list %s versions for the loader-change offer', loader)
+        return None
+    return {'loader': loader, 'current': current, 'required': declared}
+
+
 def _run_modpack_install(server, data, run_install, build_modpack_info, *, log_label):
     """Run a modpack install and everything that has to happen around one.
 
@@ -857,6 +890,9 @@ def _run_modpack_install(server, data, run_install, build_modpack_info, *, log_l
         payload['backup_file'] = backup_file
     if java_warning:
         payload['java_warning'] = java_warning
+    loader_change = _loader_change(server, Path(install_path), result)
+    if loader_change:
+        payload['loader_change'] = loader_change
     return jsonify(payload)
 
 
@@ -879,6 +915,7 @@ def install_modpack(project_id, server):
             allow_missing=_parse_bool(data.get('allow_missing'), default=False),
             mod_side_overrides=data.get('mod_side_overrides'),
             progress_callback=progress_cb,
+            version_id=data.get('version_id') or None,
         )
 
     def _modpack_info(result):
@@ -899,7 +936,7 @@ def install_modpack(project_id, server):
 
 @modrinth_bp.route('/modpack/upload', methods=['POST'])
 def upload_modpack_archive():
-    """Stage an uploaded .mrpack and report what it declares.
+    """Stage an uploaded .mrpack or server pack zip and report what it declares.
 
     The raw archive bytes are the request body (``fetch(url, {body: file})``);
     the display filename comes from the ``filename`` query param or the
@@ -939,12 +976,16 @@ def upload_modpack_archive():
         return jsonify({'error': 'Empty upload — no file received'}), 400
 
     try:
-        index = mrpack.read_index(temp_path)
+        summary = mrpack.describe(mrpack.read_index(temp_path), temp_path)
     except mrpack.InvalidMrpackError as exc:
-        temp_path.unlink(missing_ok=True)
-        return jsonify({'error': str(exc)}), 400
-
-    summary = mrpack.describe(index, temp_path)
+        # Not a .mrpack: a CurseForge-style server pack zip also installs (#104).
+        try:
+            summary = serverpack.describe(temp_path, safe_display)
+        except mrpack.InvalidMrpackError as pack_exc:
+            temp_path.unlink(missing_ok=True)
+            # Report against what the user meant to upload.
+            error = pack_exc if safe_display.lower().endswith('.zip') else exc
+            return jsonify({'error': str(error)}), 400
     staged = mrpack.stage(
         temp_path, filename=safe_display, size_bytes=written, summary=summary
     )
@@ -966,7 +1007,7 @@ def discard_modpack_upload(upload_id):
     busy_message='A modpack install is already in progress for this server',
 )
 def install_uploaded_modpack(upload_id, server):
-    """Install a previously staged .mrpack onto a server (#53)."""
+    """Install a previously staged .mrpack (#53) or server pack (#104) onto a server."""
     data = request.get_json() or {}
     staged = mrpack.get(upload_id)
     if staged is None:
@@ -989,6 +1030,16 @@ def install_uploaded_modpack(upload_id, server):
     loader = data.get('loader') or staged.summary.get('loader') or server.get('loader')
 
     def _run(install_path, progress_cb):
+        if staged.summary.get('kind') == serverpack.KIND:
+            return serverpack.install(
+                staged.path,
+                install_path,
+                staged.summary,
+                clean=modrinth_client.clean_modpack_switch_paths,
+                protected=modrinth_client.PROTECTED_SERVER_PATHS,
+                clean_install=_parse_bool(data.get('clean_install'), default=True),
+                progress_callback=progress_cb,
+            )
         return modrinth_client.install_mrpack_archive(
             staged.path,
             install_path,
