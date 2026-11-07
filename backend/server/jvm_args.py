@@ -23,6 +23,9 @@ import os
 import shlex
 from typing import Any, List
 
+from backend.server import storage
+from backend.server.players.files import read_json_list, write_json_list
+
 logger = logging.getLogger(__name__)
 
 # Bounds. Generous next to a real tuning string (a heavy G1/ZGC setup runs to
@@ -147,3 +150,75 @@ def validate_java_path(raw: Any) -> str:
         if not os.access(value, os.X_OK):
             raise JvmArgsError(f"Not executable: '{value}'")
     return value
+
+
+# --------------------------------------------------------------------------- #
+# Presets (#108): named flag sets shared by every server
+# --------------------------------------------------------------------------- #
+#
+# Stored next to servers.json rather than on a record, so a tuning string set up
+# once is offered on every server. A preset is only something the UI copies
+# from: applying one writes that server's own ``jvmArgs`` through the settings
+# route, so editing or deleting a preset never changes a server.
+
+PRESETS_FILE = "jvm-presets.json"
+MAX_PRESETS = 50
+MAX_PRESET_NAME_LENGTH = 64
+
+
+def validate_presets(raw: Any) -> List[dict]:
+    """Validate a whole preset list, returning it as stripped ``{name, args}``.
+
+    Each preset's flags get the same checks as a server's ``jvmArgs``, so
+    applying one can never be refused at save time. Raises
+    :class:`JvmArgsError` with a message meant for the user.
+    """
+    if not isinstance(raw, list):
+        raise JvmArgsError("Presets must be a list")
+    if len(raw) > MAX_PRESETS:
+        raise JvmArgsError(f"Too many presets ({len(raw)}, max {MAX_PRESETS})")
+
+    presets: List[dict] = []
+    seen = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            raise JvmArgsError("Each preset needs a name and JVM arguments")
+        name = item.get("name")
+        name = name.strip() if isinstance(name, str) else ""
+        if not name:
+            raise JvmArgsError("Every preset needs a name")
+        if len(name) > MAX_PRESET_NAME_LENGTH:
+            raise JvmArgsError(
+                f"Preset names can be at most {MAX_PRESET_NAME_LENGTH} characters"
+            )
+        if name.casefold() in seen:
+            raise JvmArgsError(f"There is already a preset named '{name}'")
+        seen.add(name.casefold())
+
+        args = item.get("args")
+        if not isinstance(args, str) or not args.strip():
+            raise JvmArgsError(f"Preset '{name}' has no JVM arguments")
+        try:
+            validate_jvm_args(args)
+        except JvmArgsError as exc:
+            raise JvmArgsError(f"Preset '{name}': {exc}") from exc
+        presets.append({"name": name, "args": args.strip()})
+    return presets
+
+
+def load_presets() -> List[dict]:
+    """Return the saved presets; ``[]`` before the first save.
+
+    A corrupt or invalid file raises ``ValueError`` instead of reading as empty:
+    an empty read would let the next save overwrite it.
+    """
+    return validate_presets(read_json_list(storage.SERVERS_FILE.parent, PRESETS_FILE))
+
+
+def save_presets(raw: Any) -> List[dict]:
+    """Validate and store the whole list, returning what was stored."""
+    # shortcut: whole-list replace, last write wins. Fine for one operator's
+    # panel; move to per-preset routes if concurrent editors clobber each other.
+    presets = validate_presets(raw)
+    write_json_list(storage.SERVERS_FILE.parent, PRESETS_FILE, presets)
+    return presets

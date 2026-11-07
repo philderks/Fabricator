@@ -1437,7 +1437,23 @@
       "cannotRun": "That path could not be run — check it points at a java executable.",
       "tooOld": "This server needs Java {required} or newer; the selected runtime reports Java {selected}.",
       "autoHintVersion": "Picks an installed Java {version}+ runtime automatically.",
-      "autoHint": "Picks a compatible installed runtime automatically."
+      "autoHint": "Picks a compatible installed runtime automatically.",
+      "preset": "Flag Preset",
+      "presetHint": "Choosing a preset replaces the JVM arguments below. Nothing changes until you save.",
+      "presetHints": {
+        "aikar": "Paper's recommended G1 tuning. Aikar also recommends setting the minimum memory equal to the maximum."
+      },
+      "presetNone": "No preset",
+      "presetBuiltinGroup": "Built-in",
+      "presetCustomGroup": "Your presets",
+      "presetSaveAs": "Save as preset",
+      "presetName": "Preset name",
+      "presetDelete": "Delete preset",
+      "presetToastTitle": "JVM presets",
+      "presetSaved": "Preset saved. It is available on every server.",
+      "presetDeleted": "Preset deleted. Servers already using its flags keep them.",
+      "presetSaveFailed": "Could not save the presets.",
+      "presetLoadFailed": "Could not load your saved presets."
     },
     "performance": {
       "title": "Performance",

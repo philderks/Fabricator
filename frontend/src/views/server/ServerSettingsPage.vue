@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import AppButton from '../../components/ui/AppButton.vue'
 import FormField from '../../components/ui/FormField.vue'
 import MotdEditor from '../../components/ui/MotdEditor.vue'
@@ -7,9 +7,10 @@ import Panel from '../../components/ui/Panel.vue'
 import ToggleRow from '../../components/ui/ToggleRow.vue'
 import { useServerStore } from '../../stores/server'
 import { useAuthStore } from '../../stores/auth'
-import { deleteServerIcon, getInstalledJava, getJavaStatus, getLoaderGameVersions, getServerInstallProgress, setServerIcon, upgradeServer } from '../../api/servers'
+import { deleteServerIcon, getInstalledJava, getJavaStatus, getJvmPresets, getLoaderGameVersions, getServerInstallProgress, saveJvmPresets, setServerIcon, upgradeServer } from '../../api/servers'
 import { useToast } from '../../composables/useToast'
 import { t } from '../../i18n'
+import { BUILTIN_JVM_PRESETS } from '../../utils/jvmPresets'
 
 const store = useServerStore()
 const auth = useAuthStore()
@@ -262,6 +263,82 @@ const javaAutoHint = computed(() =>
     : t('properties.java.autoHint')
 )
 
+// ─── JVM flag presets (#108) ────────────────────────────────────────────────
+// Built-ins ship with the app; custom ones are saved on the panel and shared by
+// every server. Applying one replaces the JVM Arguments field (appending could
+// stack two collectors), and the form's Save/Reset handle it like any edit.
+
+const customPresets = ref([])
+const presetNameOpen = ref(false)
+const presetName = ref('')
+const presetNameInput = ref(null)
+const presetBusy = ref(false)
+
+// Custom first: one saved with a built-in's exact flags must still be the match
+// shown, or its Delete button could never appear.
+const presetOptions = computed(() => [
+  ...customPresets.value.map((preset) => ({ ...preset, id: `custom:${preset.name}` })),
+  ...BUILTIN_JVM_PRESETS
+])
+
+// Derived from the field, so the dropdown shows what is active with no state
+// of its own.
+const presetSelection = computed(() => {
+  const args = (store.serverSettings?.jvmArgs || '').trim()
+  return presetOptions.value.find((preset) => preset.args === args)?.id ?? ''
+})
+
+const selectedCustomPreset = computed(() =>
+  presetSelection.value.startsWith('custom:') ? presetSelection.value.slice('custom:'.length) : ''
+)
+
+const presetHint = computed(() =>
+  t(BUILTIN_JVM_PRESETS.find((preset) => preset.id === presetSelection.value)?.hint || 'properties.java.presetHint')
+)
+
+function applyPreset(id) {
+  const preset = presetOptions.value.find((entry) => entry.id === id)
+  if (preset && store.serverSettings) store.serverSettings.jvmArgs = preset.args
+}
+
+async function writePresets(next, successKey) {
+  presetBusy.value = true
+  try {
+    customPresets.value = (await saveJvmPresets(next)).presets
+    toast.success(t(successKey), t('properties.java.presetToastTitle'))
+    return true
+  } catch (error) {
+    toast.error(error.message || t('properties.java.presetSaveFailed'), t('common.error'))
+    return false
+  } finally {
+    presetBusy.value = false
+  }
+}
+
+async function openPresetName() {
+  presetName.value = ''
+  presetNameOpen.value = true
+  await nextTick()
+  presetNameInput.value?.focus()
+}
+
+async function savePreset() {
+  const name = presetName.value.trim()
+  const args = (store.serverSettings?.jvmArgs || '').trim()
+  if (!name || !args) return
+  // Saving under an existing name (any case) overwrites it: that is the edit.
+  const others = customPresets.value.filter((preset) => preset.name.toLowerCase() !== name.toLowerCase())
+  if (await writePresets([...others, { name, args }], 'properties.java.presetSaved')) {
+    presetNameOpen.value = false
+  }
+}
+
+// No confirm: the flags stay in the field, and no server's settings change.
+function deletePreset() {
+  const name = selectedCustomPreset.value
+  writePresets(customPresets.value.filter((preset) => preset.name !== name), 'properties.java.presetDeleted')
+}
+
 onMounted(async () => {
   if (auth.managed) return
   await loadUpgradeVersions()
@@ -270,6 +347,12 @@ onMounted(async () => {
     installedJava.value = Array.isArray(payload?.managed) ? payload.managed : []
   } catch {
     installedJava.value = []
+  }
+  try {
+    customPresets.value = (await getJvmPresets()).presets
+  } catch (error) {
+    // Loud, not an empty list: saving a preset would overwrite the stored file.
+    toast.error(error.message || t('properties.java.presetLoadFailed'), t('common.error'))
   }
   try {
     const status = await getJavaStatus({ mcVersion: store.server?.version })
@@ -1123,6 +1206,65 @@ const onReset = () => {
         <div>{{ javaWarning }}</div>
       </div>
 
+      <FormField :label="$t('properties.java.preset')" :hint="presetHint">
+        <template #default="{ id, describedBy }">
+          <div class="settings-page__preset">
+            <select
+              :id="id"
+              class="settings-page__select"
+              :value="presetSelection"
+              :disabled="!store.canEditSettings"
+              :aria-describedby="describedBy"
+              @change="applyPreset($event.target.value)"
+            >
+              <!-- Shown, never chosen: picking it would change nothing. -->
+              <option value="" disabled>{{ $t('properties.java.presetNone') }}</option>
+              <optgroup :label="$t('properties.java.presetBuiltinGroup')">
+                <option v-for="preset in BUILTIN_JVM_PRESETS" :key="preset.id" :value="preset.id">
+                  {{ preset.name }}
+                </option>
+              </optgroup>
+              <optgroup v-if="customPresets.length" :label="$t('properties.java.presetCustomGroup')">
+                <option v-for="preset in customPresets" :key="preset.name" :value="`custom:${preset.name}`">
+                  {{ preset.name }}
+                </option>
+              </optgroup>
+            </select>
+            <AppButton
+              variant="ghost"
+              :disabled="!store.serverSettings.jvmArgs || presetNameOpen"
+              @click="openPresetName"
+            >
+              {{ $t('properties.java.presetSaveAs') }}
+            </AppButton>
+            <AppButton v-if="selectedCustomPreset" variant="danger" :loading="presetBusy" @click="deletePreset">
+              {{ $t('properties.java.presetDelete') }}
+            </AppButton>
+          </div>
+        </template>
+      </FormField>
+
+      <form
+        v-if="presetNameOpen"
+        class="settings-page__preset"
+        @submit.prevent="savePreset"
+        @keydown.esc="presetNameOpen = false"
+      >
+        <input
+          ref="presetNameInput"
+          v-model="presetName"
+          class="settings-page__input"
+          type="text"
+          maxlength="64"
+          :placeholder="$t('properties.java.presetName')"
+          :aria-label="$t('properties.java.presetName')"
+        />
+        <AppButton type="submit" :loading="presetBusy" :disabled="!presetName.trim()">
+          {{ $t('common.save') }}
+        </AppButton>
+        <AppButton variant="ghost" @click="presetNameOpen = false">{{ $t('common.cancel') }}</AppButton>
+      </form>
+
       <FormField
         :label="$t('properties.java.jvmArgs')"
         :hint="$t('properties.java.jvmArgsHint')"
@@ -1659,6 +1801,19 @@ const onReset = () => {
   min-height: 72px;
   resize: vertical;
   font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+/* Select or name input, then its buttons; the buttons wrap below on phones. */
+.settings-page__preset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.settings-page__preset > :first-child {
+  flex: 1 1 220px;
+  width: auto;
+  min-width: 0;
 }
 
 .settings-page__input:focus,
