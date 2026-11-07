@@ -181,6 +181,8 @@ const onMemoryUnitChange = (nextUnit) => {
 
 const installedJava = ref([])
 const requiredJava = ref(null)
+// The major "Automatic" starts this server on (see the status call below).
+const autoJava = ref(null)
 // Forces the custom-path row open while the field is still empty, which is
 // otherwise indistinguishable from "Automatic".
 const customJavaOpen = ref(false)
@@ -231,7 +233,7 @@ async function probeCustomJava() {
     })
     customJavaProbe.value = {
       available: Boolean(status?.installed ?? status?.available),
-      major: status?.detected_java ?? status?.major_version ?? null
+      major: status?.detected_major ?? null
     }
   } catch {
     customJavaProbe.value = null
@@ -296,6 +298,22 @@ const presetHint = computed(() =>
   t(BUILTIN_JVM_PRESETS.find((preset) => preset.id === presetSelection.value)?.hint || 'properties.java.presetHint')
 )
 
+const effectiveJava = computed(() => (javaSelection.value === 'auto' ? autoJava.value : selectedJavaMajor.value))
+
+// An unknown Java allows every preset; their names state the range.
+function presetFitsJava(preset) {
+  const java = effectiveJava.value
+  return !java || (java >= (preset.minJava ?? 0) && java <= (preset.maxJava ?? Infinity))
+}
+
+// Disabling the option can't catch flags applied before the Java version changed.
+const presetJavaWarning = computed(() => {
+  const preset = BUILTIN_JVM_PRESETS.find((entry) => entry.id === presetSelection.value)
+  return preset && !presetFitsJava(preset)
+    ? t('properties.java.presetWrongJava', { preset: preset.name, java: effectiveJava.value })
+    : ''
+})
+
 function applyPreset(id) {
   const preset = presetOptions.value.find((entry) => entry.id === id)
   if (preset && store.serverSettings) store.serverSettings.jvmArgs = preset.args
@@ -355,8 +373,11 @@ onMounted(async () => {
     toast.error(error.message || t('properties.java.presetLoadFailed'), t('common.error'))
   }
   try {
-    const status = await getJavaStatus({ mcVersion: store.server?.version })
+    // loader: legacy Forge caps the Java version, which changes what Automatic picks.
+    const status = await getJavaStatus({ mcVersion: store.server?.version, loader: store.server?.loader })
     requiredJava.value = status?.required_java ?? null
+    // A runtime that already fits, else the one the start flow installs first.
+    autoJava.value = status?.meets_requirement ? status.detected_major : status?.install_major ?? null
   } catch {
     requiredJava.value = null
   }
@@ -1199,11 +1220,11 @@ const onReset = () => {
         </FormField>
       </div>
 
-      <div v-if="javaWarning" class="settings-page__notice settings-page__notice--warning" role="status">
+      <div v-if="javaWarning || presetJavaWarning" class="settings-page__notice settings-page__notice--warning" role="status">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path d="M12 9V13M12 17H12.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
-        <div>{{ javaWarning }}</div>
+        <div>{{ javaWarning || presetJavaWarning }}</div>
       </div>
 
       <FormField :label="$t('properties.java.preset')" :hint="presetHint">
@@ -1220,7 +1241,12 @@ const onReset = () => {
               <!-- Shown, never chosen: picking it would change nothing. -->
               <option value="" disabled>{{ $t('properties.java.presetNone') }}</option>
               <optgroup :label="$t('properties.java.presetBuiltinGroup')">
-                <option v-for="preset in BUILTIN_JVM_PRESETS" :key="preset.id" :value="preset.id">
+                <option
+                  v-for="preset in BUILTIN_JVM_PRESETS"
+                  :key="preset.id"
+                  :value="preset.id"
+                  :disabled="!presetFitsJava(preset)"
+                >
                   {{ preset.name }}
                 </option>
               </optgroup>

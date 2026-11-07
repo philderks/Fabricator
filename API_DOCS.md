@@ -595,8 +595,7 @@ reinstall.
 #### `GET /api/jvm-presets`
 
 Saved JVM flag presets, stored in `jvm-presets.json` next to `servers.json` and offered on every
-server's Java settings. The built-in presets (Aikar's flags) ship with the frontend and are not
-listed here.
+server's Java settings. The built-in presets ship with the frontend and are not listed here.
 
 **Response (200):** `{ "presets": [{ "name": "G1 tune", "args": "-XX:+UseG1GC -XX:MaxGCPauseMillis=130" }] }`,
 an empty list before the first save.

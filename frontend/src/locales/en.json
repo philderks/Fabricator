@@ -1425,7 +1425,7 @@
       "title": "Java Runtime",
       "path": "Java Executable Path",
       "jvmArgs": "JVM Arguments",
-      "jvmArgsHint": "Extra flags passed to the JVM, e.g. -XX:+UseZGC -XX:+ZGenerational. Set the heap with Memory Allocation below, not with -Xmx.",
+      "jvmArgsHint": "Extra flags passed to the JVM. Set the heap with Memory Allocation below, not with -Xmx.",
       "preStartCommand": "Pre-start Command",
       "preStartCommandHint": "Runs in the server folder before every start, e.g. to sync a packwiz modpack. Its output appears in the console. If it fails or runs longer than 10 minutes, the server does not start.",
       "notice": "These change how the server process is launched and take effect on the next start.",
@@ -1441,8 +1441,12 @@
       "preset": "Flag Preset",
       "presetHint": "Choosing a preset replaces the JVM arguments below. Nothing changes until you save.",
       "presetHints": {
-        "aikar": "Paper's recommended G1 tuning. Aikar also recommends setting the minimum memory equal to the maximum."
+        "aikar": "Paper's recommended G1 tuning. Aikar also recommends setting the minimum memory equal to the maximum.",
+        "aikar12g": "Aikar's adjustment for more than 12 GB of memory. If old-generation collections become more frequent, switch back to Aikar's flags.",
+        "zgc": "Short pauses for servers with plenty of memory and CPU cores. Java 21 and 22 need -XX:+ZGenerational for the generational mode; from Java 23 it is the default.",
+        "shenandoah": "Short pauses before Java 21, where generational ZGC is not available. Part of Temurin, the Java Fabricator installs, but not of Oracle's JDK."
       },
+      "presetWrongJava": "{preset} does not match Java {java}, which this server uses. Pick the preset for that version, or the server may not start.",
       "presetNone": "No preset",
       "presetBuiltinGroup": "Built-in",
       "presetCustomGroup": "Your presets",
