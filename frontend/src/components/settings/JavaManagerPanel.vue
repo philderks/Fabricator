@@ -5,7 +5,7 @@ import AppButton from '../ui/AppButton.vue'
 import ConfirmModal from '../modals/ConfirmModal.vue'
 import { getInstalledJava, installJava, getJavaInstallProgress, uninstallJava } from '../../api/servers'
 import { useToast } from '../../composables/useToast'
-import { t } from '../../i18n'
+import { formatList, t } from '../../i18n'
 
 const toast = useToast()
 
@@ -29,7 +29,28 @@ let pollHandle = null
 const deleteTarget = ref(null)
 const deleting = ref(false)
 
+// Bulk selection, as on the Mods page.
+const selectedMajors = ref(new Set())
+const bulkConfirmOpen = ref(false)
+
 const installedMajors = computed(() => managed.value.map((item) => item.major))
+
+// No server runs on these or would start on them (#109).
+const unusedMajors = computed(() =>
+  managed.value.filter((item) => !item.used_by?.length).map((item) => item.major)
+)
+
+const allSelected = computed(() =>
+  managed.value.length > 0 && managed.value.every((item) => selectedMajors.value.has(item.major))
+)
+
+const selectAllLabel = computed(() => {
+  if (allSelected.value) return t('java.deselectAll')
+  if (selectedMajors.value.size > 0) return t('java.selected', { n: selectedMajors.value.size })
+  return t('java.selectAll', managed.value.length)
+})
+
+const majorsLabel = (majors) => formatList(majors.map((major) => String(major)))
 
 const availableMajors = computed(() =>
   INSTALLABLE_MAJORS.filter((major) => !installedMajors.value.includes(major))
@@ -85,6 +106,8 @@ const loadInstalled = async () => {
     const data = await getInstalledJava()
     managed.value = Array.isArray(data?.managed) ? data.managed : []
     systemJava.value = data?.system || null
+    // Drop selections whose runtime is gone (removed here or elsewhere).
+    selectedMajors.value = new Set([...selectedMajors.value].filter((major) => installedMajors.value.includes(major)))
     if (!availableMajors.value.includes(selectedMajor.value)) {
       selectedMajor.value = availableMajors.value[0] ?? null
     }
@@ -170,6 +193,40 @@ const confirmDelete = async () => {
   }
 }
 
+const toggleSelection = (major) => {
+  const next = new Set(selectedMajors.value)
+  if (next.has(major)) next.delete(major)
+  else next.add(major)
+  selectedMajors.value = next
+}
+
+const toggleSelectAll = () => {
+  selectedMajors.value = allSelected.value ? new Set() : new Set(installedMajors.value)
+}
+
+// One at a time through the single-remove route; a failure doesn't stop the rest.
+const confirmBulkRemove = async () => {
+  const majors = [...selectedMajors.value].sort((a, b) => a - b)
+  const failed = []
+  deleting.value = true
+  for (const major of majors) {
+    try {
+      await uninstallJava(major)
+    } catch {
+      failed.push(major)
+    }
+  }
+  if (failed.length) {
+    toast.error(t('java.removeFailed', { major: majorsLabel(failed) }), t('java.title'))
+  } else {
+    toast.success(t('java.removed', { major: majorsLabel(majors) }), t('java.title'))
+  }
+  deleting.value = false
+  bulkConfirmOpen.value = false
+  selectedMajors.value = new Set()
+  await loadInstalled()
+}
+
 const versionLabel = (entry) => {
   if (entry.version != null && entry.version !== entry.major) {
     return t('java.versionReports', { major: entry.major, version: entry.version })
@@ -201,6 +258,47 @@ onBeforeUnmount(clearPoll)
     </div>
 
     <template v-else>
+      <div
+        v-if="managed.length > 0"
+        class="java-manager__bulk-bar"
+        :class="{ 'is-active': selectedMajors.size > 0 }"
+      >
+        <label class="java-manager__select-all">
+          <input
+            type="checkbox"
+            class="java-manager__checkbox"
+            :checked="allSelected"
+            :indeterminate.prop="selectedMajors.size > 0 && !allSelected"
+            @change="toggleSelectAll"
+          />
+          <span>{{ selectAllLabel }}</span>
+        </label>
+        <div class="java-manager__bulk-actions">
+          <button
+            v-if="selectedMajors.size === 0 && unusedMajors.length > 0"
+            type="button"
+            class="java-manager__bulk-clear"
+            @click="selectedMajors = new Set(unusedMajors)"
+          >
+            {{ $t('java.selectUnused', unusedMajors.length) }}
+          </button>
+          <template v-if="selectedMajors.size > 0">
+            <button type="button" class="java-manager__bulk-clear" @click="selectedMajors = new Set()">
+              {{ $t('common.clear') }}
+            </button>
+            <AppButton
+              variant="danger"
+              size="sm"
+              :disabled="installing"
+              :loading="deleting"
+              @click="bulkConfirmOpen = true"
+            >
+              {{ $t('java.removeCount', selectedMajors.size) }}
+            </AppButton>
+          </template>
+        </div>
+      </div>
+
       <ul class="java-manager__list">
         <li
           v-if="systemJava && systemJava.installed"
@@ -220,18 +318,32 @@ onBeforeUnmount(clearPoll)
           :key="entry.major"
           class="java-manager__row"
         >
+          <label class="java-manager__check" :aria-label="$t('java.select', { major: entry.major })">
+            <input
+              type="checkbox"
+              class="java-manager__checkbox"
+              :checked="selectedMajors.has(entry.major)"
+              @change="toggleSelection(entry.major)"
+            />
+          </label>
           <div class="java-manager__info">
             <span class="java-manager__title">{{ versionLabel(entry) }}</span>
             <span class="java-manager__path" :title="entry.path">{{ entry.path }}</span>
+            <span v-if="entry.used_by?.length" class="java-manager__usage">
+              {{ $t('java.usedBy', { servers: formatList(entry.used_by) }) }}
+            </span>
           </div>
-          <AppButton
-            variant="danger"
-            size="sm"
-            :disabled="installing"
-            @click="requestDelete(entry)"
-          >
-            {{ $t('common.remove') }}
-          </AppButton>
+          <div class="java-manager__actions">
+            <span v-if="!entry.used_by?.length" class="java-manager__badge">{{ $t('java.unusedBadge') }}</span>
+            <AppButton
+              variant="danger"
+              size="sm"
+              :disabled="installing"
+              @click="requestDelete(entry)"
+            >
+              {{ $t('common.remove') }}
+            </AppButton>
+          </div>
         </li>
 
         <li
@@ -302,6 +414,18 @@ onBeforeUnmount(clearPoll)
       @confirm="confirmDelete"
       @cancel="cancelDelete"
     />
+
+    <ConfirmModal
+      :show="bulkConfirmOpen"
+      :title="$t('java.removeSelectedTitle')"
+      :message="$t('java.removeMessage', { major: majorsLabel([...selectedMajors].sort((a, b) => a - b)) })"
+      :description="$t('java.removeDescription')"
+      type="danger"
+      :confirm-text="$t('java.removeCount', selectedMajors.size)"
+      :loading="deleting"
+      @confirm="confirmBulkRemove"
+      @cancel="bulkConfirmOpen = false"
+    />
   </Panel>
 </template>
 
@@ -358,6 +482,7 @@ onBeforeUnmount(clearPoll)
 }
 
 .java-manager__info {
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -377,6 +502,80 @@ onBeforeUnmount(clearPoll)
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.java-manager__usage {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.java-manager__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+/* Bulk bar and checkboxes match the Mods page's. */
+.java-manager__bulk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  min-height: 44px;
+  /* The background bleeds into the panel padding so the checkbox and buttons
+     line up with the rows below. */
+  margin: 0 calc(-1 * var(--space-3));
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  transition: background 0.15s ease;
+}
+
+.java-manager__bulk-bar.is-active {
+  background: color-mix(in srgb, var(--primary) 8%, var(--bg-secondary));
+}
+
+.java-manager__select-all,
+.java-manager__check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  user-select: none;
+}
+
+.java-manager__checkbox {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  accent-color: var(--primary);
+}
+
+.java-manager__bulk-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.java-manager__bulk-clear {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.java-manager__bulk-clear:hover {
+  color: var(--text-secondary);
+  border-color: var(--text-muted);
 }
 
 .java-manager__badge {

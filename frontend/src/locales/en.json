@@ -1213,7 +1213,16 @@
     "allInstalled": "All common versions installed",
     "removeTitle": "Remove Java runtime?",
     "removeMessage": "Remove Java {major}?",
-    "removeDescription": "Servers that need this version will prompt you to reinstall it the next time they start."
+    "removeDescription": "Servers that need this version will prompt you to reinstall it the next time they start.",
+    "usedBy": "Used by {servers}",
+    "unusedBadge": "Unused",
+    "select": "Select Java {major}",
+    "selectAll": "Select all {n} runtime | Select all {n} runtimes",
+    "selected": "{n} selected",
+    "deselectAll": "Deselect all",
+    "selectUnused": "Select {n} unused",
+    "removeCount": "Remove {n} runtime | Remove {n} runtimes",
+    "removeSelectedTitle": "Remove Java runtimes?"
   },
   "mcp": {
     "title": "MCP",

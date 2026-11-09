@@ -575,7 +575,7 @@ Signal cancellation. Best-effort: the worker only notices between phases or down
 
 ```json
 {
-  "managed": [{ "major": 21, "path": "/home/u/.fabricator/java/21/bin/java", "version": 21 }],
+  "managed": [{ "major": 21, "path": "/home/u/.fabricator/java/21/bin/java", "version": 21, "used_by": ["Survival"] }],
   "system": { "path": "java", "version": 17, "installed": true }
 }
 ```
@@ -583,6 +583,11 @@ Signal cancellation. Best-effort: the worker only notices between phases or down
 Managed entries are sorted by `major` ascending and are removable; `major` is the directory name and
 `version` is the major actually reported by the binary (`null` if the probe fails). The system entry
 is informational only — it lives outside Fabricator's data directory.
+
+`used_by` lists the names of the servers that run on that runtime now or would start on it, by the
+same rules a start uses: the server's own Java path, else a fitting Java on `PATH`, else the managed
+runtime. An empty list means no server uses it; the UI tags those **Unused**. A corrupt `servers.json` fails the request (500) like every other server route, rather than
+reporting every runtime as unused.
 
 #### `DELETE /api/java/installed/<major>`
 
