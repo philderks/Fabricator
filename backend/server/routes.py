@@ -2593,6 +2593,28 @@ def uninstall_installed_java(major):
     return jsonify({'success': True, 'major': major})
 
 
+@server_bp.route('/jvm-presets', methods=['GET'])
+def get_jvm_presets():
+    """Saved JVM flag presets (#108), offered on every server's settings page."""
+    try:
+        return jsonify({'presets': jvm_args.load_presets()})
+    except (ValueError, OSError) as exc:
+        return jsonify({'error': f'Could not read the saved JVM presets: {exc}'}), 500
+
+
+@server_bp.route('/jvm-presets', methods=['PUT'])
+def save_jvm_presets():
+    """Replace the whole preset list; see ``jvm_args.save_presets``."""
+    data = request.get_json(silent=True)
+    presets = data.get('presets') if isinstance(data, dict) else None
+    try:
+        return jsonify({'presets': jvm_args.save_presets(presets)})
+    except jvm_args.JvmArgsError as exc:
+        return jsonify({'error': str(exc)}), 400
+    except OSError as exc:
+        return jsonify({'error': f'Could not save the JVM presets: {exc}'}), 500
+
+
 @server_bp.route('/metrics/system', methods=['GET'])
 def get_system_metrics():
     if not psutil:

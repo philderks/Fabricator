@@ -134,6 +134,10 @@ _NEVER = [
     ("PUT", "/api/servers/<server_id>/schedules/<schedule_id>"),
     ("DELETE", "/api/servers/<server_id>/schedules/<schedule_id>"),
     ("POST", "/api/servers/<server_id>/schedules/<schedule_id>/run"),
+    # JVM flag presets (#108): a source for jvmArgs, which is itself NEVER
+    # (settings PUT above). UI-only, reads included, like schedules.
+    ("GET", "/api/jvm-presets"),
+    ("PUT", "/api/jvm-presets"),
     # full-server migration is intentionally UI-only until a dedicated MCP tool
     # can present its backup and rollback contract.
     ("POST", "/api/servers/<server_id>/upgrade"),
