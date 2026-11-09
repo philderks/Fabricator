@@ -47,6 +47,7 @@ from backend.utils.upload import (
     env_max_bytes,
     stream_upload_to_temp,
 )
+from backend.utils.zip import is_within
 
 try:
     import psutil  # type: ignore
@@ -2569,9 +2570,25 @@ def list_installed_java():
     Used by the Java manager in the Settings tab to render installed
     runtimes. Managed entries are removable; the system entry is informational
     only (lives outside Fabricator's data directory).
+
+    Each managed entry carries ``used_by``: the names of the servers running on
+    it or that would start on it; the UI tags the rest "Unused" (#109).
     """
+    managed = java_manager.list_installed_java()
+    # load_servers raises on a corrupt index rather than reading as empty: an
+    # empty read would mark every runtime unused.
+    # shortcut: one `java -version` per server via the start resolver; cache the
+    # PATH probe if this panel gets slow with many servers.
+    in_use = []
+    for server in storage.load_servers():
+        java = _registry().java_exec_in_use(server)
+        # which + is_within's resolve() also catch a PATH java symlinked into a managed JDK.
+        in_use.append((server.get('name') or server.get('id'), Path(shutil.which(java) or java)))
+    for entry in managed:
+        base = java_manager.managed_java_dir(entry['major'])
+        entry['used_by'] = [name for name, binary in in_use if is_within(base, binary)]
     return jsonify({
-        'managed': java_manager.list_installed_java(),
+        'managed': managed,
         'system': java_manager.system_java_info(),
     })
 
@@ -2591,6 +2608,28 @@ def uninstall_installed_java(major):
     if not removed:
         return jsonify({'error': f'No managed Java {major} install found'}), 404
     return jsonify({'success': True, 'major': major})
+
+
+@server_bp.route('/jvm-presets', methods=['GET'])
+def get_jvm_presets():
+    """Saved JVM flag presets (#108), offered on every server's settings page."""
+    try:
+        return jsonify({'presets': jvm_args.load_presets()})
+    except (ValueError, OSError) as exc:
+        return jsonify({'error': f'Could not read the saved JVM presets: {exc}'}), 500
+
+
+@server_bp.route('/jvm-presets', methods=['PUT'])
+def save_jvm_presets():
+    """Replace the whole preset list; see ``jvm_args.save_presets``."""
+    data = request.get_json(silent=True)
+    presets = data.get('presets') if isinstance(data, dict) else None
+    try:
+        return jsonify({'presets': jvm_args.save_presets(presets)})
+    except jvm_args.JvmArgsError as exc:
+        return jsonify({'error': str(exc)}), 400
+    except OSError as exc:
+        return jsonify({'error': f'Could not save the JVM presets: {exc}'}), 500
 
 
 @server_bp.route('/metrics/system', methods=['GET'])

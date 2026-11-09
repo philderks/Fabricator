@@ -279,6 +279,16 @@ export async function uninstallJava(major) {
   return del(`/api/java/installed/${major}`)
 }
 
+/** `{ presets: Array<{name, args}> }`, shared by every server (#108). */
+export async function getJvmPresets() {
+  return get('/api/jvm-presets')
+}
+
+/** Replaces the whole list; resolves to what was stored, as `getJvmPresets`. */
+export async function saveJvmPresets(presets) {
+  return put('/api/jvm-presets', { presets })
+}
+
 export async function getUpdateStatus() {
   return get('/api/system/update/status')
 }

@@ -1213,7 +1213,16 @@
     "allInstalled": "All common versions installed",
     "removeTitle": "Remove Java runtime?",
     "removeMessage": "Remove Java {major}?",
-    "removeDescription": "Servers that need this version will prompt you to reinstall it the next time they start."
+    "removeDescription": "Servers that need this version will prompt you to reinstall it the next time they start.",
+    "usedBy": "Used by {servers}",
+    "unusedBadge": "Unused",
+    "select": "Select Java {major}",
+    "selectAll": "Select all {n} runtime | Select all {n} runtimes",
+    "selected": "{n} selected",
+    "deselectAll": "Deselect all",
+    "selectUnused": "Select {n} unused",
+    "removeCount": "Remove {n} runtime | Remove {n} runtimes",
+    "removeSelectedTitle": "Remove Java runtimes?"
   },
   "mcp": {
     "title": "MCP",
@@ -1425,7 +1434,7 @@
       "title": "Java Runtime",
       "path": "Java Executable Path",
       "jvmArgs": "JVM Arguments",
-      "jvmArgsHint": "Extra flags passed to the JVM, e.g. -XX:+UseZGC -XX:+ZGenerational. Set the heap with Memory Allocation below, not with -Xmx.",
+      "jvmArgsHint": "Extra flags passed to the JVM. Set the heap with Memory Allocation below, not with -Xmx.",
       "preStartCommand": "Pre-start Command",
       "preStartCommandHint": "Runs in the server folder before every start, e.g. to sync a packwiz modpack. Its output appears in the console. If it fails or runs longer than 10 minutes, the server does not start.",
       "notice": "These change how the server process is launched and take effect on the next start.",
@@ -1437,7 +1446,27 @@
       "cannotRun": "That path could not be run — check it points at a java executable.",
       "tooOld": "This server needs Java {required} or newer; the selected runtime reports Java {selected}.",
       "autoHintVersion": "Picks an installed Java {version}+ runtime automatically.",
-      "autoHint": "Picks a compatible installed runtime automatically."
+      "autoHint": "Picks a compatible installed runtime automatically.",
+      "preset": "Flag Preset",
+      "presetHint": "Choosing a preset replaces the JVM arguments below. Nothing changes until you save.",
+      "presetHints": {
+        "aikar": "Paper's recommended G1 tuning. Aikar also recommends setting the minimum memory equal to the maximum.",
+        "aikar12g": "Aikar's adjustment for more than 12 GB of memory. If old-generation collections become more frequent, switch back to Aikar's flags.",
+        "zgc": "Short pauses for servers with plenty of memory and CPU cores. Java 21 and 22 need -XX:+ZGenerational for the generational mode; from Java 23 it is the default.",
+        "shenandoah": "Short pauses before Java 21, where generational ZGC is not available. Part of Temurin, the Java Fabricator installs, but not of Oracle's JDK."
+      },
+      "presetWrongJava": "{preset} does not match Java {java}, which this server uses. Pick the preset for that version, or the server may not start.",
+      "presetNone": "No preset",
+      "presetBuiltinGroup": "Built-in",
+      "presetCustomGroup": "Your presets",
+      "presetSaveAs": "Save as preset",
+      "presetName": "Preset name",
+      "presetDelete": "Delete preset",
+      "presetToastTitle": "JVM presets",
+      "presetSaved": "Preset saved. It is available on every server.",
+      "presetDeleted": "Preset deleted. Servers already using its flags keep them.",
+      "presetSaveFailed": "Could not save the presets.",
+      "presetLoadFailed": "Could not load your saved presets."
     },
     "performance": {
       "title": "Performance",

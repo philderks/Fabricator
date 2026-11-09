@@ -575,7 +575,7 @@ Signal cancellation. Best-effort: the worker only notices between phases or down
 
 ```json
 {
-  "managed": [{ "major": 21, "path": "/home/u/.fabricator/java/21/bin/java", "version": 21 }],
+  "managed": [{ "major": 21, "path": "/home/u/.fabricator/java/21/bin/java", "version": 21, "used_by": ["Survival"] }],
   "system": { "path": "java", "version": 17, "installed": true }
 }
 ```
@@ -584,6 +584,11 @@ Managed entries are sorted by `major` ascending and are removable; `major` is th
 `version` is the major actually reported by the binary (`null` if the probe fails). The system entry
 is informational only — it lives outside Fabricator's data directory.
 
+`used_by` lists the names of the servers that run on that runtime now or would start on it, by the
+same rules a start uses: the server's own Java path, else a fitting Java on `PATH`, else the managed
+runtime. An empty list means no server uses it; the UI tags those **Unused**. A corrupt `servers.json` fails the request (500) like every other server route, rather than
+reporting every runtime as unused.
+
 #### `DELETE /api/java/installed/<major>`
 
 Remove a managed runtime. Safe: if a server later needs it, the normal resolution flow prompts to
@@ -591,6 +596,28 @@ reinstall.
 
 **Response (200):** `{ "success": true, "major": 21 }`
 **Errors:** `400` invalid major · `404` no managed install for that major
+
+#### `GET /api/jvm-presets`
+
+Saved JVM flag presets, stored in `jvm-presets.json` next to `servers.json` and offered on every
+server's Java settings. The built-in presets ship with the frontend and are not listed here.
+
+**Response (200):** `{ "presets": [{ "name": "G1 tune", "args": "-XX:+UseG1GC -XX:MaxGCPauseMillis=130" }] }`,
+an empty list before the first save.
+**Error (500):** the file exists but is corrupt or invalid. It is reported instead of read as empty,
+so a later save cannot silently replace it.
+
+#### `PUT /api/jvm-presets`
+
+Replace the whole list. **Body:** `{ "presets": [{ "name": "G1 tune", "args": "-XX:+UseG1GC" }] }`.
+Names and args are trimmed. A preset is only something the UI copies into a server's `jvmArgs`, so
+editing or deleting one never changes a server.
+
+**Response (200):** the stored list, same shape as `GET`.
+**Errors:** `400` with a message naming the problem: not a list, more than 50 presets, a blank name
+or one over 64 characters, a duplicate name (ignoring case), empty `args`, or `args` that
+`jvmArgs` would refuse (the same rules as server settings, prefixed `Preset '<name>':`) · `500` if
+the file cannot be written
 
 ---
 
@@ -1641,10 +1668,10 @@ token list; the `<secret>` half is what is never shown again.
 | `manage` | Everything `read` can do, plus start / stop / restart, re-install the configured loader, install or update a mod by Modrinth ID, and remove, enable or disable installed mods. |
 
 Every `/api` route is classified into exactly one of three buckets, and the classification is
-enforced by the panel itself, not by the client: **36 read**, **8 manage**, **72 never**. Routes in
+enforced by the panel itself, not by the client: **36 read**, **8 manage**, **77 never**. Routes in
 the `never` bucket are refused for **every** token regardless of scope — the console, scheduled
 commands, all file read
-and write routes, server settings, autostart, server create and delete, Java installation, the
+and write routes, server settings, JVM flag presets, autostart, server create and delete, Java installation, the
 self-updater, playit, backup restore/download/delete, world import, whole-modpack install (including
 the `.mrpack` upload routes), all player administration (bans, kicks, ops, whitelist), the
 player-data reads (they contain player names, UUIDs and IP addresses), and the token-management

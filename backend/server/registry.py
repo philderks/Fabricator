@@ -325,6 +325,14 @@ class ServerProcessRegistry:
             manager.command = self._build_command(server)
         return manager.probe_java()
 
+    def java_exec_in_use(self, server: Dict[str, object]) -> str:
+        """The java a running server was started with, else the one a start would pick."""
+        with self._lock:
+            manager = self._instances.get(str(server.get('id')))
+        if manager and manager.is_running:
+            return manager._java_executable()
+        return self._resolve_java_exec(server)
+
     def stop_server(self, server_id: str) -> Dict[str, object]:
         server_id = str(server_id)
         with self._lock:
