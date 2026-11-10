@@ -510,8 +510,14 @@
     "noteLocalOnly": "Reachable on your network. For access from outside it, set up a tunnel on the playit.gg tab or forward the port on your router."
   },
   "console": {
-    "levelFilter": "Log level filter",
+    "levelFilter": "Console filter",
     "filterAll": "ALL",
+    "events": {
+      "CHAT": "CHAT",
+      "JOIN": "JOINS",
+      "DEATH": "DEATHS",
+      "ADVANCEMENT": "ADVANCEMENTS"
+    },
     "autoScrollOn": "Auto-scroll on",
     "autoScrollOff": "Auto-scroll off — click, or scroll to the bottom, to resume",
     "loadingLogs": "Loading logs…",

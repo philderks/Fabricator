@@ -2,6 +2,8 @@
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import AppButton from '../../components/ui/AppButton.vue'
 import { useServerStore } from '../../stores/server'
+import { CONSOLE_EVENTS, consoleEvent } from '../../utils/consoleEvents'
+import { t } from '../../i18n'
 
 const store = useServerStore()
 
@@ -70,7 +72,7 @@ const parseLine = (entry, defaultLevel = 'INFO') => {
   // when microsecond == 0, so "…:00Z" would sort AFTER "…:00.5Z" as text
   // ('.' < 'Z') and reverse same-second lines. NaN when ts is absent/unparseable.
   const tsMs = ts ? Date.parse(ts) : NaN
-  return { tsMs, time, level, message }
+  return { tsMs, time, level, message, event: consoleEvent(text) }
 }
 
 // Tag each line with an id so :key stays stable across filter toggles — index
@@ -216,7 +218,9 @@ const filteredLines = computed(() => {
   if (activeFilter.value === 'ALL') return released
   // Drop the restart divider under a level filter: it defaults to INFO, so it
   // would otherwise show up as the lone "entry" in an empty INFO view.
-  return released.filter((l) => !l.boundary && l.level === activeFilter.value)
+  // Event filters (#113) match what a line reports, not its level.
+  const key = CONSOLE_EVENTS.includes(activeFilter.value) ? 'event' : 'level'
+  return released.filter((l) => !l.boundary && l[key] === activeFilter.value)
 })
 
 const scrollToBottom = () => {
@@ -245,6 +249,11 @@ const onTerminalScroll = () => {
 }
 
 const setFilter = (level) => { activeFilter.value = level }
+
+const filterLabel = (filter) => {
+  if (filter === 'ALL') return t('console.filterAll')
+  return CONSOLE_EVENTS.includes(filter) ? t(`console.events.${filter}`) : filter
+}
 
 const toggleAutoScroll = async () => {
   autoScroll.value = !autoScroll.value
@@ -294,7 +303,17 @@ const onHistoryNext = () => {
           :class="[`console-page__filter--${level.toLowerCase()}`, { 'is-active': activeFilter === level }]"
           :aria-pressed="activeFilter === level"
           @click="setFilter(level)"
-        >{{ level === 'ALL' ? $t('console.filterAll') : level }}</button>
+        >{{ filterLabel(level) }}</button>
+        <span class="console-page__filters-sep" aria-hidden="true"></span>
+        <button
+          v-for="event in CONSOLE_EVENTS"
+          :key="event"
+          type="button"
+          class="console-page__filter"
+          :class="{ 'is-active': activeFilter === event }"
+          :aria-pressed="activeFilter === event"
+          @click="setFilter(event)"
+        >{{ filterLabel(event) }}</button>
       </div>
       <div class="console-page__bar-actions">
         <button
@@ -319,7 +338,7 @@ const onHistoryNext = () => {
       <div v-if="!filteredLines.length" class="console-page__empty">
         <template v-if="store.logsLoading">{{ $t('console.loadingLogs') }}</template>
         <template v-else-if="activeFilter === 'ALL'">{{ $t('console.noLogs') }}</template>
-        <template v-else>{{ $t('console.noLevelEntries', { level: activeFilter }) }}</template>
+        <template v-else>{{ $t('console.noLevelEntries', { level: filterLabel(activeFilter) }) }}</template>
       </div>
       <template v-for="line in filteredLines" :key="line.id">
         <div v-if="line.boundary" class="console-page__boundary" role="separator">
@@ -414,6 +433,14 @@ const onHistoryNext = () => {
 .console-page__filter--warn.is-active   { color: var(--warning); }
 .console-page__filter--error.is-active  { color: var(--danger); }
 .console-page__filter--debug.is-active  { color: var(--primary); }
+
+/* Splits the level filters from the event filters (#113). */
+.console-page__filters-sep {
+  flex-shrink: 0;
+  width: 1px;
+  margin: 4px 2px;
+  background: var(--border-color);
+}
 
 .console-page__bar-actions {
   display: flex;
@@ -580,7 +607,7 @@ const onHistoryNext = () => {
   color: var(--text-disabled);
   cursor: not-allowed;
 }
-/* Mobile: five level filters plus the two actions overflow a phone row. The
+/* Mobile: the level and event filters plus the two actions overflow a phone row. The
    filter group scrolls sideways rather than wrapping, which keeps it reading as
    one segmented control. */
 @media (max-width: 768px) {
