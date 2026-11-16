@@ -308,6 +308,14 @@ The read commands (`status`, `version`, `help`) accept `--json` for scripting. T
 
 ---
 
+## Community Integrations
+
+Projects built by the community. They are not maintained by Fabricator.
+
+- **[Stream Deck plugin](https://github.com/derDeno/streamdeck-plugins/tree/main/fabricator)** by [derDeno](https://github.com/derDeno): view server stats, start/stop/restart servers, and send preset console commands from an Elgato Stream Deck.
+
+---
+
 > **A note on AI usage:** I use Claude while developing Fabricator. It lets me ship features and fixes faster than my free time would otherwise allow. I review and test every change myself before it is released, and backend tests run on every pull request. If you'd rather not run AI-assisted software, that's a fair choice, and I'd rather you know upfront.
 
 ---
