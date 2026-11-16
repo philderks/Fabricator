@@ -55,5 +55,10 @@ export const usePreferencesStore = defineStore('preferences', () => {
   const showHeapStats = ref(persisted.showHeapStats === true)
   watch(showHeapStats, (on) => persist({ showHeapStats: on }))
 
-  return { cpuDisplayMode, memoryUnit, showHeapStats }
+  // Installed mods/plugins order: 'name' (Modrinth title, else filename — the
+  // default) or 'filename'.
+  const modSort = ref(persisted.modSort === 'filename' ? 'filename' : 'name')
+  watch(modSort, (mode) => persist({ modSort: mode }))
+
+  return { cpuDisplayMode, memoryUnit, showHeapStats, modSort }
 })
