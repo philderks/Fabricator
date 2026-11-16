@@ -7,10 +7,19 @@ import { formatFileSize } from '../../utils/format'
 import { installedModDisplayName } from '../../utils/installedModDisplay'
 import { modrinthProjectUrl } from '../../utils/modrinthUrl'
 import { useServerStore } from '../../stores/server'
+import { usePreferencesStore } from '../../stores/preferences'
 import { isPluginLoader } from '../../utils/loaderKind'
 import { t } from '../../i18n'
 
 const store = useServerStore()
+const prefs = usePreferencesStore()
+
+const compareText = (a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true })
+const sortedMods = computed(() => {
+  const key = prefs.modSort === 'filename' ? (m) => m.filename || '' : installedModDisplayName
+  return [...store.filteredMods].sort((a, b) =>
+    compareText(key(a), key(b)) || compareText(a.filename || '', b.filename || ''))
+})
 
 const onSearch = (event) => { store.modSearch = event.target.value }
 
@@ -61,6 +70,10 @@ const selectAllLabel = computed(() => {
         :value="store.modSearch"
         @input="onSearch"
       />
+      <select v-model="prefs.modSort" class="mods-page__sort" :aria-label="$t('mods.sortBy')">
+        <option value="name">{{ $t('mods.sortByName') }}</option>
+        <option value="filename">{{ $t('mods.sortByFilename') }}</option>
+      </select>
       <div class="mods-page__actions">
         <AppButton
           v-if="updateCount > 0"
@@ -197,7 +210,7 @@ const selectAllLabel = computed(() => {
       </div>
       <div v-else class="mods-page__grid">
         <SearchResultCard
-          v-for="mod in store.filteredMods"
+          v-for="mod in sortedMods"
           :key="mod.path"
           :icon-url="mod.iconUrl"
           :title="installedModDisplayName(mod)"
@@ -279,6 +292,18 @@ const selectAllLabel = computed(() => {
   font-size: var(--text-sm);
 }
 
+.mods-page__sort {
+  height: 32px;
+  padding: 0 var(--space-2);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+}
+
+.mods-page__sort:focus,
 .mods-page__search:focus {
   outline: none;
   border-color: var(--primary);
